@@ -166,35 +166,35 @@
 
 ### Foundational Papers
 
-| Paper | Year | Link | Notes |
-|-------|------|------|-------|
-| Playing Atari with Deep RL | 2013 | [arXiv](https://arxiv.org/abs/1312.5602) | Original DQN |
-| Human-level Control through Deep RL | 2015 | [Nature](https://storage.googleapis.com/deepmind-media/dqn/DQNNaturePaper.pdf) | DQN breakthrough |
-| Deep RL with Double Q-learning | 2015 | [arXiv](https://arxiv.org/abs/1509.06461) | Double DQN |
-| Dueling Network Architectures | 2015 | [arXiv](https://arxiv.org/abs/1511.06581) | Dueling DQN |
-| Prioritized Experience Replay | 2015 | [arXiv](https://arxiv.org/abs/1511.05952) | PER |
-| Asynchronous Methods for Deep RL | 2016 | [arXiv](https://arxiv.org/abs/1602.01783) | A3C |
-| Continuous Control with Deep RL | 2015 | [arXiv](https://arxiv.org/abs/1509.02971) | DDPG |
+| Paper | Year | Link | Notes | Code |
+|-------|------|------|-------|------|
+| Playing Atari with Deep RL | 2013 | [arXiv](https://arxiv.org/abs/1312.5602) | Original DQN | [DQN Zoo](https://github.com/google-deepmind/dqn_zoo) |
+| Human-level Control through Deep RL | 2015 | [Nature](https://storage.googleapis.com/deepmind-media/dqn/DQNNaturePaper.pdf) | DQN breakthrough | [DQN Zoo](https://github.com/google-deepmind/dqn_zoo) |
+| Deep RL with Double Q-learning | 2015 | [arXiv](https://arxiv.org/abs/1509.06461) | Double DQN | [DQN Zoo](https://github.com/google-deepmind/dqn_zoo) |
+| Dueling Network Architectures | 2015 | [arXiv](https://arxiv.org/abs/1511.06581) | Dueling DQN | [DQN Zoo](https://github.com/google-deepmind/dqn_zoo) |
+| Prioritized Experience Replay | 2015 | [arXiv](https://arxiv.org/abs/1511.05952) | PER | [DQN Zoo](https://github.com/google-deepmind/dqn_zoo) |
+| Asynchronous Methods for Deep RL | 2016 | [arXiv](https://arxiv.org/abs/1602.01783) | A3C | [Acme](https://github.com/google-deepmind/acme) |
+| Continuous Control with Deep RL | 2015 | [arXiv](https://arxiv.org/abs/1509.02971) | DDPG | [Acme](https://github.com/google-deepmind/acme) |
 
 ### Policy Gradient Methods
 
-| Paper | Year | Link | Notes |
-|-------|------|------|-------|
-| Proximal Policy Optimization | 2017 | [arXiv](https://arxiv.org/abs/1707.06347) | PPO |
-| High-dimensional Continuous Control Using GAE | 2015 | [arXiv](https://arxiv.org/abs/1506.02438) | GAE |
-| Emergence of Locomotion Behaviours | 2017 | [arXiv](https://arxiv.org/abs/1707.02286) | A2C/A3C for locomotion |
-| D4PG | 2018 | [OpenReview](https://openreview.net/pdf?id=SyZipzbCb) | Distributed DDPG |
+| Paper | Year | Link | Notes | Code |
+|-------|------|------|-------|------|
+| Proximal Policy Optimization | 2017 | [arXiv](https://arxiv.org/abs/1707.06347) | PPO | [Stable-Baselines3](https://github.com/DLR-RM/stable-baselines3) |
+| High-dimensional Continuous Control Using GAE | 2015 | [arXiv](https://arxiv.org/abs/1506.02438) | GAE | [Spinning Up](https://github.com/openai/spinningup) |
+| Emergence of Locomotion Behaviours | 2017 | [arXiv](https://arxiv.org/abs/1707.02286) | A2C/A3C for locomotion | [Acme](https://github.com/google-deepmind/acme) |
+| D4PG | 2018 | [OpenReview](https://openreview.net/pdf?id=SyZipzbCb) | Distributed DDPG | [Acme](https://github.com/google-deepmind/acme) |
 
 ### Advanced Topics
 
-| Paper | Year | Link | Notes |
-|-------|------|------|-------|
-| Rainbow: Combining Improvements | 2017 | [arXiv](https://arxiv.org/abs/1710.02298) | Combined DQN improvements |
-| Noisy Networks for Exploration | 2017 | [arXiv](https://arxiv.org/abs/1706.10295) | NoisyNet |
-| Deep Recurrent Q-Learning | 2015 | [arXiv](https://arxiv.org/abs/1507.06527) | DRQN |
-| Distributional Perspective on RL | 2017 | [arXiv](https://arxiv.org/abs/1707.06887) | C51 |
-| Meta-Gradient RL | 2018 | [arXiv](https://arxiv.org/abs/1805.09801) | Meta-learning |
-| RUDDER: Return Decomposition | 2018 | [arXiv](https://arxiv.org/abs/1806.07857) | Credit assignment |
+| Paper | Year | Link | Notes | Code |
+|-------|------|------|-------|------|
+| Rainbow: Combining Improvements | 2017 | [arXiv](https://arxiv.org/abs/1710.02298) | Combined DQN improvements | [DQN Zoo](https://github.com/google-deepmind/dqn_zoo) |
+| Noisy Networks for Exploration | 2017 | [arXiv](https://arxiv.org/abs/1706.10295) | NoisyNet | [DQN Zoo](https://github.com/google-deepmind/dqn_zoo) |
+| Deep Recurrent Q-Learning | 2015 | [arXiv](https://arxiv.org/abs/1507.06527) | DRQN | [GitHub](https://github.com/keep9oing/DRQN-Pytorch-CartPole-v1) |
+| Distributional Perspective on RL | 2017 | [arXiv](https://arxiv.org/abs/1707.06887) | C51 | [DQN Zoo](https://github.com/google-deepmind/dqn_zoo) |
+| Meta-Gradient RL | 2018 | [arXiv](https://arxiv.org/abs/1805.09801) | Meta-learning | [Disco RL](https://github.com/google-deepmind/disco_rl) |
+| RUDDER: Return Decomposition | 2018 | [arXiv](https://arxiv.org/abs/1806.07857) | Credit assignment | [GitHub](https://github.com/ml-jku/rudder) |
 
 ### Surveys & Overviews
 
@@ -207,19 +207,19 @@
 
 ### Multi-Agent RL
 
-| Paper | Link |
-|-------|------|
-| Multi-Agent RL: Challenges and Approaches | [arXiv](https://arxiv.org/abs/1807.09427) |
-| Is MARL the Answer or the Question? | [arXiv](https://arxiv.org/abs/1810.05587) |
-| MARL Papers Collection | [GitHub](https://github.com/LantaoYu/MARL-Papers) |
+| Paper | Link | Code |
+|-------|------|------|
+| Multi-Agent RL: Challenges and Approaches | [arXiv](https://arxiv.org/abs/1807.09427) | [MARLlib](https://github.com/Replicable-MARL/MARLlib) |
+| Is MARL the Answer or the Question? | [arXiv](https://arxiv.org/abs/1810.05587) | [MARLlib](https://github.com/Replicable-MARL/MARLlib) |
+| MARL Papers Collection | [GitHub](https://github.com/LantaoYu/MARL-Papers) | - |
 
 ### Applications
 
-| Paper | Application | Link |
-|-------|-------------|------|
-| Deep RL in Portfolio Management | Finance | [arXiv](https://arxiv.org/abs/1808.09940) |
-| Market Making via RL | Trading | [arXiv](https://arxiv.org/abs/1804.04216) |
-| Autonomous Driving with RL | Self-driving | [arXiv](https://arxiv.org/abs/1801.05299) |
+| Paper | Application | Link | Code |
+|-------|-------------|------|------|
+| Deep RL in Portfolio Management | Finance | [arXiv](https://arxiv.org/abs/1808.09940) | [GitHub](https://github.com/wassname/rl-portfolio-management) |
+| Market Making via RL | Trading | [arXiv](https://arxiv.org/abs/1804.04216) | - |
+| Autonomous Driving with RL | Self-driving | [arXiv](https://arxiv.org/abs/1801.05299) | - |
 
 ---
 
@@ -268,7 +268,7 @@
 
 | Repository | Description |
 |------------|-------------|
-| [worldmodels.github.io](https://worldmodels.github.io/) | World Models implementation |
+| [worldmodels.github.io](https://worldmodels.github.io/) | World Models implementation ([Author's Code](https://github.com/hardmaru/WorldModelsExperiments)) |
 | [kvfrans/openai-cartpole](https://github.com/kvfrans/openai-cartpole) | CartPole solutions |
 | [alirezamika/bipedal-es](https://github.com/alirezamika/bipedal-es) | BipedalWalker with ES |
 | [xkiwilabs/DQN_Unity_Keras](https://github.com/xkiwilabs/DQN_Unity_Keras) | DQN for Unity |

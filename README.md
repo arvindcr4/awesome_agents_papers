@@ -49,6 +49,7 @@ slides/                  # 45 presentation decks
 - [Neural & Symbolic Reasoning](#neural--symbolic-reasoning)
 - [Agentic Reasoning & RL Fine-Tuning](#agentic-reasoning--rl-fine-tuning)
 - [Agentic Architectures & Coordination](#agentic-architectures--coordination)
+- [Deep Reinforcement Learning](#deep-reinforcement-learning)
 
 ---
 
@@ -256,6 +257,86 @@ slides/                  # 45 presentation decks
 |----------|-------------|
 | [Intel AI Agents Architecture](slides/Intel_AI_Agents_Architecture.pdf) | AI agents resource guide |
 | [Cisco Agentic Frameworks](slides/Cisco_Agentic_Frameworks_Overview.pdf) | Overview of agentic frameworks |
+
+---
+
+## Deep Reinforcement Learning
+
+> Essential resources, courses, and papers for Deep Reinforcement Learning
+
+### Course GitHub Repositories
+
+| Repository | Description |
+|------------|-------------|
+| [udacity/deep-reinforcement-learning](https://github.com/udacity/deep-reinforcement-learning) | Udacity Deep RL Nanodegree |
+| [udacity/deep-reinforcement-learning.git](https://github.com/udacity/deep-reinforcement-learning.git) | Deep RL course materials |
+| [udacity/Value-based-methods](https://github.com/udacity/Value-based-methods) | Value-based RL methods |
+| [udacity/DL_PyTorch](https://github.com/udacity/DL_PyTorch) | Deep Learning with PyTorch |
+| [udacity/CVND_Exercises](https://github.com/udacity/CVND_Exercises) | Computer Vision exercises |
+
+### Google Docs & Study Materials
+
+| Resource | Description |
+|----------|-------------|
+| [Student Resources Doc](https://docs.google.com/document/d/1FoIc9X0NcM-0y0dgXCzJcpu5lVXGFqS62mb1ABLDT1M/edit) | Student-curated resources |
+| [Course Notes](https://docs.google.com/document/d/1PA3YcIKpANBZuHLX6tz7bVw60ug_DM1_V_yFKyrMP-s/edit) | Additional course materials |
+
+### Quick Links & Short URLs
+
+| Link | Description |
+|------|-------------|
+| [bit.ly/drlndlinks](http://bit.ly/drlndlinks) | Student-curated resources |
+| [bit.ly/gdrl_u](http://bit.ly/gdrl_u) | Grokking DRL book discount |
+| [bit.ly/mimoralea_l](http://bit.ly/mimoralea_l) | Miguel Morales links |
+
+### OpenAI & Gym
+
+| Resource | Description |
+|----------|-------------|
+| [OpenAI](https://openai.com) | OpenAI homepage |
+| [OpenAI Gym](https://github.com/openai/gym) | Gym repository |
+| [Gym Homepage](https://gym.openai.com) | Gym documentation |
+| [OpenAI Blog](https://blog.openai.com/) | Research blog |
+
+### PyTorch Resources
+
+| Resource | Description |
+|----------|-------------|
+| [PyTorch](https://pytorch.org) | Official PyTorch website |
+| [PyTorch Neural Networks](https://pytorch.org/docs/stable/nn.html) | NN module documentation |
+| [PyTorch GitHub](https://github.com/pytorch/pytorch) | Source code |
+
+### Key Papers (arXiv)
+
+| Paper | arXiv Link | Topic |
+|-------|-----------|-------|
+| Human-level control through deep RL | [1509.02971](https://arxiv.org/abs/1509.02971) | DQN breakthrough |
+| Dueling Network Architectures | [1511.06581](https://arxiv.org/abs/1511.06581) | Dueling DQN |
+| Asynchronous Methods for Deep RL | [1602.01783](https://arxiv.org/abs/1602.01783) | A3C algorithm |
+| Proximal Policy Optimization (PPO) | [1707.06347](https://arxiv.org/abs/1707.06347) | PPO algorithm |
+| Actor-Critic Methods | [1707.02286](https://arxiv.org/abs/1707.02286) | A2C/A3C methods |
+
+### Books & Reference Materials
+
+| Resource | Link | Description |
+|----------|------|-------------|
+| Sutton & Barto (2020) | [PDF](http://incompleteideas.net/book/RLbook2020.pdf) | Reinforcement Learning: An Introduction |
+| Grokking Deep RL | [Manning](https://www.manning.com/books/grokking-deep-reinforcement-learning) | Practical DRL book |
+
+### Unity ML-Agents
+
+| Resource | Link | Description |
+|----------|------|-------------|
+| ML-Agents Repository | [GitHub](https://github.com/Unity-Technologies/ml-agents) | Unity ML-Agents toolkit |
+| ML-Agents Introduction | [Blog](https://blogs.unity3d.com/2017/09/19/introducing-unity-machine-learning-agents/) | Overview and getting started |
+
+### Notable Blog Posts & Resources
+
+| Resource | Link | Author/Source |
+|----------|------|---------------|
+| Reinforcement Learning: An Overview | [Link](http://karpathy.github.io/2016/05/31/rl/) | Andrej Karpathy |
+| Cart-Pole Balancing with Q-Learning | [Medium](https://medium.com/@tuzzer/cart-pole-balancing-with-q-learning-b54c6068d947) | Tutorial |
+| Reinforcement Learning Might Be Hard | [Blog](https://www.alexirpan.com/2018/02/14/rl-hard.html) | Alex Irpan |
 
 ---
 

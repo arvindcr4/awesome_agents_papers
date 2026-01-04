@@ -83,29 +83,29 @@
 | Language Models as Agents | CMU | [CMU](slides/CMU_Language_Models_as_Agents.pdf) |
 | LLM Agents & Tool Use | Mannheim | [Mannheim](slides/Mannheim_LLM_Agents_Tool_Use.pdf) |
 | Multi-Agent RL | Edinburgh | [Edinburgh](slides/Edinburgh_Multi_Agent_RL_Intro.pdf) |
-| DigiRL | [arXiv:2406.11896](https://arxiv.org/abs/2406.11896) | [NeurIPS 2024](slides/DigiRL_NeurIPS_2024.pdf) |
-| MasRouter | [arXiv:2502.11133](https://arxiv.org/abs/2502.11133) | [ACL 2025](slides/MasRouter_ACL_2025.pdf) |
-| ARTIST | Microsoft Research | [Microsoft](slides/ARTIST_Agentic_Reasoning_Microsoft.pdf) |
-| OS-Harm | [arXiv:2506.14866](https://arxiv.org/abs/2506.14866) | [Benchmark](slides/OS_Harm_Benchmark.pdf) |
-| PTA-GRPO | [arXiv:2510.01833](https://arxiv.org/abs/2510.01833) | [Planning](slides/PTA_GRPO_High_Level_Planning.pdf) |
+| DigiRL | [arXiv](https://arxiv.org/abs/2406.11896), [PDF](papers/computer-use/DigiRL_Device_Control_Agents.pdf) | [NeurIPS 2024](slides/DigiRL_NeurIPS_2024.pdf) |
+| MasRouter | [arXiv](https://arxiv.org/abs/2502.11133), [PDF](papers/multi-agent/MasRouter_Multi-Agent_Routing.pdf) | [ACL 2025](slides/MasRouter_ACL_2025.pdf) |
+| ARTIST | [PDF](papers/agent-frameworks/ARTIST_Agentic_Reasoning_Tool_Integration.pdf) | [Microsoft](slides/ARTIST_Agentic_Reasoning_Microsoft.pdf) |
+| OS-Harm | [arXiv](https://arxiv.org/abs/2506.14866), [PDF](papers/computer-use/OS-Harm_Computer_Use_Safety.pdf) | [Benchmark](slides/OS_Harm_Benchmark.pdf) |
+| PTA-GRPO | [arXiv](https://arxiv.org/abs/2510.01833) | [Planning](slides/PTA_GRPO_High_Level_Planning.pdf) |
 
 ### RLHF & Preference Learning
 | Topic | Paper | Slides |
 |-------|-------|--------|
-| DPO | [arXiv:2305.18290](https://arxiv.org/abs/2305.18290) | [CMU](slides/DPO_CMU_Lecture.pdf), [Toronto](slides/DPO_Toronto_Presentation.pdf), [UT Austin](slides/DPO_UT_Austin.pdf), [Jinen](slides/DPO_Jinen_Slides.pdf) |
-| RLHF | [arXiv:2203.02155](https://arxiv.org/abs/2203.02155) | [UT Austin](slides/RLHF_UT_Austin_Slides.pdf) |
+| DPO | [arXiv](https://arxiv.org/abs/2305.18290), [PDF](papers/rl-finetuning/Direct_Preference_Optimization.pdf) | [CMU](slides/DPO_CMU_Lecture.pdf), [Toronto](slides/DPO_Toronto_Presentation.pdf), [UT Austin](slides/DPO_UT_Austin.pdf), [Jinen](slides/DPO_Jinen_Slides.pdf) |
+| RLHF | [arXiv](https://arxiv.org/abs/2203.02155) | [UT Austin](slides/RLHF_UT_Austin_Slides.pdf) |
 
 ### Chain-of-Thought & Reasoning
 | Topic | Paper | Slides |
 |-------|-------|--------|
-| DeepSeek-R1 | [arXiv:2501.12948](https://arxiv.org/abs/2501.12948) | [CMU](slides/DeepSeek_R1_CMU_Reasoning.pdf), [Intro](slides/DeepSeek_R1_Introduction.pdf), [Seoul National](slides/DeepSeek_R1_Seoul_National.pdf), [Toronto](slides/DeepSeek_R1_Toronto.pdf) |
-| Chain-of-Thought | [arXiv:2201.11903](https://arxiv.org/abs/2201.11903) | [Princeton](slides/CoT_Princeton_Lecture.pdf), [SJTU](slides/CoT_SJTU_Slides.pdf), [Toronto](slides/CoT_Toronto_Presentation.pdf), [Interpretable ML](slides/CoT_Interpretable_ML_Lecture.pdf), [Concise CoT](slides/Concise_CoT_Benefits.pdf) |
-| ReAct | [arXiv:2210.03629](https://arxiv.org/abs/2210.03629) | [UVA](slides/ReAct_UVA_Lecture.pdf) |
+| DeepSeek-R1 | [arXiv](https://arxiv.org/abs/2501.12948), [PDF](papers/rl-finetuning/DeepSeek-R1_Reasoning_via_RL.pdf) | [CMU](slides/DeepSeek_R1_CMU_Reasoning.pdf), [Intro](slides/DeepSeek_R1_Introduction.pdf), [Seoul National](slides/DeepSeek_R1_Seoul_National.pdf), [Toronto](slides/DeepSeek_R1_Toronto.pdf) |
+| Chain-of-Thought | [arXiv](https://arxiv.org/abs/2201.11903), [PDF](papers/reasoning/Chain-of-Thought_Reasoning_Without_Prompting.pdf) | [Princeton](slides/CoT_Princeton_Lecture.pdf), [SJTU](slides/CoT_SJTU_Slides.pdf), [Toronto](slides/CoT_Toronto_Presentation.pdf), [Interpretable ML](slides/CoT_Interpretable_ML_Lecture.pdf), [Concise CoT](slides/Concise_CoT_Benefits.pdf) |
+| ReAct | [arXiv](https://arxiv.org/abs/2210.03629), [PDF](papers/agent-frameworks/ReAct_Synergizing_Reasoning_and_Acting.pdf) | [UVA](slides/ReAct_UVA_Lecture.pdf) |
 
 ### Benchmarks & Evaluation
 | Topic | Paper | Slides |
 |-------|-------|--------|
-| AgentBench | [arXiv:2308.03688](https://arxiv.org/abs/2308.03688) | [NeurIPS](slides/AgentBench_Multi_Turn_NeurIPS.pdf) |
+| AgentBench | [arXiv](https://arxiv.org/abs/2308.03688) | [NeurIPS](slides/AgentBench_Multi_Turn_NeurIPS.pdf) |
 | Data Science Agents | Benchmark | [Benchmark](slides/Data_Science_Agents_Benchmark.pdf) |
 | Web Agent Evaluation | Refinement | [Refinement](slides/Web_Agent_Evaluation_Refinement.pdf) |
 
@@ -115,11 +115,11 @@
 | Software Agents | CMU Neubig | [CMU](slides/Software_Agents_Neubig.pdf) |
 | Multimodal Agents | Berkeley | [Berkeley](slides/Multimodal_Agents_Berkeley.pdf) |
 | LLM Training Agents | Berkeley | [Berkeley](slides/Berkeley_LLM_Training_Agents.pdf) |
-| Voyager | [arXiv:2305.16291](https://arxiv.org/abs/2305.16291) | [UT Austin](slides/Voyager_UT_Austin_Presentation.pdf) |
-| LeanDojo | [arXiv:2306.15626](https://arxiv.org/abs/2306.15626) | [AITP](slides/LeanDojo_AITP_Slides.pdf), [NeurIPS](slides/LeanDojo_NeurIPS_Slides.pdf) |
+| Voyager | [arXiv](https://arxiv.org/abs/2305.16291), [PDF](papers/robotics/Voyager_Open-Ended_Embodied_Agent.pdf) | [UT Austin](slides/Voyager_UT_Austin_Presentation.pdf) |
+| LeanDojo | [arXiv](https://arxiv.org/abs/2306.15626), [PDF](papers/theorem-proving/LeanDojo_Theorem_Proving_Retrieval-Augmented.pdf) | [AITP](slides/LeanDojo_AITP_Slides.pdf), [NeurIPS](slides/LeanDojo_NeurIPS_Slides.pdf) |
 | Theorem Proving ML | - | [Slides](slides/Theorem_Proving_ML_Slides.pdf) |
-| HippoRAG | [arXiv:2405.14831](https://arxiv.org/abs/2405.14831) | [NeurIPS](slides/HippoRAG_NeurIPS_Slides.pdf) |
-| Eureka | [arXiv:2310.12931](https://arxiv.org/abs/2310.12931) | [Paper](slides/Eureka_Reward_Design_Paper.pdf) |
+| HippoRAG | [arXiv](https://arxiv.org/abs/2405.14831), [PDF](papers/memory-rag/HippoRAG_Neurobiologically_Inspired_Long-Term_Memory.pdf) | [NeurIPS](slides/HippoRAG_NeurIPS_Slides.pdf) |
+| Eureka | [arXiv](https://arxiv.org/abs/2310.12931), [PDF](papers/robotics/Eureka_Human-Level_Reward_Design.pdf) | [Slides](slides/Eureka_Reward_Design_Paper.pdf) |
 | Code Agents Vulnerability | Berkeley | [Berkeley](slides/Code_Agents_Vulnerability_Detection_Berkeley.pdf) |
 | Prompt Injection | Duke | [Duke](slides/Prompt_Injection_Duke_Slides.pdf) |
 | EMNLP 2024 Language Agents | Tutorial | [Tutorial](slides/EMNLP2024_Language_Agents_Tutorial.pdf) |

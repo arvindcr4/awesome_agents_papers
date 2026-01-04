@@ -58,7 +58,7 @@ slides/                  # 92 presentation decks (504 MB)
 
 | Paper | Slides | Code |
 |-------|--------|------|
-| [Large Language Models as Optimizers](papers/planning/Large_Language_Models_as_Optimizers.pdf) | - | - |
+| [Large Language Models as Optimizers](papers/planning/Large_Language_Models_as_Optimizers.pdf) | - | [GitHub](https://github.com/google-deepmind/opro) |
 | [Large Language Models Cannot Self-Correct Reasoning Yet](papers/reasoning/Large_Language_Models_Cannot_Self-Correct_Reasoning_Yet.pdf) | - | - |
 | [Teaching Large Language Models to Self-Debug](papers/agent-frameworks/Teaching_Large_Language_Models_to_Self-Debug.pdf) | - | - |
 | [Chain-of-Thought Reasoning Without Prompting](papers/reasoning/Chain-of-Thought_Reasoning_Without_Prompting.pdf) | [CoT Princeton Lecture](slides/CoT_Princeton_Lecture.pdf), [CoT Toronto](slides/CoT_Toronto_Presentation.pdf), [CoT SJTU](slides/CoT_SJTU_Slides.pdf), [CoT Interpretable ML](slides/CoT_Interpretable_ML_Lecture.pdf), [Concise CoT](slides/Concise_CoT_Benefits.pdf) | - |

@@ -61,7 +61,7 @@ slides/                  # 92 presentation decks (504 MB)
 |-------|--------|------|-------|
 | [Large Language Models as Optimizers](papers/planning/Large_Language_Models_as_Optimizers.pdf) | [CS839 Prompting II](slides/CS839_Prompting_II_OPRO.pdf) | [GitHub](https://github.com/google-deepmind/opro) | [🖼️](media/planning/Large_Language_Models_as_Optimizers/README.md) |
 | [Large Language Models Cannot Self-Correct Reasoning Yet](papers/reasoning/Large_Language_Models_Cannot_Self-Correct_Reasoning_Yet.pdf) | - | - | [🎨](diagrams/downloaded_images/reasoning_03_LLMs_Cannot_Self_Correct.png) [🖼️](media/reasoning/Large_Language_Models_Cannot_Self-Correct_Reasoning_Yet/README.md) |
-| [Teaching Large Language Models to Self-Debug](papers/agent-frameworks/Teaching_Large_Language_Models_to_Self-Debug.pdf) | - | - | [🎨](diagrams/downloaded_images/agent-frameworks_DSPy-_Compiling_Declarative_Language_Model.png) [🖼️](media/agent-frameworks/Teaching_Large_Language_Models_to_Self-Debug/README.md) |
+| [Teaching Large Language Models to Self-Debug](papers/agent-frameworks/Teaching_Large_Language_Models_to_Self-Debug.pdf) | - | - | [🎨](diagrams/downloaded_images/agent-frameworks_DSPy-_Compiling_Declarative_Language_Model.png) [🖼️](media/agent-frameworks/Teaching_Large_Language_Models_to_Self-Debug/README.md) [🎧](https://notebooklm.cloud.google.com/global/notebook/9368678b-0ef3-4ef6-a52b-250073dfd750?project=358208640342) |
 | [Chain-of-Thought Reasoning Without Prompting](papers/reasoning/Chain-of-Thought_Reasoning_Without_Prompting.pdf) | [CoT Princeton Lecture](slides/CoT_Princeton_Lecture.pdf), [CoT Toronto](slides/CoT_Toronto_Presentation.pdf), [CoT SJTU](slides/CoT_SJTU_Slides.pdf), [CoT Interpretable ML](slides/CoT_Interpretable_ML_Lecture.pdf), [Concise CoT](slides/Concise_CoT_Benefits.pdf) | [GitHub (unofficial)](https://github.com/fangyuan-ksgk/CoT-Reasoning-without-Prompting) | [🎨](diagrams/downloaded_images/reasoning_01_Chain_of_Thought_Reasoning_Without_Prompting.png) [🖼️](media/reasoning/Chain-of-Thought_Reasoning_Without_Prompting/README.md) |
 | [Premise Order Matters in Reasoning with LLMs](papers/reasoning/Premise_Order_Matters_in_Reasoning_with_Large_Language_Models.pdf) | - | - | [🎨](diagrams/downloaded_images/reasoning_04_Premise_Order_Matters.png) [🖼️](media/reasoning/Premise_Order_Matters_in_Reasoning_with_Large_Language_Models/README.md) |
 | [Chain-of-Thought Empowers Transformers](papers/reasoning/Chain-of-Thought_Empowers_Transformers_to_Solve_Inherently_Serial_Problems.pdf) | [CoT Slides](slides/CoT_SJTU_Slides.pdf) | - | [🎨](diagrams/downloaded_images/reasoning_02_Chain_of_Thought_Empowers_Transformers.png) [🖼️](media/reasoning/Chain-of-Thought_Empowers_Transformers_to_Solve_Inherently_Serial_Problems/README.md) |
@@ -89,10 +89,10 @@ slides/                  # 92 presentation decks (504 MB)
 
 | Paper | Slides | Code | Media |
 |-------|--------|------|-------|
-| [ReAct: Synergizing Reasoning and Acting](papers/agent-frameworks/ReAct_Synergizing_Reasoning_and_Acting.pdf) | [ReAct UVA Lecture](slides/ReAct_UVA_Lecture.pdf) | [GitHub](https://github.com/ysymyth/ReAct) | [🎨](diagrams/downloaded_images/agent-frameworks_ReAct-_Synergizing_Reasoning_and_Acting.png) [🖼️](media/agent-frameworks/ReAct_Synergizing_Reasoning_and_Acting/README.md) |
-| [AutoGen: Multi-Agent Conversation](papers/agent-frameworks/AutoGen_Multi-Agent_Conversation.pdf) | - | [GitHub](https://github.com/microsoft/autogen) | [🎨](diagrams/downloaded_images/agent-frameworks_AutoGen-_Multi-Agent_Conversation.png) [🖼️](media/agent-frameworks/AutoGen_Multi-Agent_Conversation/README.md) |
-| [StateFlow: Enhancing LLM Task-Solving](papers/agent-frameworks/StateFlow_Enhancing_LLM_Task-Solving.pdf) | - | [GitHub](https://github.com/yiranwu0/StateFlow) | [🖼️](media/agent-frameworks/StateFlow_Enhancing_LLM_Task-Solving/README.md) |
-| [DSPy: Compiling Declarative Language Model](papers/agent-frameworks/DSPy_Compiling_Declarative_Language_Model.pdf) | - | [GitHub](https://github.com/stanfordnlp/dspy) | [🎨](diagrams/downloaded_images/agent-frameworks_DSPy-_Compiling_Declarative_Language_Model.png) [🖼️](media/agent-frameworks/DSPy_Compiling_Declarative_Language_Model/README.md) |
+| [ReAct: Synergizing Reasoning and Acting](papers/agent-frameworks/ReAct_Synergizing_Reasoning_and_Acting.pdf) | [ReAct UVA Lecture](slides/ReAct_UVA_Lecture.pdf) | [GitHub](https://github.com/ysymyth/ReAct) | [🎨](diagrams/downloaded_images/agent-frameworks_ReAct-_Synergizing_Reasoning_and_Acting.png) [🖼️](media/agent-frameworks/ReAct_Synergizing_Reasoning_and_Acting/README.md) [🎧](https://notebooklm.cloud.google.com/global/notebook/fe6430c3-2fee-4244-ace3-1db109cc2c0c?project=358208640342) |
+| [AutoGen: Multi-Agent Conversation](papers/agent-frameworks/AutoGen_Multi-Agent_Conversation.pdf) | - | [GitHub](https://github.com/microsoft/autogen) | [🎨](diagrams/downloaded_images/agent-frameworks_AutoGen-_Multi-Agent_Conversation.png) [🖼️](media/agent-frameworks/AutoGen_Multi-Agent_Conversation/README.md) [🎧](https://notebooklm.cloud.google.com/global/notebook/bd26a628-e81f-4dc0-9371-70d9b54dcdca?project=358208640342) |
+| [StateFlow: Enhancing LLM Task-Solving](papers/agent-frameworks/StateFlow_Enhancing_LLM_Task-Solving.pdf) | - | [GitHub](https://github.com/yiranwu0/StateFlow) | [🖼️](media/agent-frameworks/StateFlow_Enhancing_LLM_Task-Solving/README.md) [🎧](https://notebooklm.cloud.google.com/global/notebook/918935e4-1b33-4a47-be5f-ac7c115cd09f?project=358208640342) |
+| [DSPy: Compiling Declarative Language Model](papers/agent-frameworks/DSPy_Compiling_Declarative_Language_Model.pdf) | - | [GitHub](https://github.com/stanfordnlp/dspy) | [🎨](diagrams/downloaded_images/agent-frameworks_DSPy-_Compiling_Declarative_Language_Model.png) [🖼️](media/agent-frameworks/DSPy_Compiling_Declarative_Language_Model/README.md) [🎧](https://notebooklm.cloud.google.com/global/notebook/7c68d545-0d36-402e-97f5-44e730389da2?project=358208640342) |
 | **LLM Agents Tutorials** | [EMNLP 2024 Tutorial](slides/EMNLP2024_Language_Agents_Tutorial.pdf), [WWW 2024 Tutorial](slides/WWW2024_LLM_Agents_Tutorial.pdf), [Berkeley Training Agents](slides/Berkeley_LLM_Training_Agents.pdf) | - | - |
 
 ## Code Generation & Software Agents
@@ -100,10 +100,10 @@ slides/                  # 92 presentation decks (504 MB)
 | Paper | Slides | Code | Media |
 |-------|--------|------|-------|
 | [SWE-agent: Agent-Computer Interfaces](papers/computer-use/SWE-agent_Agent-Computer_Interfaces.pdf) | [Software Agents (Neubig)](slides/Software_Agents_Neubig.pdf) | [GitHub](https://github.com/SWE-agent/SWE-agent) | [🎨](diagrams/downloaded_images/agent-frameworks_AutoGen-_Multi-Agent_Conversation.png) [🖼️](media/computer-use/SWE-agent_Agent-Computer_Interfaces/README.md) |
-| [OpenHands: AI Software Developers](papers/agent-frameworks/OpenHands_AI_Software_Developers.pdf) | [Software Agents (Neubig)](slides/Software_Agents_Neubig.pdf) | [GitHub](https://github.com/OpenHands/OpenHands) | [🖼️](media/agent-frameworks/OpenHands_AI_Software_Developers/README.md) |
+| [OpenHands: AI Software Developers](papers/agent-frameworks/OpenHands_AI_Software_Developers.pdf) | [Software Agents (Neubig)](slides/Software_Agents_Neubig.pdf) | [GitHub](https://github.com/OpenHands/OpenHands) | [🖼️](media/agent-frameworks/OpenHands_AI_Software_Developers/README.md) [🎧](https://notebooklm.cloud.google.com/global/notebook/ed315459-c9ed-478d-975c-d17dd7f357ac?project=358208640342) |
 | [Interactive Tools Assist LM Agents Security Vulnerabilities](papers/security/Interactive_Tools_Assist_LM_Agents_Security_Vulnerabilities.pdf) | [Code Agents & Vulnerability Detection](slides/Code_Agents_Vulnerability_Detection_Berkeley.pdf) | [GitHub](https://github.com/NYU-LLM-CTF/NYU_CTF_) | - |
 | [Big Sleep: LLM Vulnerabilities Real-World](papers/security/Big_Sleep_LLM_Vulnerabilities_Real-World.pdf) | [Code Agents & Vulnerability Detection](slides/Code_Agents_Vulnerability_Detection_Berkeley.pdf) | - | - |
-| [SWE-bench Verified](papers/benchmarks/SWE-bench_Verified.pdf) | - | [GitHub](https://github.com/SWE-bench/SWE-bench) | [🖼️](media/benchmarks/SWE-bench_Verified/README.md) |
+| [SWE-bench Verified](papers/benchmarks/SWE-bench_Verified.pdf) | - | [GitHub](https://github.com/SWE-bench/SWE-bench) | [🖼️](media/benchmarks/SWE-bench_Verified/README.md) [🎧](https://notebooklm.cloud.google.com/global/notebook/a23fbadb-1949-4a19-b9b1-77d65d8478d4?project=358208640342) |
 
 ## Web & Multimodal Agents
 
@@ -120,9 +120,9 @@ slides/                  # 92 presentation decks (504 MB)
 
 | Paper | Slides | Code | Media |
 |-------|--------|------|-------|
-| [WorkArena: Common Knowledge Work Tasks](papers/benchmarks/WorkArena_Common_Knowledge_Work_Tasks.pdf) | - | [GitHub](https://github.com/ServiceNow/WorkArena) | [🖼️](media/benchmarks/WorkArena_Common_Knowledge_Work_Tasks/README.md) |
-| [WorkArena++: Compositional Planning](papers/benchmarks/WorkArena_Compositional_Planning.pdf) | - | [GitHub](https://github.com/ServiceNow/WorkArena) | [🖼️](media/benchmarks/WorkArena_Compositional_Planning/README.md) |
-| [TapeAgents: Holistic Framework Agent Development](papers/agent-frameworks/TapeAgents_Holistic_Framework_Agent_Development.pdf) | - | [GitHub](https://github.com/ServiceNow/TapeAgents) | [🖼️](media/agent-frameworks/TapeAgents_Holistic_Framework_Agent_Development/README.md) |
+| [WorkArena: Common Knowledge Work Tasks](papers/benchmarks/WorkArena_Common_Knowledge_Work_Tasks.pdf) | - | [GitHub](https://github.com/ServiceNow/WorkArena) | [🖼️](media/benchmarks/WorkArena_Common_Knowledge_Work_Tasks/README.md) [🎧](https://notebooklm.cloud.google.com/global/notebook/e719ad68-4c9a-4587-b792-c35c10e8b405?project=358208640342) |
+| [WorkArena++: Compositional Planning](papers/benchmarks/WorkArena_Compositional_Planning.pdf) | - | [GitHub](https://github.com/ServiceNow/WorkArena) | [🖼️](media/benchmarks/WorkArena_Compositional_Planning/README.md) [🎧](https://notebooklm.cloud.google.com/global/notebook/53f4fdb1-7eb9-4ecf-a0be-11bfbdcd4e29?project=358208640342) |
+| [TapeAgents: Holistic Framework Agent Development](papers/agent-frameworks/TapeAgents_Holistic_Framework_Agent_Development.pdf) | - | [GitHub](https://github.com/ServiceNow/TapeAgents) | [🖼️](media/agent-frameworks/TapeAgents_Holistic_Framework_Agent_Development/README.md) [🎧](https://notebooklm.cloud.google.com/global/notebook/8cd2f3fb-cb23-44a8-863d-3242c823aa04?project=358208640342) |
 
 ## Mathematics & Theorem Proving
 
@@ -154,7 +154,7 @@ slides/                  # 92 presentation decks (504 MB)
 
 | Paper | Slides | Code | Media |
 |-------|--------|------|-------|
-| [Paper2Agent: Research Papers as AI Agents](papers/agent-frameworks/Paper2Agent_Research_Papers_as_AI_Agents.pdf) | - | [GitHub](https://github.com/jmiao24/Paper2Agent) | [🖼️](media/agent-frameworks/Paper2Agent_Research_Papers_as_AI_Agents/README.md) |
+| [Paper2Agent: Research Papers as AI Agents](papers/agent-frameworks/Paper2Agent_Research_Papers_as_AI_Agents.pdf) | - | [GitHub](https://github.com/jmiao24/Paper2Agent) | [🖼️](media/agent-frameworks/Paper2Agent_Research_Papers_as_AI_Agents/README.md) [🎧](https://notebooklm.cloud.google.com/global/notebook/9db0bff2-5fa0-4eeb-87d4-477d420ef5c9?project=358208640342) |
 | [OpenScholar: Synthesizing Scientific Literature](papers/memory-rag/OpenScholar_Synthesizing_Scientific_Literature.pdf) | - | [GitHub](https://github.com/AkariAsai/OpenScholar) | [🖼️](media/memory-rag/OpenScholar_Synthesizing_Scientific_Literature/README.md) |
 
 ## Safety & Security
@@ -174,9 +174,9 @@ slides/                  # 92 presentation decks (504 MB)
 
 | Paper | Slides | Code | Media |
 |-------|--------|------|-------|
-| [Survey: Evaluation LLM-based Agents](papers/benchmarks/Survey_Evaluation_LLM-based_Agents.pdf) | [AgentBench Multi-Turn NeurIPS](slides/AgentBench_Multi_Turn_NeurIPS.pdf) | - | [🖼️](media/benchmarks/Survey_Evaluation_LLM-based_Agents/README.md) |
-| [Adding Error Bars to Evals](papers/benchmarks/Adding_Error_Bars_to_Evals.pdf) | - | [GitHub](https://github.com/openai/evals) | [🖼️](media/benchmarks/Adding_Error_Bars_to_Evals/README.md) |
-| [Tau2-Bench: Conversational Agents Dual-Control](papers/benchmarks/Tau2-Bench_Conversational_Agents_Dual-Control.pdf) | - | [GitHub](https://github.com/sierra-research/tau2-bench) | [🖼️](media/benchmarks/Tau2-Bench_Conversational_Agents_Dual-Control/README.md) |
+| [Survey: Evaluation LLM-based Agents](papers/benchmarks/Survey_Evaluation_LLM-based_Agents.pdf) | [AgentBench Multi-Turn NeurIPS](slides/AgentBench_Multi_Turn_NeurIPS.pdf) | - | [🖼️](media/benchmarks/Survey_Evaluation_LLM-based_Agents/README.md) [🎧](https://notebooklm.cloud.google.com/global/notebook/728fb1d8-6903-4ac3-bd97-eec90cc67182?project=358208640342) |
+| [Adding Error Bars to Evals](papers/benchmarks/Adding_Error_Bars_to_Evals.pdf) | - | [GitHub](https://github.com/openai/evals) | [🖼️](media/benchmarks/Adding_Error_Bars_to_Evals/README.md) [🎧](https://notebooklm.cloud.google.com/global/notebook/2df09327-6444-4c47-995c-4d5389b15fe9?project=358208640342) |
+| [Tau2-Bench: Conversational Agents Dual-Control](papers/benchmarks/Tau2-Bench_Conversational_Agents_Dual-Control.pdf) | - | [GitHub](https://github.com/sierra-research/tau2-bench) | [🖼️](media/benchmarks/Tau2-Bench_Conversational_Agents_Dual-Control/README.md) [🎧](https://notebooklm.cloud.google.com/global/notebook/f5a83e17-9a24-4ad6-a32f-e8921ee4c73d?project=358208640342) |
 | **Data Science Agents** | [Data Science Agents Benchmark](slides/Data_Science_Agents_Benchmark.pdf) | - | - |
 
 ## Neural & Symbolic Reasoning
@@ -220,7 +220,7 @@ slides/                  # 92 presentation decks (504 MB)
 | Paper | Slides | Code | Media |
 |-------|--------|------|-------|
 | [WebAgent-R1: Multi-Turn RL for Web Agents](papers/web-agents/WebAgent-R1_Multi-Turn_RL.pdf) | - | [GitHub](https://github.com/weizhepei/WebAgent-R1) | - |
-| [ARTIST: Agentic Reasoning & Tool Integration](papers/agent-frameworks/ARTIST_Agentic_Reasoning_Tool_Integration.pdf) | [ARTIST Microsoft](slides/ARTIST_Agentic_Reasoning_Microsoft.pdf) | [GitHub](https://github.com/microsoft/ARTIST) | [🎨](diagrams/downloaded_images/agent-frameworks_ReAct-_Synergizing_Reasoning_and_Acting.png) [🖼️](media/agent-frameworks/ARTIST_Agentic_Reasoning_Tool_Integration/README.md) |
+| [ARTIST: Agentic Reasoning & Tool Integration](papers/agent-frameworks/ARTIST_Agentic_Reasoning_Tool_Integration.pdf) | [ARTIST Microsoft](slides/ARTIST_Agentic_Reasoning_Microsoft.pdf) | [GitHub](https://github.com/microsoft/ARTIST) | [🎨](diagrams/downloaded_images/agent-frameworks_ReAct-_Synergizing_Reasoning_and_Acting.png) [🖼️](media/agent-frameworks/ARTIST_Agentic_Reasoning_Tool_Integration/README.md) [🎧](https://notebooklm.cloud.google.com/global/notebook/dd5aab2c-a230-4161-b521-81c63cbf2902?project=358208640342) |
 
 ## Agentic Architectures & Coordination
 
@@ -238,15 +238,15 @@ slides/                  # 92 presentation decks (504 MB)
 
 | Paper | Slides | Code | Media |
 |-------|--------|------|-------|
-| [DigiRL: Device Control Agents](papers/computer-use/DigiRL_Device_Control_Agents.pdf) | [DigiRL NeurIPS 2024](slides/DigiRL_NeurIPS_2024.pdf) | [GitHub](https://github.com/DigiRL-agent/digirl) | [🖼️](media/computer-use/DigiRL_Device_Control_Agents/README.md) |
+| [DigiRL: Device Control Agents](papers/computer-use/DigiRL_Device_Control_Agents.pdf) | [DigiRL NeurIPS 2024](slides/DigiRL_NeurIPS_2024.pdf) | [GitHub](https://github.com/DigiRL-agent/digirl) | [🖼️](media/computer-use/DigiRL_Device_Control_Agents/README.md) [🎧](https://notebooklm.cloud.google.com/global/notebook/931f05c0-39d7-48d2-a51a-8d273bd3d6af?project=358208640342) |
 | [OSWorld: Multimodal Agents Benchmark](papers/computer-use/OSWorld_Multimodal_Agents_Benchmark.pdf) | - | [GitHub](https://github.com/xlang-ai/OSWorld) | [🖼️](media/computer-use/OSWorld_Multimodal_Agents_Benchmark/README.md) |
-| [OS-Harm: Computer Use Safety](papers/computer-use/OS-Harm_Computer_Use_Safety.pdf) | [OS-Harm Benchmark](slides/OS_Harm_Benchmark.pdf) | [GitHub](https://github.com/tml-epfl/os-harm) | [🖼️](media/computer-use/OS-Harm_Computer_Use_Safety/README.md) |
+| [OS-Harm: Computer Use Safety](papers/computer-use/OS-Harm_Computer_Use_Safety.pdf) | [OS-Harm Benchmark](slides/OS_Harm_Benchmark.pdf) | [GitHub](https://github.com/tml-epfl/os-harm) | [🖼️](media/computer-use/OS-Harm_Computer_Use_Safety/README.md) [🎧](https://notebooklm.cloud.google.com/global/notebook/09f307c6-9716-45a3-9c83-be2e99b1f8e6?project=358208640342) |
 
 ### Agent Fine-Tuning & Tool Use
 
 | Paper | Slides | Code | Media |
 |-------|--------|------|-------|
-| [FireAct: Language Agent Fine-tuning](papers/agent-frameworks/FireAct_Language_Agent_Fine-tuning.pdf) | [LLM Agents Tool Learning](slides/LLM_Agents_Tool_Learning_Tutorial.pdf) | [GitHub](https://github.com/anchen1011/FireAct) | [🖼️](media/agent-frameworks/FireAct_Language_Agent_Fine-tuning/README.md) |
+| [FireAct: Language Agent Fine-tuning](papers/agent-frameworks/FireAct_Language_Agent_Fine-tuning.pdf) | [LLM Agents Tool Learning](slides/LLM_Agents_Tool_Learning_Tutorial.pdf) | [GitHub](https://github.com/anchen1011/FireAct) | [🖼️](media/agent-frameworks/FireAct_Language_Agent_Fine-tuning/README.md) [🎧](https://notebooklm.cloud.google.com/global/notebook/79089fc8-bf2d-406d-985b-e06fd724c9fc?project=358208640342) |
 | [DeepSeek Janus Pro: Multimodal](papers/rl-finetuning/DeepSeek_Janus_Pro_Multimodal.pdf) | - | [GitHub](https://github.com/deepseek-ai/Janus) | [🎨](diagrams/downloaded_images/rl-finetuning_DeepSeek_R1-_Implications_for_AI.png) [🖼️](media/rl-finetuning/DeepSeek_Janus_Pro_Multimodal/README.md) |
 | [PTA-GRPO: High-Level Planning](slides/PTA_GRPO_High_Level_Planning.pdf) | [PTA-GRPO Planning](slides/PTA_GRPO_High_Level_Planning.pdf) | - | - |
 | **Stanford RL for Agents** | [Stanford RL Agents 2025](slides/Stanford_RL_for_Agents_2025.pdf) | - | - |

@@ -263,26 +263,61 @@ slides/                  # 92 presentation decks (504 MB)
 
 ## Deep Reinforcement Learning
 
-> **[See Full Deep RL Resources Guide](DEEP_RL_RESOURCES.md)** - Comprehensive collection with 100+ resources
+> **[See Full Deep RL Resources Guide](DEEP_RL_RESOURCES.md)** - Comprehensive collection with 100+ resources and 92 slides
 
-### Quick Start
+### Value-Based Methods (DQN Family)
 
-| Category | Top Resources |
-|----------|---------------|
-| **Courses** | [Hugging Face Deep RL](https://huggingface.co/learn/deep-rl-course), [UC Berkeley CS294](https://rail.eecs.berkeley.edu/deeprlcourse/), [Spinning Up](https://spinningup.openai.com/) |
-| **Books** | [Sutton & Barto](http://incompleteideas.net/book/RLbook2020.pdf), [Grokking Deep RL](https://www.manning.com/books/grokking-deep-reinforcement-learning) |
-| **Repos** | [udacity/deep-reinforcement-learning](https://github.com/udacity/deep-reinforcement-learning), [openai/baselines](https://github.com/openai/baselines) |
-| **Papers** | [DQN](https://arxiv.org/abs/1312.5602), [PPO](https://arxiv.org/abs/1707.06347), [A3C](https://arxiv.org/abs/1602.01783) |
+| Paper | arXiv | Slides |
+|-------|-------|--------|
+| Playing Atari with Deep RL (DQN) | [1312.5602](https://arxiv.org/abs/1312.5602) | [CMU](slides/DQN_CMU_Deep_Q_Learning.pdf), [CVUT](slides/DQN_CVUT_Q_Learning.pdf), [NTHU](slides/DQN_NTHU_Deep_RL.pdf), [Waterloo](slides/DQN_Waterloo_CS885.pdf) |
+| Deep RL with Double Q-learning | [1509.06461](https://arxiv.org/abs/1509.06461) | [CMU DQN](slides/DQN_CMU_Deep_Q_Learning.pdf) |
+| Dueling Network Architectures | [1511.06581](https://arxiv.org/abs/1511.06581) | [Buffalo](slides/Dueling_DQN_PER_Buffalo.pdf) |
+| Prioritized Experience Replay | [1511.05952](https://arxiv.org/abs/1511.05952) | [Buffalo](slides/Dueling_DQN_PER_Buffalo.pdf), [Julien Vitay](slides/PER_Julien_Vitay.pdf), [ICML 2020](slides/Experience_Replay_ICML2020.pdf) |
+| Rainbow: Combining Improvements | [1710.02298](https://arxiv.org/abs/1710.02298) | [Prague](slides/Rainbow_Prague_NPFL122.pdf), [Berkeley](slides/Rainbow_Berkeley_Off_Policy.pdf), [Wisconsin](slides/Rainbow_Wisconsin_CS760.pdf) |
 
-### Key Foundational Papers
+### Policy Gradient Methods
 
-| Paper | Link | Notes |
-|-------|------|-------|
-| Playing Atari with Deep RL | [arXiv](https://arxiv.org/abs/1312.5602) | Original DQN |
-| Human-level Control | [Nature](https://storage.googleapis.com/deepmind-media/dqn/DQNNaturePaper.pdf) | DQN breakthrough |
-| Proximal Policy Optimization | [arXiv](https://arxiv.org/abs/1707.06347) | PPO algorithm |
-| Asynchronous Methods | [arXiv](https://arxiv.org/abs/1602.01783) | A3C |
-| Deep RL Survey (150 pages) | [arXiv](https://arxiv.org/abs/1810.06339) | Comprehensive overview |
+| Paper | arXiv | Slides |
+|-------|-------|--------|
+| Policy Gradient Methods | - | [Toronto](slides/Policy_Gradient_Toronto.pdf), [Berkeley CS285](slides/Policy_Gradient_Berkeley_CS285.pdf), [REINFORCE Stanford](slides/REINFORCE_Stanford_CS229.pdf) |
+| Proximal Policy Optimization (PPO) | [1707.06347](https://arxiv.org/abs/1707.06347) | [Waterloo](slides/PPO_Waterloo_CS885.pdf), [NTU Taiwan](slides/PPO_NTU_Taiwan.pdf) |
+| Trust Region Policy Optimization (TRPO) | [1502.05477](https://arxiv.org/abs/1502.05477) | [FAU](slides/TRPO_FAU_Mutschler.pdf), [UT Austin](slides/TRPO_UT_Austin.pdf), [CMU Natural PG](slides/TRPO_CMU_Natural_PG.pdf), [Toronto PAIR](slides/TRPO_Toronto_PAIR.pdf) |
+| High-Dimensional Continuous Control (GAE) | [1506.02438](https://arxiv.org/abs/1506.02438) | [Berkeley CS285](slides/GAE_Berkeley_CS285.pdf) |
+
+### Actor-Critic Methods
+
+| Paper | arXiv | Slides |
+|-------|-------|--------|
+| Asynchronous Methods (A3C) | [1602.01783](https://arxiv.org/abs/1602.01783) | [WPI](slides/A3C_WPI_DS595.pdf), [Buffalo](slides/A3C_Buffalo_Actor_Critic.pdf), [NTU](slides/A3C_NTU_Taiwan.pdf), [UIUC](slides/A3C_UIUC_ECE448.pdf), [Julien Vitay](slides/A3C_Julien_Vitay.pdf) |
+| Continuous Control (DDPG) | [1509.02971](https://arxiv.org/abs/1509.02971) | [Paderborn](slides/DDPG_Paderborn_DPG.pdf), [FAU](slides/DDPG_FAU_Mutschler.pdf), [Julien Vitay](slides/DDPG_Julien_Vitay.pdf), [Buffalo](slides/DDPG_Buffalo_DPG.pdf) |
+| Addressing Function Approximation (TD3) | [1802.09477](https://arxiv.org/abs/1802.09477) | [Prague](slides/TD3_SAC_Prague_NPFL139.pdf) |
+| Soft Actor-Critic (SAC) | [1801.01290](https://arxiv.org/abs/1801.01290) | [Toronto PAIR](slides/SAC_Toronto_PAIR.pdf), [Purdue](slides/SAC_Purdue_RL_Inference.pdf), [Stanford CS231n](slides/SAC_Stanford_CS231n.pdf), [Prague](slides/TD3_SAC_Prague_NPFL139.pdf) |
+
+### Temporal Difference & Q-Learning
+
+| Paper | arXiv | Slides |
+|-------|-------|--------|
+| TD Learning Fundamentals | - | [CMU](slides/TD_Learning_CMU.pdf), [Michigan](slides/TD_Methods_Michigan.pdf), [Sutton & Barto](slides/TD_Sutton_Barto.pdf) |
+| Q-Learning | - | [Northeastern](slides/Q_Learning_Northeastern.pdf), [CMU TD](slides/TD_Learning_CMU.pdf) |
+
+### Model-Based RL
+
+| Paper | arXiv | Slides |
+|-------|-------|--------|
+| Model-Based RL | - | [FAU](slides/Model_Based_RL_FAU.pdf), [Toronto](slides/Model_Based_RL_Toronto.pdf), [Berkeley](slides/Model_Based_RL_Berkeley.pdf), [CMU](slides/Model_Based_RL_CMU.pdf) |
+
+### Imitation & Inverse RL
+
+| Paper | arXiv | Slides |
+|-------|-------|--------|
+| Imitation Learning | - | [WPI](slides/Imitation_Learning_WPI.pdf), [EPFL](slides/Imitation_Learning_EPFL.pdf) |
+| Inverse Reinforcement Learning | - | [TU Darmstadt](slides/Inverse_RL_TU_Darmstadt.pdf), [Berkeley CS285](slides/Inverse_RL_Berkeley_CS285.pdf) |
+
+### Introductory Lectures
+
+| Topic | Slides |
+|-------|--------|
+| Deep RL Introduction | [Berkeley CS294](slides/Berkeley_CS294_Intro.pdf), [Berkeley 2017](slides/Berkeley_CS294_Intro_2017.pdf) |
 
 ### Frameworks & Tools
 

@@ -1,0 +1,16 @@
+# VisualWebArena
+
+**Index:** 4
+
+**Diagram Type:** Sequence Diagram
+
+**Mode:** Premium
+
+## Links
+
+- **Image URL:** [View Diagram](https://storage.googleapis.com/second-petal-295822.appspot.com/elements/autoDiagram%3A50bfcab70f878cf4cc3ccd3e579dc4931e71f6e28802f8be71b0383f7208c544.png)
+
+- **Editable File:** [Open in Eraser](https://app.eraser.io/workspace/azWaqq7klQPLS1trjsxp)
+
+**Request ID:** `GtkZr0GD2eLXjoDdb1AU`
+

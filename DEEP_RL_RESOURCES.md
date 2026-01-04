@@ -19,6 +19,152 @@
 - [Competitions](#competitions)
 - [Cheatsheets & Glossaries](#cheatsheets--glossaries)
 - [Articles](#articles)
+- [Lecture Slides](#lecture-slides)
+
+---
+
+## Lecture Slides
+
+> 📂 **92 curated lecture slides** from top universities available in the `slides/` folder (~504 MB)
+
+### Value-Based Methods (DQN Family)
+| Algorithm | Source | File |
+|-----------|--------|------|
+| DQN | CMU 10-403 | `slides/DQN_CMU_Deep_Q_Learning.pdf` |
+| DQN | CVUT Q-Learning | `slides/DQN_CVUT_Q_Learning.pdf` |
+| DQN | NTHU Deep RL | `slides/DQN_NTHU_Deep_RL.pdf` |
+| DQN | Waterloo CS885 | `slides/DQN_Waterloo_CS885.pdf` |
+| Dueling DQN + PER | U. Buffalo | `slides/Dueling_DQN_PER_Buffalo.pdf` |
+| Rainbow | Prague NPFL122 | `slides/Rainbow_Prague_NPFL122.pdf` |
+| Rainbow/Off-Policy | Berkeley CS287 | `slides/Rainbow_Berkeley_Off_Policy.pdf` |
+| Rainbow | Wisconsin CS760 | `slides/Rainbow_Wisconsin_CS760.pdf` |
+| PER (DQN Extensions) | Julien Vitay | `slides/PER_Julien_Vitay.pdf` |
+| Experience Replay | ICML 2020 | `slides/Experience_Replay_ICML2020.pdf` |
+
+### Policy Gradient Methods
+| Algorithm | Source | File |
+|-----------|--------|------|
+| PPO | Waterloo CS885 | `slides/PPO_Waterloo_CS885.pdf` |
+| PPO | NTU Taiwan | `slides/PPO_NTU_Taiwan.pdf` |
+| TRPO | FAU Mutschler | `slides/TRPO_FAU_Mutschler.pdf` |
+| TRPO | UT Austin | `slides/TRPO_UT_Austin.pdf` |
+| TRPO/PPO | CMU Natural PG | `slides/TRPO_CMU_Natural_PG.pdf` |
+| TRPO | Toronto PAIR | `slides/TRPO_Toronto_PAIR.pdf` |
+| Policy Gradient | Toronto | `slides/Policy_Gradient_Toronto.pdf` |
+| Policy Gradient | Berkeley CS285 | `slides/Policy_Gradient_Berkeley_CS285.pdf` |
+| REINFORCE | Stanford CS229 | `slides/REINFORCE_Stanford_CS229.pdf` |
+| GAE | Berkeley CS285 | `slides/GAE_Berkeley_CS285.pdf` |
+
+### Actor-Critic Methods
+| Algorithm | Source | File |
+|-----------|--------|------|
+| A3C | WPI DS595 | `slides/A3C_WPI_DS595.pdf` |
+| A3C/Actor-Critic | U. Buffalo | `slides/A3C_Buffalo_Actor_Critic.pdf` |
+| A3C | NTU Taiwan | `slides/A3C_NTU_Taiwan.pdf` |
+| A3C | UIUC ECE448 | `slides/A3C_UIUC_ECE448.pdf` |
+| A3C | Julien Vitay | `slides/A3C_Julien_Vitay.pdf` |
+| DDPG | Paderborn DPG | `slides/DDPG_Paderborn_DPG.pdf` |
+| DDPG | FAU Mutschler | `slides/DDPG_FAU_Mutschler.pdf` |
+| DDPG | Julien Vitay | `slides/DDPG_Julien_Vitay.pdf` |
+| DDPG/DPG | U. Buffalo | `slides/DDPG_Buffalo_DPG.pdf` |
+| TD3 + SAC | Prague NPFL139 | `slides/TD3_SAC_Prague_NPFL139.pdf` |
+| SAC | Toronto PAIR | `slides/SAC_Toronto_PAIR.pdf` |
+| SAC/RL as Inference | Purdue | `slides/SAC_Purdue_RL_Inference.pdf` |
+| SAC | Stanford CS231n | `slides/SAC_Stanford_CS231n.pdf` |
+
+### Temporal Difference Learning
+| Algorithm | Source | File |
+|-----------|--------|------|
+| TD Learning | CMU 10-403 | `slides/TD_Learning_CMU.pdf` |
+| TD Methods | Michigan | `slides/TD_Methods_Michigan.pdf` |
+| TD Learning | Sutton & Barto | `slides/TD_Sutton_Barto.pdf` |
+| Q-Learning | Northeastern | `slides/Q_Learning_Northeastern.pdf` |
+
+### Model-Based RL
+| Topic | Source | File |
+|-------|--------|------|
+| Model-Based RL | FAU 2023 | `slides/Model_Based_RL_FAU.pdf` |
+| Model-Based RL | Toronto | `slides/Model_Based_RL_Toronto.pdf` |
+| Model-Based RL | Berkeley CS287 | `slides/Model_Based_RL_Berkeley.pdf` |
+| Model-Based RL | CMU 10-403 | `slides/Model_Based_RL_CMU.pdf` |
+
+### Imitation & Inverse RL
+| Topic | Source | File |
+|-------|--------|------|
+| Imitation Learning | WPI DS595 | `slides/Imitation_Learning_WPI.pdf` |
+| Imitation Learning | EPFL | `slides/Imitation_Learning_EPFL.pdf` |
+| Inverse RL | TU Darmstadt | `slides/Inverse_RL_TU_Darmstadt.pdf` |
+| Inverse RL | Berkeley CS285 | `slides/Inverse_RL_Berkeley_CS285.pdf` |
+
+### Introductory Lectures
+| Topic | Source | File |
+|-------|--------|------|
+| Deep RL Intro | Berkeley CS294 | `slides/Berkeley_CS294_Intro.pdf` |
+| Deep RL Intro (2017) | Berkeley CS294 | `slides/Berkeley_CS294_Intro_2017.pdf` |
+
+### Agentic RL & LLM Agents
+| Topic | Source | File |
+|-------|--------|------|
+| RL for Agents | Stanford CS329T 2025 | `slides/Stanford_RL_for_Agents_2025.pdf` |
+| RL for LLM Reasoning | Stanford | `slides/Stanford_RL_for_LLM_Reasoning.pdf` |
+| LLM Agents Tool Learning | Tutorial | `slides/LLM_Agents_Tool_Learning_Tutorial.pdf` |
+| Language Models as Agents | CMU | `slides/CMU_Language_Models_as_Agents.pdf` |
+| LLM Agents & Tool Use | Mannheim | `slides/Mannheim_LLM_Agents_Tool_Use.pdf` |
+| Multi-Agent RL Intro | Edinburgh | `slides/Edinburgh_Multi_Agent_RL_Intro.pdf` |
+| DigiRL | NeurIPS 2024 | `slides/DigiRL_NeurIPS_2024.pdf` |
+| MasRouter | ACL 2025 | `slides/MasRouter_ACL_2025.pdf` |
+| ARTIST Reasoning | Microsoft Research | `slides/ARTIST_Agentic_Reasoning_Microsoft.pdf` |
+| OS-Harm Benchmark | Safety | `slides/OS_Harm_Benchmark.pdf` |
+| PTA-GRPO Planning | Planning | `slides/PTA_GRPO_High_Level_Planning.pdf` |
+
+### RLHF & Preference Learning
+| Topic | Source | File |
+|-------|--------|------|
+| DPO | CMU Lecture | `slides/DPO_CMU_Lecture.pdf` |
+| DPO | Toronto | `slides/DPO_Toronto_Presentation.pdf` |
+| DPO | UT Austin | `slides/DPO_UT_Austin.pdf` |
+| DPO | Jinen Slides | `slides/DPO_Jinen_Slides.pdf` |
+| RLHF | UT Austin | `slides/RLHF_UT_Austin_Slides.pdf` |
+
+### Chain-of-Thought & Reasoning
+| Topic | Source | File |
+|-------|--------|------|
+| DeepSeek-R1 | CMU Reasoning | `slides/DeepSeek_R1_CMU_Reasoning.pdf` |
+| DeepSeek-R1 | Introduction | `slides/DeepSeek_R1_Introduction.pdf` |
+| DeepSeek-R1 | Seoul National | `slides/DeepSeek_R1_Seoul_National.pdf` |
+| DeepSeek-R1 | Toronto | `slides/DeepSeek_R1_Toronto.pdf` |
+| CoT | Princeton | `slides/CoT_Princeton_Lecture.pdf` |
+| CoT | SJTU | `slides/CoT_SJTU_Slides.pdf` |
+| CoT | Toronto | `slides/CoT_Toronto_Presentation.pdf` |
+| CoT Interpretable ML | Lecture | `slides/CoT_Interpretable_ML_Lecture.pdf` |
+| Concise CoT | Benefits | `slides/Concise_CoT_Benefits.pdf` |
+| ReAct | UVA Lecture | `slides/ReAct_UVA_Lecture.pdf` |
+
+### Benchmarks & Evaluation
+| Topic | Source | File |
+|-------|--------|------|
+| AgentBench | NeurIPS | `slides/AgentBench_Multi_Turn_NeurIPS.pdf` |
+| Data Science Agents | Benchmark | `slides/Data_Science_Agents_Benchmark.pdf` |
+| Web Agent Evaluation | Refinement | `slides/Web_Agent_Evaluation_Refinement.pdf` |
+
+### Additional Topics
+| Topic | Source | File |
+|-------|--------|------|
+| Software Agents | CMU Neubig | `slides/Software_Agents_Neubig.pdf` |
+| Multimodal Agents | Berkeley | `slides/Multimodal_Agents_Berkeley.pdf` |
+| LLM Training Agents | Berkeley | `slides/Berkeley_LLM_Training_Agents.pdf` |
+| Voyager | UT Austin | `slides/Voyager_UT_Austin_Presentation.pdf` |
+| LeanDojo | AITP | `slides/LeanDojo_AITP_Slides.pdf` |
+| LeanDojo | NeurIPS | `slides/LeanDojo_NeurIPS_Slides.pdf` |
+| Theorem Proving ML | Slides | `slides/Theorem_Proving_ML_Slides.pdf` |
+| HippoRAG | NeurIPS | `slides/HippoRAG_NeurIPS_Slides.pdf` |
+| Eureka Reward Design | Paper | `slides/Eureka_Reward_Design_Paper.pdf` |
+| Code Agents Vulnerability | Berkeley | `slides/Code_Agents_Vulnerability_Detection_Berkeley.pdf` |
+| Prompt Injection | Duke | `slides/Prompt_Injection_Duke_Slides.pdf` |
+| EMNLP 2024 Language Agents | Tutorial | `slides/EMNLP2024_Language_Agents_Tutorial.pdf` |
+| WWW 2024 LLM Agents | Tutorial | `slides/WWW2024_LLM_Agents_Tutorial.pdf` |
+| AI Agents Architecture | Intel | `slides/Intel_AI_Agents_Architecture.pdf` |
+| Agentic Frameworks | Cisco | `slides/Cisco_Agentic_Frameworks_Overview.pdf` |
 
 ---
 

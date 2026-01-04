@@ -2,12 +2,14 @@
 
 A comprehensive collection of papers and presentation slides on LLM agents, reasoning, and AI systems.
 
-> Source: [arvindcr4/awesome-agents](https://github.com/arvindcr4/awesome-agents)
+> Sources:
+> - [arvindcr4/awesome-agents](https://github.com/arvindcr4/awesome-agents)
+> - [redhat-et/agentic-reasoning-reinforcement-fine-tuning](https://github.com/redhat-et/agentic-reasoning-reinforcement-fine-tuning)
 
 ## Quick Stats
-- **Papers:** 66 PDFs
-- **Slides:** 27 presentation decks
-- **Topics:** 13 categories
+- **Papers:** 81 PDFs
+- **Slides:** 33 presentation decks
+- **Topics:** 14 categories
 
 ---
 
@@ -25,6 +27,7 @@ A comprehensive collection of papers and presentation slides on LLM agents, reas
 - [Safety & Security](#safety--security)
 - [Evaluation & Benchmarking](#evaluation--benchmarking)
 - [Neural & Symbolic Reasoning](#neural--symbolic-reasoning)
+- [Agentic Reasoning & RL Fine-Tuning](#agentic-reasoning--rl-fine-tuning) *(NEW)*
 
 ---
 
@@ -162,6 +165,40 @@ A comprehensive collection of papers and presentation slides on LLM agents, reas
 | [Composing Global Optimizers: Algebraic Objects](Composing_Global_Optimizers_Algebraic_Objects.pdf) | - |
 | [SurCo: Learning Linear Surrogates](SurCo_Learning_Linear_Surrogates.pdf) | - |
 
+## Agentic Reasoning & RL Fine-Tuning
+
+> Source: [redhat-et/agentic-reasoning-reinforcement-fine-tuning](https://github.com/redhat-et/agentic-reasoning-reinforcement-fine-tuning)
+
+### DeepSeek R1 & Reasoning Models
+
+| Paper | Slides |
+|-------|--------|
+| [DeepSeek-R1: Reasoning via RL](DeepSeek-R1_Reasoning_via_RL.pdf) | [DeepSeek R1 Intro](slides/DeepSeek_R1_Introduction.pdf), [DeepSeek R1 Toronto](slides/DeepSeek_R1_Toronto.pdf), [DeepSeek R1 CMU](slides/DeepSeek_R1_CMU_Reasoning.pdf), [DeepSeek R1 Seoul](slides/DeepSeek_R1_Seoul_National.pdf) |
+| [DeepSeek R1: Implications for AI](DeepSeek_R1_Implications_for_AI.pdf) | [DeepSeek R1 Intro](slides/DeepSeek_R1_Introduction.pdf) |
+| [DeepSeek R1: Are Reasoning Models Faithful?](DeepSeek_R1_Reasoning_Models_Faithful.pdf) | - |
+| [OpenAI O1 Replication Journey](OpenAI_O1_Replication_Journey.pdf) | - |
+| [Qwen QwQ Reasoning Model](Qwen_QwQ_Reasoning_Model.pdf) | - |
+| [Sky-T1: Training Small Reasoning LLMs](Sky-T1_Training_Small_Reasoning_LLMs.pdf) | - |
+| [s1: Simple Test-Time Scaling](s1_Simple_Test-Time_Scaling.pdf) | - |
+
+### GRPO & RL Fine-Tuning
+
+| Paper | Slides |
+|-------|--------|
+| [DeepSeekMath: GRPO Algorithm](DeepSeekMath_GRPO.pdf) | [Stanford RL for Reasoning](slides/Stanford_RL_for_LLM_Reasoning.pdf) |
+| [Guided GRPO: Adaptive Guidance](Guided_GRPO_Adaptive_Guidance.pdf) | [PTA-GRPO Planning](slides/PTA_GRPO_Planning_Reasoning.pdf) |
+| [R-Search: Multi-Step Reasoning](R-Search_Multi-Step_Reasoning.pdf) | [Stanford RL for Reasoning](slides/Stanford_RL_for_LLM_Reasoning.pdf) |
+| [RL Fine-tuning: Instruction Following](RL_Fine-tuning_Instruction_Following.pdf) | - |
+| [RFT Powers Multimodal Reasoning](RFT_Powers_Multimodal_Reasoning.pdf) | - |
+| [STILL-2: Distilling Reasoning](STILL-2_Distilling_Reasoning.pdf) | - |
+
+### Agentic RL
+
+| Paper | Slides |
+|-------|--------|
+| [WebAgent-R1: Multi-Turn RL for Web Agents](WebAgent-R1_Multi-Turn_RL.pdf) | - |
+| [ARTIST: Agentic Reasoning & Tool Integration](ARTIST_Agentic_Reasoning_Tool_Integration.pdf) | - |
+
 ---
 
 ## Recommended Study Path
@@ -180,6 +217,11 @@ A comprehensive collection of papers and presentation slides on LLM agents, reas
 1. [LeanDojo slides](slides/LeanDojo_NeurIPS_Slides.pdf) for theorem proving
 2. [HippoRAG NeurIPS](slides/HippoRAG_NeurIPS_Slides.pdf) for memory systems
 3. [Prompt Injection Duke](slides/Prompt_Injection_Duke_Slides.pdf) for security
+
+### Reasoning & RL Fine-Tuning Path
+1. [DeepSeek-R1 paper](DeepSeek-R1_Reasoning_via_RL.pdf) + [DeepSeek R1 CMU slides](slides/DeepSeek_R1_CMU_Reasoning.pdf)
+2. [DeepSeekMath GRPO](DeepSeekMath_GRPO.pdf) + [Stanford RL for Reasoning](slides/Stanford_RL_for_LLM_Reasoning.pdf)
+3. [ARTIST paper](ARTIST_Agentic_Reasoning_Tool_Integration.pdf) for agentic reasoning with tools
 
 ---
 

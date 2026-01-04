@@ -79,10 +79,10 @@ slides/                  # 92 presentation decks (504 MB)
 
 | Paper | Slides | Code |
 |-------|--------|------|
-| [Grokked Transformers are Implicit Reasoners](papers/reasoning/Grokked_Transformers_are_Implicit_Reasoners.pdf) | - | - |
+| [Grokked Transformers are Implicit Reasoners](papers/reasoning/Grokked_Transformers_are_Implicit_Reasoners.pdf) | - | [GitHub](https://github.com/OSU-NLP-Group/GrokkedTransformer) |
 | [HippoRAG: Neurobiologically Inspired Long-Term Memory](papers/memory-rag/HippoRAG_Neurobiologically_Inspired_Long-Term_Memory.pdf) | [HippoRAG NeurIPS](slides/HippoRAG_NeurIPS_Slides.pdf) | [GitHub](https://github.com/OSU-NLP-Group/HippoRAG) |
 | [Is Your LLM Secretly a World Model of the Internet](papers/memory-rag/Is_Your_LLM_Secretly_a_World_Model_of_the_Internet.pdf) | - | - |
-| [Tree Search for Language Model Agents](papers/planning/Tree_Search_for_Language_Model_Agents.pdf) | - | - |
+| [Tree Search for Language Model Agents](papers/planning/Tree_Search_for_Language_Model_Agents.pdf) | - | [GitHub](https://github.com/kohjingyu/search-agents) |
 
 ## Agent Frameworks
 
@@ -131,8 +131,8 @@ slides/                  # 92 presentation decks (504 MB)
 | [Autoformalization with Large Language Models](papers/theorem-proving/Autoformalization_with_Large_Language_Models.pdf) | - | - |
 | [Autoformalizing Euclidean Geometry](papers/theorem-proving/Autoformalizing_Euclidean_Geometry.pdf) | - | - |
 | [Draft, Sketch and Prove: Formal Theorem Provers](papers/theorem-proving/Draft_Sketch_and_Prove_Formal_Theorem_Provers.pdf) | [Theorem Proving ML](slides/Theorem_Proving_ML_Slides.pdf) | - |
-| [miniCTX: Neural Theorem Proving Long-Contexts](papers/theorem-proving/miniCTX_Neural_Theorem_Proving_Long-Contexts.pdf) | - | - |
-| [Lean-STaR: Interleave Thinking and Proving](papers/theorem-proving/Lean-STaR_Interleave_Thinking_and_Proving.pdf) | - | - |
+| [miniCTX: Neural Theorem Proving Long-Contexts](papers/theorem-proving/miniCTX_Neural_Theorem_Proving_Long-Contexts.pdf) | - | [GitHub](https://github.com/cmu-l3/minictx-eval) |
+| [Lean-STaR: Interleave Thinking and Proving](papers/theorem-proving/Lean-STaR_Interleave_Thinking_and_Proving.pdf) | - | [Website](https://leanstar.github.io/) |
 | [ImProver: Agent-Based Automated Proof Optimization](papers/theorem-proving/ImProver_Agent-Based_Automated_Proof_Optimization.pdf) | - | [GitHub](https://github.com/riyazahuja/ImProver) |
 | [In-Context Learning Agent Formal Theorem-Proving](papers/theorem-proving/In-Context_Learning_Agent_Formal_Theorem-Proving.pdf) | - | - |
 | [Symbolic Regression: Learned Concept Library](papers/planning/Symbolic_Regression_Learned_Concept_Library.pdf) | - | - |
@@ -175,15 +175,15 @@ slides/                  # 92 presentation decks (504 MB)
 |-------|--------|------|
 | [Survey: Evaluation LLM-based Agents](papers/benchmarks/Survey_Evaluation_LLM-based_Agents.pdf) | [AgentBench Multi-Turn NeurIPS](slides/AgentBench_Multi_Turn_NeurIPS.pdf) | - |
 | [Adding Error Bars to Evals](papers/benchmarks/Adding_Error_Bars_to_Evals.pdf) | - | - |
-| [Tau2-Bench: Conversational Agents Dual-Control](papers/benchmarks/Tau2-Bench_Conversational_Agents_Dual-Control.pdf) | - | - |
+| [Tau2-Bench: Conversational Agents Dual-Control](papers/benchmarks/Tau2-Bench_Conversational_Agents_Dual-Control.pdf) | - | [GitHub](https://github.com/sierra-research/tau2-bench) |
 | **Data Science Agents** | [Data Science Agents Benchmark](slides/Data_Science_Agents_Benchmark.pdf) | - |
 
 ## Neural & Symbolic Reasoning
 
 | Paper | Slides | Code |
 |-------|--------|------|
-| [Beyond A-Star: Better Planning Transformers](papers/reasoning/Beyond_A-Star_Better_Planning_Transformers.pdf) | - | - |
-| [Dualformer: Controllable Fast and Slow Thinking](papers/reasoning/Dualformer_Controllable_Fast_and_Slow_Thinking.pdf) | - | - |
+| [Beyond A-Star: Better Planning Transformers](papers/reasoning/Beyond_A-Star_Better_Planning_Transformers.pdf) | - | [GitHub](https://github.com/facebookresearch/searchformer) |
+| [Dualformer: Controllable Fast and Slow Thinking](papers/reasoning/Dualformer_Controllable_Fast_and_Slow_Thinking.pdf) | - | [GitHub](https://github.com/facebookresearch/dualformer) |
 | [Composing Global Optimizers: Algebraic Objects](papers/planning/Composing_Global_Optimizers_Algebraic_Objects.pdf) | - | - |
 | [SurCo: Learning Linear Surrogates](papers/planning/SurCo_Learning_Linear_Surrogates.pdf) | - | - |
 

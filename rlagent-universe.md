@@ -451,5 +451,3 @@
 | **Safe RL Survey** | Garcia & Fernandez | 2015 | Safety in RL |
 
 ---
-
-*Organized by research direction from ChatGPT Deep Research, December 2025*

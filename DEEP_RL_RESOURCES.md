@@ -28,46 +28,46 @@
 > 📂 **92 curated lecture slides** from top universities available in the `slides/` folder (~504 MB)
 
 ### Value-Based Methods (DQN Family)
-| Algorithm | Paper | Slides |
-|-----------|-------|--------|
-| DQN | [arXiv:1312.5602](https://arxiv.org/abs/1312.5602) | [CMU 10-403](slides/DQN_CMU_Deep_Q_Learning.pdf), [CVUT](slides/DQN_CVUT_Q_Learning.pdf), [NTHU](slides/DQN_NTHU_Deep_RL.pdf), [Waterloo CS885](slides/DQN_Waterloo_CS885.pdf) |
-| Double DQN | [arXiv:1509.06461](https://arxiv.org/abs/1509.06461) | [CMU 10-403](slides/DQN_CMU_Deep_Q_Learning.pdf) |
-| Dueling DQN | [arXiv:1511.06581](https://arxiv.org/abs/1511.06581) | [U. Buffalo](slides/Dueling_DQN_PER_Buffalo.pdf) |
-| PER | [arXiv:1511.05952](https://arxiv.org/abs/1511.05952) | [U. Buffalo](slides/Dueling_DQN_PER_Buffalo.pdf), [Julien Vitay](slides/PER_Julien_Vitay.pdf), [ICML 2020](slides/Experience_Replay_ICML2020.pdf) |
-| Rainbow | [arXiv:1710.02298](https://arxiv.org/abs/1710.02298) | [Prague NPFL122](slides/Rainbow_Prague_NPFL122.pdf), [Berkeley CS287](slides/Rainbow_Berkeley_Off_Policy.pdf), [Wisconsin CS760](slides/Rainbow_Wisconsin_CS760.pdf) |
+| Algorithm | Paper | Slides | Code |
+|-----------|-------|--------|------|
+| DQN | [arXiv:1312.5602](https://arxiv.org/abs/1312.5602) | [CMU 10-403](slides/DQN_CMU_Deep_Q_Learning.pdf), [CVUT](slides/DQN_CVUT_Q_Learning.pdf), [NTHU](slides/DQN_NTHU_Deep_RL.pdf), [Waterloo CS885](slides/DQN_Waterloo_CS885.pdf) | [OpenAI Baselines](https://github.com/openai/baselines), [CleanRL](https://github.com/vwxyzjn/cleanrl) |
+| Double DQN | [arXiv:1509.06461](https://arxiv.org/abs/1509.06461) | [CMU 10-403](slides/DQN_CMU_Deep_Q_Learning.pdf) | [OpenAI Baselines](https://github.com/openai/baselines) |
+| Dueling DQN | [arXiv:1511.06581](https://arxiv.org/abs/1511.06581) | [U. Buffalo](slides/Dueling_DQN_PER_Buffalo.pdf) | [OpenAI Baselines](https://github.com/openai/baselines) |
+| PER | [arXiv:1511.05952](https://arxiv.org/abs/1511.05952) | [U. Buffalo](slides/Dueling_DQN_PER_Buffalo.pdf), [Julien Vitay](slides/PER_Julien_Vitay.pdf), [ICML 2020](slides/Experience_Replay_ICML2020.pdf) | [OpenAI Baselines](https://github.com/openai/baselines) |
+| Rainbow | [arXiv:1710.02298](https://arxiv.org/abs/1710.02298) | [Prague NPFL122](slides/Rainbow_Prague_NPFL122.pdf), [Berkeley CS287](slides/Rainbow_Berkeley_Off_Policy.pdf), [Wisconsin CS760](slides/Rainbow_Wisconsin_CS760.pdf) | [Dopamine](https://github.com/google/dopamine) |
 
 ### Policy Gradient Methods
-| Algorithm | Paper | Slides |
-|-----------|-------|--------|
-| REINFORCE | [Sutton et al. 1999](http://www-anw.cs.umass.edu/~barto/courses/cs687/williams92simple.pdf) | [Stanford CS229](slides/REINFORCE_Stanford_CS229.pdf), [Toronto](slides/Policy_Gradient_Toronto.pdf), [Berkeley CS285](slides/Policy_Gradient_Berkeley_CS285.pdf) |
-| PPO | [arXiv:1707.06347](https://arxiv.org/abs/1707.06347) | [Waterloo CS885](slides/PPO_Waterloo_CS885.pdf), [NTU Taiwan](slides/PPO_NTU_Taiwan.pdf) |
-| TRPO | [arXiv:1502.05477](https://arxiv.org/abs/1502.05477) | [FAU](slides/TRPO_FAU_Mutschler.pdf), [UT Austin](slides/TRPO_UT_Austin.pdf), [CMU Natural PG](slides/TRPO_CMU_Natural_PG.pdf), [Toronto PAIR](slides/TRPO_Toronto_PAIR.pdf) |
-| GAE | [arXiv:1506.02438](https://arxiv.org/abs/1506.02438) | [Berkeley CS285](slides/GAE_Berkeley_CS285.pdf) |
+| Algorithm | Paper | Slides | Code |
+|-----------|-------|--------|------|
+| REINFORCE | [Sutton et al. 1999](http://www-anw.cs.umass.edu/~barto/courses/cs687/williams92simple.pdf) | [Stanford CS229](slides/REINFORCE_Stanford_CS229.pdf), [Toronto](slides/Policy_Gradient_Toronto.pdf), [Berkeley CS285](slides/Policy_Gradient_Berkeley_CS285.pdf) | [Spinning Up](https://github.com/openai/spinningup) |
+| PPO | [arXiv:1707.06347](https://arxiv.org/abs/1707.06347) | [Waterloo CS885](slides/PPO_Waterloo_CS885.pdf), [NTU Taiwan](slides/PPO_NTU_Taiwan.pdf) | [Stable-Baselines3](https://github.com/DLR-RM/stable-baselines3), [CleanRL](https://github.com/vwxyzjn/cleanrl) |
+| TRPO | [arXiv:1502.05477](https://arxiv.org/abs/1502.05477) | [FAU](slides/TRPO_FAU_Mutschler.pdf), [UT Austin](slides/TRPO_UT_Austin.pdf), [CMU Natural PG](slides/TRPO_CMU_Natural_PG.pdf), [Toronto PAIR](slides/TRPO_Toronto_PAIR.pdf) | [Spinning Up](https://github.com/openai/spinningup) |
+| GAE | [arXiv:1506.02438](https://arxiv.org/abs/1506.02438) | [Berkeley CS285](slides/GAE_Berkeley_CS285.pdf) | [Stable-Baselines3](https://github.com/DLR-RM/stable-baselines3) |
 
 ### Actor-Critic Methods
-| Algorithm | Paper | Slides |
-|-----------|-------|--------|
-| A3C | [arXiv:1602.01783](https://arxiv.org/abs/1602.01783) | [WPI DS595](slides/A3C_WPI_DS595.pdf), [U. Buffalo](slides/A3C_Buffalo_Actor_Critic.pdf), [NTU Taiwan](slides/A3C_NTU_Taiwan.pdf), [UIUC ECE448](slides/A3C_UIUC_ECE448.pdf), [Julien Vitay](slides/A3C_Julien_Vitay.pdf) |
-| DDPG | [arXiv:1509.02971](https://arxiv.org/abs/1509.02971) | [Paderborn](slides/DDPG_Paderborn_DPG.pdf), [FAU](slides/DDPG_FAU_Mutschler.pdf), [Julien Vitay](slides/DDPG_Julien_Vitay.pdf), [U. Buffalo](slides/DDPG_Buffalo_DPG.pdf) |
-| TD3 | [arXiv:1802.09477](https://arxiv.org/abs/1802.09477) | [Prague NPFL139](slides/TD3_SAC_Prague_NPFL139.pdf) |
-| SAC | [arXiv:1801.01290](https://arxiv.org/abs/1801.01290) | [Toronto PAIR](slides/SAC_Toronto_PAIR.pdf), [Purdue](slides/SAC_Purdue_RL_Inference.pdf), [Stanford CS231n](slides/SAC_Stanford_CS231n.pdf), [Prague NPFL139](slides/TD3_SAC_Prague_NPFL139.pdf) |
+| Algorithm | Paper | Slides | Code |
+|-----------|-------|--------|------|
+| A3C | [arXiv:1602.01783](https://arxiv.org/abs/1602.01783) | [WPI DS595](slides/A3C_WPI_DS595.pdf), [U. Buffalo](slides/A3C_Buffalo_Actor_Critic.pdf), [NTU Taiwan](slides/A3C_NTU_Taiwan.pdf), [UIUC ECE448](slides/A3C_UIUC_ECE448.pdf), [Julien Vitay](slides/A3C_Julien_Vitay.pdf) | [OpenAI Baselines](https://github.com/openai/baselines) |
+| DDPG | [arXiv:1509.02971](https://arxiv.org/abs/1509.02971) | [Paderborn](slides/DDPG_Paderborn_DPG.pdf), [FAU](slides/DDPG_FAU_Mutschler.pdf), [Julien Vitay](slides/DDPG_Julien_Vitay.pdf), [U. Buffalo](slides/DDPG_Buffalo_DPG.pdf) | [Stable-Baselines3](https://github.com/DLR-RM/stable-baselines3), [Spinning Up](https://github.com/openai/spinningup) |
+| TD3 | [arXiv:1802.09477](https://arxiv.org/abs/1802.09477) | [Prague NPFL139](slides/TD3_SAC_Prague_NPFL139.pdf) | [Stable-Baselines3](https://github.com/DLR-RM/stable-baselines3), [author's code](https://github.com/sfujim/TD3) |
+| SAC | [arXiv:1801.01290](https://arxiv.org/abs/1801.01290) | [Toronto PAIR](slides/SAC_Toronto_PAIR.pdf), [Purdue](slides/SAC_Purdue_RL_Inference.pdf), [Stanford CS231n](slides/SAC_Stanford_CS231n.pdf), [Prague NPFL139](slides/TD3_SAC_Prague_NPFL139.pdf) | [Stable-Baselines3](https://github.com/DLR-RM/stable-baselines3), [Spinning Up](https://github.com/openai/spinningup) |
 
 ### Temporal Difference Learning
-| Algorithm | Paper | Slides |
-|-----------|-------|--------|
-| TD Learning | [Sutton 1988](http://incompleteideas.net/papers/sutton-88-with-erratum.pdf) | [CMU 10-403](slides/TD_Learning_CMU.pdf), [Michigan](slides/TD_Methods_Michigan.pdf), [Sutton & Barto](slides/TD_Sutton_Barto.pdf) |
-| Q-Learning | [Watkins 1989](https://link.springer.com/article/10.1007/BF00992698) | [Northeastern](slides/Q_Learning_Northeastern.pdf), [CMU 10-403](slides/TD_Learning_CMU.pdf) |
+| Algorithm | Paper | Slides | Code |
+|-----------|-------|--------|------|
+| TD Learning | [Sutton 1988](http://incompleteideas.net/papers/sutton-88-with-erratum.pdf) | [CMU 10-403](slides/TD_Learning_CMU.pdf), [Michigan](slides/TD_Methods_Michigan.pdf), [Sutton & Barto](slides/TD_Sutton_Barto.pdf) | [Sutton's code](http://incompleteideas.net/book/code/code2nd.html) |
+| Q-Learning | [Watkins 1989](https://link.springer.com/article/10.1007/BF00992698) | [Northeastern](slides/Q_Learning_Northeastern.pdf), [CMU 10-403](slides/TD_Learning_CMU.pdf) | [Gymnasium](https://github.com/Farama-Foundation/Gymnasium) |
 
 ### Model-Based RL
-| Topic | Paper | Slides |
-|-------|-------|--------|
-| Model-Based RL | [arXiv:2006.16712](https://arxiv.org/abs/2006.16712) | [FAU 2023](slides/Model_Based_RL_FAU.pdf), [Toronto](slides/Model_Based_RL_Toronto.pdf), [Berkeley CS287](slides/Model_Based_RL_Berkeley.pdf), [CMU 10-403](slides/Model_Based_RL_CMU.pdf) |
+| Topic | Paper | Slides | Code |
+|-------|-------|--------|------|
+| Model-Based RL | [arXiv:2006.16712](https://arxiv.org/abs/2006.16712) | [FAU 2023](slides/Model_Based_RL_FAU.pdf), [Toronto](slides/Model_Based_RL_Toronto.pdf), [Berkeley CS287](slides/Model_Based_RL_Berkeley.pdf), [CMU 10-403](slides/Model_Based_RL_CMU.pdf) | [MBRL-Lib](https://github.com/facebookresearch/mbrl-lib) |
 
 ### Imitation & Inverse RL
-| Topic | Paper | Slides |
-|-------|-------|--------|
-| Imitation Learning | [arXiv:1811.06711](https://arxiv.org/abs/1811.06711) | [WPI DS595](slides/Imitation_Learning_WPI.pdf), [EPFL](slides/Imitation_Learning_EPFL.pdf) |
-| Inverse RL | [Ng & Russell 2000](https://ai.stanford.edu/~ang/papers/icml00-irl.pdf) | [TU Darmstadt](slides/Inverse_RL_TU_Darmstadt.pdf), [Berkeley CS285](slides/Inverse_RL_Berkeley_CS285.pdf) |
+| Topic | Paper | Slides | Code |
+|-------|-------|--------|------|
+| Imitation Learning | [arXiv:1811.06711](https://arxiv.org/abs/1811.06711) | [WPI DS595](slides/Imitation_Learning_WPI.pdf), [EPFL](slides/Imitation_Learning_EPFL.pdf) | [imitation](https://github.com/HumanCompatibleAI/imitation) |
+| Inverse RL | [Ng & Russell 2000](https://ai.stanford.edu/~ang/papers/icml00-irl.pdf) | [TU Darmstadt](slides/Inverse_RL_TU_Darmstadt.pdf), [Berkeley CS285](slides/Inverse_RL_Berkeley_CS285.pdf) | [imitation](https://github.com/HumanCompatibleAI/imitation) |
 
 ### Introductory Lectures
 | Topic | Slides |

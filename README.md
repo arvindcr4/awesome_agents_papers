@@ -113,7 +113,7 @@ slides/                  # 92 presentation decks (504 MB)
 | [WebArena: Realistic Web Environment](papers/web-agents/WebArena_Realistic_Web_Environment.pdf) | [Multimodal Agents Berkeley](slides/Multimodal_Agents_Berkeley.pdf), [Web Agent Evaluation](slides/Web_Agent_Evaluation_Refinement.pdf) | [GitHub](https://github.com/web-arena-x/webarena) |
 | [VisualWebArena](papers/web-agents/VisualWebArena.pdf) | [Multimodal Agents Berkeley](slides/Multimodal_Agents_Berkeley.pdf) | [GitHub](https://github.com/web-arena-x/visualwebarena) |
 | [AGUVIS: Unified Pure Vision Agents GUI](papers/web-agents/AGUVIS_Unified_Pure_Vision_Agents_GUI.pdf) | - | [GitHub](https://github.com/xlang-ai/aguvis) |
-| [BrowseComp: Web Browsing Benchmark](papers/web-agents/BrowseComp_Web_Browsing_Benchmark.pdf) | - | - |
+| [BrowseComp: Web Browsing Benchmark](papers/web-agents/BrowseComp_Web_Browsing_Benchmark.pdf) | - | [GitHub](https://github.com/openai/simple-evals) |
 
 ## Enterprise & Workflow Agents
 
@@ -133,7 +133,7 @@ slides/                  # 92 presentation decks (504 MB)
 | [Draft, Sketch and Prove: Formal Theorem Provers](papers/theorem-proving/Draft_Sketch_and_Prove_Formal_Theorem_Provers.pdf) | [Theorem Proving ML](slides/Theorem_Proving_ML_Slides.pdf) | - |
 | [miniCTX: Neural Theorem Proving Long-Contexts](papers/theorem-proving/miniCTX_Neural_Theorem_Proving_Long-Contexts.pdf) | - | - |
 | [Lean-STaR: Interleave Thinking and Proving](papers/theorem-proving/Lean-STaR_Interleave_Thinking_and_Proving.pdf) | - | - |
-| [ImProver: Agent-Based Automated Proof Optimization](papers/theorem-proving/ImProver_Agent-Based_Automated_Proof_Optimization.pdf) | - | - |
+| [ImProver: Agent-Based Automated Proof Optimization](papers/theorem-proving/ImProver_Agent-Based_Automated_Proof_Optimization.pdf) | - | [GitHub](https://github.com/riyazahuja/ImProver) |
 | [In-Context Learning Agent Formal Theorem-Proving](papers/theorem-proving/In-Context_Learning_Agent_Formal_Theorem-Proving.pdf) | - | - |
 | [Symbolic Regression: Learned Concept Library](papers/planning/Symbolic_Regression_Learned_Concept_Library.pdf) | - | - |
 | [AlphaGeometry: Solving Olympiad Geometry](papers/theorem-proving/AlphaGeometry_Solving_Olympiad_Geometry.pdf) | - | [GitHub](https://github.com/google-deepmind/alphageometry) |
@@ -160,7 +160,7 @@ slides/                  # 92 presentation decks (504 MB)
 
 | Paper | Slides | Code |
 |-------|--------|------|
-| [DataSentinel: Game-Theoretic Detection Prompt Injection](papers/security/DataSentinel_Game-Theoretic_Detection_Prompt_Injection.pdf) | [Prompt Injection Duke](slides/Prompt_Injection_Duke_Slides.pdf) | - |
+| [DataSentinel: Game-Theoretic Detection Prompt Injection](papers/security/DataSentinel_Game-Theoretic_Detection_Prompt_Injection.pdf) | [Prompt Injection Duke](slides/Prompt_Injection_Duke_Slides.pdf) | [GitHub](https://github.com/liu00222/Open-Prompt-Injection) |
 | [AgentPoison: Red-teaming LLM Agents](papers/security/AgentPoison_Red-teaming_LLM_Agents.pdf) | [Prompt Injection Duke](slides/Prompt_Injection_Duke_Slides.pdf) | [GitHub](https://github.com/AI-secure/AgentPoison) |
 | [Progent: Programmable Privilege Control](papers/security/Progent_Programmable_Privilege_Control.pdf) | - | - |
 | [DecodingTrust: Trustworthiness GPT Models](papers/security/DecodingTrust_Trustworthiness_GPT_Models.pdf) | - | [GitHub](https://github.com/AI-secure/DecodingTrust) |
@@ -198,10 +198,10 @@ slides/                  # 92 presentation decks (504 MB)
 | [DeepSeek-R1: Reasoning via RL](papers/rl-finetuning/DeepSeek-R1_Reasoning_via_RL.pdf) | [DeepSeek R1 Intro](slides/DeepSeek_R1_Introduction.pdf), [DeepSeek R1 Toronto](slides/DeepSeek_R1_Toronto.pdf), [DeepSeek R1 CMU](slides/DeepSeek_R1_CMU_Reasoning.pdf), [DeepSeek R1 Seoul](slides/DeepSeek_R1_Seoul_National.pdf) | [GitHub](https://github.com/deepseek-ai/DeepSeek-R1) |
 | [DeepSeek R1: Implications for AI](papers/rl-finetuning/DeepSeek_R1_Implications_for_AI.pdf) | [DeepSeek R1 Intro](slides/DeepSeek_R1_Introduction.pdf) | - |
 | [DeepSeek R1: Are Reasoning Models Faithful?](papers/rl-finetuning/DeepSeek_R1_Reasoning_Models_Faithful.pdf) | - | - |
-| [OpenAI O1 Replication Journey](papers/rl-finetuning/OpenAI_O1_Replication_Journey.pdf) | - | - |
-| [Qwen QwQ Reasoning Model](papers/rl-finetuning/Qwen_QwQ_Reasoning_Model.pdf) | - | - |
-| [Sky-T1: Training Small Reasoning LLMs](papers/rl-finetuning/Sky-T1_Training_Small_Reasoning_LLMs.pdf) | - | - |
-| [s1: Simple Test-Time Scaling](papers/rl-finetuning/s1_Simple_Test-Time_Scaling.pdf) | - | - |
+| [OpenAI O1 Replication Journey](papers/rl-finetuning/OpenAI_O1_Replication_Journey.pdf) | - | [GitHub](https://github.com/GAIR-NLP/O1-Journey) |
+| [Qwen QwQ Reasoning Model](papers/rl-finetuning/Qwen_QwQ_Reasoning_Model.pdf) | - | [HuggingFace](https://huggingface.co/Qwen/QwQ-32B-Preview) |
+| [Sky-T1: Training Small Reasoning LLMs](papers/rl-finetuning/Sky-T1_Training_Small_Reasoning_LLMs.pdf) | - | [GitHub](https://github.com/NovaSky-AI/SkyThought) |
+| [s1: Simple Test-Time Scaling](papers/rl-finetuning/s1_Simple_Test-Time_Scaling.pdf) | - | [GitHub](https://github.com/simplescaling/s1) |
 
 ### GRPO & RL Fine-Tuning
 
@@ -218,8 +218,8 @@ slides/                  # 92 presentation decks (504 MB)
 
 | Paper | Slides | Code |
 |-------|--------|------|
-| [WebAgent-R1: Multi-Turn RL for Web Agents](papers/web-agents/WebAgent-R1_Multi-Turn_RL.pdf) | - | - |
-| [ARTIST: Agentic Reasoning & Tool Integration](papers/agent-frameworks/ARTIST_Agentic_Reasoning_Tool_Integration.pdf) | [ARTIST Microsoft](slides/ARTIST_Agentic_Reasoning_Microsoft.pdf) | - |
+| [WebAgent-R1: Multi-Turn RL for Web Agents](papers/web-agents/WebAgent-R1_Multi-Turn_RL.pdf) | - | [GitHub](https://github.com/weizhepei/WebAgent-R1) |
+| [ARTIST: Agentic Reasoning & Tool Integration](papers/agent-frameworks/ARTIST_Agentic_Reasoning_Tool_Integration.pdf) | [ARTIST Microsoft](slides/ARTIST_Agentic_Reasoning_Microsoft.pdf) | [GitHub](https://github.com/microsoft/ARTIST) |
 
 ## Agentic Architectures & Coordination
 
@@ -229,8 +229,8 @@ slides/                  # 92 presentation decks (504 MB)
 
 | Paper | Slides | Code |
 |-------|--------|------|
-| [AgentNet: Decentralized Multi-Agent Coordination](papers/multi-agent/AgentNet_Decentralized_Multi-Agent.pdf) | - | - |
-| [MasRouter: Multi-Agent Routing](papers/multi-agent/MasRouter_Multi-Agent_Routing.pdf) | [MasRouter ACL 2025](slides/MasRouter_ACL_2025.pdf) | - |
+| [AgentNet: Decentralized Multi-Agent Coordination](papers/multi-agent/AgentNet_Decentralized_Multi-Agent.pdf) | - | [GitHub](https://github.com/zoe-yyx/AgentNet) |
+| [MasRouter: Multi-Agent Routing](papers/multi-agent/MasRouter_Multi-Agent_Routing.pdf) | [MasRouter ACL 2025](slides/MasRouter_ACL_2025.pdf) | [GitHub](https://github.com/THU-KEG/MasRouter) |
 | **Multi-Agent RL Overview** | [Edinburgh MARL Intro](slides/Edinburgh_Multi_Agent_RL_Intro.pdf) | - |
 
 ### Device & Computer Control
@@ -246,7 +246,7 @@ slides/                  # 92 presentation decks (504 MB)
 | Paper | Slides | Code |
 |-------|--------|------|
 | [FireAct: Language Agent Fine-tuning](papers/agent-frameworks/FireAct_Language_Agent_Fine-tuning.pdf) | [LLM Agents Tool Learning](slides/LLM_Agents_Tool_Learning_Tutorial.pdf) | [GitHub](https://github.com/anchen1011/FireAct) |
-| [DeepSeek Janus Pro: Multimodal](papers/rl-finetuning/DeepSeek_Janus_Pro_Multimodal.pdf) | - | - |
+| [DeepSeek Janus Pro: Multimodal](papers/rl-finetuning/DeepSeek_Janus_Pro_Multimodal.pdf) | - | [GitHub](https://github.com/deepseek-ai/Janus) |
 | [PTA-GRPO: High-Level Planning](slides/PTA_GRPO_High_Level_Planning.pdf) | [PTA-GRPO Planning](slides/PTA_GRPO_High_Level_Planning.pdf) | - |
 | **Stanford RL for Agents** | [Stanford RL Agents 2025](slides/Stanford_RL_for_Agents_2025.pdf) | - |
 | **CMU LM Agents** | [CMU Language Models as Agents](slides/CMU_Language_Models_as_Agents.pdf) | - |

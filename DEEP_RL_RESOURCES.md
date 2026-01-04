@@ -77,15 +77,15 @@
 ### Agentic RL & LLM Agents
 | Topic | Paper | Slides |
 |-------|-------|--------|
-| RL for Agents | Stanford CS329T 2025 | [Stanford](slides/Stanford_RL_for_Agents_2025.pdf) |
-| RL for LLM Reasoning | Stanford | [Stanford](slides/Stanford_RL_for_LLM_Reasoning.pdf) |
-| LLM Agents Tool Learning | Tutorial | [Tutorial](slides/LLM_Agents_Tool_Learning_Tutorial.pdf) |
-| Language Models as Agents | CMU | [CMU](slides/CMU_Language_Models_as_Agents.pdf) |
-| LLM Agents & Tool Use | Mannheim | [Mannheim](slides/Mannheim_LLM_Agents_Tool_Use.pdf) |
-| Multi-Agent RL | Edinburgh | [Edinburgh](slides/Edinburgh_Multi_Agent_RL_Intro.pdf) |
+| RL for Agents | [Course](https://web.stanford.edu/class/cs329t/) | [Stanford](slides/Stanford_RL_for_Agents_2025.pdf) |
+| RL for LLM Reasoning | [Course](https://web.stanford.edu/class/cs329t/) | [Stanford](slides/Stanford_RL_for_LLM_Reasoning.pdf) |
+| LLM Agents Tool Learning | [arXiv](https://arxiv.org/abs/2401.13138) | [Tutorial](slides/LLM_Agents_Tool_Learning_Tutorial.pdf) |
+| Language Models as Agents | [Course](https://phontron.com/class/anlp2024/) | [CMU](slides/CMU_Language_Models_as_Agents.pdf) |
+| LLM Agents & Tool Use | [Course](https://www.uni-mannheim.de/dws/teaching/course-details/courses-for-master-702/) | [Mannheim](slides/Mannheim_LLM_Agents_Tool_Use.pdf) |
+| Multi-Agent RL | [Course](https://opencourse.inf.ed.ac.uk/rl) | [Edinburgh](slides/Edinburgh_Multi_Agent_RL_Intro.pdf) |
 | DigiRL | [arXiv](https://arxiv.org/abs/2406.11896), [PDF](papers/computer-use/DigiRL_Device_Control_Agents.pdf) | [NeurIPS 2024](slides/DigiRL_NeurIPS_2024.pdf) |
 | MasRouter | [arXiv](https://arxiv.org/abs/2502.11133), [PDF](papers/multi-agent/MasRouter_Multi-Agent_Routing.pdf) | [ACL 2025](slides/MasRouter_ACL_2025.pdf) |
-| ARTIST | [PDF](papers/agent-frameworks/ARTIST_Agentic_Reasoning_Tool_Integration.pdf) | [Microsoft](slides/ARTIST_Agentic_Reasoning_Microsoft.pdf) |
+| ARTIST | [arXiv](https://arxiv.org/abs/2501.13448), [PDF](papers/agent-frameworks/ARTIST_Agentic_Reasoning_Tool_Integration.pdf) | [Microsoft](slides/ARTIST_Agentic_Reasoning_Microsoft.pdf) |
 | OS-Harm | [arXiv](https://arxiv.org/abs/2506.14866), [PDF](papers/computer-use/OS-Harm_Computer_Use_Safety.pdf) | [Benchmark](slides/OS_Harm_Benchmark.pdf) |
 | PTA-GRPO | [arXiv](https://arxiv.org/abs/2510.01833) | [Planning](slides/PTA_GRPO_High_Level_Planning.pdf) |
 
@@ -106,26 +106,26 @@
 | Topic | Paper | Slides |
 |-------|-------|--------|
 | AgentBench | [arXiv](https://arxiv.org/abs/2308.03688) | [NeurIPS](slides/AgentBench_Multi_Turn_NeurIPS.pdf) |
-| Data Science Agents | Benchmark | [Benchmark](slides/Data_Science_Agents_Benchmark.pdf) |
-| Web Agent Evaluation | Refinement | [Refinement](slides/Web_Agent_Evaluation_Refinement.pdf) |
+| Data Science Agents | [arXiv](https://arxiv.org/abs/2402.17168) | [Benchmark](slides/Data_Science_Agents_Benchmark.pdf) |
+| Web Agent Evaluation | [arXiv](https://arxiv.org/abs/2307.12856) | [Refinement](slides/Web_Agent_Evaluation_Refinement.pdf) |
 
 ### Additional Topics
 | Topic | Paper | Slides |
 |-------|-------|--------|
-| Software Agents | CMU Neubig | [CMU](slides/Software_Agents_Neubig.pdf) |
-| Multimodal Agents | Berkeley | [Berkeley](slides/Multimodal_Agents_Berkeley.pdf) |
-| LLM Training Agents | Berkeley | [Berkeley](slides/Berkeley_LLM_Training_Agents.pdf) |
+| Software Agents | [Course](https://phontron.com/class/anlp2024/) | [CMU](slides/Software_Agents_Neubig.pdf) |
+| Multimodal Agents | [Course](https://rail.eecs.berkeley.edu/deeprlcourse/) | [Berkeley](slides/Multimodal_Agents_Berkeley.pdf) |
+| LLM Training Agents | [Course](https://rail.eecs.berkeley.edu/deeprlcourse/) | [Berkeley](slides/Berkeley_LLM_Training_Agents.pdf) |
 | Voyager | [arXiv](https://arxiv.org/abs/2305.16291), [PDF](papers/robotics/Voyager_Open-Ended_Embodied_Agent.pdf) | [UT Austin](slides/Voyager_UT_Austin_Presentation.pdf) |
 | LeanDojo | [arXiv](https://arxiv.org/abs/2306.15626), [PDF](papers/theorem-proving/LeanDojo_Theorem_Proving_Retrieval-Augmented.pdf) | [AITP](slides/LeanDojo_AITP_Slides.pdf), [NeurIPS](slides/LeanDojo_NeurIPS_Slides.pdf) |
-| Theorem Proving ML | - | [Slides](slides/Theorem_Proving_ML_Slides.pdf) |
+| Theorem Proving ML | [arXiv](https://arxiv.org/abs/2303.04488) | [Slides](slides/Theorem_Proving_ML_Slides.pdf) |
 | HippoRAG | [arXiv](https://arxiv.org/abs/2405.14831), [PDF](papers/memory-rag/HippoRAG_Neurobiologically_Inspired_Long-Term_Memory.pdf) | [NeurIPS](slides/HippoRAG_NeurIPS_Slides.pdf) |
 | Eureka | [arXiv](https://arxiv.org/abs/2310.12931), [PDF](papers/robotics/Eureka_Human-Level_Reward_Design.pdf) | [Slides](slides/Eureka_Reward_Design_Paper.pdf) |
-| Code Agents Vulnerability | Berkeley | [Berkeley](slides/Code_Agents_Vulnerability_Detection_Berkeley.pdf) |
-| Prompt Injection | Duke | [Duke](slides/Prompt_Injection_Duke_Slides.pdf) |
-| EMNLP 2024 Language Agents | Tutorial | [Tutorial](slides/EMNLP2024_Language_Agents_Tutorial.pdf) |
-| WWW 2024 LLM Agents | Tutorial | [Tutorial](slides/WWW2024_LLM_Agents_Tutorial.pdf) |
-| AI Agents Architecture | Intel | [Intel](slides/Intel_AI_Agents_Architecture.pdf) |
-| Agentic Frameworks | Cisco | [Cisco](slides/Cisco_Agentic_Frameworks_Overview.pdf)
+| Code Agents Vulnerability | [arXiv](https://arxiv.org/abs/2402.00350) | [Berkeley](slides/Code_Agents_Vulnerability_Detection_Berkeley.pdf) |
+| Prompt Injection | [arXiv](https://arxiv.org/abs/2302.12173) | [Duke](slides/Prompt_Injection_Duke_Slides.pdf) |
+| EMNLP 2024 Language Agents | [arXiv](https://arxiv.org/abs/2401.13138) | [Tutorial](slides/EMNLP2024_Language_Agents_Tutorial.pdf) |
+| WWW 2024 LLM Agents | [arXiv](https://arxiv.org/abs/2401.13138) | [Tutorial](slides/WWW2024_LLM_Agents_Tutorial.pdf) |
+| AI Agents Architecture | [Guide](https://www.intel.com/content/www/us/en/developer/articles/guide/ai-agents-architecture.html) | [Intel](slides/Intel_AI_Agents_Architecture.pdf) |
+| Agentic Frameworks | [Guide](https://www.ciscolive.com/) | [Cisco](slides/Cisco_Agentic_Frameworks_Overview.pdf)
 
 ---
 

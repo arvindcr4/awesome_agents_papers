@@ -8,7 +8,7 @@ A comprehensive collection of papers and presentation slides on LLM agents, reas
 
 ## Quick Stats
 - **Papers:** 88 PDFs (organized in 12 folders)
-- **Slides:** 92 presentation decks (~504 MB)
+- **Slides:** 93 presentation decks (~504 MB)
 - **Topics:** 15 categories
 - **Audio Overviews:** See [NOTEBOOKLM_LINKS.md](NOTEBOOKLM_LINKS.md) for AI-generated podcast summaries
 - **Resources:** See [DEEP_RL_RESOURCES.md](DEEP_RL_RESOURCES.md) for comprehensive RL learning materials

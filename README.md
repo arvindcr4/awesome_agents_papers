@@ -73,7 +73,7 @@ slides/                  # 92 presentation decks (504 MB)
 | [Direct Preference Optimization (DPO)](papers/rl-finetuning/Direct_Preference_Optimization.pdf) | [DPO CMU](slides/DPO_CMU_Lecture.pdf), [DPO UT Austin](slides/DPO_UT_Austin.pdf), [DPO Toronto](slides/DPO_Toronto_Presentation.pdf), [DPO Jinen](slides/DPO_Jinen_Slides.pdf) | [GitHub](https://github.com/eric-mitchell/direct-preference-optimization) | [🎨](diagrams/downloaded_images/reasoning_07_Iterative_Reasoning_Preference_Optimization.png) [🖼️](media/rl-finetuning/Direct_Preference_Optimization/README.md) |
 | [Iterative Reasoning Preference Optimization](papers/reasoning/Iterative_Reasoning_Preference_Optimization.pdf) | - | - | [🎨](diagrams/downloaded_images/reasoning_07_Iterative_Reasoning_Preference_Optimization.png) [🖼️](media/reasoning/Iterative_Reasoning_Preference_Optimization/README.md) |
 | [Chain-of-Verification Reduces Hallucination](papers/reasoning/Chain-of-Verification_Reduces_Hallucination.pdf) | - | - | [🎨](diagrams/downloaded_images/reasoning_05_Chain_of_Verification.png) [🖼️](media/reasoning/Chain-of-Verification_Reduces_Hallucination/README.md) |
-| [Unpacking DPO and PPO](papers/rl-finetuning/Unpacking_DPO_and_PPO.pdf) | [DPO Slides](slides/DPO_CMU_Lecture.pdf) | - | [🖼️](media/rl-finetuning/Unpacking_DPO_and_PPO/README.md) |
+| [Unpacking DPO and PPO](papers/rl-finetuning/Unpacking_DPO_and_PPO.pdf) | [DPO Slides](slides/DPO_CMU_Lecture.pdf) | [GitHub](https://github.com/allenai/open-instruct) | [🖼️](media/rl-finetuning/Unpacking_DPO_and_PPO/README.md) |
 | **RLHF Background** | [RLHF UT Austin](slides/RLHF_UT_Austin_Slides.pdf) | - | - |
 
 ## Memory & Planning
@@ -82,7 +82,7 @@ slides/                  # 92 presentation decks (504 MB)
 |-------|--------|------|-------|
 | [Grokked Transformers are Implicit Reasoners](papers/reasoning/Grokked_Transformers_are_Implicit_Reasoners.pdf) | - | [GitHub](https://github.com/OSU-NLP-Group/GrokkedTransformer) | [🎨](diagrams/downloaded_images/reasoning_06_Grokked_Transformers.png) [🖼️](media/reasoning/Grokked_Transformers_are_Implicit_Reasoners/README.md) |
 | [HippoRAG: Neurobiologically Inspired Long-Term Memory](papers/memory-rag/HippoRAG_Neurobiologically_Inspired_Long-Term_Memory.pdf) | [HippoRAG NeurIPS](slides/HippoRAG_NeurIPS_Slides.pdf) | [GitHub](https://github.com/OSU-NLP-Group/HippoRAG) | [🎨](diagrams/downloaded_images/memory-rag_HippoRAG.png) [🖼️](media/memory-rag/HippoRAG_Neurobiologically_Inspired_Long-Term_Memory/README.md) |
-| [Is Your LLM Secretly a World Model of the Internet](papers/memory-rag/Is_Your_LLM_Secretly_a_World_Model_of_the_Internet.pdf) | - | - | [🖼️](media/memory-rag/Is_Your_LLM_Secretly_a_World_Model_of_the_Internet/README.md) |
+| [Is Your LLM Secretly a World Model of the Internet](papers/memory-rag/Is_Your_LLM_Secretly_a_World_Model_of_the_Internet.pdf) | - | [GitHub](https://github.com/OSU-NLP-Group/WebDreamer) | [🖼️](media/memory-rag/Is_Your_LLM_Secretly_a_World_Model_of_the_Internet/README.md) |
 | [Tree Search for Language Model Agents](papers/planning/Tree_Search_for_Language_Model_Agents.pdf) | - | [GitHub](https://github.com/kohjingyu/search-agents) | [🖼️](media/planning/Tree_Search_for_Language_Model_Agents/README.md) |
 
 ## Agent Frameworks
@@ -101,7 +101,7 @@ slides/                  # 92 presentation decks (504 MB)
 |-------|--------|------|-------|
 | [SWE-agent: Agent-Computer Interfaces](papers/computer-use/SWE-agent_Agent-Computer_Interfaces.pdf) | [Software Agents (Neubig)](slides/Software_Agents_Neubig.pdf) | [GitHub](https://github.com/SWE-agent/SWE-agent) | [🎨](diagrams/downloaded_images/agent-frameworks_AutoGen-_Multi-Agent_Conversation.png) [🖼️](media/computer-use/SWE-agent_Agent-Computer_Interfaces/README.md) |
 | [OpenHands: AI Software Developers](papers/agent-frameworks/OpenHands_AI_Software_Developers.pdf) | [Software Agents (Neubig)](slides/Software_Agents_Neubig.pdf) | [GitHub](https://github.com/OpenHands/OpenHands) | [🖼️](media/agent-frameworks/OpenHands_AI_Software_Developers/README.md) |
-| [Interactive Tools Assist LM Agents Security Vulnerabilities](papers/security/Interactive_Tools_Assist_LM_Agents_Security_Vulnerabilities.pdf) | [Code Agents & Vulnerability Detection](slides/Code_Agents_Vulnerability_Detection_Berkeley.pdf) | - | - |
+| [Interactive Tools Assist LM Agents Security Vulnerabilities](papers/security/Interactive_Tools_Assist_LM_Agents_Security_Vulnerabilities.pdf) | [Code Agents & Vulnerability Detection](slides/Code_Agents_Vulnerability_Detection_Berkeley.pdf) | [GitHub](https://github.com/NYU-LLM-CTF/NYU_CTF_) | - |
 | [Big Sleep: LLM Vulnerabilities Real-World](papers/security/Big_Sleep_LLM_Vulnerabilities_Real-World.pdf) | [Code Agents & Vulnerability Detection](slides/Code_Agents_Vulnerability_Detection_Berkeley.pdf) | - | - |
 | [SWE-bench Verified](papers/benchmarks/SWE-bench_Verified.pdf) | - | [GitHub](https://github.com/SWE-bench/SWE-bench) | [🖼️](media/benchmarks/SWE-bench_Verified/README.md) |
 
@@ -135,7 +135,7 @@ slides/                  # 92 presentation decks (504 MB)
 | [miniCTX: Neural Theorem Proving Long-Contexts](papers/theorem-proving/miniCTX_Neural_Theorem_Proving_Long-Contexts.pdf) | - | [GitHub](https://github.com/cmu-l3/minictx-eval) | [🎨](diagrams/downloaded_images/theorem-proving_minictx-_long-context.png) |
 | [Lean-STaR: Interleave Thinking and Proving](papers/theorem-proving/Lean-STaR_Interleave_Thinking_and_Proving.pdf) | - | [Website](https://leanstar.github.io/) | [🎨](diagrams/downloaded_images/agent-frameworks_ReAct-_Synergizing_Reasoning_and_Acting.png) |
 | [ImProver: Agent-Based Automated Proof Optimization](papers/theorem-proving/ImProver_Agent-Based_Automated_Proof_Optimization.pdf) | - | [GitHub](https://github.com/riyazahuja/ImProver) | [🎨](diagrams/downloaded_images/reasoning_07_Iterative_Reasoning_Preference_Optimization.png) |
-| [In-Context Learning Agent Formal Theorem-Proving](papers/theorem-proving/In-Context_Learning_Agent_Formal_Theorem-Proving.pdf) | - | - | - |
+| [In-Context Learning Agent Formal Theorem-Proving](papers/theorem-proving/In-Context_Learning_Agent_Formal_Theorem-Proving.pdf) | - | [GitHub](https://github.com/trishullab/copra) | - |
 | [Symbolic Regression: Learned Concept Library](papers/planning/Symbolic_Regression_Learned_Concept_Library.pdf) | - | - | [🖼️](media/planning/Symbolic_Regression_Learned_Concept_Library/README.md) |
 | [AlphaGeometry: Solving Olympiad Geometry](papers/theorem-proving/AlphaGeometry_Solving_Olympiad_Geometry.pdf) | - | [GitHub](https://github.com/google-deepmind/alphageometry) | - |
 
@@ -154,7 +154,7 @@ slides/                  # 92 presentation decks (504 MB)
 
 | Paper | Slides | Code | Media |
 |-------|--------|------|-------|
-| [Paper2Agent: Research Papers as AI Agents](papers/agent-frameworks/Paper2Agent_Research_Papers_as_AI_Agents.pdf) | - | - | [🖼️](media/agent-frameworks/Paper2Agent_Research_Papers_as_AI_Agents/README.md) |
+| [Paper2Agent: Research Papers as AI Agents](papers/agent-frameworks/Paper2Agent_Research_Papers_as_AI_Agents.pdf) | - | [GitHub](https://github.com/jmiao24/Paper2Agent) | [🖼️](media/agent-frameworks/Paper2Agent_Research_Papers_as_AI_Agents/README.md) |
 | [OpenScholar: Synthesizing Scientific Literature](papers/memory-rag/OpenScholar_Synthesizing_Scientific_Literature.pdf) | - | [GitHub](https://github.com/AkariAsai/OpenScholar) | [🖼️](media/memory-rag/OpenScholar_Synthesizing_Scientific_Literature/README.md) |
 
 ## Safety & Security
@@ -175,7 +175,7 @@ slides/                  # 92 presentation decks (504 MB)
 | Paper | Slides | Code | Media |
 |-------|--------|------|-------|
 | [Survey: Evaluation LLM-based Agents](papers/benchmarks/Survey_Evaluation_LLM-based_Agents.pdf) | [AgentBench Multi-Turn NeurIPS](slides/AgentBench_Multi_Turn_NeurIPS.pdf) | - | [🖼️](media/benchmarks/Survey_Evaluation_LLM-based_Agents/README.md) |
-| [Adding Error Bars to Evals](papers/benchmarks/Adding_Error_Bars_to_Evals.pdf) | - | - | [🖼️](media/benchmarks/Adding_Error_Bars_to_Evals/README.md) |
+| [Adding Error Bars to Evals](papers/benchmarks/Adding_Error_Bars_to_Evals.pdf) | - | [GitHub](https://github.com/openai/evals) | [🖼️](media/benchmarks/Adding_Error_Bars_to_Evals/README.md) |
 | [Tau2-Bench: Conversational Agents Dual-Control](papers/benchmarks/Tau2-Bench_Conversational_Agents_Dual-Control.pdf) | - | [GitHub](https://github.com/sierra-research/tau2-bench) | [🖼️](media/benchmarks/Tau2-Bench_Conversational_Agents_Dual-Control/README.md) |
 | **Data Science Agents** | [Data Science Agents Benchmark](slides/Data_Science_Agents_Benchmark.pdf) | - | - |
 
@@ -209,8 +209,8 @@ slides/                  # 92 presentation decks (504 MB)
 | Paper | Slides | Code | Media |
 |-------|--------|------|-------|
 | [DeepSeekMath: GRPO Algorithm](papers/rl-finetuning/DeepSeekMath_GRPO.pdf) | [Stanford RL for Reasoning](slides/Stanford_RL_for_LLM_Reasoning.pdf) | [GitHub](https://github.com/deepseek-ai/DeepSeek-Math) | [🎨](diagrams/downloaded_images/rl-finetuning_DeepSeek_R1-_Implications_for_AI.png) [🖼️](media/rl-finetuning/DeepSeekMath_GRPO/README.md) |
-| [Guided GRPO: Adaptive Guidance](papers/rl-finetuning/Guided_GRPO_Adaptive_Guidance.pdf) | [PTA-GRPO Planning](slides/PTA_GRPO_Planning_Reasoning.pdf) | - | [🖼️](media/rl-finetuning/Guided_GRPO_Adaptive_Guidance/README.md) |
-| [R-Search: Multi-Step Reasoning](papers/rl-finetuning/R-Search_Multi-Step_Reasoning.pdf) | [Stanford RL for Reasoning](slides/Stanford_RL_for_LLM_Reasoning.pdf) | - | [🖼️](media/rl-finetuning/R-Search_Multi-Step_Reasoning/README.md) |
+| [Guided GRPO: Adaptive Guidance](papers/rl-finetuning/Guided_GRPO_Adaptive_Guidance.pdf) | [PTA-GRPO Planning](slides/PTA_GRPO_Planning_Reasoning.pdf) | [GitHub](https://github.com/T-Lab-CUHKSZ/G2RPO-A) | [🖼️](media/rl-finetuning/Guided_GRPO_Adaptive_Guidance/README.md) |
+| [R-Search: Multi-Step Reasoning](papers/rl-finetuning/R-Search_Multi-Step_Reasoning.pdf) | [Stanford RL for Reasoning](slides/Stanford_RL_for_LLM_Reasoning.pdf) | [GitHub](https://github.com/wentao0429/Reasoning-search) | [🖼️](media/rl-finetuning/R-Search_Multi-Step_Reasoning/README.md) |
 | [RL Fine-tuning: Instruction Following](papers/rl-finetuning/RL_Fine-tuning_Instruction_Following.pdf) | - | - | [🖼️](media/rl-finetuning/RL_Fine-tuning_Instruction_Following/README.md) |
 | [RFT Powers Multimodal Reasoning](papers/rl-finetuning/RFT_Powers_Multimodal_Reasoning.pdf) | - | - | [🖼️](media/rl-finetuning/RFT_Powers_Multimodal_Reasoning/README.md) |
 | [STILL-2: Distilling Reasoning](papers/rl-finetuning/STILL-2_Distilling_Reasoning.pdf) | - | - | [🖼️](media/rl-finetuning/STILL-2_Distilling_Reasoning/README.md) |
@@ -240,7 +240,7 @@ slides/                  # 92 presentation decks (504 MB)
 |-------|--------|------|-------|
 | [DigiRL: Device Control Agents](papers/computer-use/DigiRL_Device_Control_Agents.pdf) | [DigiRL NeurIPS 2024](slides/DigiRL_NeurIPS_2024.pdf) | [GitHub](https://github.com/DigiRL-agent/digirl) | [🖼️](media/computer-use/DigiRL_Device_Control_Agents/README.md) |
 | [OSWorld: Multimodal Agents Benchmark](papers/computer-use/OSWorld_Multimodal_Agents_Benchmark.pdf) | - | [GitHub](https://github.com/xlang-ai/OSWorld) | [🖼️](media/computer-use/OSWorld_Multimodal_Agents_Benchmark/README.md) |
-| [OS-Harm: Computer Use Safety](papers/computer-use/OS-Harm_Computer_Use_Safety.pdf) | [OS-Harm Benchmark](slides/OS_Harm_Benchmark.pdf) | - | [🖼️](media/computer-use/OS-Harm_Computer_Use_Safety/README.md) |
+| [OS-Harm: Computer Use Safety](papers/computer-use/OS-Harm_Computer_Use_Safety.pdf) | [OS-Harm Benchmark](slides/OS_Harm_Benchmark.pdf) | [GitHub](https://github.com/tml-epfl/os-harm) | [🖼️](media/computer-use/OS-Harm_Computer_Use_Safety/README.md) |
 
 ### Agent Fine-Tuning & Tool Use
 

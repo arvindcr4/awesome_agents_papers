@@ -7,9 +7,9 @@ A comprehensive collection of papers and presentation slides on LLM agents, reas
 > - [redhat-et/agentic-reasoning-reinforcement-fine-tuning](https://github.com/redhat-et/agentic-reasoning-reinforcement-fine-tuning)
 
 ## Quick Stats
-- **Papers:** 81 PDFs
-- **Slides:** 33 presentation decks
-- **Topics:** 14 categories
+- **Papers:** 88 PDFs
+- **Slides:** 45 presentation decks
+- **Topics:** 15 categories
 
 ---
 
@@ -27,7 +27,8 @@ A comprehensive collection of papers and presentation slides on LLM agents, reas
 - [Safety & Security](#safety--security)
 - [Evaluation & Benchmarking](#evaluation--benchmarking)
 - [Neural & Symbolic Reasoning](#neural--symbolic-reasoning)
-- [Agentic Reasoning & RL Fine-Tuning](#agentic-reasoning--rl-fine-tuning) *(NEW)*
+- [Agentic Reasoning & RL Fine-Tuning](#agentic-reasoning--rl-fine-tuning)
+- [Agentic Architectures & Coordination](#agentic-architectures--coordination) *(NEW)*
 
 ---
 
@@ -197,7 +198,45 @@ A comprehensive collection of papers and presentation slides on LLM agents, reas
 | Paper | Slides |
 |-------|--------|
 | [WebAgent-R1: Multi-Turn RL for Web Agents](WebAgent-R1_Multi-Turn_RL.pdf) | - |
-| [ARTIST: Agentic Reasoning & Tool Integration](ARTIST_Agentic_Reasoning_Tool_Integration.pdf) | - |
+| [ARTIST: Agentic Reasoning & Tool Integration](ARTIST_Agentic_Reasoning_Tool_Integration.pdf) | [ARTIST Microsoft](slides/ARTIST_Agentic_Reasoning_Microsoft.pdf) |
+
+## Agentic Architectures & Coordination
+
+> Papers on multi-agent systems, decentralized coordination, and agentic frameworks
+
+### Decentralized Multi-Agent Systems
+
+| Paper | Slides |
+|-------|--------|
+| [AgentNet: Decentralized Multi-Agent Coordination](AgentNet_Decentralized_Multi-Agent.pdf) | - |
+| [MasRouter: Multi-Agent Routing](MasRouter_Multi-Agent_Routing.pdf) | [MasRouter ACL 2025](slides/MasRouter_ACL_2025.pdf) |
+| **Multi-Agent RL Overview** | [Edinburgh MARL Intro](slides/Edinburgh_Multi_Agent_RL_Intro.pdf) |
+
+### Device & Computer Control
+
+| Paper | Slides |
+|-------|--------|
+| [DigiRL: Device Control Agents](DigiRL_Device_Control_Agents.pdf) | [DigiRL NeurIPS 2024](slides/DigiRL_NeurIPS_2024.pdf) |
+| [OSWorld: Multimodal Agents Benchmark](OSWorld_Multimodal_Agents_Benchmark.pdf) | - |
+| [OS-Harm: Computer Use Safety](OS-Harm_Computer_Use_Safety.pdf) | [OS-Harm Benchmark](slides/OS_Harm_Benchmark.pdf) |
+
+### Agent Fine-Tuning & Tool Use
+
+| Paper | Slides |
+|-------|--------|
+| [FireAct: Language Agent Fine-tuning](FireAct_Language_Agent_Fine-tuning.pdf) | [LLM Agents Tool Learning](slides/LLM_Agents_Tool_Learning_Tutorial.pdf) |
+| [DeepSeek Janus Pro: Multimodal](DeepSeek_Janus_Pro_Multimodal.pdf) | - |
+| [PTA-GRPO: High-Level Planning](slides/PTA_GRPO_High_Level_Planning.pdf) | [PTA-GRPO Planning](slides/PTA_GRPO_High_Level_Planning.pdf) |
+| **Stanford RL for Agents** | [Stanford RL Agents 2025](slides/Stanford_RL_for_Agents_2025.pdf) |
+| **CMU LM Agents** | [CMU Language Models as Agents](slides/CMU_Language_Models_as_Agents.pdf) |
+| **Mannheim Tool Use** | [Mannheim LLM Agents Tool Use](slides/Mannheim_LLM_Agents_Tool_Use.pdf) |
+
+### Enterprise & Industry Guides
+
+| Resource | Description |
+|----------|-------------|
+| [Intel AI Agents Architecture](slides/Intel_AI_Agents_Architecture.pdf) | AI agents resource guide |
+| [Cisco Agentic Frameworks](slides/Cisco_Agentic_Frameworks_Overview.pdf) | Overview of agentic frameworks |
 
 ---
 

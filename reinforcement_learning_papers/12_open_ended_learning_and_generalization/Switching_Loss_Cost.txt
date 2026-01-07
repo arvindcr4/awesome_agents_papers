@@ -1,0 +1,8512 @@
+Transformers as Decision Makers: Provable In-Context
+Reinforcement Learning via Supervised Pretraining
+
+arXiv:2310.08566v2 [cs.LG] 26 May 2024
+
+Licong Lin∗
+
+Yu Bai†§
+
+Song Mei‡§
+
+May 28, 2024
+Abstract
+Large transformer models pretrained on offline reinforcement learning datasets have demonstrated
+remarkable in-context reinforcement learning (ICRL) capabilities, where they can make good decisions
+when prompted with interaction trajectories from unseen environments. However, when and how transformers can be trained to perform ICRL have not been theoretically well-understood. In particular, it is
+unclear which reinforcement-learning algorithms transformers can perform in context, and how distribution mismatch in offline training data affects the learned algorithms. This paper provides a theoretical
+framework that analyzes supervised pretraining for ICRL. This includes two recently proposed training
+methods — algorithm distillation and decision-pretrained transformers. First, assuming model realizability, we prove the supervised-pretrained transformer will imitate the conditional expectation of the expert
+algorithm given the observed trajectory. The generalization error will scale with model capacity and a
+distribution divergence factor between the expert and offline algorithms. Second, we show transformers
+with ReLU attention can efficiently approximate near-optimal online reinforcement learning algorithms
+like LinUCB and Thompson sampling for stochastic linear bandits, and UCB-VI for tabular Markov
+decision processes. This provides the first quantitative analysis of the ICRL capabilities of transformers
+pretrained from offline trajectories.
+
+1
+
+Introduction
+
+The transformer architecture (Vaswani et al., 2017) for sequence modeling has become a key weapon for
+modern artificial intelligence, achieving success in language (Devlin et al., 2018; Brown et al., 2020; OpenAI,
+2023) and vision (Dosovitskiy et al., 2020). Motivated by these advances, the research community has actively
+explored how to best harness transformers for reinforcement learning (RL) (Chen et al., 2021; Janner et al.,
+2021; Lee et al., 2022; Reed et al., 2022; Laskin et al., 2022; Lee et al., 2023; Yang et al., 2023). While
+promising empirical results have been demonstrated, the theoretical understanding of transformers for RL
+remains limited.
+This paper provides theoretical insights into in-context reinforcement learning (ICRL)—an emerging approach that utilizes sequence-to-sequence models like transformers to perform reinforcement learning in
+newly encountered environments. In ICRL, the model takes as input the current state and past interaction history with the environment (the context), and outputs an action. The key hypothesis in ICRL is that
+pretrained transformers can act as RL algorithms, progressively improving their policy based on past observations. Approaches such as Algorithm Distillation (Laskin et al., 2022) and Decision-Pretrained Transformers
+(Lee et al., 2023) have demonstrated early successes, finding that supervised pretraining can produce good
+ICRL performance. However, many concrete theoretical questions remain open about the ICRL capabilities
+of transformers, including but not limited to (1) what RL algorithms can transformers implement in-context;
+(2) what performance guarantees (e.g. regret bounds) can such transformers achieve when used iteratively as
+∗ UC Berkeley. Email: liconglin@berkeley.edu
+
+† Salesforce AI Research. Email: yu.bai@salesforce.com
+‡ UC Berkeley. Email: songmei@berkeley.edu
+§ Equal contribution.
+
+1
+
+an online RL algorithm; and (3) when can supervised pretraining find such a good transformer. Specifically,
+this paper investigates the following open question:
+How can supervised pretraining on Transformers learn in-context reinforcement learning?
+In this paper, we initiate a theoretical study of the ICRL capability of transformers under supervised pretraining to address the open questions outlined above. We show that (1) Transformers can implement prevalent
+RL algorithms, including LinUCB and Thompson sampling for stochastic linear bandits, and UCB-VI for
+tabular Markov decision processes; (2) The algorithms learned by transformers achieve near-optimal regret
+bounds in their respective settings; (3) Supervised pretraining find such algorithms as long as the sample
+size scales with the covering number of transformer class and distribution ratio between expert and offline
+algorithms.
+Summary of contributions and paper outline
+• We propose a general framework for supervised pretraining approaches to meta-reinforcement learning
+(Section 2). This framework encompasses existing methods like Algorithm Distillation (Laskin et al.,
+2022), where the expert and context algorithms are identical, as well as Decision-Pretrained Transformers
+(Lee et al., 2023), where the expert generates optimal actions for the MDP. It also includes approximate
+DPT variants where the expert estimates optimal actions from full interaction trajectories.
+• We prove that the supervised-pretrained transformer will imitate the conditional expectation of the
+expert algorithm given the observed trajectory (Section 3). The generalization error scales with both
+model capacity and a distribution ratio measuring divergence between the expert algorithm and the
+algorithm that generated offline trajectories.
+• We demonstrate that transformers can effectively approximate several near-optimal reinforcement learning algorithms by taking observed trajectories as context inputs (Section 4). Specifically, we show transformers can approximate LinUCB (Section 4.1) and Thompson sampling algorithms (Section 4.2) for
+stochastic linear bandit problems, and UCB-VI (Section 4.3) for tabular Markov decision processes.
+Combined with the generalization error bound from supervised pretraining and regret bounds of these
+RL algorithms, this provides regret bounds for supervised-pretrained transformers.
+• Preliminary experiments validate that transformers can perform ICRL in our setup (Section 5).
+• Technically, we prove efficient approximation of LinUCB by showing transformers can implement accelerated gradient descent for solving ridge regression (Appendix E.4), enabling fewer attention layers than
+the vanilla gradient descent approach in Bai et al. (2023). To enable efficient Thompson sampling implementation, we prove transformers can compute matrix square roots through the Pade decomposition
+(Appendix F.3). These approximation results are interesting in their own right.
+
+1.1
+
+Related work
+
+Meta-learning and meta-reinforcement learning In-context reinforcement learning can be cast into
+the framework of meta-learning and meta-reinforcement learning (Schmidhuber, 1987, 1992; Bengio et al.,
+1990; Naik and Mammone, 1992; Ishii et al., 2002; Schaul and Schmidhuber, 2010; Thrun and Pratt, 2012).
+More recently, a line of work focuses on meta-learn certain shared structures such as the dynamics of the
+shared tasks (Fu et al., 2016; Nagabandi et al., 2018), a task context identifier (Rakelly et al., 2019; Humplik
+et al., 2019; Zintgraf et al., 2019), exploration strategies (Gupta et al., 2018), or the initialization of the
+network policy (Finn et al., 2017; Hochreiter et al., 2001; Nichol et al., 2018; Rothfuss et al., 2018). Theories
+for this last approach of model-agnostic meta-learning have been explored by Wang et al. (2020).
+Our work focuses on a more agnostic approach to learning the learning algorithm itself (Wang et al., 2016;
+Duan et al., 2016; Dorfman et al., 2021; Mitchell et al., 2021; Li et al., 2020; Pong et al., 2022; Laskin
+et al., 2022; Lee et al., 2023). Among these works, Wang et al. (2016); Duan et al. (2016) focus on the
+online meta-RL setting with the training objective to be the total reward. Furthermore, Dorfman et al.
+(2021); Mitchell et al. (2021); Li et al. (2020); Pong et al. (2022) focus on offline meta-RL, but their training
+objectives differ from the cross entropy loss used here, requiring explicit handling of distribution shift. The
+
+2
+
+supervised pretraining approach we consider is most similar to the algorithm distillation methods of Laskin
+et al. (2022) and the decision-pretrained transformers of Lee et al. (2023). We provide quantitative sample
+complexity guarantees and transformer constructions absent from previous work.
+In-context learning The in-context learning (ICL) capability of pretrained transformers has gained significant attention since being demonstrated on GPT-3 Brown et al. (2020). Recent work investigates why
+and how pretrained transformers perform ICL (Garg et al., 2022; Li et al., 2023; Von Oswald et al., 2023;
+Akyürek et al., 2022; Xie et al., 2021; Bai et al., 2023; Zhang et al., 2023; Ahn et al., 2023; Raventós et al.,
+2023). In particular, Xie et al. (2021) propose a Bayesian framework explaining how ICL works. Garg et al.
+(2022) show transformers can be trained from scratch to perform ICL of simple function classes. Von Oswald
+et al. (2023); Akyürek et al. (2022); Bai et al. (2023) demonstrate transformers can implement in-context
+learning algorithms via in-context gradient descent, with Bai et al. (2023) showing transformers can perform
+in-context algorithm selection. Zhang et al. (2023) studied training dynamics of a single attention layer for
+in-context learning of linear functions. Our work focuses on the related but distinct capability of in-context
+decision-making for pretrained transformers.
+Transformers for decision making Besides the ICRL approach, recent work has proposed goal-conditioned
+supervised learning (GCSL) for using transformers to make decisions (Chen et al., 2021; Janner et al., 2021;
+Lee et al., 2022; Reed et al., 2022; Brohan et al., 2022; Shafiullah et al., 2022; Yang et al., 2023). In particular, Decision Transformer (DT) (Chen et al., 2021; Janner et al., 2021) uses transformers to autoregressively
+model action sequences from offline data, conditioned on the achieved return. During inference, one queries
+the model with a desired high return. Limitations and modifications of GCSL have been studied in Yang
+et al. (2022); Paster et al. (2022); Strupl et al. (2022); Brandfonbrener et al. (2022). A key distinction
+between GCSL and ICRL is that GCSL treats the transformer as a policy, whereas ICRL treats it as an
+algorithm for improving the policy based on observed trajectories.
+Expressivity of transformers The transformer architecture, introduced by Vaswani et al. (2017), has
+revolutionized natural language processing and is used in most recently developed large language models
+like BERT and GPT (Devlin et al., 2018; Brown et al., 2020). The expressivity of transformers has been
+extensively studied (Yun et al., 2019; Pérez et al., 2019; Hron et al., 2020; Yao et al., 2021; Bhattamishra
+et al., 2020; Zhang et al., 2022; Liu et al., 2022; Wei et al., 2022; Fu et al., 2023; Bai et al., 2023; Akyürek
+et al., 2022; Von Oswald et al., 2023). Deep neural networks such as ResNets and transformers have been
+shown to efficiently approximate various algorithms, including automata (Liu et al., 2022), Turing machines
+(Wei et al., 2022), variational inference (Mei and Wu, 2023), and gradient descent (Bai et al., 2023; Akyürek
+et al., 2022; Von Oswald et al., 2023). Our work provides efficient transformer constructions that implement
+accelerated gradient descent and matrix square root algorithms, complementing existing expressivity results.
+Statistical theories of imitation learning Our generalization error analysis adapts classical analysis of
+maximum-likelihood estimator (Geer, 2000). The error compounding analysis for imitation learning appeared
+in early works (Ross et al., 2011; Ross and Bagnell, 2010). More recent theoretical analyses of imitation
+learning also appear in Rajaraman et al. (2020, 2021); Rashidinejad et al. (2021).
+
+2
+
+Framework for In-Context Reinforcement Learning
+
+Let M be the space of decision-making environments, where each environment M ∈ M shares the same
+t−1
+number of rounds T and state-action-reward spaces {St , At , Rt }t∈[T ] . Each M = {TM
+, RtM }t∈[T ] has its
+t
+0
+own transition model TM : St × At → ∆(St+1 ) (with S0 , A0 = {∅} so TM (·) ∈ ∆(S1 ) gives the initial state
+distribution) and reward functions RtM : St × At → ∆(Rt ). We equip M with a distribution Λ ∈ ∆(M), the
+environment prior. While this setting is general, we later give concrete examples taking M as T rounds of
+bandits or K episodes of H-step MDPs with T = KH.
+Distributions of offline trajectories We denote a partial interaction trajectory,
+consisting of observed
+Q
+state-action-reward tuples, by Dt = {(s1 , a1 , r1 ), . . . , (st , at , rt )} ∈ Tt = s≤t (Ss × As × Rs ) and write
+3
+
+D = DT for short. An algorithm Alg maps a partial trajectory Dt−1 ∈ Tt−1 and state st ∈ St to a
+distribution over the actions Alg(·|Dt−1 , st ) ∈ ∆(At ). Given an environment M and algorithm Alg, the
+distribution over a full trajectory DT is fully specified:
+QT
+t−1
+t
+PAlg
+t=1 TM (st |st−1 , at−1 )Alg(at |Dt−1 , st )RM (rt |st , at ).
+M (DT ) =
+In supervised pretraining, we use a context algorithm Alg0 (which we also refer to as the offline algorithm)
+to collect the offline trajectories DT . For each trajectory DT , we also assume accessQto expert actions
+a = (at ∈ At )t∈T ∼ AlgE (·|DT , M), sampled from an expert algorithm AlgE : TT × M → t∈[T ] ∆(At ). This
+expert could omnisciently observe the full trajectory DT and environment M to recommend actions. Let
+DT = DT ∪ {a} be the augmented trajectory. Then we have
+Alg ,AlgE
+
+PM 0
+
+Alg
+
+(DT ) = PM 0 (DT )
+
+QT
+
+t
+t=1 AlgE (at |DT , M).
+
+Alg ,Alg
+
+Alg ,AlgE
+
+We denote PΛ 0 E as the joint distribution of (M, DT ) where M ∼ Λ and DT ∼ PM 0
+Alg
+joint distribution of (M, DT ) where M ∼ Λ and DT ∼ PM 0 .
+
+Alg
+
+, and PΛ 0 as the
+
+Three special cases of expert algorithms We consider three special cases of the expert algorithm AlgE ,
+corresponding to three supervised pretraining setups:
+(a) Algorithm distillation (Laskin et al., 2022). The algorithm depends only on the partial trajectory Dt−1
+and current state st : AlgtE (·|DT , M) = AlgtE (·|Dt−1 , st ). For example, AlgE could be a bandit algorithm
+like the Uniform Confidence Bound (UCB).
+(b) Decision pretrained transformer (DPT) (Lee et al., 2023). The algorithm depends on the environment
+M and the current state st : AlgtE (·|DT , M) = AlgtE (·|st , M). For example, AlgE could output the optimal
+action a∗t in state st for environment M.
+(c) Approximate DPT. The algorithm depends on the full trajectory DT but not the environment M:
+AlgtE (·|DT , M) = AlgtE (·|DT ). For example, AlgE could estimate the optimal action b
+a∗t from the entire
+trajectory DT .
+For any expert algorithm AlgE , we define its reduced algorithm where the t-th step is
+Alg
+
+AlgE (·|Dt−1 , st ) := EΛ 0 [AlgtE (·|DT , M)|Dt−1 , st ].
+Alg
+
+Alg
+
+Alg
+
+The expectation on the right is over PΛ 0 (DT , M|Dt−1 , st ) = Λ(M) · PM 0 (DT )/PM 0 (Dt−1 , st ). Note that
+the reduced expert algorithm AlgE generally depends on the context algorithm Alg0 . However, for cases (a)
+t
+and (b), AlgE is independent of the context algorithm Alg0 . Furthermore, in case (a), we have AlgE = AlgtE .
+N
+
+Transformer architecture We consider a sequence of N input vectors {hi }i=1 ⊂ RD , compactly written
+as an input matrix H = [h1 , . . . , hN ] ∈ RD×N , where each hi is a column of H (also a token). Throughout
+this paper, we define σ(t) := ReLU(t) = max {t, 0} as the standard relu activation function.
+Definition 1 (Masked attention layer). A masked attention layer with M heads is denoted as Attnθ (·)
+with parameters θ = {(Vm , Qm , Km )}m∈[M ] ⊂ RD×D . On any input sequence H ∈ RD×N , we have H =
+Attnθ (H) = [h1 , . . . , hN ] ∈ RD×N , where
+hi = [Attnθ (H)]i = hi +
+
+PM
+
+1
+m=1 i
+
+Pi
+
+j=1 σ(⟨Qm hi , Km hj ⟩) · Vm hj ∈ R
+
+D
+
+.
+
+We remark that the use of ReLU attention layers is for technical reasons. In practice, both ReLU attention
+and softmax attention layers should perform well. Indeed, several studies have shown that ReLU transformers
+achieve comparable performance to softmax transformers across a variety of tasks (Wortsman et al., 2023;
+Shen et al., 2023; Bai et al., 2023).
+
+4
+
+Definition 2 (MLP layer). An MLP layer with hidden dimension D′ is denoted as MLPθ (·) with parameters
+′
+′
+θ = (W1 , W2 ) ∈ RD ×D × RD×D . On any input sequence H ∈ RD×N , we have H = MLPθ (H) =
+[h1 , . . . , hN ] ∈ RD×N , where
+hi = hi + W2 · σ(W1 hi ) ∈ RD .
+We next define L-layer decoder-based transformers. Each layer consists of a masked attention layer (see
+Definition 1) followed by an MLP layer (see Definition 2) and a clip operation.
+Definition 3 (Decoder-based Transformer). An L-layer decoder-based transformer, denoted as TFRθ (·), is a
+composition of L masked attention layers, each followed by an MLP layer and a clip operation: TFRθ (H) =
+H(L) ∈ RD×N , where H(L) is defined iteratively by taking H(0) = clipR (H) ∈ RD×N , and for ℓ ∈ [L],
+
+
+
+∈ RD×N ,
+clipR (H) = [proj∥h∥2 ≤R (hi )]i .
+H(ℓ) = clipR MLPθ(ℓ) Attnθ(ℓ) H(ℓ−1)
+mattn
+
+mlp
+
+(1:L)
+
+(1:L)
+
+(ℓ)
+
+(ℓ)
+
+(ℓ)
+
+(ℓ)
+
+(ℓ)
+
+Above, the parameter θ = (θmattn , θmlp ) consists of θmattn = {(Vm , Qm , Km )}m∈[M ] ⊂ RD×D and θmlp =
+(ℓ)
+
+(ℓ)
+
+′
+
+′
+
+(W1 , W2 ) ∈ RD ×D × RD×D . We define the parameter class of transformers as ΘD,L,M,D′ ,B := {θ =
+(1:L)
+(1:L)
+(θattn , θmlp ) : |||θ||| ≤ B}, where the norm of a transformer TFRθ is denoted as
+|||θ||| := max
+ℓ∈[L]
+
+n
+
+max
+m∈[M ]
+
+M
+n
+o X
+o
+(ℓ)
+(ℓ)
+(ℓ)
+(ℓ)
+∥Q(ℓ)
+∥Vm
+∥op + ∥W1 ∥op + ∥W2 ∥op .
+m ∥op , ∥Km ∥op +
+
+(1)
+
+m=1
+
+We introduced clipped operations in transformers for technical reasons. For brevity, we will write TFθ = TFRθ
+when there is no ambiguity. We will set the clipping value R to be sufficiently large so that the clip operator
+does not take effect in any of our approximation results.
+Algorithm induced by Transformers We equip the transformer with an embedding mapping h :
+∪t∈[T ] St ∪ ∪t∈[T ] (At × Rt ) → RD . This assigns any state st ∈ St a D-dimensional embedding vector h(st ) ∈ RD , and any action-reward pair (at , rt ) ∈ At × Rt a D-dimensional embedding h(at , rt ) ∈
+RD . The embedding function h should encode the time step t of the state, action, and reward. With
+abuse of notation, we denote h(Dt−1 , st ) = [h(s1 ), h(a1 , r1 ), . . . , h(at−1 , rt−1 ), h(st )]. We define a concatenation operator cat : RD×∗ → RD×∗ that concatenates its inputs cat(h1 , . . . , hN ) = [h1 , . . . , hN ]
+in most examples, but it could also insert special tokens at certain positions (in MDPs we add an additional token at the end of each episode). For a partial trajectory and current state (Dt−1 , st ), we input H = cat(h(s1 ), h(a1 , r1 ), . . . , h(at−1 , rt−1 ), h(st )) ∈ RD×∗ into the transformer. This produces output
+H = TFRθ (H) = [h1 , h2 . . . , h−2 , h−1 ] with the same shape as H. To extract a distribution over the action
+space At with |At | = A actions, we assume a fixed linear extraction mapping A ∈ RA×D . The induced
+algorithm is then defined as: Algθ (·|Dt−1 , st ) = softmax(A · h−1 ). The overall algorithm induced by the
+transformer is:
+Algθ (·|Dt−1 , st ) = softmax(A · TFRθ (cat(h(Dt−1 , st )))−1 ).
+(2)
+We will always choose a proper concatenation operator cat in examples, so that in the pretraining phase,
+all the algorithm outputs {Algθ (·|Dt−1 , st )}t≤T along the trajectory can be computed in a single forward
+propagation.
+
+3
+
+Statistical analysis of supervised pretraining
+
+In supervised pretraining, we are given n i.i.d offline trajectories {DTi = (si1 , ai1 , r1i , . . . , siT , aiT , rTi )}ni=1 ∼iid
+Alg
+PΛ 0 from the interaction of Mi ∼iid Λ with an offline algorithm Alg0 . Given an expert algorithm AlgE ,
+i
+we augment each trajectory DTi by {ait ∼iid AlgE (·|Dt−1
+, sit )}t∈[T ] . Supervised pretraining maximizes the
+log-likelihood over the algorithm class {Algθ }θ∈Θ
+n
+T
+1 XX
+i
+log Algθ (ait |Dt−1
+, sit ).
+θb = arg max
+n i=1 t=1
+θ∈Θ
+
+This section discusses the statistical properties of the algorithm learned via supervised pretraining.
+5
+
+(3)
+
+3.1
+
+Main result
+
+Our main result demonstrates that the algorithm maximizing the supervised pretraining loss will imitate
+AlgE (·|Dt−1 , st ) = EM∼Λ,DT ∼Alg0 [AlgtE (·|DT , M)|Dt−1 , st ], the conditional expectation of the expert algorithm AlgE given the observed trajectory. The imitation error bound will scale with the covering number of
+the algorithm class and a distribution ratio factor, defined as follows.
+Definition 4 (Covering number). For a class of algorithms {Algθ , θ ∈ Θ}, we say Θ0 ⊆ Θ is an ρ-cover of
+Θ, if Θ0 is a finite set such that for any θ ∈ Θ, there exists θ0 ∈ Θ0 such that
+∥ log Algθ0 (·|Dt−1 , st ) − log Algθ (·|Dt−1 , st )∥∞ ≤ ρ,
+
+for all Dt−1 , st , t ∈ [T ].
+
+The covering number NΘ (ρ) is the minimal cardinality of Θ0 such that Θ0 is a ρ-cover of Θ.
+Definition 5 (Distribution ratio). We define the distribution ratio of two algorithms Alg1 , Alg2 by
+RAlg1 ,Alg2 := EM∼Λ,DT ∼PAlg1
+
+T
+hY
+Alg (a |D
+s
+
+1
+
+M
+
+s=1
+
+s−1 , ss )
+
+Alg2 (as |Ds−1 , ss )
+
+i
+
+
+
+Alg
+Alg
+= 1 + χ2 PΛ 1 ; PΛ 2 .
+
+Our main result requires the realizability assumption of algorithm class {Algθ }θ∈Θ with respect to the
+conditional expectation of the expert algorithm.
+Assumption A (Approximate realizability). There exists θ∗ ∈ Θ and εreal > 0 such that for all t ∈ [T ],
+log EM∼Λ,D ∼PAlg0 ,AlgE
+T
+
+M
+
+h Alg (a |D
+E
+
+t
+
+t−1 , st )
+
+Algθ∗ (at |Dt−1 , st )
+
+i
+
+≤ εreal .
+
+(4)
+
+We aim to bound the performance gap between Algθb and AlgE in terms of expected cumulative rewards,
+where the expected cumulative reward is defined as
+
+
+PT
+RΛ,Alg (T ) := EM∼Λ RM,Alg (T ) ,
+RM,Alg (T ) = EDT ∼PAlg [ t=1 rt ].
+M
+
+An intermediate step of the result is controllingR the
+p expected
+p Hellinger distance between two algorithms,
+where for distributions p, q, we have D2H (p, q) = ( p(x) − q(x) )2 dx.
+Theorem 6 (Performance gap between expected cumulative rewards). Let Assumption A hold and let θb be
+a solution to Eq. (3). Take R = RAlgE ,Alg0 as defined in Definition 5, and NΘ = NΘ ((nT )−2 ) as defined in
+Definition 4. Then for some universal constant c > 0, with probability at least 1 − δ, we have
+r
+
+T
+hX
+√
+i
+log [NΘ · T /δ] √
+ED ∼PAlgE
+DH Algθb(·|Dt−1 , st ), AlgE (·|Dt−1 , st ) ≤ cT R
++ εreal .
+(5)
+T
+Λ
+n
+t=1
+Further assume that |rt | ≤ 1 almost surely. Then with probability at least 1 − δ, the difference of the expected
+cumulative rewards between Algθb and AlgE satisfies
+RΛ,Algθb(T ) − RΛ,AlgE (T ) ≤ cT
+
+2
+
+√
+
+r
+
+log [NΘ · T /δ] √
+R
++ εreal .
+n
+
+(6)
+
+The proof of Theorem 6 is contained in Section D.1.
+Alg
+
+We remark that when the expectation on the left-hand-side of (5) is with respect to the measure PΛ 0 ,
+standard MLE analysis will provide a bound without the distribution ratio factor R = RAlgE ,Alg0 in the
+right-hand side. The distribution ratio factor arises from the distribution shift between trajectories generated
+by the expert algorithm AlgE versus the context algorithm Alg0 . In addition, it should be noted that the
+result in Theorem 6 holds generally provided Assumption A is satisfied, which does not require that the
+algorithm class is induced by transformers.
+6
+
+3.2
+
+Implications in special cases
+
+Algorithm Distillation When we set AlgE = Alg0 , the supervised pretraining approach corresponds to
+the Algorithm Distillation method introduced in Laskin et al. (2022). In this case, it suffices to set ai = ai
+for every pretraining trajectory, eliminating the need to sample additional expert actions. The conditional
+expectation of the expert algorithm is given by AlgE = Alg0 , and the distribution ratio RAlgE ,Alg0 = 1. Under
+these conditions, Theorem 6 ensures that Algθb imitates Alg0 with a reward difference bounded by
+RΛ,Algθb(T ) − RΛ,Alg0 (T ) ≤ cT
+
+2
+
+
+
+r
+
+
+log [NΘ · T /δ] √
++ εreal .
+n
+
+If the context algorithm Alg0 does not perform well, we cannot expect the learned algorithm Algθb to have
+good performance, regardless of the number of offline trajectories.
+Decision Pretrained Transformer When we set AlgtE = AlgtE (st , M) = a∗t to be the optimal action at
+time t, the supervised pretraining approach corresponds to Decision-Pretrained Transformers (DPT) proposed in Lee et al. (2023). In this case, the conditional expectation of the expert algorithm AlgE (·|Dt−1 , st ) =
+E[AlgE (·|st , M)|Dt−1 , st ] = AlgTS (·|Dt−1 , st ) is the Thompson sampling algorithm (Lee et al., 2023, Theorem 1), which samples from the posterior distribution of the optimal action a∗t given by P(a∗t (M)|Dt−1 , st ) ∝
+Alg
+Λ(M)·PM 0 (Dt−1 , st ). This implies that learning from optimal actions effectively learns to imitate Thompson
+sampling. Furthermore, the context algorithm is not required to perform well for the learned algorithm to
+be consistent with Thompson sampling. However, a high-quality context algorithm Alg0 may help reduce
+the distribution ratio R, thereby learning Thompson sampling with fewer samples.
+Approximate DPT In practical scenarios, the learner may not have access to the optimal action a∗t of the
+environment M during pretraining. Instead, they might rely on an estimated optimal action b
+a∗t ∼ AlgtE (·|DT ),
+derived from the entire trajectory DT . We can offer a guarantee analogous to Theorem 6, provided the
+distribution of the estimated action closely aligns with its posterior distribution:
+EDT ∼PAlg0 KL(AlgtE (·|DT ) ∥ PTS,t (·|DT )) ≤ εapprox ,
+
+∀t ∈ [T ].
+
+(7)
+
+Λ
+
+Here, PTS,t (·|DT ) represents the posterior distribution of the optimal action a∗t = a∗t (M) at time t, given the
+Alg
+observation DT , where (M, DT ) ∼ PΛ 0 .
+Proposition 7. Let Assumption A hold and let θb be the solution to Eq. (3). Take R = RAlgTS ,Alg0 as defined
+in Definition 5, and NΘ = NΘ ((nT )−2 ) as defined in Definition 4. Assume that for each trajectory, an
+estimated optimal action is provided b
+a∗t ∼ AlgtE (·|DT ) at each time t ∈ [T ] satisfying Eq. (7). Assume that
+the rewards |rt | ≤ 1 almost surely. Then for some universal constant c > 0, with probability at least 1 − δ,
+the difference of the expected cumulative rewards between Algθb and AlgTS satisfies
+
+√
+|RΛ,Algθb(T ) − RΛ,AlgTS (T )| ≤ c R · T 2
+
+r
+
+
+log [NΘ · T /δ] √
+√
++ εreal + εapprox .
+n
+
+The proof of Proposition 7 is contained in Appendix D.2.
+
+4
+
+Approximation by transformers
+
+In this section, we demonstrate the capability of transformers to implement prevalent reinforcement learning algorithms that produce near-optimal regret bounds. Specifically, we illustrate the implementation of
+LinUCB for stochastic linear bandits in Section 4.1, Thompson sampling for stochastic linear bandits in
+Section 4.2, and UCB-VI for tabular Markov decision process in Section 4.3.
+
+7
+
+4.1
+
+LinUCB for linear bandits
+
+A stochastic linear bandit environment is defined by M = (w∗ , E, A1 , . . . , AT ). For each time step t ∈ [T ], the
+learner chooses an action at ∈ Rd from a set of actions At = {at,1 , . . . , at,A }, which consists of A actions and
+may vary over time. Upon this action selection, the learner receives a reward rt = ⟨at , w∗ ⟩+εt . Here,{εt } ∼iid
+E are zero-mean noise variables, and w∗ ∈ Rd represents an unknown parameter vector. Stochastic linear
+bandit can be cast into our general framework by setting st = At and adopting a deterministic transition
+where st transits to st+1 deterministically regardless of the chosen action.
+We assume the context algorithm Alg0 is the soft LinUCB (Chu et al., 2011). Specifically, for each time step
+Pt−1
+t
+t ∈ [T ], the learner estimates the parameter w∗ using linear ridge regression wridge,λ
+:= arg minw∈Rd j=1 (rj −
+⟨aj , w⟩)2 + λ∥w∥22 . Subsequently, the learner calculates the upper confidence bounds for the reward of each
+Pt−1
+∗
+t
+⊤ −1
+action as vtk
+:= ⟨at,k , wridge,λ
+⟩ + α · (a⊤
+at,k )1/2 . Finally, the learner selects an action
+t,k (λId +
+j=1 aj aj )
+∗
+∗
+at according to probability {pt,j }j∈[A] = softmax({vtj /τ }j∈[A] ) for some sufficiently small τ > 0. Note that
+the soft LinUCB AlgsLinUCB(τ ) recovers LinUCB as τ → 0.
+We further assume the existence of constants σ, ba , Ba , Bw > 0 such that the following conditions hold:
+|εt | ≤ σ, ba ≤ ∥at,k ∥2 ≤ Ba , and ∥w∗ ∥2 ≤ Bw for all t ∈ [T ], k ∈ [A]. Given these, the confidence parameter
+p
+√
+√
+is defined as: α = λBw + σ 2 log(2Ba Bw T ) + d log((dλ + T Ba2 )/(dλ)) = Õ( d). The following result
+shows that the soft LinUCB algorithm can be efficiently approximated by transformers, for which the proof
+is contained in Appendix E.4.
+Theorem 8 (Approximating the soft LinUCB). Consider the embedding mapping h, extraction mapping A,
+and concatenation operator cat as in E.1. For any small ε, τ > 0, there exists a transformer TFRθ (·) with
+log R = Õ(1),
+p
+√
+√
+(8)
+D ≤ O(dA), L = Õ( T ), M ≤ 4A, D′ = Õ(d + A T d/(τ ε)), |||θ||| = Õ(A + T d/(τ ε1/4 )),
+such that taking Algθ as defined in Eq. (2), we have
+log AlgsLinUCB(τ ) (at,k |Dt−1 , st ) − log Algθ (at,k |Dt−1 , st ) ≤ ε,
+
+∀t ∈ [T ], k ∈ [A].
+
+±1
+Here O(·) hides some absolute constant, and Õ(·) additionally hides polynomial terms in (σ, b−1
+),
+a , Ba , Bw , λ
+and poly-logarithmic terms in (T, A, d, 1/ε, 1/τ ).
+
+A key component in proving Theorem 8 is demonstrating that the transformer can approximate the accelerated gradient descent algorithm for solving linear ridge regression (Lemma 21), a result of independent
+interest. Leveraging Theorem 8, we can derive the following regret bound for the algorithm obtained via
+Algorithm Distillation, with the proof provided in Appendix E.5.
+′
+Theorem 9 (Regret of LinUCB and ICRL). Let Θ = Θ√D,L,M,D
+√ ,B be the class of transformers satisfying
+Eq. (8) with ε = 1/T 3 and τ = 1/ log(4T ABa (Bw + 2α/ λ))/ 4T = Õ(T −1/2 ), and choose the clip value
+log R = Õ(1). Let both the context algorithm Alg0 and the expert algorithm AlgE coincide with the soft
+LinUCB algorithm AlgsLinUCB(τ ) with parameter τ during supervised pretraining. Then with probability at
+least 1 − δ, the learned algorithm Algθb, a solution to Eq. (3), entails the regret bound
+
+EM∼Λ
+
+T
+hX
+t=1
+
+
+i
+√
+max ⟨at,k , w ⟩ − RM,Algθb(T ) ≤ O d T log(T ) + T 2
+∗
+
+k
+
+r
+
+
+log(NΘ · T /δ)
+,
+n
+
+where log NΘ ≤ Õ(L2 D(M D+D′ ) log n) ≤ Õ(T 3.5 d2 A3 log n). Here O hides polynomial terms in (σ, b−1
+a , Ba ,
+Bw , λ±1 ), and Õ additionally hides poly-logarithmic terms in (T, A, d, 1/ε, 1/τ ).
+
+4.2
+
+Thompson sampling for linear bandit
+
+We continue to examine the stochastic linear bandit framework of Section 4.1, now assuming a Gaussian
+prior w⋆ ∼ N (0, λId ) and Gaussian noises {εt }t≥0 ∼iid N (0, r). Additionally, we assume existence of
+(ba , Ba ) such that ba ≤ ∥at,k ∥2 ≤ Ba . In this model, Thompson sampling also utilizes linear ridge regression.
+8
+
+Subsequently, we establish that transformers trained under the DPT methodology can learn Thompson
+sampling algorithms. We state the informal theorem in Theorem 10 below, where its formal statement and
+proof are contained in Appendix F.
+Theorem 10 (Approximating the Thompson sampling, Informal). Consider the embedding mapping h,
+extraction mapping A, and concatenation operator cat as in E.1. Under Assumption B, C, for sufficiently
+small ε, there exists a transformer TFRθ (·) with log R = Õ(1),
+√
+D = Õ(AT 1/4 d),
+L = Õ( T ), M = Õ(AT 1/4 ),
+(9)
+√
+|||θ||| = Õ(T + AT 1/4 + A),
+D′ = Õ(AT 1/4 d),
+such that taking Algθ as defined in Eq. (2), with probability at least 1 − δ0 over (M, DT ) ∼ PAlg
+Λ for any Alg,
+we have
+log AlgTS (at,k |Dt−1 , st ) − log Algθ (at,k |Dt−1 , st ) ≤ ε,
+∀t ∈ [T ], k ∈ [A].
+Here, Õ(·) hides polynomial terms in (M0 , C0 , λ±1 , r±1 , b−1
+a , Ba ), and poly-logarithmic terms in (T, A, d, 1/ε,
+1/δ0 ), where (M0 , C0 ) are parameters in Assumption B and C.
+Central to proving Theorem 10 is establishing that the transformer can approximate matrix square roots
+via Pade decomposition (Appendix F.3), a result of independent interest. Theorem 10 thereby implies the
+subsequent regret bound for transformers trained under DPT.
+Theorem 11 (Regret of Thompson sampling and ICRL). Follow the assumptions of Theorem 10. Let
+Θ = ΘD,L,M,D′ ,B be the class of transformers satisfying Eq. (9) with ε = 1/(RT 3 ), δ0 = δ/(2n), and choose
+the clip value log R = Õ(1). Assume the trajectories are collected by some context algorithm Alg0 , and we
+choose the expert algorithm AlgE (st , M) = a∗t = arg maxa∈At ⟨a, w∗ ⟩ to be the optimal action of the bandit
+instance M for each trajectory. Then with probability at least 1 − δ, the learned algorithm Algθb, a solution
+to Eq. (3), entails regret bound
+
+EM∼Λ
+
+T
+hX
+t=1
+
+
+i
+√
+√
+max ⟨at,k , w ⟩ − RM,Algθb(T ) ≤ O d T log(T d) + R · T 2
+∗
+
+k
+
+r
+
+
+log(NΘ T /δ)
+,
+n
+
+√
+where R = RAlgTS ,Alg0 , and log NΘ ≤ Õ(L2 D(M D + D′ ) log n) ≤ Õ(T 5/4 A2 d(M0 + A T d) log n). Here O
+hides polynomial terms in (λ±1 , r±1 , b−1
+a , Ba ), and Õ additionally hides poly-logarithmic terms in (M0 , C0 ,
+T, A, d, 1/ε, 1/δ0 ).
+
+4.3
+
+UCB-VI for Tabular MDPs
+
+A finite-horizon tabular MDP is specified by M = (S, A, H, {Ph }h∈[H] , {Rh }h∈[H] , µ1 ), with H being the
+time horizon, S the state space of size S, A the action space of size A, and µ1 ∈ ∆(S) defining the initial
+state distribution. At each time step h ∈ [H], Ph : S × A → ∆(S) denotes the state transition dynamics
+and Rh : S × A → [0, 1] gives the reward function. A policy π := {πh : (S × A × R)h−1 × S → ∆(A)}h∈[H]
+maps history and state to a distribution over actions. The value
+PHof policy π interacting with environment
+M is defined as the expected cumulative reward VM (π) = EM,π [ h=1 Rh (sh , ah )]. A policy π ∗ is said to be
+optimal if π ∗ = arg maxπ∈∆(Π) VM (π).
+We let the context algorithm Alg0 interact with an MDP instance M to generate K episodes, each consisting
+of H horizon sequences (sk,h , ak,h , rk,h )k∈[K],h∈[H] . These can be reindexed into a single trajectory DT =
+{(st , at , rt )}t∈[T ] with t = H(k − 1) + h and T = KH. The Bayes regret of any algorithm Alg gives
+EM∼Λ [KVM (π ∗ ) − RM,Alg (T )].
+Near minimax-optimal regret for tabular MDPs can be attained through the UCB-VI algorithm (Azar
+et al., 2017). We demonstrate that transformers are capable of approximating the soft UCB-VI algorithm
+AlgsUCBVI(τ ) , a slight modification of UCB-VI formalized in Appendix G.1.
+
+9
+
+Theorem 12 (Approximating the soft UCB-VI). Consider the embedding mapping h, extraction mapping A,
+and concatenation operator cat as in Appendix G.1. There exists a transformer TFRθ (·) with log R = Õ(1),
+D = O(HS 2 A),
+
+L = 2H + 8,
+
+D′ = O(K 2 HS 2 A),
+
+M = O(HS 2 A),
+
+|||θ||| ≤ Õ(K 2 HS 2 A + K 3 + 1/τ ),
+
+(10)
+
+such that AlgsUCBVI(τ ) (a|Dt−1 , st ) = Algθ (a|Dt−1 , st ) for all t ∈ [T ], a ∈ A. Here O(·) hides universal
+constants and Õ(·) hides poly-logarithmic terms in (H, K, S, A, 1/τ ).
+Leveraging Theorem 12, we can derive the following regret bound for the algorithm obtained via Algorithm
+Distillation.
+Theorem 13 (Regret of UCB-VI and ICRL). Let Θ = ΘD,L,M,D′ ,B be the class of transformers satisfying
+Eq. (10) with τ = 1/K, and choose the clip value log R = Õ(1). Let both the context algorithm Alg0 and the
+expert algorithm AlgE coincide with the soft UCB-VI algorithm AlgsUCBVI(τ ) during supervised pretraining.
+Then with probability at least 1 − δ, the learned algorithm Algθb, a solution to Eq. (3), entails regret bound
+r
+
+
+√
+log(NΘ T /δ)
+3 2
+2
+∗
+2
+,
+EM∼Λ [KVM (π ) − RM,Algθb(T )] ≤ Õ H SAK + H S A + T
+n
+where log NΘ ≤ Õ(L2 D(M D + D′ ) log n) = Õ(H 4 S 4 A3 (K 2 + HS 2 A) log n), and Õ(·) hides poly-logarithmic
+terms in (H, K, S, A).
+
+5
+
+Experiments
+
+In this section, we perform preliminary simulations to demonstrate the ICRL capabilities of transformers
+and validate our theoretical findings. We remark that while similar experiments have been conducted in
+existing works (Laskin et al., 2022; Lee et al., 2023), our setting differs in several aspects such as imitating
+the entire interaction trajectory in our pretrain loss (3) as opposed to on the last (query) state only as in Lee
+et al. (2023). The code is available at https://github.com/licong-lin/in-context-rl.
+We compare pretrained transformers against empirical average, LinUCB (or UCB), and Thompson sampling.
+We use a GPT-2 model Garg et al. (2022); Lee et al. (2023) with L = 8 layers, M = 4 heads, and embedding
+dimension D = 32. We utilize ReLU attention layers, aligning with our theoretical construction. We pretrain
+the transformer with two setups: (1) Both context algorithm Alg0 and expert algorithm AlgE use LinUCB
+(the Algorithm Distillation approach); (2) Context algorithms Alg0 mixes uniform policy and Thompson
+sampling, while expert AlgE = a∗t provides optimal actions (DPT). See Appendix B for further experimental
+details.
+In the first setup, we consider stochastic linear bandits with d = 5 and A = 10. At each t ∈ [200], the
+agent chooses an action at and receives reward rt = ⟨at , w∗ ⟩ + εt where εt ∼ N (0, 1.52 ). The parameter
+w∗ is from Unif([0, 1]d ). The action set At = A is fixed over time with actions i.i.d. from Unif([−1, 1]d ).
+We generate 100K trajectories using Alg0 = AlgE = LinUCB and train transformer TFθb(·) via Eq. (3).
+Figure 1 (left) shows regrets of the transformer (TF), empirical average (Emp), LinUCB, and Thompson
+sampling (TS). The transformer outperforms Thompson sampling and empirical average, and is comparable
+to LinUCB, agreeing with Theorem 9. The small regret gap between TF and LinUCB may stem from the
+limited capacity of the GPT2 model.
+In the second setup, we consider multi-armed Bernoulli bandits with d = 5. The parameter w∗ is from
+Unif([0, 1]d ). The fixed action set At = A contains one-hot vectors {ei }di=1 (multi-armed bandits). At
+each t ∈ [200], the agent selects at receives reward rt ∼ Bern(⟨at , w∗ ⟩). Let Algunif be the uniform policy.
+We use Algunif and AlgTS as context algorithms to generate 50K trajectories each. The expert is fixed as
+AlgE = a∗ . We train transformer TFθb(·) via Eq. (3). Figure 1 (right) shows regrets for the pretrained
+transformer (TF), empirical average (Emp), UCB, and Thompson sampling (TS). The transformer aligns
+with Thompson sampling, validating Theorem 11. However, TS underperforms UCB for Bernoulli bandits,
+as shown.
+10
+
+Linear bandit
+
+12
+10
+8
+6
+4
+2
+0
+
+0
+
+50
+
+Emp
+UCB
+TS
+TF
+
+Regret
+
+Emp
+LinUCB
+TS
+TF
+
+Regret
+
+60
+50
+40
+30
+20
+10
+0
+
+100
+
+Time
+
+150
+
+200
+
+0
+
+50
+
+Bernoulli bandit
+
+100
+
+Time
+
+150
+
+200
+
+Figure 1: Regrets of transformer (TF), empirical average (Emp), Thompson sampling (TS) and LinUCB or
+UCB (LinUCB reduces to UCB for Bernoulli bandits). Left: linear bandit with d = 5, A = 10, σ = 1.5,
+Alg0 = AlgE = LinUCB. Right: Bernoulli bandit with d = 5, Alg0 = (Algunif + AlgTS )/2 and AlgE = a∗ .
+The simulation is repeated 500 times. Shading displays the standard deviation of the regret estimates.
+
+6
+
+Conclusions
+
+This paper theoretically investigates the ICRL capability of supervised-pretrained transformers. We demonstrate how transformers can efficiently implement prevalent RL algorithms including LinUCB, Thompson
+sampling, and UCB-VI, achieving near-optimal regrets in respective settings. We also provide sample complexity guarantees for the supervised pretraining approach to learning these algorithms. The generalization
+error scales with the covering number of the transformer class as well as the distribution ratio between the expert and offline algorithms. Simulations validate our theoretical findings. Finally, we discuss the limitations
+of our results and provide additional discussions in Appendix A.
+
+Acknowledgement
+The authors would like to thank Peter L. Bartlett for the valuable discussions, and Jonathan Lee for the
+valuable discussions regarding Decision-Pretrained Transformers as well as providing an early version of its
+implementation. This work is supported by NSF CCF-2315725, DMS-2210827, NSF Career award DMS2339904, and an Amazon Research Award.
+
+References
+Alekh Agarwal, Nan Jiang, Sham M Kakade, and Wen Sun. Reinforcement learning: Theory and algorithms.
+CS Dept., UW Seattle, Seattle, WA, USA, Tech. Rep, 32, 2019.
+Kwangjun Ahn, Xiang Cheng, Hadi Daneshmand, and Suvrit Sra. Transformers learn to implement preconditioned gradient descent for in-context learning. arXiv preprint arXiv:2306.00297, 2023.
+Ekin Akyürek, Dale Schuurmans, Jacob Andreas, Tengyu Ma, and Denny Zhou. What learning algorithm
+is in-context learning? investigations with linear models. arXiv preprint arXiv:2211.15661, 2022.
+Mohammad Gheshlaghi Azar, Ian Osband, and Rémi Munos. Minimax regret bounds for reinforcement
+learning. In International Conference on Machine Learning, pages 263–272. PMLR, 2017.
+Jimmy Lei Ba, Jamie Ryan Kiros, and Geoffrey E Hinton.
+arXiv:1607.06450, 2016.
+
+Layer normalization.
+
+arXiv preprint
+
+Yu Bai, Fan Chen, Huan Wang, Caiming Xiong, and Song Mei. Transformers as statisticians: Provable
+in-context learning with in-context algorithm selection. arXiv preprint arXiv:2306.04637, 2023.
+Yoshua Bengio, Samy Bengio, and Jocelyn Cloutier. Learning a synaptic learning rule. Citeseer, 1990.
+Satwik Bhattamishra, Arkil Patel, and Navin Goyal. On the computational power of transformers and its
+implications in sequence modeling. arXiv preprint arXiv:2006.09286, 2020.
+11
+
+David Brandfonbrener, Alberto Bietti, Jacob Buckman, Romain Laroche, and Joan Bruna. When does
+return-conditioned supervised learning work for offline reinforcement learning? Advances in Neural Information Processing Systems, 35:1542–1553, 2022.
+Anthony Brohan, Noah Brown, Justice Carbajal, Yevgen Chebotar, Joseph Dabis, Chelsea Finn, Keerthana
+Gopalakrishnan, Karol Hausman, Alex Herzog, Jasmine Hsu, et al. Rt-1: Robotics transformer for realworld control at scale. arXiv preprint arXiv:2212.06817, 2022.
+Tom Brown, Benjamin Mann, Nick Ryder, Melanie Subbiah, Jared D Kaplan, Prafulla Dhariwal, Arvind
+Neelakantan, Pranav Shyam, Girish Sastry, Amanda Askell, et al. Language models are few-shot learners.
+Advances in neural information processing systems, 33:1877–1901, 2020.
+Lili Chen, Kevin Lu, Aravind Rajeswaran, Kimin Lee, Aditya Grover, Misha Laskin, Pieter Abbeel, Aravind Srinivas, and Igor Mordatch. Decision transformer: Reinforcement learning via sequence modeling.
+Advances in neural information processing systems, 34:15084–15097, 2021.
+Wei Chu, Lihong Li, Lev Reyzin, and Robert Schapire. Contextual bandits with linear payoff functions.
+In Proceedings of the Fourteenth International Conference on Artificial Intelligence and Statistics, pages
+208–214. JMLR Workshop and Conference Proceedings, 2011.
+Jacob Devlin, Ming-Wei Chang, Kenton Lee, and Kristina Toutanova. Bert: Pre-training of deep bidirectional
+transformers for language understanding. arXiv preprint arXiv:1810.04805, 2018.
+Ron Dorfman, Idan Shenfeld, and Aviv Tamar. Offline meta reinforcement learning–identifiability challenges
+and effective data collection strategies. Advances in Neural Information Processing Systems, 34:4607–4618,
+2021.
+Alexey Dosovitskiy, Lucas Beyer, Alexander Kolesnikov, Dirk Weissenborn, Xiaohua Zhai, Thomas Unterthiner, Mostafa Dehghani, Matthias Minderer, Georg Heigold, Sylvain Gelly, et al. An image is worth
+16x16 words: Transformers for image recognition at scale. arXiv preprint arXiv:2010.11929, 2020.
+Yan Duan, John Schulman, Xi Chen, Peter L Bartlett, Ilya Sutskever, and Pieter Abbeel. Rl2 : Fast
+reinforcement learning via slow reinforcement learning. arXiv preprint arXiv:1611.02779, 2016.
+Chelsea Finn, Pieter Abbeel, and Sergey Levine. Model-agnostic meta-learning for fast adaptation of deep
+networks. In International conference on machine learning, pages 1126–1135. PMLR, 2017.
+Dylan J Foster, Sham M Kakade, Jian Qian, and Alexander Rakhlin. The statistical complexity of interactive
+decision making. arXiv preprint arXiv:2112.13487, 2021.
+Hengyu Fu, Tianyu Guo, Yu Bai, and Song Mei. What can a single attention layer learn? a study through
+the random features lens. arXiv preprint arXiv:2307.11353, 2023.
+Justin Fu, Sergey Levine, and Pieter Abbeel. One-shot learning of manipulation skills with online dynamics
+adaptation and neural network priors. In 2016 IEEE/RSJ International Conference on Intelligent Robots
+and Systems (IROS), pages 4019–4026. IEEE, 2016.
+Shivam Garg, Dimitris Tsipras, Percy S Liang, and Gregory Valiant. What can transformers learn incontext? a case study of simple function classes. Advances in Neural Information Processing Systems, 35:
+30583–30598, 2022.
+Sara A Geer. Empirical Processes in M-estimation, volume 6. Cambridge university press, 2000.
+Abhishek Gupta, Russell Mendonca, YuXuan Liu, Pieter Abbeel, and Sergey Levine. Meta-reinforcement
+learning of structured exploration strategies. Advances in neural information processing systems, 31, 2018.
+Sepp Hochreiter, A Steven Younger, and Peter R Conwell. Learning to learn using gradient descent. In
+Artificial Neural Networks—ICANN 2001: International Conference Vienna, Austria, August 21–25, 2001
+Proceedings 11, pages 87–94. Springer, 2001.
+
+12
+
+Jiri Hron, Yasaman Bahri, Jascha Sohl-Dickstein, and Roman Novak. Infinite attention: Nngp and ntk for
+deep attention networks. In International Conference on Machine Learning, pages 4376–4386. PMLR,
+2020.
+Jan Humplik, Alexandre Galashov, Leonard Hasenclever, Pedro A Ortega, Yee Whye Teh, and Nicolas Heess.
+Meta reinforcement learning as task inference. arXiv preprint arXiv:1905.06424, 2019.
+Shin Ishii, Wako Yoshida, and Junichiro Yoshimoto. Control of exploitation–exploration meta-parameter in
+reinforcement learning. Neural networks, 15(4-6):665–687, 2002.
+Michael Janner, Qiyang Li, and Sergey Levine. Offline reinforcement learning as one big sequence modeling
+problem. Advances in neural information processing systems, 34:1273–1286, 2021.
+Michael Laskin, Luyu Wang, Junhyuk Oh, Emilio Parisotto, Stephen Spencer, Richie Steigerwald,
+DJ Strouse, Steven Hansen, Angelos Filos, Ethan Brooks, et al. In-context reinforcement learning with
+algorithm distillation. arXiv preprint arXiv:2210.14215, 2022.
+Tor Lattimore and Csaba Szepesvári. Bandit algorithms. Cambridge University Press, 2020.
+Beatrice Laurent and Pascal Massart. Adaptive estimation of a quadratic functional by model selection.
+Annals of statistics, pages 1302–1338, 2000.
+Jonathan N Lee, Annie Xie, Aldo Pacchiano, Yash Chandak, Chelsea Finn, Ofir Nachum, and Emma Brunskill. Supervised pretraining can learn in-context reinforcement learning. arXiv preprint arXiv:2306.14892,
+2023.
+Kuang-Huei Lee, Ofir Nachum, Mengjiao Sherry Yang, Lisa Lee, Daniel Freeman, Sergio Guadarrama, Ian
+Fischer, Winnie Xu, Eric Jang, Henryk Michalewski, et al. Multi-game decision transformers. Advances
+in Neural Information Processing Systems, 35:27921–27936, 2022.
+Lanqing Li, Rui Yang, and Dijun Luo. Focal: Efficient fully-offline meta-reinforcement learning via distance
+metric learning and behavior regularization. arXiv preprint arXiv:2010.01112, 2020.
+Yingcong Li, M Emrullah Ildiz, Dimitris Papailiopoulos, and Samet Oymak. Transformers as algorithms:
+Generalization and implicit model selection in in-context learning. arXiv preprint arXiv:2301.07067, 2023.
+Bingbin Liu, Jordan T Ash, Surbhi Goel, Akshay Krishnamurthy, and Cyril Zhang. Transformers learn
+shortcuts to automata. arXiv preprint arXiv:2210.10749, 2022.
+Ya Yan Lu. A padé approximation method for square roots of symmetric positive definite matrices. SIAM
+journal on matrix analysis and applications, 19(3):833–845, 1998.
+Song Mei and Yuchen Wu. Deep networks as denoising algorithms: Sample-efficient learning of diffusion
+models in high-dimensional graphical models. arXiv preprint arXiv:2309.11420, 2023.
+Eric Mitchell, Rafael Rafailov, Xue Bin Peng, Sergey Levine, and Chelsea Finn. Offline meta-reinforcement
+learning with advantage weighting. In International Conference on Machine Learning, pages 7780–7791.
+PMLR, 2021.
+Anusha Nagabandi, Ignasi Clavera, Simin Liu, Ronald S Fearing, Pieter Abbeel, Sergey Levine, and Chelsea
+Finn. Learning to adapt in dynamic, real-world environments through meta-reinforcement learning. arXiv
+preprint arXiv:1803.11347, 2018.
+Devang K Naik and Richard J Mammone. Meta-neural networks that learn by learning. In [Proceedings
+1992] IJCNN International Joint Conference on Neural Networks, volume 1, pages 437–442. IEEE, 1992.
+Yurii Nesterov. Introductory lectures on convex optimization: A basic course, volume 87. Springer Science
+& Business Media, 2003.
+Alex Nichol, Joshua Achiam, and John Schulman. On first-order meta-learning algorithms. arXiv preprint
+arXiv:1803.02999, 2018.
+13
+
+OpenAI. Gpt-4 technical report. arXiv preprint arXiv:2303.08774, 2023.
+Keiran Paster, Sheila McIlraith, and Jimmy Ba. You can’t count on luck: Why decision transformers and
+rvs fail in stochastic environments. Advances in Neural Information Processing Systems, 35:38966–38979,
+2022.
+Jorge Pérez, Javier Marinković, and Pablo Barceló. On the turing completeness of modern neural network
+architectures. arXiv preprint arXiv:1901.03429, 2019.
+Vitchyr H Pong, Ashvin V Nair, Laura M Smith, Catherine Huang, and Sergey Levine. Offline metareinforcement learning with online self-supervision. In International Conference on Machine Learning,
+pages 17811–17829. PMLR, 2022.
+Alec Radford, Jeffrey Wu, Rewon Child, David Luan, Dario Amodei, Ilya Sutskever, et al. Language models
+are unsupervised multitask learners. OpenAI blog, 1(8):9, 2019.
+Nived Rajaraman, Lin Yang, Jiantao Jiao, and Kannan Ramchandran. Toward the fundamental limits of
+imitation learning. Advances in Neural Information Processing Systems, 33:2914–2924, 2020.
+Nived Rajaraman, Yanjun Han, Lin F Yang, Kannan Ramchandran, and Jiantao Jiao. Provably breaking the
+quadratic error compounding barrier in imitation learning, optimally. arXiv preprint arXiv:2102.12948,
+2021.
+Kate Rakelly, Aurick Zhou, Chelsea Finn, Sergey Levine, and Deirdre Quillen. Efficient off-policy metareinforcement learning via probabilistic context variables. In International conference on machine learning,
+pages 5331–5340. PMLR, 2019.
+Paria Rashidinejad, Banghua Zhu, Cong Ma, Jiantao Jiao, and Stuart Russell. Bridging offline reinforcement
+learning and imitation learning: A tale of pessimism. Advances in Neural Information Processing Systems,
+34:11702–11716, 2021.
+Allan Raventós, Mansheej Paul, Feng Chen, and Surya Ganguli. Pretraining task diversity and the emergence
+of non-bayesian in-context learning for regression. arXiv preprint arXiv:2306.15063, 2023.
+Scott Reed, Konrad Zolna, Emilio Parisotto, Sergio Gomez Colmenarejo, Alexander Novikov, Gabriel BarthMaron, Mai Gimenez, Yury Sulsky, Jackie Kay, Jost Tobias Springenberg, et al. A generalist agent. arXiv
+preprint arXiv:2205.06175, 2022.
+Stéphane Ross and Drew Bagnell. Efficient reductions for imitation learning. In Proceedings of the thirteenth
+international conference on artificial intelligence and statistics, pages 661–668. JMLR Workshop and
+Conference Proceedings, 2010.
+Stéphane Ross, Geoffrey Gordon, and Drew Bagnell. A reduction of imitation learning and structured prediction to no-regret online learning. In Proceedings of the fourteenth international conference on artificial
+intelligence and statistics, pages 627–635. JMLR Workshop and Conference Proceedings, 2011.
+Jonas Rothfuss, Dennis Lee, Ignasi Clavera, Tamim Asfour, and Pieter Abbeel. Promp: Proximal meta-policy
+search. arXiv preprint arXiv:1810.06784, 2018.
+Daniel J Russo, Benjamin Van Roy, Abbas Kazerouni, Ian Osband, Zheng Wen, et al. A tutorial on thompson
+sampling. Foundations and Trends® in Machine Learning, 11(1):1–96, 2018.
+Tom Schaul and Jürgen Schmidhuber. Metalearning. Scholarpedia, 5(6):4650, 2010.
+Jürgen Schmidhuber. Evolutionary principles in self-referential learning, or on learning how to learn: the
+meta-meta-... hook. PhD thesis, Technische Universität München, 1987.
+Jürgen Schmidhuber. Learning to control fast-weight memories: An alternative to dynamic recurrent networks. Neural Computation, 4(1):131–139, 1992.
+
+14
+
+Nur Muhammad Shafiullah, Zichen Cui, Ariuntuya Arty Altanzaya, and Lerrel Pinto. Behavior transformers:
+Cloning k modes with one stone. Advances in neural information processing systems, 35:22955–22968, 2022.
+Kai Shen, Junliang Guo, Xu Tan, Siliang Tang, Rui Wang, and Jiang Bian. A study on relu and softmax in
+transformer. arXiv preprint arXiv:2302.06461, 2023.
+Miroslav Strupl, Francesco Faccio, Dylan R Ashley, Jürgen Schmidhuber, and Rupesh Kumar Srivastava.
+Upside-down reinforcement learning can diverge in stochastic environments with episodic resets. arXiv
+preprint arXiv:2205.06595, 2022.
+Sebastian Thrun and Lorien Pratt. Learning to learn. Springer Science & Business Media, 2012.
+Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez, Lukasz Kaiser,
+and Illia Polosukhin. Attention is all you need. Advances in neural information processing systems, 30,
+2017.
+Johannes Von Oswald, Eyvind Niklasson, Ettore Randazzo, João Sacramento, Alexander Mordvintsev, Andrey Zhmoginov, and Max Vladymyrov. Transformers learn in-context by gradient descent. In International Conference on Machine Learning, pages 35151–35174. PMLR, 2023.
+Martin J Wainwright. High-dimensional statistics: A non-asymptotic viewpoint, volume 48. Cambridge
+University Press, 2019.
+Jane X Wang, Zeb Kurth-Nelson, Dhruva Tirumala, Hubert Soyer, Joel Z Leibo, Remi Munos, Charles
+Blundell, Dharshan Kumaran, and Matt Botvinick. Learning to reinforcement learn. arXiv preprint
+arXiv:1611.05763, 2016.
+Lingxiao Wang, Qi Cai, Zhuoran Yang, and Zhaoran Wang. On the global optimality of model-agnostic
+meta-learning. In International conference on machine learning, pages 9837–9846. PMLR, 2020.
+Colin Wei, Yining Chen, and Tengyu Ma. Statistically meaningful approximation: a case study on approximating turing machines with transformers. Advances in Neural Information Processing Systems, 35:
+12071–12083, 2022.
+Mitchell Wortsman, Jaehoon Lee, Justin Gilmer, and Simon Kornblith. Replacing softmax with relu in
+vision transformers. arXiv preprint arXiv:2309.08586, 2023.
+Sang Michael Xie, Aditi Raghunathan, Percy Liang, and Tengyu Ma. An explanation of in-context learning
+as implicit bayesian inference. arXiv preprint arXiv:2111.02080, 2021.
+Mengjiao Yang, Dale Schuurmans, Pieter Abbeel, and Ofir Nachum. Dichotomy of control: Separating what
+you can control from what you cannot. arXiv preprint arXiv:2210.13435, 2022.
+Sherry Yang, Ofir Nachum, Yilun Du, Jason Wei, Pieter Abbeel, and Dale Schuurmans. Foundation models
+for decision making: Problems, methods, and opportunities. arXiv preprint arXiv:2303.04129, 2023.
+Shunyu Yao, Binghui Peng, Christos Papadimitriou, and Karthik Narasimhan. Self-attention networks can
+process bounded hierarchical languages. arXiv preprint arXiv:2105.11115, 2021.
+Chulhee Yun, Srinadh Bhojanapalli, Ankit Singh Rawat, Sashank J Reddi, and Sanjiv Kumar. Are transformers universal approximators of sequence-to-sequence functions? arXiv preprint arXiv:1912.10077,
+2019.
+Ruiqi Zhang, Spencer Frei, and Peter L Bartlett. Trained transformers learn linear models in-context. arXiv
+preprint arXiv:2306.09927, 2023.
+Yi Zhang, Arturs Backurs, Sébastien Bubeck, Ronen Eldan, Suriya Gunasekar, and Tal Wagner. Unveiling
+transformers with lego: a synthetic reasoning task. arXiv preprint arXiv:2206.04301, 2022.
+Luisa Zintgraf, Kyriacos Shiarlis, Maximilian Igl, Sebastian Schulze, Yarin Gal, Katja Hofmann, and Shimon
+Whiteson. Varibad: A very good method for bayes-adaptive deep rl via meta-learning. arXiv preprint
+arXiv:1910.08348, 2019.
+15
+
+Contents
+1 Introduction
+1.1 Related work . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+
+1
+2
+
+2 Framework for In-Context Reinforcement Learning
+
+3
+
+3 Statistical analysis of supervised pretraining
+3.1 Main result . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+3.2 Implications in special cases . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+
+5
+6
+7
+
+4 Approximation by transformers
+4.1 LinUCB for linear bandits . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+4.2 Thompson sampling for linear bandit . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+4.3 UCB-VI for Tabular MDPs . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+
+7
+8
+8
+9
+
+5 Experiments
+
+10
+
+6 Conclusions
+
+11
+
+A Limitation and discussion
+
+17
+
+B Experimental details
+17
+B.1 Implementation details . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 18
+B.2 Additional experiments and plots . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 18
+B.3 The effect of distribution ratio . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 19
+C Technical preliminaries
+
+19
+
+D Proofs in Section 3
+22
+D.1 Proof of Theorem 6 . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 22
+D.2 Proof of Proposition 7 . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 24
+D.3 An auxiliary lemma . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 24
+E Soft LinUCB for linear stochastic bandit
+26
+E.1 Embedding and extraction mappings . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 26
+E.2 LinUCB and soft LinUCB . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 27
+E.3 Approximation of the ridge estimator . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 27
+E.4 Proof of Theorem 8 . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 30
+E.5 Proof of Theorem 9 . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 34
+F Thompson sampling for stochastic linear bandit
+36
+F.1 Thompson sampling algorithm . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 36
+F.2 Definitions and assumptions . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 37
+F.3 Proof of Theorem 23 (and hence Theorem 10) . . . . . . . . . . . . . . . . . . . . . . . . . . 38
+F.4 Proof of Theorem 11 . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 46
+F.5 Proof of Lemma 24 . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 48
+G Learning in-context RL in markov decision processes
+50
+G.1 Embedding and extraction mappings . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 50
+G.2 UCB-VI and soft UCB-VI . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 51
+G.3 Proof of Theorem 12 . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 51
+G.4 Proof of Theorem 13 . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 59
+
+16
+
+A
+
+Limitation and discussion
+
+In this section, we discuss some limitations of our work and some potential future directions.
+Distribution ratio In Theorem 6, our regret bound of the learned algorithms Algθb depends on the distribution ratio RAlgE ,Alg0 . While in cases like algorithm distillation (Laskin et al., 2022) the distribution
+ratio equals one since the offline algorithm matches the expert algorithm, in the worst case, the ratio can
+exponentially depend on T or even become arbitrarily large. To control the distribution ratio in practice, one
+approach is to augment the offline trajectory dataset with a portion of trajectories generated by an expert
+algorithm or no-regret algorithms resembling the expert algorithm. On the other hand, further research
+could investigate structural assumptions of decision-making problems that avoid pessimistic dependence on
+the distribution ratio in regret bounds.
+Guarantee of pretrained transformer Our statistical result (Theorem 6) only guarantees that the
+pretrained transformer learns an “algorithm” matching the expert algorithm under the pre-training distribution, even though our approximation results (Theorem 8, 10, 12) show the existence of a transformer
+approximating the expert algorithm over the entire input space. In our early experiments, we noticed the
+learned transformers do not generalize well on out-of-distribution instances, such as with shifted reward
+distributions or increased number of runs T . Similar phenomena occur in other in-context learning problems
+(e.g. Garg et al. (2022)). Understanding the actual algorithm implemented by the pretrained transformer
+through theoretical and empirical analysis is an interesting question for future work.
+Alternative pretraining methods Our theoretical results study pretraining the transformer by maximizing the log-likelihood of i.i.d. offline trajectories as in Eq. (3). This aligns with standard supervised
+pretraining of large language models. However, alternative pretraining methods may also be effective. For
+instance, one could replace the log-probability in Eq. (3) with an ℓ2 loss for continuous action spaces, consider
+other objectives like cumulative reward (Duan et al., 2016), or explore goal-conditioned reinforcement learning (Chen et al., 2021) for in-context RL. While our work focuses on log-likelihood pretraining, theoretical
+investigation of alternative methods is an interesting direction for future work.
+Possibility of surpassing the expert algorithm by online training Our work considers offline pretraining by imitating the expert algorithm (i.e., AlgE ), which can only learn a transformer matching the
+expert’s performance at best. However, through online training, where the transformer interacts with the
+environment, the learned transformer may surpass existing experts by training to improve itself rather than
+imitating a specific algorithm. Investigating whether online training enables surpassing expert algorithms is
+an interesting direction for future work.
+Implications for practice While the focus of our work is primarily theoretical, our results lead to several
+practical implications for in-context reinforcement learning. One key implication is the importance of training
+labels (i.e., expert actions a). When the expert algorithm depends solely on past observations, we can learn
+AlgE (see Theorem 9). In contrast, when AlgE is the optimal action a⋆ (involving knowledge of the underlying
+MDP), we can learn the posterior average of this algorithm given past observations. This corresponds to the
+Thompson sampling algorithm, as in Decision-Pretrained Transformers (see Theorem 11).
+Furthermore, as discussed previously, the distribution ratio between the offline and expert algorithms may
+impact the generalization of the learned algorithm. Both our theory (see Theorem 8) and simulations (see
+Figure 4) show that a small distribution ratio between the offline algorithm Alg0 and the expert algorithm
+AlgE is essential, otherwise the online performance of the learned algorithm may substantially degrade. This
+suggests that incorporating trajectories generated purely from the expert (“on-policy ICRL”) into the offline
+dataset is advantageous, when feasible.
+
+B
+
+Experimental details
+
+This section provides implementation details of our experiments and some additional simulations.
+17
+
+B.1
+
+Implementation details
+
+Model and embedding Our experiments use a GPT-2 model (Radford et al., 2019) with ReLU activation
+layers. The model has L = 8 attention layers, M = 4 attention heads, and embedding dimension D = 32.
+Following standard implementations in Vaswani et al. (2017), we add Layer Normalization (Ba et al., 2016)
+after each attention and MLP layer to facilitate optimization. We consider the embedding and extraction
+mappings as described in Appendix E.1, and train transformer TFθb(·) via maximizing Eq. (3).
+Online algorithms We compare the regret of the algorithm induced by the transformer with empirical
+average, Thompson sampling, and LinUCB (or UCB for Bernoulli bandits).
+(Emp) Empirical average. For time t ≤ A, the agent selects each action once. For time t > A, the agent
+computes the average of the historical rewards for each action and selects the action with the maximal
+averaged historical rewards.
+(TS) Thompson sampling. For linear bandits with Gaussian noises, we consider Thompson sampling
+introduced in Appendix F.1 with r = σ = 1.5 and λ = 1 (note that in this case TS does not correspond
+to posterior sampling as we assume w∗ follows the uniform distribution on [0, 1]d ). For Bernoulli
+bandits, we consider the standard TS sampling procedure (see, for example, Algorithm 3.2 in Russo
+et al. (2018)).
+(LinUCB) Linear UCB and UCB. For linear bandits, we use LinUCB (Appendix E.2) with λ = 1 and α = 2.
+For
+µt,a +
+p multi-armed Bernoulli bandits, LinUCB reduces to UCB, which selects at = arg maxa∈A {b
+1/Nt (a)}, where µt,a is the average reward for action a up to time t, and Nt (a) is the number of
+times action a was selected up to time t.
+
+B.2
+
+Additional experiments and plots
+
+We provide additional experiments and plots in this section. In all experiments, we choose the number of
+samples n = 100K.
+Additional plots of suboptimality ⟨a∗t − at , w∗ ⟩ over time are shown in Figure 2 for the two experiments
+in Section 5. In both cases, the transformer is able to imitate the expected expert policy AlgE , as its
+suboptimality closely matches AlgE (LinUCB and TS for the left and right panel, respectively). While the
+empirical average (Emp) has lower suboptimality early on, its gap does not converge to zero. In contrast,
+both LinUCB and Thompson sampling are near-optimal up to Õ(1) factors in terms of their (long-term)
+regret.
+
+Linear bandit
+
+Emp
+LinUCB
+TS
+TF
+
+0.3
+
+Suboptimality
+
+Suboptimality
+
+1.2
+1.0
+0.8
+0.6
+0.4
+0.2
+0.00
+
+Bernoulli bandit
+
+0.2
+
+Emp
+UCB
+TS
+TF
+
+0.1
+
+50
+
+100
+
+Time
+
+150
+
+200
+
+0.0
+
+0
+
+50
+
+100
+
+Time
+
+150
+
+200
+
+Figure 2: Suboptimalities of transformer (TF), empirical average (Emp), Thompson sampling (TS), and
+LinUCB (or UCB). Left: linear bandit with d = 5, A = 10, σ = 1.5, Alg0 = AlgE = LinUCB. Right:
+Bernoulli bandit with d = 5, Alg0 = (Algunif + AlgTS )/2, and AlgE = a∗t . The simulation is repeated 500
+times. Shading displays the standard deviation of the sub-optimality estimates.
+
+18
+
+Additional simulations were run with Alg0 = AlgE = UCB for Bernoulli bandits, which has fewer actions
+(A = 5) than linear bandits (A = 10). Figure 3 shows the regret and suboptimality of UCB and the
+transformer overlap perfectly, with both algorithms exhibiting optimal behavior. This suggests the minor
+gaps between LinUCB and transformer in the left panel of Figure 1 and 2 are likely due to limited model
+capacity.
+
+Emp
+UCB
+TS
+TF
+
+Regret
+
+10.0
+7.5
+
+0.3
+
+Suboptimality
+
+12.5
+
+Bernoulli bandit
+
+Bernoulli bandit
+
+0.2
+
+5.0
+
+0.1
+
+2.5
+0.0
+
+Emp
+UCB
+TS
+TF
+
+0
+
+50
+
+100
+
+Time
+
+150
+
+200
+
+0.0
+
+0
+
+50
+
+100
+
+Time
+
+150
+
+200
+
+Figure 3: Regrets and suboptimalities of transformer (TF), empirical average (Emp), Thompson sampling
+(TS), and UCB. Settings: Bernoulli bandit with d = 5, and Alg0 = AlgE = LinUCB. The simulation is
+repeated 500 times. Shading displays the standard deviation of the estimates.
+
+B.3
+
+The effect of distribution ratio
+
+We evaluate the effect of the distribution ratio R = RAlgE ,Alg0 (Definition 5) on transformer performance.
+We consider the Bernoulli bandit setting from Section 5 with expert AlgE = a∗ giving optimal actions. The
+context algorithm is
+Alg0 = αAlgTS + (1 − α)Algunif ,
+mixing uniform policy Algunif and Thompson sampling AlgTS , for α ∈ {0, 0.1, 0.5, 1}. The case α = 0
+corresponds to the context algorithm being the i.i.d. uniform policy, and α = 1 corresponds to the context
+algorithm being Thompson sampling. Note that the distribution ratio R may scale as O((1/α) ∧ AO(T ) ) in
+the worst case.
+Figure 4 evaluates the learned transformers against Thompson sampling for varying context algorithms.
+The left plot shows cumulative regret for all algorithms. The right plot shows the regret difference between
+transformers and Thompson sampling. The results indicate that an increased distribution ratio impairs
+transformer regret, as expected. Moreover, it is observed that the transformer, even with the uniform
+policy (i.e., α = 0), is capable of imitating Thompson sampling in the early stages (Time ≤ 30), exceeding
+theoretical predictions. This suggests the transformer can learn Thompson sampling even when the context
+algorithm differs significantly from the expert algorithm.
+
+C
+
+Technical preliminaries
+
+In this work, we will apply the following standard concentration inequality (see e.g. Lemma A.4 in Foster
+et al. (2021)).
+Lemma 14. For any sequence of random variables (Xt )t≤T adapted to a filtration {Ft }Tt=1 , we have with
+probability at least 1 − δ that
+t
+X
+s=1
+
+Xs ≤
+
+t
+X
+
+log E[exp(Xs ) | Fs−1 ] + log(1/δ),
+
+s=1
+
+19
+
+for all t ∈ [T ].
+
+Bernoulli bandit
+
+25
+
+Regret
+
+15
+10
+
+Difference of Regrets
+
+=0
+= 0.1
+= 0.5
+=1
+TS
+
+20
+
+4
+3
+
+=0
+= 0.1
+= 0.5
+=1
+
+2
+
+5
+0
+
+Bernoulli bandit
+
+5
+
+1
+
+0
+
+50
+
+100
+
+150
+
+Time
+
+200
+
+0
+
+0
+
+50
+
+100
+
+Time
+
+150
+
+200
+
+Figure 4: Regrets and difference of regrets between transformers and Thompson sampling, for different
+context algorithms. Settings: Bernoulli bandit with d = 5, AlgE = a∗t and Alg0 = αAlgTS + (1 − α)Algunif
+with α ∈ {0, 0.1, 0.5, 1}. The simulation is repeated 500 times. Shading displays the standard deviation of
+the estimates.
+Lemma 15. Adopt the notations in Definition 4. Then for any θ ∈ Θ, there exists θ0 ∈ Θ0 such that
+∥Algθ0 (·|Dt−1 , st ) − Algθ (·|Dt−1 , st )∥1 ≤ 2ρ.
+Proof of Lemma 15. For any θ ∈ Θ, let θ0 ∈ Θ0 be such that ∥ log Algθ0 (·|Dt−1 , st )−log Algθ (·|Dt−1 , st )∥∞ ≤
+ρ for all Dt−1 , st and t ∈ [T ]. Then
+∥Algθ0 (·|Dt−1 , st ) − Algθ (·|Dt−1 , st )∥1
+X
+=
+|Algθ0 (a|Dt−1 , st ) − Algθ (a|Dt−1 , st )|
+a∈At
+
+≤
+
+X
+
+emax{log Algθ0 (·|Dt−1 ,st ),log Algθ (·|Dt−1 ,st )}
+
+a∈At
+
+· | log Algθ0 (·|Dt−1 , st ) − log Algθ (·|Dt−1 , st )|
+X
+≤ρ
+emax{log Algθ0 (·|Dt−1 ,st ),log Algθ (·|Dt−1 ,st )}
+a∈At
+
+≤ρ
+
+X
+
+(Algθ0 (·|Dt−1 , st ) + Algθ (·|Dt−1 , st )) ≤ 2ρ,
+
+a∈At
+
+where the second line uses a Taylor expansion of ex , the fourth line uses the assumption on θ0 , the last line
+uses emax{x,y} ≤ ex + ey and the fact that Algθ0 (·|Dt−1 , st ), Algθ (·|Dt−1 , st ) are probability functions.
+We have the following upper bound on the covering number of the transformer class {TFRθ : θ ∈ ΘD,L,M,D′ ,B }.
+Lemma 16. For the space of transformers {TFRθ : θ ∈ ΘD,L,M,D′ ,B } with
+n
+o
+(ℓ)
+[L]
+[L]
+ΘD,L,M,D′ ,B := θ = (θattn , θmlp ) : max M (ℓ) ≤ M, max D′ ≤ D′ , |||θ||| ≤ B ,
+ℓ∈[L]
+
+ℓ∈[L]
+
+(ℓ)
+
+where M (ℓ) , D′ denote the number of heads and hidden neurons in the ℓ-th layer respectively, the covering
+number of the set of induced algorithms {Algθ , θ ∈ ΘD,L,M,D′ ,B } (c.f. Eq. 2) satisfies
+
+max{B, L, R} 
+log NΘD,L,M,D′ ,B (ρ) ≤ cL2 D(M D + D′ ) log 2 +
+ρ
+for some universal constant c > 0.
+
+20
+
+Remark of Lemma 16. Note that the transformer classes ΘD,L,M,D′ ,B , ΘD,L,M,D′ ,B have the same expressivity as one can augment any TFθ ∈ ΘD,L,M,D′ ,B such that the resulting TFθ,aug ∈ ΘD,L,M,D′ ,B by
+adding heads or hidden neurons with fixed zero weights. Therefore, the same bound in Lemma 16 follows for
+ΘD,L,M,D′ ,B , and throughout the paper we do not distinguish ΘD,L,M,D′ ,B and ΘD,L,M,D′ ,B and use them
+(ℓ)
+interchangeably. We also use M (ℓ) , D′ to represent the number of heads and hidden neurons in the ℓ-th
+layer of transformers, respectively.
+Proof of Lemma 16. We start with introducing Proposition J.1 in Bai et al. (2023).
+L
+Proposition 17 (Proposition J.1 in Bai et al. (2023)). The function TFR is (LBH
+BΘ )-Lipschitz w.r.t.
+θ ∈ ΘD,L,M,D′ ,B for any fixed input H. Namely, for any θ1 , θ2 ∈ ΘD,L,M,D′ ,B , we have
+L
+BΘ |||θ1 − θ2 |||,
+TFRθ1 (H) − TFRθ2 (H) 2,∞ ≤ LBH
+
+where ∥A∥2,∞ := supt∈[T ] ∥A·t ∥2 for any matrix A ∈ RK×T , and BΘ := BR(1 + BR2 + B 3 R2 ), BH :=
+(1 + B 2 )(1 + B 2 R3 ).
+As in the Proof of Theorem 20 in Bai et al. (2023), we can verify using Example 5.8 in Wainwright (2019)
+that the δ-covering number
+log N (δ; B|||·||| (r), |||·|||) ≤ L(3M D2 + 2DD′ ) log(1 + 2r/δ),
+
+(11)
+
+where B|||·||| (r) denotes any ball of radius r under the norm |||·|||. Moreover, we have the following continuity
+result on the log-softmax function
+Lemma 18 (Continuity of log-softmax). For any u, v ∈ Rd , we have
+log
+
+ eu 
+ ev 
+≤ 2 ∥u − v∥∞
+−
+log
+∥eu ∥1
+∥ev ∥1 ∞
+
+We defer the proof of Lemma 18 to the end of this section.
+Note that Algθ (·|Dt−1 , st ) corresponds to K entries in one column of H(L) applied through the softmax
+function. Therefore, combining Proposition 17, Lemma 18 and Eq. (11), we conclude that for any r > 0, there
+exists a subset Θ0 ∈ ΘD,L,M,D′ ,B with size L(3M D2 +2DD′ ) log(1+2r/δ) such that for any θ ∈ ΘD,L,M,D′ ,B ,
+there exists θ0 ∈ Θ0 with
+L
+BΘ δ
+log Algθ (·|Dt−1 , st ) − log Algθ0 (·|Dt−1 , st ) ∞ ≤ 2LBH
+L
+for all DT . Substituting r = B and letting δ = ρ/(2LBH
+BΘ ) yields the upper bound on NΘD,L,M,D′ ,B (ρ) in
+Lemma 16.
+
+Proof of Lemma 18. Define w := u − v. Then
+log
+
+ eu 
+ ev 
+−
+log
+∥eu ∥1
+∥ev ∥1 ∞
+
+≤ ∥u − v∥∞ + |log ∥eu ∥1 − log ∥ev ∥1 |
+
+Z 1  v+tw
+e
+= ∥u − v∥∞ +
+,
+w
+dt
+∥ev+tw ∥1
+0
+Z 1
+ev+tw
+· ∥w∥∞ dt
+≤ ∥u − v∥∞ +
+∥ev+tw ∥1 1
+0
+= 2 ∥u − v∥∞ ,
+where the third line uses the Newton-Leibniz formula.
+21
+
+We present the following standard results on the convergence of GD and AGD. We refer the reader to Nesterov
+(2003) for the proof of these results.
+Proposition 19 (Convergence guarantee of GD and AGD). Suppose L(w) is a α-strongly convex and
+β-smooth function on Rd . Denote the condition number κ := β/α and w∗ := arg minw L(w).
+t+1
+t
+t
+(a). The gradient descent iterates wGD
+:= wGD
+− η∇L(wGD
+) with stepsize η = 1/β and initial point
+0
+wGD = 0d satisfies
+
+t
+0
+t
+− w∗ ∥22 ,
+∥wGD
+− w∗ ∥22 ≤ exp(− )∥wGD
+κ
+β
+t
+t
+0
+L(wGD
+) − L(w∗ ) ≤ exp(− )∥wGD
+− w∗ ∥22 .
+2
+κ
+t+1
+t+1
+t
+t
+(b). The accelerated gradient descent (AGD, Nesterov (2003)) iterates wAGD
+:= vGD
+− β1 L(vAGD
+), vAGD
+:=
+√
+
+t+1
+t+1
+t
+0
+0
+wAGD
+(wAGD
++ √κ−1
+− wAGD
+) with wAGD
+= vAGD
+= 0d satisfies
+κ+1
+
+t
+0
+t
+− w∗ ∥22 ,
+∥wAGD
+− w∗ ∥22 ≤ (1 + κ) exp(− √ )∥wAGD
+κ
+α+β
+t
+t
+0
+L(wAGD
+) − L(w∗ ) ≤
+exp(− √ )∥wAGD
+− w∗ ∥22 .
+2
+κ
+
+D
+
+Proofs in Section 3
+
+In this section, c > 0 denotes universal constants that may differ across equations.
+
+D.1
+
+Proof of Theorem 6
+
+Proof of Eq. (5)
+T
+X
+
+Note that we have
+q
+
+EM∼Λ,a1:t−1 ∼AlgE ,st
+
+D2H (AlgE (·|Dt−1 , st ), Algθb(·|Dt−1 , st ))
+
+t=1
+
+=
+
+T
+X
+
+EM∼Λ,a1:t−1 ∼Alg0 ,st
+
+h t−1
+Y Alg (a |D
+
+t=1
+
+Λ,Alg0
+
+ t−1
+Y Alg (a |D
+E
+
+s
+
+s−1 , ss )
+
+s
+
+Alg0 (as |Ds−1 , ss )
+
+s=1
+
+v
+T u
+u
+X
+tE
+≤
+t=1
+
+E
+
+s−1 , ss )
+
+Alg0 (as |Ds−1 , ss )
+s=1
+
+2
+
+ q
+i
+· D2H (AlgE (·|Dt−1 , st ), Algθb(·|Dt−1 , st ))
+
+· EΛ,Alg0 D2H (AlgE (·|Dt−1 , st ), Algθb(·|Dt−1 , st ))
+
+v
+u
+T
+T q
+Y
+u
+AlgE (as |Ds−1 , ss ) 2 X
+≤ tEΛ,Alg0
+·
+EΛ,Alg0 D2H (AlgE (·|Dt−1 , st ), Algθb(·|Dt−1 , st )),
+Alg
+(a
+|D
+,
+s
+)
+s
+s−1
+s
+0
+s=1
+t=1
+where the second line follows from a change of distribution argument, the third line follows from CauchySchwartz inequality, and the fourth line uses the fact that
+ Q (x)Q (y|x) 2 Z Q (x)2 Q2 (y|x)
+1
+2
+1
+2
+Ex,y∼P1 ·P2
+=
+dµ(x, y)
+P1 (x)P2 (y|x)
+P1 (x)P2 (y|x)
+Z
+Z
+Z
+
+ Q (x) 2
+Q1 (x)2  Q22 (y|x)
+Q1 (x)2
+1
+dµ(y|x) dµ(x) ≥
+dµ(x) = Ex∼P1
+=
+,
+P1 (x)
+P2 (y|x)
+P1 (x)
+P1 (x)
+for any probability densities {Qi , Pi }i=1,2 with respect to some base measure µ.
+
+22
+
+Continuing the calculation of the above lines of bounds, we have
+T
+X
+
+q
+EM∼Λ,a1:t−1 ∼AlgE ,st
+
+D2H (AlgE (·|Dt−1 , st ), Algθb(·|Dt−1 , st ))
+
+t=1
+
+v
+u
+T
+Y
+√ u
+AlgE (as |Ds−1 , ss ) 2
+≤ T tEM∼Λ,a1:T −1 ∼Alg0 ,st
+Alg0 (as |Ds−1 , ss )
+s=1
+v
+u T
+uX
+·t
+EM∼Λ,a1:t−1 ∼Alg0 ,st D2H (AlgE (·|Dt−1 , st ), Algθb(·|Dt−1 , st ))
+t=1
+
+v
+u
+T
+hY
+√ u
+AlgE (as |Ds−1 , ss ) i
+= T tEM∼Λ,a1:T −1 ∼AlgE ,st
+Alg0 (as |Ds−1 , ss )
+s=1
+v
+u T
+uX
+·t
+EM∼Λ,a1:t−1 ∼Alg0 ,st D2H (AlgE (·|Dt−1 , st ), Algθb(·|Dt−1 , st ))
+t=1
+
+r
+
+log NΘ (1/(nT )2 ) + log(T /δ)
++ εreal
+n
+r
+ log[N (1/(nT )2 )T /δ] √
+
+q
+Θ
++ εreal ,
+≤ cT RAlgE ,Alg0
+n
+≤ cT
+
+q
+
+RAlgE ,Alg0
+
+where the first inequality follows from the Cauchy-Schwartz inequality, the first equality is due to a change
+of distribution argument, the second inequality uses Lemma 20. This completes the proof of Eq. (5).
+For any bounded function f such that |f (DT )| ≤ F for some F > 0, we have
+
+Proof of Eq. (6)
+
+EM∼Λ,a∼AlgE [f (DT )] − EM∼Λ,a∼Algθb[f (DT )]
+=
+
+T
+X
+
+EM∼Λ,a1:t ∼AlgE ,at+1:T ∼Alg [f (DT )] − EM∼Λ,a1:t−1 ∼AlgE ,at:T ∼Alg [f (DT )]
+b
+θ
+
+t=1
+
+≤ 2F
+
+T
+X
+
+b
+θ
+
+EM∼Λ,a1:t−1 ∼AlgE ,st DTV (AlgE (·|Dt−1 , st ), Algθb(·|Dt−1 , st )),
+
+t=1
+
+where the first equality uses the performance difference lemma, the last line follows from the variational
+representation of the total variation distance
+DTV (P, Q) =
+
+sup EP [f (X)]/2 − EQ [f (X)]/2,
+
+∥f ∥∞ =1
+
+and
+DTV (P1 (x)P2 (y | x)P3 (z | y), P1 (x)P4 (y | x)P3 (z | y)) = Ex∼P1 DTV (P2 (y | x), P4 (y | x))
+(12)
+p
+for probability densities {Pi }i=1,2,3,4 with respect to some base measure µ. Since DTV (P, Q) ≤ D2H (P, Q)
+for any distributions P, Q, it follows from Eq. (5) that
+EM∼Λ,a∼AlgE [f (DT )] − EM∼Λ,a∼Algθb[f (DT )]
+r
+ log [N (1/(nT )2 )T /δ] √
+
+q
+Θ
+≤ cF RAlgE ,Alg0 · T
++ εreal
+n
+with probability at least 1 − δ for some universal constant c > 0. Letting f (DT ) =
+|f (DT )| ≤ T concludes the proof of Theorem 6.
+23
+
+PT
+
+t=1 rt and noting that
+
+D.2
+
+Proof of Proposition 7
+
+By the jointly convexity of KL(P ∥ Q) with respect to (P, Q) and the fact that D2H (P, Q) ≤ KL(P ∥ Q), we
+have
+EDt−1 ,st ∼PAlg0 D2H (AlgE (·|Dt−1 , st ), PTS (·|Dt−1 , st ))
+Λ
+
+≤ EDt−1 ,st ∼PAlg0 KL(AlgE (·|Dt−1 , st ) ∥ PTS (·|Dt−1 , st ))
+Λ
+
+≤ EDT ∼PAlg0 KL(b
+a∗t ∥ PTS,t (·|DT )) ≤ εapprox .
+Λ
+
+Therefore, applying Lemma 20 gives
+#
+" T
+X
+
+2
+EM∼Λ,DT ∼PAlg0
+DH Algθb(·|Dt−1 , st ), AlgTS (·|Dt−1 , st )
+M
+
+t=1
+
+≤ 2EM∼Λ,DT ∼PAlg0
+M
+
+" T
+X
+
+#
+D2H
+
+Algθb(·|Dt−1 , st ), AlgE (·|Dt−1 , st )
+
+
+
++ D2H (AlgE (·|Dt−1 , st ), AlgTS (·|Dt−1 , st ))
+
+t=1
+
+ T log N (1/(nT )2 )T /δ 
+
+Θ
+≤c
++ T (εreal + εapprox )
+n
+with probability at least 1 − δ. Proposition 7 follows from similar arguments as in the proof of Theorem 6
+with εreal replaced by εreal + εapprox .
+
+D.3
+
+An auxiliary lemma
+
+Lemma 20 (General guarantee for supervised pretraining). Suppose Assumption A holds. Then the solution
+to Eq. (3) achieves
+" T
+#
+
+
+X
+
+T log NΘ (1/(nT )2 )T /δ
+2
+EDT ∼PAlg0
+DH Algθb(·|Dt−1 , st ), AlgE (·|Dt−1 , st ) ≤ c
++ T εreal .
+Λ
+n
+t=1
+with probability at least 1 − δ for some universal constant c > 0.
+Proof of Lemma 20.
+Define
+Lnt (θ) :=
+
+n
+X
+
+i
+log Algθ (ait |Dt−1
+, sit ),
+
+and Lnt (expert) :=
+
+i=1
+
+and let Ln (θ) =
+
+PT
+
+i
+log AlgE (ait |Dt−1
+, sit ),
+
+i=1
+
+t=1 Lnt (θ), Ln (expert) =
+T
+X
+
+n
+X
+
+PT
+
+t=1 Lnt (expert). We claim that with probability at least 1 − δ
+
+i
+h
+EDT D2H (Algθ (·|Dt−1 , st ), AlgE (·|Dt−1 , st ))
+
+t=1
+
+Ln (expert) − Ln (θ)
+T log NΘ (1/(nT )2 )
+T log(T /δ)
+4
+≤
++2
++2
++
+n
+n
+n
+n
+Alg
+
+(13)
+
+for all θ ∈ Θ, i ∈ [T ], where DT follows distribution PM 0 (·), M ∼ Λ. For now, we assume this claim holds.
+b ≥ Ln (θ∗ ) that
+Moreover, it follows from Lemma 14 and the fact Ln (θ)
+T
+b
+Ln (expert) − Ln (θ)
+Ln (expert) − Ln (θ∗ ) X Lnt (expert) − Lnt (θ∗ )
+≤
+=
+n
+n
+n
+t=1
+T
+h Alg (a |D , s ) i
+T log(T /δ) X
+t−1 t
+E t
+≤
++
+log EDT
+n
+Alg
+(a
+|D
+∗
+t
+t−1 , st )
+θ
+t=1
+
+24
+
+≤
+
+T log(T /δ)
++ T εreal
+n
+
+(14)
+
+with probability at least 1 − δ.
+Choosing θ = θb in Eq. (13) and combining it with Eq. (14) and a union bound, we obtain
+T
+X
+
+h
+i
+EDT D2H (Algθb(·|Dt−1 , st ), AlgE (·|Dt−1 , st ))
+
+t=1
+
+≤ T εreal + 2
+
+ T log N (1/(nT )2 ) + 2T log(2T /δ) + 2 
+
+≤ T εreal + cT
+
+Θ
+
+n
+ log N (1/(nT )2 ) + log(T /δ) 
+Θ
+
+n
+
+with probability at least 1 − δ for some universal constant c > 0. This completes the proof.
+Proof of Eq. (13) Let Θ0 be a 1/(nT )2 -covering set of Θ with covering number ncov = |Θi |. For k ∈
+[ncov ], t ∈ [T ], i ∈ [n], define
+i
+AlgE (ait |Dt−1
+, sit )
+,
+ℓikt = log
+i
+, sit )
+Algθk (ait |Dt−1
+where (DTi , ai ) are the trajectory and expert actions collected in the i-th instance. Using Lemma 14 with
+Xs = −ℓskt and a union bound over (k, t), conditioned on the trajectories (DT1 , . . . , DTn ), we have
+n
+n
+h
+ ℓi i
+X
+1X i
+ℓkt + log(ncov T /δ) ≥
+− log E exp − kt
+2 i=1
+2
+i=1
+
+for all k ∈ [ncov ], t ∈ [T ] with probability at least 1 − δ. Note that
+#
+"s
+h
+ ℓi 
+i
+i
+Algθk (ait |Dt−1
+, sit ) i
+i
+i
+i
+kt
+E exp −
+Dt−1 , st
+Dt−1 , st = ED
+i
+2
+, sit )
+AlgE (ait |Dt−1
+X q
+i
+i
+=
+Algθk (a|Dt−1
+, sit )AlgE (a|Dt−1
+, sit ),
+a∈At
+i
+where the last inequality uses the assumption that the actions ai are generated using the expert AlgE (·|Dt−1
+, sit ).
+Therefore, for any θ ∈ Θ covered by θk , we have
+
+h
+ ℓi i
+− log E exp − kt
+2
+h X q
+i
+i
+i
+≥ 1 − EDi
+Algθk (a|Dt−1
+, sit )AlgE (a|Dt−1
+, sit )
+a∈At
+
+i
+h X q
+i
+i
+, sit )AlgE (a|Dt−1
+, sit )
+Algθ (a|Dt−1
+= 1 − EDi
+a∈At
+
+− EDi
+
+q
+h X q
+q
+i
+i
+i
+i
+AlgE (a|Dt−1
+, sit )
+Algθk (a|Dt−1
+, sit ) − Algθ (a|Dt−1
+, sit )
+a∈At
+
+h
+i
+1
+i
+i
+≥ EDi D2H (AlgE (·|Dt−1
+, sit ), Algθ (·|Dt−1
+, sit ))
+2
+q
+h X q
+2 i1/2
+i
+i
+− EDi
+Algθ (·|Dt−1
+, sit ) − Algθk (·|Dt−1
+, sit )
+a∈A
+
+h
+i
+1
+1/2
+i
+i
+i
+i
+≥ EDi D2H (AlgE (·|Dt−1
+, sit ), Algθ (·|Dt−1
+, sit )) − ∥Algθ (·|Dt−1
+, sit ) − Algθk (·|Dt−1
+, sit )∥1
+2
+h
+i √2
+1
+2
+i
+i
+i
+i
+≥ EDi DH (AlgE (·|Dt−1 , st ), Algθ (·|Dt−1 , st )) −
+2
+nT
+25
+
+for all i ∈ [n], t ∈ [T ], where the first inequality uses √
+− log x ≥ 1 − x, the second inequality follows from
+√
+Cauchy-Schwartz inequality, the third inequality uses ( x − y)2 ≤ |x − y| for x, y ≥ 0, the last inequality
+uses the fact that θ is covered by θk and Lemma 15. Since any θ ∈ Θ is covered by θk for some k ∈ [ncov ],
+and for this k summing over t ∈ [T ] gives
+n X
+T
+X
+
+ℓikt = Ln (expert) − Ln (θk ) ≤ Ln (expert) − Ln (θ) +
+
+i=1 t=1
+
+1
+≤ Ln (expert) − Ln (θ) + 1.
+nT
+
+Therefore, with probability at least 1 − δ, we have
+
+√
+1
+Ln (expert) − Ln (θ) + 1 + T log(ncov T /δ) + 2
+2
+T
+h
+i
+nX
+≥
+EDT D2H (Algθ (·|Dt−1 , st ), Algexpert (·|Dt−1 , st ))
+2 t=1
+Alg
+
+for all θ ∈ Θ, where DT follows PΛ 0 . Multiplying both sides by 2/n and letting ncov = NΘ (1/(nT )2 ) yields
+Eq. (13).
+
+E
+
+Soft LinUCB for linear stochastic bandit
+
+Throughout this section, we use c > 0 to denote universal constants whose values may vary from line to
+line. Moreover, for notational simplicity, we use O(·) to hide universal constants, O(·) to hide polynomial
+±1
+), and Õ(·) to hide both poly-logarithmic terms in
+terms in the problem parameters (σ, b−1
+a , Ba , Bw , λ
+−1
+(T, A, d, 1/ε, 1/τ ) and polynomial terms in (σ, ba , Ba , Bw , λ±1 ). We also use the bold font at ∈ Rd to
+denote the selected action vector at at time t ∈ [T ].
+This section is organized as follows. Section E.1 discusses the embedding and extraction formats of transformers for the stochastic linear bandit environment. Section E.2 describes the LinUCB and the soft LinUCB
+algorithms. Section E.3 introduces and proves a lemma on approximating the linear ridge regression estimator, which is important for proving Theorem 8. We prove Theorem 8 in Section E.4 and prove Theorem 9
+in Section E.5.
+
+E.1
+
+Embedding and extraction mappings
+
+Consider the embedding in which for each t ∈ [T ], we have two tokens h2t−1 , h2t ∈ RD such that
+
+
+
+
+at
+ a 
+ a
+0d+1
+ rt 
+h2t−1
+h2t
+
+
+
+
+A
+t
+
+
+hb2t−1 
+ 0Ad 
+hb2t 
+ =:  c  , h2t = 
+
+ 
+h2t−1 = 
+0A
+
+
+ 0A  =: hc2t  ,
+h2t−1 
+
+
+
+
+0
+ 0 
+hd2t−1
+hd2t
+pos2t−1
+pos2t
+
+
+⊤
+
+⊤ ⊤
+rt
+denotes the action set at time t, ha2t = a⊤
+denotes the
+where hb2t−1 = At = a⊤
+t,1 . . . at,A
+t
+action and the observed reward at time t, hc2t−1 is used to store the (unnormalized) policy at time t, 0
+in hd denotes an additional zero vector with dimension O(dA), and posi := (i, i2 , 1)⊤ for i ∈ [2T ] is the
+positional
+Note that the token dimension D = O(dA). In addition, we define the token matrix
+ embedding.
+
+Ht := h1 , . . . , h2t ∈ RD×2t for all t ∈ [T ].
+Offline pretraining During pretraining, the transformer TFθ takes in Hpre
+:= HT as the input token
+T
+pre
+matrix and generates Hpost
+:=
+TF
+(H
+)
+as
+the
+output.
+For
+each
+step
+t
+∈
+[T
+], we define the induced
+θ
+T
+T
+exp(hpost,c )
+
+2t−1
+policy Algθ (·|Dt−1 , st ) := ∥ exp(hpost,c
+∈ ∆A , whose i-th entry is the probability of selecting action at,i
+)∥
+2t−1
+
+1
+
+given (Dt−1 , st ). We then find the transformer θb ∈ Θ by solving Eq. (3). Due to the decoder structure of
+transformer TFθ , the 2t − 1-th token only has access to the first 2t − 1 tokens. Therefore the induced policy
+is determined by the historical data (Dt−1 , st ) and does not depend on future observations.
+26
+
+Rollout At each time t ∈ [T ], given the action set At (i.e., current state st ) and the previous data Dt−1 ,
+D×(2t−1)
+we first construct the token matrix Hpre
+. The transformer then takes Hpre
+roll,t = [Ht−1 , h2t−1 ] ∈ R
+roll,t
+pre
+post
+post
+post
+as the input and generates Hroll,t = [Ht−1 , h2t−1 ] = TFθ (Hroll,t ). Next, the agent selects an action at ∈ At
+exp(hpost,c )
+
+2t−1
+according to the induced policy Algθ (·|Dt−1 , st ) := ∥ exp(hpost,c
+∈ ∆A and observes the reward rt .
+)∥
+2t−1
+
+1
+
+Embedding and extraction mappings To integrate the above construction into the framework described in Section 2, we have the embedding vectors h(st ) := h2t−1 , h(at , rt ) := h2t , the concatenation
+operator cat(h1 , . . . , hN ) := [h1 , . . . , hN ], the input token matrix
+D×(2t−1)
+H = Hpre
+,
+roll,t := cat(h(s1 ), h(a1 , r1 ), . . . , h(at−1 , rt−1 ), h(st )) ∈ R
+post
+
+post,c
+the output token matrix H = Hpost
+roll,t , and the linear extraction map A satisfies A · h−1 = A · h2t−1 = h2t−1 .
+
+E.2
+
+LinUCB and soft LinUCB
+
+Let T be the total time and λ, α > 0 be some prespecified values. At each time t ∈ [T ], LinUCB consists of
+the following steps:
+Pt−1
+1
+λ
+t
+2
+2
+1. Computes the ridge estimator wridge,λ
+= arg minw∈Rd 2t
+j=1 (rj − ⟨aj , w⟩) + 2t ∥w∥2 .
+q
+D
+E
+−1
+∗
+t
+2. For each action k ∈ [A], computes vtk
+:= at,k , wridge,λ
++ α a⊤
+t,k At at,k , where At = λId +
+Pt−1
+⊤
+j=1 aj aj .
+∗
+3. Selects the action at,j with j := arg maxk∈[A] vtk
+.
+
+Unless stated otherwise, in step 2 above we choose α = α(δ) with δ = 1/(2Ba Bw T ) and
+p
+p
+√
+√
+α(δ) := λBw + σ 2 log(1/δ) + d log((dλ + T Ba2 )/(dλ)) = O( d log T ) = Õ( d).
+In this work, to facilitate the analysis of supervised pretraining, we consider soft LinUCB (denoted by
+sLinUCB(τ )), which replaces step 3 in LinUCB with
+3’ Selects the action at,j with probability
+
+∗
+exp(vtj
+/τ )
+∗ /τ )
+∥exp(vtj
+∥
+
+for j ∈ [A].
+
+1
+
+Note that soft LinUCB recovers the standard LinUCB as τ → 0.
+
+E.3
+
+Approximation of the ridge estimator
+
+In this section, we present a lemma on how transformers can approximately implement the ridge regression
+estimator in-context.
+(L)
+
+Throughout the proof, for t ∈ [2T ], we let ht denote the i-th token in the output token matrix obtained
+after passing through an L-layer transformer. We also define readwridge : RD 7→ Rd be the operator that gives
+the values of d coordinates in the token vector that are used to store the estimation of the ridge estimate.
+Lemma 21 (Approximation of the ridge estimator). For any small ε > 0, there exists an attention-only
+(i.e., no MLP layers) transformer TFθ (·) with
+L=
+
+l 4T (B 2 + λ)
+a
+
+λ
+
+m
+log(T Ba (Ba Bw + σ)/(λε)) = Õ(T ),
+
+max M (l) ≤ 3,
+
+|||θ||| ≤
+
+√
+
+2+
+
+ℓ∈[L]
+
+λ+2
+= O(1)
+Ba2 + λ
+
+(L)
+
+t
+such that ∥readwridge (h2t−1 ) − wridge,λ
+∥2 ≤ ε for all t ∈ [T ].
+
+Moreover, there exists a transformer TFθ (·) with
+r
+l √
+ (2T (B 2 + λ) + λ)T B (B B + σ) m
+√
+Ba2 + λ
+a
+a w
+a
+L = 2 2T
+log
+= Õ( T ),
+2
+λ
+λ ε
+27
+
+max M (l) ≤ 4,
+ℓ∈[L]
+
+max D′
+
+(ℓ)
+
+≤ 4d,
+
+|||θ||| ≤ 10 +
+
+ℓ∈[L]
+
+λ+2
+= O(1)
+Ba2 + λ
+
+(L)
+
+t
+such that ∥readwridge (h2t−1 ) − wridge,λ
+∥2 ≤ ε for all t ∈ [T ].
+
+Results similar to Lemma 21 have been shown in Bai et al. (2023) under a different scenario. However, we
+remark that the second part of Lemma 21 has a weaker requirement on the number of layers as we prove
+that transformers can implement accelerated gradient descent (AGD, Nesterov (2003)) in-context.
+Proof of Lemma 21. Note that λId ⪯ At ⪯ (T Ba2 + λ)Id . Therefore the optimization problem
+t
+wridge,λ
+= arg min L(w) := arg min
+w∈Rd
+
+w∈Rd
+
+t−1
+X
+1
+λ
+(rj − ⟨aj , w⟩)2 +
+∥w∥22
+2(2t − 1) j=1
+2(2t − 1)
+
+is λ/(2t − 1)-strongly convex and (Ba2 + λ)-smooth and the condition number κ ≤ 2T (Ba2 + λ)/λ. Moreover,
+t
+by the definition of wridge,λ
+we have
+t
+∥wridge,λ
+∥2 = ∥(λId +
+
+t−1
+X
+
+t−1
+t−1
+t−1
+X
+X
+X
+−1
+⊤ −1
+aj a⊤
+)
+(
+a
+r
+)∥
+≤
+∥(λI
++
+a
+a
+)
+∥
+·
+∥
+aj rj ∥2
+j
+j
+2
+d
+j
+2
+j
+j
+
+j=1
+
+j=1
+
+j=1
+
+j=1
+
+T Ba (Ba Bw + σ)
+≤
+λ
+for all t ∈ [T ].
+Proof of part 1 By Proposition 19, we see that L = ⌈4T (Ba2 + λ) log(T Ba (Ba Bw + σ)/(λε))/λ⌉ steps
+L
+L
+0
+−
+such that ∥wGD
+= 0d finds wGD
+of gradient descent with stepsize η = 1/(Ba2 + λ) starting from wGD
+t
+wridge,λ ∥2 ≤ ε.
+Now we prove that one attention-only layer can implement one step of gradient descent
+ℓ+1
+ℓ
+wGD
+:= wGD
+−
+
+t−1
+η X
+ηλ
+ℓ
+( aj , wGD
+wℓ .
+− rj )aj −
+2t − 1 j=1
+2t − 1 GD
+
+We encode the algorithm using the last token (i.e., the 2t − 1-th token). Denote the first d entries of hd2t−1
+b and define readwridge (h2t−1 ) = w.
+b Starting from w
+b 0 = 0d , for each layer ℓ ∈ [L], we let the number of
+by w
+(ℓ)
+(ℓ)
+(ℓ)
+heads M (ℓ) = 3 and choose Q1,2,3 , K1,2,3 , V1,2,3 such that for even tokens h2j with j ≤ t − 1 and odd tokens
+h2j−1 with j ≤ t
+ 
+ ℓ−1 
+
+
+0
+b
+a
+w
+(ℓ) (ℓ−1)
+(ℓ) (ℓ−1)
+(ℓ) (ℓ−1)
+(ℓ) (ℓ−1)
+(ℓ) (ℓ−1)
+j
+, K1 h2j
+=
+, V1 h2j
+= −η aj  , K1 h2j−1 = 0, V1 h2j−1 = 0
+Q1 h2t−1 =
+−rj
+1
+0
+(ℓ)
+
+(ℓ)
+
+(ℓ)
+
+(ℓ)
+
+(ℓ)
+
+(ℓ)
+
+Q2 = −Q1 , K2 = K1 , V2 = −V1 ,
+
+ 
+
+
+
+
+
+0
+1
+1
+1
+(ℓ) (ℓ−1)
+(ℓ) (ℓ−1)
+(ℓ) (ℓ−1)
+(ℓ) (ℓ−1)
+b ℓ−1  .
+Q3 h2t−1 = −(2t − 1) , K3 h2j
+=  1  , K3 h2j−1 =  1  , V3 h2t−1 = −ηλ w
+1
+2j
+2j − 1
+0
+b part of h2t−1 (i.e.,
+Summing up the three heads and noting that t = σ(t) − σ(−t), we see that the w
+readwridge (h2t−1 )) has the update
+bl = w
+b l−1 −
+w
+
+t
+η X
+b l−1 − rj ) − σ(rj − aj , w
+b l−1 )]aj
+[σ( aj , w
+2t − 1 j=1
+t−1
+
+−
+
+i
+ηλ h X
+(ℓ) (ℓ−1)
+(ℓ) (ℓ−1)
+(ℓ) (ℓ−1)
+(σ(1 + 2j − 2t)V3 h2j−1 + σ(1 + 2j − 2t + 1)V3 h2j ) + V3 h2t−1
+2t − 1 j=1
+28
+
+b l−1 −
+=w
+
+t
+η X
+ηλ
+(ℓ) (ℓ−1)
+b l−1 − rj ]aj −
+[ aj , w
+V h
+2t − 1 j=1
+2t − 1 3 2t−1
+
+b l−1 −
+=w
+
+t−1
+ηλ
+η X
+b l−1 − rj ]aj −
+b l−1 ,
+[ aj , w
+w
+2t − 1 j=1
+2t − 1
+
+which is one step of gradient descent with stepsize η. Moreover, it is easy to see that one can choose the
+√
+(ℓ)
+(ℓ)
+(ℓ)
+(ℓ)
+(ℓ)
+marices such that maxm∈[3] ∥Qm ∥op = maxm∈[3] ∥Km ∥op = 2 and ∥V1 ∥op = ∥V2 ∥op = η, ∥V3 ∥op =
+√
+λη. Therefore the norm of the transformer |||θ||| ≤ 2 + (λ + 2)/(Ba2 + λ).
+p
+Proof of part 2 Similarly, Proposition 19 shows L = ⌈2 2T (Ba2 + λ)/λ log((1+κ)T Ba (Ba Bw + σ)/(λε))⌉
+L
+t
+steps of accelerated gradient descent gives ∥wAGD
+− wridge,λ
+∥2 ≤ ε.
+Again, we encode the algorithm using the last token (i.e., the 2t − 1-th token). Denote the first d, d + 1 ∼
+b a, w
+b b, v
+b respectively. Starting from w
+b a0 = w
+b b0 = v
+b 0 = 0d , AGD updates
+2d, 2d + 1 ∼ 3d entries of hd2t−1 by w
+the parameters as follows:
+b aℓ = w
+b aℓ−1 + (b
+b aℓ−1 ) − η∇L(b
+w
+vℓ−1 − w
+vℓ−1 ),
+√
+κ−1 ℓ
+b −w
+b bℓ−1 ) − v
+b ℓ−1 ],
+bℓ = v
+b ℓ−1 + [w
+b aℓ + √
+(w
+v
+κ+1 a
+
+(15a)
+(15b)
+
+b bℓ = w
+b bℓ−1 + (w
+b aℓ − w
+b bℓ−1 ).
+w
+
+(15c)
+
+We show that one attention layer and one MLP layer can implement one step of AGD as above. Namely,
+b replacing
+Eq. (15a) can be obtained using the same attention layer we constructed for gradient descent with v
+b and an extra head with
+w,
+
+ 
+
+
+
+0
+1
+2t − 1
+(ℓ) (ℓ−1)
+(ℓ) (ℓ−1)
+(ℓ) (ℓ−1)
+b ℓ−1 − w
+b al−1 
+=  1  , V4 h2t−1 = v
+Q4 h2t−1 = −(2t − 1)2  , K4 hi
+2
+i
+1
+0
+b ℓ−1 − w
+b aℓ−1 . Denote the output tokens of the attention layer by h̃. Eq. (15b), (15c)
+for i ≤ 2t − 1 that gives v
+(ℓ)
+(ℓ)
+can be implemented using one layer of MLP. Concretely, we choose W1 , W2 such that
+
+
+√
+
+b aℓ − w
+b bℓ−1 ) − v
+b l−1
+waℓ + √κ−1
+(w
+κ+1
+
+
+
+√
+
+
+−waℓ − √κ−1
+(ℓ) (ℓ−1)
+b bℓ−1 ) + v
+b l−1  ,
+b aℓ−1 − w
+(w
+κ+1
+W1 h̃2t−1 = 
+
+
+
+waℓ − wbℓ−1
+ℓ−1
+ℓ
+−wa + wb
+
+
+0
+w
+b bℓ 
+(ℓ)
+(ℓ) (ℓ−1)
+.
+W2 σ(W1 h̃2t−1 ) = 
+v
+bℓ 
+0
+
+
+Since t = σ(t) − σ(−t) for t ∈ R, it is readily verified that one can choose the linear maps such that
+√
+√
+(ℓ)
+(ℓ)
+∥W1 ∥op ≤ 4 2, ∥W2 ∥op = 2. Combining this with the attention layer for Eq. (15a) and noting that
+√
+(ℓ)
+∥V4 ∥op = 2, we verify that the transformer we constructed has norm |||θ||| ≤ 10 + (λ + 2)/(Ba2 + λ). This
+completes the proof of Lemma 21.
+
+29
+
+E.4
+
+Proof of Theorem 8
+
+We construct a transformer that implements the following steps at each time t ∈ [T ] starting with hx2t−1 =
+hpre,x
+2t−1 for x ∈ {a, b, c, d}
+
+
+pre,{a,b,c}
+h2t−1
+
+ w
+ b ridge 
+ pre,{a,b,c} 
+
+
+h2t−1
+⋆
+
+
+
+
+ w
+
+−1
+ A\
+ b ridge 
+ pre,{a,b,c} 
+at,1 
+t
+
+
+
+
+ post,a 
+ pre,a 
+⋆
+h2t−1
+
+
+
+
+h2t−1
+h2t−1
+..
+
+
+
+
+
+
+−1
+b ridge 
+.
+post,b 
+
+
+
+ A\
+
+hpre,b  step 1  w
+a
+t,1
+step
+3
+step
+2
+2t−1  ,
+2t−1  −
+ =:  hpost,c
+ −−−−→  \
+
+ −−−−→  t .
+(16)
+−
+−
+−
+→
+h2t−1 = 
+−1
+⋆
+pre,c
+ At at,A 
+
+
+
+
+
+h
+h2t−1 
+..
+2t−1
+
+
+
+
+
+
+0
+ vbt1 /τ 
+
+
+hpre,d
+hpost,d
+
+
+ A\
+
+2t−1
+−1
+2t−1
+pos
+
+
+ t at,A 
+..
+
+
+
+
+.
+0
+
+
+ vbtA /τ 
+pos
+
+
+
+
+0
+pos
+−1
+t
+b ridge is an approximation to the ridge estimator wridge,λ
+where pos := [t, i2 , 1]⊤ ; w
+; A\
+t at,k are approxirD
+E
+−1
+b ridge , at,k ⟩ + α
+mations to A−1
+btk are approximations to vtk := ⟨w
+at,k , A\
+t at,k ; v
+t at,k , which are also
+
+approximations to
+∗
+t
+vtk
+:= wridge,λ
+, at,k + α
+
+q
+
+at,k , A−1
+t at,k
+
+for k ∈ [A]. After passing through the transformer, we obtain the policy
+Algθ (·|Dt−1 , st ) :=
+
+exp(hpost,c
+2t−1 )
+∥ exp(hpost,c
+2t−1 )∥1
+
+∈ ∆A .
+
+We claim the following results which we will prove later.
+Step 1 For any ε > 0, there exists a transformer TFθ (·) with
+r
+ (2T (B 2 + λ) + λ)T B (B B + σ) m
+l √
+√
+Ba2 + λ
+a
+a w
+a
+log
+=
+Õ(
+T ),
+L = 2 2T
+λ
+λ2 ε
+λ+2
+(l)
+max M (l) ≤ 4, max D′ ≤ 4d, |||θ||| ≤ 10 + 2
+= O(1)
+Ba + λ
+ℓ∈[L]
+ℓ∈[L]
+t
+b ridge − wridge,λ
+that implements step 1 in (16) with ∥w
+∥2 ≤ ε.
+
+Step 2 For any ε > 0, there exists a transformer TFθ (·) with
+r
+ (2T (B 2 + λ) + λ)B m
+l √
+√
+Ba2 + λ
+a
+a
+log
+=
+Õ(
+T ), max M (l) ≤ 4A,
+L = 2 2T
+λ
+λ2 ε
+ℓ∈[L]
+√
+λ+3
+(l)
+max D′ ≤ 4dA, |||θ||| ≤ 10 + A( 2
++ 2) = O(A)
+Ba + λ
+ℓ∈[L]
+−1
+−1
+that implements step 2 in (16) with ∥A\
+t at,k − At at,k ∥2 ≤ ε for k ∈ [A].
+
+Step 3 Suppose that the approximation error in Step 2 satisfies ε2 ≤ b2a /[2(Ba2 + λ)T Ba ]. For any ε > 0, there
+exists a one-layer transformer TFθ (·) with
+p
+(ℓ)
+L = 2, max M (l) ≤ 4A, max D′ ≤ O(A T α/(τ ε)), |||θ||| ≤ O(A + T (α/(τ ε))1/4 + α/τ )
+ℓ∈[L]
+
+ℓ∈[L]
+
+that implements step 3 in (16) with |b
+vtk /τ − vtk /τ | ≤ ε for k ∈ [A].
+30
+
+Denote the errors ε appear in each step by ε1 , ε2 , ε3 , respectively. Define for all k ∈ [A] that
+q
+∗
+t
+vtk
+:= wridge,λ
+, at,k + α at,k , A−1
+t at,k ,
+which are the actual values used to compare across different actions in LinUCB. Then for all k ∈ [A], we
+have the approximation error
+∗
+v∗
+vtk
+vbtk
+vtk
+vbtk
+vtk
+≤ tk −
++
+−
+−
+τ
+τ
+τ
+τ
+τ
+τ
+rD
+q
+E
+1
+1
+−1
+−1
+t
+b ridge , at,k | + α at,k , At at,k − α
+≤ | wridge,λ − w
+at,k , A\
++ ε3
+a
+t,k
+t
+τ
+τ
+Ba ε1
+αBa ε2
+rD
+≤
++
+Eo + ε3
+nq
+τ
+−1
+\
+a
+,
+A
+a
+2τ min
+at,k , A−1
+a
+,
+t,k
+t,k
+t,k
+t
+t
+p
+T (Ba2 + λ)αBa ε2
+Ba ε1
+≤
++
++ ε3 ,
+τ
+ba τ
+
+where the lastpline uses Eq. (17). For a targeted approximation error ε, choosing ε1 = ετ /(12Ba ), ε2 =
+∗
+min{ba τ ε/(12 T (Ba2 + λ)αBa ), b2a /[2(Ba2 + λ)T Ba ]} and ε3 = ε/12, we obtain |vtk
+/τ − vbtk /τ | ≤ ε/2 for all
+k ∈ [A].
+From the proof of each step, we can verify that the token dimension D can be chosen to be of order O(dA).
+Moreover, due to the convergence guarantee for each iteration of AGD in Proposition 19, it can be verified
+(ℓ)
+that there exists some sufficiently large value R > 0 with log R = Õ(1) such that we have ∥hi ∥2 ≤ R for
+∞
+R
+all layer ℓ ∈ [L] and all token i ∈ [2T ] in our TF construction. Therefore, TFθ and TFθ generate the same
+output for all the token matrices we consider, and w.l.o.g. we may assume in the proof of each step that the
+transformers we consider are those without truncation (i.e., TFθ = TF∞
+θ ).
+√
+Finally, combining Step 1—3 with α = Õ( d) and applying Lemma 18 completes the proof of Theorem 8.
+b ridge and the d + 1 ∼ 3d entries (denoted
+Proof of Step 1 We use the first d entries of hd2t−1 to represent w
+b ridge . Step 1 follows immediately from the second part
+by ⋆) to record intermediate results for computing w
+of Lemma 21.
+Proof of Step 2 Note that
+A−1
+t at,k = arg min
+x∈Rd
+
+1
+1
+x ⊤ At x −
+⟨x, at,k ⟩ =: arg min Lk (x)
+2(2t − 1)
+(2t − 1)
+x∈Rd
+
+is the global minimizer of a λ/(2t − 1)-strongly convex and (Ba2 + λ)-smooth quadratic function with the
+condition number κ ≤ 2T (Ba2 + λ)/λ. Moreover, we have
+−1
+∥A−1
+t at,k ∥2 ≤ ∥At ∥op ∥at,k ∥2 ≤ Ba /λ.
+p
+It follows from Proposition 19 that L = ⌈2 2T (Ba2 + λ)/λ log((1 + κ)Ba /(λε))⌉ steps of accelerated gradient
+−1
+−1
+descent finds A\
+a with ∥A\
+a − A−1 a ∥ ≤ ε.
+t
+
+t,k
+
+t
+
+t,k
+
+t
+
+t,k 2
+
+Similar to the proof of Lemma 21, we can construct a transformer such that each (self-attention+MLP) layer
+implements one step of the accelerated gradient descent (AGD) for all k ∈ [A]. Denote the (k + 2)d + 1 ∼
+b a,tk , w
+b b,k , v
+bk
+(k + 3)d, (A + 1 + 2k)d + 1 ∼ (A + 2 + 2k)d, (A + 2 + 2k)d + 1 ∼ (A + 3 + 2k)d entries of hd2t−1 by w
+pre,d
+0
+0
+0
+b a,tk , w
+b b,k , v
+bk = 0d .
+for k ∈ [A]. Note that in the input vector h2t−1 we have w
+(ℓ)
+
+(ℓ)
+
+(ℓ)
+
+For each layer ℓ ∈ [L] and k ∈ [A], we choose Qk1,k2,k3,k4 , Kk1,k2,k3,k4 , Vk1,k2,k3,k4 such that for even tokens
+h2j with j ≤ t − 1 and odd tokens h2j−1 with j ≤ t
+ 
+ ℓ−1 
+ 
+0
+a
+b
+v
+(ℓ) (ℓ−1)
+(ℓ) (ℓ−1)
+(ℓ) (ℓ−1)
+(ℓ) (ℓ−1)
+(ℓ) (ℓ−1)
+Qk1 h2t−1 = k
+, Kk1 h2j
+= j , Kk1 h2j−1 = 0, Vk1 h2j
+= −η aj  , Vk1 h2j−1 = 0
+0
+0
+0
+31
+
+(ℓ)
+
+(ℓ)
+
+(ℓ)
+
+(ℓ)
+
+(ℓ)
+
+(ℓ)
+
+Qk2 = −Qk1 , Kk2 = Kk1 , Vk2 = −Vk1 ,
+
+
+ 
+
+
+
+
+1
+1
+1
+0
+ 1 
+1
+1 − 2t
+(ℓ)
+(ℓ−1)
+(ℓ)
+(ℓ−1)
+(ℓ)
+(ℓ−1)
+(ℓ) (ℓ−1)
+
+
+
+
+
+=
+Qk3 h2t−1 = 
+vkℓ−1  ,
+2j  , Kk3 h2j−1 = 2j − 1 , Vk3 h2t−1 = η aj,k − λb
+ 1  , Kk3 h2j
+0
+0
+0
+0
+
+
+
+
+
+
+
+
+2t − 1
+1
+1
+0
+−(2t − 1)2 
+ 1 
+
+
+1
+(ℓ) (ℓ−1)
+(ℓ)
+(ℓ)
+(ℓ)
+(ℓ)
+(ℓ)
+(ℓ−1)
+ℓ−1
+ℓ−1
+, K h = 
+
+
+
+ bk − w
+b a,k  ,
+Qk4 h2t−1 = 
+k4 2j
+
+
+(2j)2  , Kk4 h2j−1 = (2j − 1)2  , Vk4 h2t−1 = v
+1
+0
+0
+0
+0
+(ℓ) (ℓ−1)
+
+(ℓ) (ℓ−1)
+
+where η = 1/(Ba2 + λ) and the values Vkt h2j , Vkt h2j−1 , t = 1, 2, 3, 4 are supported on the entries
+b a,k . Summing up the M = 4A heads and noting that t = σ(t) − σ(−t), we see that the
+corresponding to w
+b a,k part of ht has the update
+w
+ℓ−1
+ℓ
+b a,k
+b a,k
+w
+=w
+−
+
+t−1
+η X
+ηλ
+(ℓ) (ℓ−1)
+(ℓ) (ℓ−1)
+bkℓ−1 ) − σ(− aj , v
+bkℓ−1 )]aj −
+[σ( aj , v
+V h
++ Vk4 h2t−1
+2t − 1 j=1
+2t − 1 k3 2t−1
+
+ℓ−1
+b a,k
+=w
+−
+
+t−1
+ηλ
+η X
+(ℓ) (ℓ−1)
+(ℓ) (ℓ−1)
+bkℓ−1 aj −
+aj , v
+V h
++ Vk4 h2t−1
+2t − 1 j=1
+2t − 1 k3 2t−1
+
+bkℓ−1 −
+=v
+
+t−1
+η X
+ηλ ℓ−1
+η
+bkℓ−1 aj −
+bk +
+aj , v
+v
+at,k
+2t − 1 j=1
+2t − 1
+2t − 1
+
+bkℓ−1 − η∇L(vkℓ−1 ),
+=v
+which is one step of gradient descent with step size η (c.f. Eq. 15a). Moreover, it can be verified that one can
+√
+(ℓ)
+(ℓ)
+(ℓ)
+choose the matrices such that maxk∈[A],m∈[4] ∥Qkm ∥op = maxk∈[A],m∈[4] ∥Kkm ∥op ≤ 2 and maxk∈[A] ∥Vk1 ∥op =
+√
+(ℓ)
+(ℓ)
+(ℓ)
+maxk∈[A] ∥Vk2 ∥op = η, maxk∈[A] ∥Vk3 ∥op ≤ (λ + 1)η, maxk∈[A] ∥Vk4 ∥op ≤ 2. Therefore, the norm of
+the attention layer
+√
+|||θ||| ≤ 2(A + 1) + A(λ + 3)/(Ba2 + λ).
+(ℓ)
+
+(ℓ)
+
+Following the construction as in the proof of Lemma 21, we can choose W1 , W2 that implement Eq. (15b), (15b)
+√
+√
+(ℓ)
+(ℓ)
+′(ℓ)
+for all k ∈ [A] simultaneously and we also have ∥W1 ∥op ≤ 4 2, W2 = 2 with D′
+= 4dA. It follows
+from combining the bounds for the weight matrices that
+√
+√
+√
+√
+√
+λ+3
+λ+3
+|||θ||| ≤ 2(A + 1) + A( 2
++ 2) + 2 + 4 2 ≤ 10 + A( 2
++ 2) = O(A).
+Ba + λ
+Ba + λ
+(0)
+
+Proof of Step 3 Denote the i-th token of the output of step 2 (i.e., the input of step 3) by hi . We
+use the (3A + 3)d + 1 ∼ (3A + 3)d + A entries of hd2t−1 to record vbt1 /τ, . . . , vbtA /τ and use the (3A + 3)d +
+A + 1 ∼ (3A + 3)d + 2A entries to store additional information (denoted by va,t1 , . . . , va,tA ) for computing
+(ℓ)
+(ℓ)
+(ℓ)
+vbt1 /τ, . . . , vbtA /τ . Concretely, for all k ∈ [A], we choose Qk1,k2,k3,k4 , Kk1,k2,k3,k4 , Vk1,k2,k3,k4 such that for
+even tokens h2j with j ≤ t − 1 and odd tokens h2j−1 with j ≤ t
+
+
+
+
+
+
+b ridge
+w
+aj,k
+0d
+2t − 1
+ −B 
+ −B 
+(1) (0)
+(1) (0)
+(1) (0)
+
+
+
+
+
+Qk1 h2t−1 = 
+ 1  , Kk1 h2j−1 = B(2j − 1) , Kk1 h2j = 2Bj  ,
+0
+0
+0
+
+
+ 
+0
+0
+(1) (0)
+(1) (0)
+Vk1 h2j−1 = 2j − 1 , Vk1 h2j = 2j  ,
+0
+0
+
+
+b ridge
+−w
+ 2t − 1 
+(1) (0)
+(1)
+(1)
+(1)
+(1)
+
+Qk2 h2t−1 = 
+ 1  , Kk2 = Kk1 , Vk2 = −Vk1 ,
+0
+32
+
+
+
+
+
+
+
+−1
+0d
+aj,k
+A\
+t at,k
+
+
+ 2t − 1 
+
+
+(1) (0)
+ , K(1) h(0) =  −B  , K(1) h(0) =  −B  ,
+Qk3 h2t−1 = 
+2j
+2j−1
+k3
+k3
+2Bj 
+
+B(2j − 1)
+
+1
+0
+0
+0
+
+
+ 
+0
+0
+(1) (0)
+(1) (0)
+Vk3 h2j−1 = 2j − 1 , Vk3 h2j = 2j  ,
+0
+0
+
+
+−1
+\
+−At at,k
+ 2t − 1 
+(1) (0)
+
+ , K(1) = K(1) , V(1) = −V(1) ,
+Qk4 h2t−1 = 
+k4
+k3
+k4
+k3
+
+1
+0
+(1) (0)
+
+(1) (0)
+
+where B := T Ba2 (Ba Bw +σ)/λ+2Ba2 /λ; Vk1 hc , Vk2 hc (c = 2j −1, 2j) are supported on the [(3A+3)d+k](1) (0)
+(1) (0)
+th entry of hdc ; Vk3 hc , Vk4 hc (c = 2j − 1, 2j) are supported on the [(3A + 3)d + A + k]-th entry of hdc .
+b ridge , aj,k ⟩ ≤ ∥w
+b ridge ∥2 ∥aj,k ∥2 ≤ B, it follows that
+Since ⟨w
+D
+E
+(1) (0)
+(1) (0)
+b ridge , aj,k ⟩ + (2j − 1 − (2t − 1))B ≤ 0
+Qk1 h2t−1 , Kk1 h2j−1 = ⟨w
+D
+E
+(1) (0)
+(1) (0)
+for j < i. Likewise Qk1 h2t−1 , Kk1 h2j ≤ 0 for j < i. Since we assume the error ε2 ≤ b2a /[2(Ba2 T + λ)Ba ]
+in Step 2, ba ≤ ∥at,k ∥2 ≤ Ba and λId ⪯ At ⪯ (Ba2 T + λ)Id , it follows that
+D
+E
+−1
+−1
+−1
+\
+at,k , A\
+a
+≥ at,k , A−1
+t,k
+t
+t at,k − ∥at,k ∥2 ∥At at,k − At at,k ∥2
+≥
+
+b2a
+1
+b2a
+≥
+=: · l1 ,
+2
+2(Ba T + λ)
+2T (Ba2 + λ)
+T
+
+(17)
+
+E
+2Ba2
+−1
+−1
+−1
+−1
+\
+=: l2 .
+(18)
+at,k , A\
+t at,k ≤ at,k , At at,k + ∥at,k ∥2 ∥At at,k − At at,k ∥2 ≤
+λ
+D
+E
+D
+E
+(1) (0)
+(1) (0)
+−1
+Therefore, Qk3 h2t−1 , Kk3 h2j−1 = A\
+t at,k , aj,k + (2j − 1 − (2t − 1))B ≥ 0 iff j = i. Likewise
+D
+E
+(1) (0)
+(1) (0)
+Qk3 h2t−1 , Kk3 h2j ≤ 0 for j < i. Similar results hold for the k2, k4-th heads. By some basic algeD
+
+bra and noting that t = σ(t) − σ(−t) forDt ∈ R, we see
+E that the attention layer updates the position for
+−1
+\
+b
+vb /τ, vb
+with the values ⟨w
+,a ⟩, a ,A a
+for all k ∈ [A], respectively. Moreover, it can be
+tk
+
+a,tk
+
+ridge
+
+t,k
+
+t,k
+
+t
+
+t,k
+
+verified that one can choose the matrices such that
+max
+k∈[A],m∈[4]
+
+(1)
+
+∥Qkm ∥op =
+
+(1)
+
+max
+k∈[A],m∈[4]
+
+∥Vkm ∥op = 1,
+
+max
+k∈[A],m∈[4]
+
+(1)
+
+∥Kkm ∥op ≤ B.
+
+p
+Now, to compute the value of vbtk /τ in step 3 in (16), what remains is to approximately compute α vba,tk ,
+add the result to the position for vbtk /τ , and multiplied it by 1/τ .
+rD
+D
+E
+E
+−1
+−1
+\
+Since vba,tk = at,k , At at,k ∈ [l1 /T, l2 ], to approximately compute
+at,k , A\
+a
+, it suffices to apt,k
+t
+√
+proximate f (x) = x, x ∈ [l1 /T, l2 ]. For any level of approximation error εapprox > 0, let (x1 , x2 , . . . , xN ) ∈
+[l1 /T, l2 ] satisfy
+√
+√
+x1 = l1 /T, xN = l2 ,
+0 ≤ xj+1 − xj ≤ εapprox , for j ∈ [N − 1].
+Define the function
+√
+f˜(x) := x1 +
+
+N
+−1
+X
+
+σ(x − xj ) √
+
+j=1
+
+33
+
+1
+√ .
+xj+1 + xj
+
+√
+Note that f˜(x) is a piecewise linear function on [l1 /T, l2 ] with f˜(xi ) = xi for i ∈ [N ]. By some basic
+algebra, it can the shown that for εapprox < l1 /T , the difference between f (x) and f˜(x)
+q
+t
+√
+max |f˜(c) − f (c)| = max
+xj + p
+√ − xj + t(xj+1 − xj ) ≤ εapprox
+c∈[xj ,xj+1 ]
+t∈[0,1]
+xj + 1 + xj
+√
+
+√
+
+p
+xj < c εapprox l1 /T for some universal constant c > 0 and all j ∈ [N − 1].
+p
+Therefore, there exists a function f˜(x) with N = O( T /εapprox ) that satisfies
+when
+
+xj+1 −
+
+max |f˜(x) − f (x)| ≤ εapprox .
+
+[l1 /T,l2 ]
+
+As a consequence, we verify that one can implement f˜(b
+va,tk ) for all k ∈ [A] simultaneously by constructing
+a two-layer MLP with
+√
+√
+(1)
+(1)
+∥W1 ∥op ≤ O( N ), ∥W2 ∥op ≤ O( T N ), D′ ≤ AN.
+Choose εapprox = τ ε/α. Substituting the expressions for N, εapprox into the upper bounds on the norms, we
+obtain
+(1)
+
+(1)
+
+∥W1 ∥op ≤ O((αT /(τ ε))1/4 ), ∥W2 ∥op ≤ O(T 3/4 (α/(τ ε))1/4 ), D′ ≤ O(A(αT /(τ ε))1/2 ).
+(2)
+
+(2)
+
+Lastly, we can construct another two-layer MLP with weights W1 , W2
+summation and multiplication updates
+(2)
+
+(2) (1)
+
+b←v
+b + W2 σ(W1 h2t−1 ) ≈ v
+b+
+v
+
+such that it implements the
+
+
+i⊤
+p
+α hp
+vbtk
+b+
+vba,t1 , . . . , vba,tA =
+−1 v
+τ
+τ
+τ
+
+1
+
+with ∥b
+vtk /τ − vtk /τ ∥ ≤ ε for all k ∈ [A]. We verify that the weight matrices can be chosen with
+(2)
+
+(2)
+
+∥W1 ∥op ≤ O(1), ∥W2 ∥op ≤ O(α/τ )
+and D′ ≤ O(A).
+Therefore the norm of the transformer that implements step 3 satisfies
+|||θ||| ≤ O(B + 1 + 4A + T 3/4 (α/(τ ε))1/4 + α/τ ) = O(A + T (α/(τ ε))1/4 + α/τ ).
+This conclude the proof of Step 3.
+
+E.5
+
+Proof of Theorem 9
+
+By Theorem 6 and Theorem 8 with εreal = ε = 1/T 3 , it suffices to show soft LinUCB with parameter τ has
+the regret guarantee
+EM∼Λ
+
+T
+hX
+t=1
+
+i
+√
+max ⟨at,k , w∗ ⟩ − RM,AlgsLinUCB(τ ) (T ) ≤ O(d T log(T )).
+k
+
+This follows directly from a regret analysis similar to that for LinUCB (see
+q or Theorem
+D e.g. Chu etEal. (2011)
+∗
+t
+19.2 in Lattimore and Szepesvári (2020)). Concretely, note that vtk
+= wridge,λ
+, at,k + α
+is the solution to the optimization problem
+
+maximize
+
+⟨w, at,k ⟩
+
+subject to
+
+t
+t
+w ∈ Ct := {w|(w − wridge,λ
+)⊤ At (w − wridge,λ
+) ≤ α2 },
+
+34
+
+at,k , A−1
+t at,k
+
+where we recall α = α(δ0 ) with δ0 = 1/(2Ba Bw T ) and
+p
+√
+α = α(δ0 ) := λBw + σ 2 log(1/δ0 ) + d log((dλ + T Ba2 )/(dλ)).
+
+(19)
+
+Moreover, standard analysis as in the proof of Theorem 19.2 in Lattimore and Szepesvári (2020) shows with
+probability over 1 − 1/(2Ba Bw T ) we have w∗ ∈ Ct for all t ∈ [T ]. Denote this event by E0 . Moreover, let
+pt,k denote the probability of soft LinUCB selecting the action at,k at time t for all k ∈ [A]. For any ε > 0,
+∗
+∗
+let St (ε) := {k ∈ [A] : vtk
+− maxj∈[A] vtj
+≤ ε}.
+Therefore, on the event E0 at time t we have
+∗
+max vtj
+−
+j
+
+A
+X
+
+X
+
+∗
+pt,k vtk
+=
+
+k=1
+
+X
+
+∗
+∗
+pt,k (max vtj
+− vtk
+)+
+j
+
+k∈St (ε0 )
+
+∗
+∗
+pt,k (max vtj
+− vtk
+)
+
+k∈S
+/ t (ε0 )
+
+j
+
+ ε 
+0
+∗
+∗
+(max vtj
+− vtk
+)
+exp −
+j
+τ
+k∈S
+/ t (ε0 )
+ ε 
+√
+0
+Ba (Bw + 2α/ λ),
+≤ ε0 + 2A exp −
+τ
+X
+
+≤ ε0 +
+
+where the second line uses
+
+ ε 
+ ε 
+0
+0
+· max pt,k ≤ exp −
+,
+pt,k ≤ exp −
+τ
+τ
+√
+√
+∗
+and the last line follows from that |vtj
+| ≤ Ba (Bw + 2α/ λ) on the event E0 . Choosing ε0 = ε1 /2 := 1/ 4T
+√
+√
+and noting that τ = ε0 / log(4T ABa (Bw + 2α/ λ)) = Õ(1/ T ), we obtain
+∗
+max vtj
+−
+j
+
+A
+X
+
+∗
+pt,k vtk
+≤ ε1 .
+
+k=1
+
+Now, on the event E0 , we have
+∗
+max ⟨w∗ , at,j ⟩ ≤ max vtj
+≤
+
+j∈[A]
+
+j∈[A]
+
+A
+X
+
+∗
+pt,k vtk
++ ε1 =
+
+k=1
+
+A
+X
+
+pt,k ⟨w̃k , at,k ⟩ + ε1
+
+k=1
+
+for some w̃k ∈ Ct , k ∈ [A]. Therefore, on E0 for each t ∈ [T ]
+max ⟨w∗ , at,j ⟩ −
+
+j∈[A]
+
+≤ ε1 +
+
+A
+X
+
+pt,k ⟨w∗ , at,k ⟩ ≤ ε1 +
+
+pt,k ⟨w̃k − w∗ , at,k ⟩
+
+k=1
+
+k=1
+
+A
+X
+
+A
+X
+
+pt,k ∥w̃k − w∗ ∥At · ∥at,k ∥A−1 ≤ ε1 + 2αEk∼pt ∥at,k ∥A−1 .
+t
+
+t
+
+k=1
+
+√
+Moreover, note that maxj∈[A] ⟨w∗ , at,j ⟩ − ⟨w∗ , at,k ⟩ ≤ 2Bw Ba and ∥at,k ∥A−1 ≤ Ba / λ. Summing over
+t
+t ∈ [T ] and using the tower property of martingales, we obtain
+EM∼Λ
+
+T
+hX
+t=1
+
+i
+max ⟨at,k , w∗ ⟩ − RM,AlgsLinUCB(τ ) (T )
+k
+
+A
+h
+i
+X
+= E max ⟨w∗ , at,j ⟩ −
+pt,k ⟨w∗ , at,k ⟩
+j∈[A]
+
+≤ E[2
+
+T
+X
+
+k=1
+
+αEk∼pt ∥at,k ∥A−1 + ε1 T + 2Bw Ba T · 1{E0c } ]
+t
+
+t=1
+T
+B
+
+X
+a
+≤ E[2
+α √ ∧ ∥at,k ∥A−1 + ε1 T + 2Bw Ba T · 1{E0c } ]
+t
+λ
+t=1
+
+35
+
+v
+u T
+h √ B
+i
+uX
+a
+≤ 2E α T ( √ + 1)t (1 ∧ ∥at,k ∥2A−1 ) + ε1 T + 2Bw Ba T P(E0c )
+t
+λ
+t=1
+q
+√
+≤ 8d(Ba / λ + 1)2 T α2 log((dλ + T Ba2 )/(dλ)) + ε1 T + 1,
+where the fourth line uses the fact that
+B
+B
+√a ∧ ∥at,k ∥A−1 ≤ ( √a + 1) · (1 ∧ ∥at,k ∥2A−1 )
+t
+t
+λ
+λ
+and Cauchy-Schwatz√inequality, the last line follows from Lemma 19.4 of Lattimore and Szepesvári (2020).
+Plugging in ε1 = 1/ T and Eq. (19) gives the upper bound on expected regret
+EM∼Λ
+
+T
+hX
+t=1
+
+i
+√
+max ⟨at,k , w∗ ⟩ − RM,AlgsLinUCB(τ ) (T ) ≤ O(d T log(T ))
+k
+
+for soft LinUCB with parameter τ.
+Moreover, the second part of Theorem 9 (i.e., the upper bound on log NΘ ) follows directly from Lemma 16
+and Eq. (8).
+
+F
+
+Thompson sampling for stochastic linear bandit
+
+Throughout this section, we use c > 0 to denote universal constants whose values may vary from line to
+line. Moreover, for notational simplicity, we use O(·) to hide universal constants, O(·) to hide polynomial terms in the problem parameters (λ±1 , r±1 , b−1
+a , Ba ), and Õ(·) to hide both poly-logarithmic terms
+in (M0 , C0 , T, A, d, 1/ε, 1/δ0 ) and polynomial terms in (λ±1 , r±1 , b−1
+a , Ba ). We also use the bold font letter
+at ∈ Rd to denote the selected action at at time t ∈ [T ].
+This section is organized as follows. Section F.1 describes the Thompson sampling algorithm for stochastic
+linear bandits. Section F.2 introduces some additional definitions, assumptions, and the formal version of
+Theorem 10 as in Theorem 23. We prove Theorem 23 in Section F.3 and prove Theorem 11 in Section F.4.
+Lastly, the proof of Lemma 24 used in the proof of Theorem 23 is provided in Section F.5.
+
+F.1
+
+Thompson sampling algorithm
+
+Consider the stochastic linear bandit setup as in Section 4.1, but instead we assume a Gaussian prior
+distribution w⋆ ∼ N (0, λId ) and Gaussian noises {εt }t≥0 ∼iid N (0, r). Furthermore, we assume there exist
+(ba , Ba ) such that ba ≤ ∥at,k ∥2 ≤ Ba . At each time t ∈ [T ], Thompson sampling consists of the following
+steps:
+1. Computes
+µt :=
+
+r
+λ
+
+Id +
+
+t−1
+X
+
+aj a⊤
+j
+
+t−1
+−1 X
+
+j=1
+
+aj yj ,
+
+j=1
+
+Σt :=
+
+t−1
+X
+r
+Id +
+aj a⊤
+j .
+λ
+j=1
+
+2. Selects the action at = at,k with probability
+
+
+Pw̃t ∼N (µt ,rΣ−1 ) k = arg max ⟨at,j , w̃t ⟩ .
+t
+
+j∈[A]
+
+Note that Thompson sampling is equivalent to the posterior sampling procedure in our stochastic linear
+bandit setup, i.e., we select an action with probability that equals the posterior probability of the action
+being optimal. We allow λ to be either some constant independent of T, d, or has the form λ = λ0 /d for
+some constant λ0 > 0. The latter case is considered so that the bandit parameter vector w∗ has ℓ2 norm
+of order Õ(1) with high probability. In this case, we use O(·) to hide polynomial terms in the problem
+±1 −1
+parameters (λ±1
+, ba , Ba ), and Õ(·) to hide both poly-logarithmic terms in (M0 , C0 , T, A, d, 1/ε, 1/δ0 )
+0 ,r
+±1 −1
+and polynomial terms in (λ±1
+, ba , Ba ).
+0 ,r
+36
+
+F.2
+
+Definitions and assumptions
+
+For any actions at,1 , . . . , at,A ∈ Rd , we define
+
+
+fk (at,1 , . . . , at,A ; µt , rΣ−1
+t ) := log Pw̃t ∼N (µt ,rΣ−1 ) k = arg max ⟨at,j , w̃t ⟩ .
+t
+
+j∈[A]
+
+For any k ∈ [A], x1 , . . . , xA ∈ Rd , y1 , . . . , yA ∈ R, we introduce
+
+
+gk (x1 , . . . , xA , y1 , . . . , yA ) := log Pz∼N (0,Id ) ⟨xk − xj , z⟩ + yk − yj ≥ 0, for all j ∈ [A] .
+It can be verified that
+√ −1/2
+√ −1/2
+at,1 , . . . , rΣt
+at,A , ⟨µt , at,1 ⟩ , . . . , ⟨µt , at,A ⟩).
+fk (a1 , . . . , aA ; µt , rΣ−1
+t ) = gk ( rΣt
+For any η1 ∈ [0, 1], we also define the truncated log-probabilities
+h 
+
+i
+fk,η1 (at1 , . . . , at,A ; µt , rΣ−1
+t ) := log P k = arg max ⟨at,j , w̃t ⟩ ∨ η1 ,
+j∈[A]
+
+h 
+
+i
+gk,η1 (x1 , . . . , xA , y1 , . . . , yA ) := log P ⟨xk − xj , z⟩ + yk − yj ≥ 0, for all j ∈ [A] ∨ η1 .
+Define in addition the region Dη := {x1 , . . . , xA , y1 , . . . , yk : ∥xi − xj ∥2 ≥ η, for all i ̸= j}. We verify that
+on the set Dη , the function gk,η1 is Lipschitz continuous in any of its arguments (see Lemma 24 for more).
+We adopt the following definition in Bai et al. (2023).
+Definition 22 (Approximability by sum of relus). A function g : Rd → R is (ε, R, M0 , C0 )-approximable by
+sum of relus, if there exists a “(M0 , C0 )-sum of relus” function
+fM0 ,C0 (z) =
+
+M0
+X
+
+
+⊤
+c m σ wm
+[z; 1]
+
+with
+
+m=1
+
+M0
+X
+
+|cm | ≤ C0 , max ∥wm ∥1 ≤ 1, wm ∈ Rd+1 , cm ∈ R,
+m∈[M0 ]
+
+m=1
+
+such that supz∈[−R,R]d |g(z) − fM0 ,C0 (z)| ≤ ε.
+Assumption B (Approximation of log-posterior probability). There exist M0 , C0 > 0 depending on (1/ε, 1/η1 ,
+1/η2 , Rδ , A) such that for any ε > 0, η1 ∈ (0, 1), η2 > 0, δ ∈ (0, 1/2) and√k ∈ [A],p
+gk,η1 (x1 , . . . √
+, xA , y1 , . .√
+. , yA )
+is (ε, Rδ , M0 , C0 )-approximable by sum of relus on Dη2 with Rδ := 2Ba λ(1 + 2 log(2/δ) + d) = Õ( λd).
+Assumption B states that the (truncated)
+√ log-policy of Thompson sampling can be approximated via a twolayer MLP on a compact set with Õ( d)-radius when λ = Õ(1) (or with Õ(1)–radius when λ = λ0 /d =
+Õ(1/d)).
+Assumption C (Difference between the actions). There exists some η > 0 such that for all instances M
+and any time t ∈ [T ], we have ∥at,j − at,k ∥2 ≥ η for all 1 ≤ j < k ≤ A.
+With the definitions and assumptions at hand, we now present the formal statement of Theorem 10 as in
+Theorem 23.
+Theorem 23 (Approximating the Thompson sampling, Formal statement of Theorem 10). For any 0 <
+δ0 < 1/2, consider the same embedding mapping h and extraction mapping A as for soft LinUCB in E.1, and
+consider the standard concatenation operator cat. Under Assumption B, C, for ε < (η ∧ 1)/4, there exists
+a transformer TFRθ (·) with log R = Õ(1),
+√
+D = Õ(T 1/4 Ad), L = Õ( T ), M = Õ(AT 1/4 ), D′ = Õ(A(T 1/4 d + M0 )) ,
+p
+|||θ||| ≤ Õ(T + AT 1/4 + M0 A + C0 ),
+(20)
+such that with probability at least 1 − δ0 over (M, DT ) ∼ PAlg
+Λ for any Alg, we have
+log AlgTS (at,k |Dt−1 , st ) − log Algθ (at,k |Dt−1 , st ) ≤ ε,
+
+for all t ∈ [T ], k ∈ [A].
+
+Here M0 , C0 are the values defined in Assumption B with η1 = ε/(4A), η2 = η, δ = δ0 , and Õ(·) hides
+polynomial terms in (λ±1 , r±1 , b−1
+a , Ba ) and poly-logarithmic terms in (M0 , C0 , T, A, d, 1/δ0 , 1/ε).
+37
+
+F.3
+
+Proof of Theorem 23 (and hence Theorem 10)
+
+We construct a transformer implementing the following steps at each time t ∈ [T ] starting with h⋆2t−1 = hpre,⋆
+2t−1
+for ⋆ ∈ {a, b, c, d}
+ pre,{a,b,c} 
+h2t−1
+
+
+µbt
+ pre,{a,b,c} 
+
+
+ √ −1/2
+
+h2t−1
+ rΣ \
+
+a
+
+
+t,1 
+t
+
+µ
+b
+t
+
+
+
+
+ pre,{a,b,c} 
+.
+
+
+..
+
+
+ pre,a 
+1/2
+ Σ\
+h2t−1
+
+
+at,1 
+h2t−1
+t
+
+
+
+
+
+
+\ 
+µbt
+..
+√rΣ−1/2
+ step 2 
+
+hpre,b  step 1 
+step
+3
+
+
+a
+t,A 
+2t−1  −
+t
+ −−−−→ 
+.
+(21)
+−−−→ 
+h2t−1 = 
+ −−−−→ 
+⋆
+ ⟨µbt , at,1 ⟩ 
+
+
+
+hpre,c
+
+
+2t−1
+
+
+
+
+1/2
+
+ Σ\
+0
+pre,d
+
+
+..
+ t at,A 
+h2t−1
+
+
+
+
+pos
+.
+
+
+⋆
+
+
+
+
+
+
+⟨
+µ
+b
+,
+a
+⟩
+t
+t,A
+
+
+0
+
+
+⋆
+
+
+pos
+
+
+0
+pos
+ pre,{a,b} 
+h2t−1
+ post,a 
+ vb
+
+h2t−1
+t1
+
+
+ hpost,b 
+
+.
+step 4 
+2t−1  ,
+ =:  post,c
+..
+−−−−→ 
+
+
+h
+
+2t−1
+ vb
+
+post,d
+tA
+
+
+h2t−1
+hd2t−1
+where pos := [t, t2 , 1]⊤ ; µt , Σt are the mean and covariance of the distribution we sample w̃ from; vbtk are
+∗
+approximations to vtk
+:= log P(j = arg maxk∈[A] ⟨at,k , w̃t ⟩). In addition, we use h⋆ , ⋆ ∈ {a, b, c, d} to denote
+the corresponding parts of a token vector h. After passing through the transformer, we obtain the policy
+Algθ (·|Dt−1 , st ) :=
+
+exp(hpost,c
+2t−1 )
+
+exp(b
+vt )
+∈ ∆A .
+=
+post,c
+∥ exp(b
+vt )∥1
+∥ exp(h2t−1 )∥1
+
+In step 1—3 of (21), we use transformer to approximately generate the arguments
+√ −1/2
+√ −1/2
+( rΣt
+at,1 , . . . , rΣt
+at,A , ⟨µt , at,1 ⟩ , . . . , ⟨µt , at,A ⟩)
+of the function gk (or gk,η2 ), and in step 4 of (21), we use transformer to approximate the truncated logprobability gk,η1 for some η1 ∈ (0, 1) by exploiting Assumption B, C.
+p
+√ √
+
+For any 0 < δ0 < 1/2, define Bw := λ d + 2 log(2/δ0 ) and the event
+p
+Eδ0 := {max |εt | ≤ 2r log(2T /δ0 )} ∪ {∥w∗ ∥2 ≤ Bw }.
+t∈[T ]
+
+Then by a standard tail bound for gaussian variables {εt }Tt=1 , a union bound over t ∈ [T ], and Eq. (4.3)
+in Laurent and Massart (2000), we have
+P(Eδ0 ) ≥ 1 − δ0 .
+We claim the following results which we will prove later.
+Step 1 Under the high probability event Eδ0 , for any ε > 0, there exists a transformer TFθ (·) with
+s
+p
+ (2T (B 2 + λ)
+l √
+e + λ)T
+e Ba (Ba Bw + 2r log(2T /δ0 )) m
+e
+√
+Ba2 + λ
+a
+L = 2 2T
+log
+= Õ( T ),
+e
+e2 ε
+λ
+λ
+max M (l) ≤ 4,
+
+max D′
+
+ℓ∈[L]
+
+ℓ∈[L]
+
+(ℓ)
+
+≤ 4d,
+
+|||θ||| ≤ 10 + (λ̃ + 2)/(Ba2 + λ̃),
+
+e := r/λ that implements step 1 in (21) with ∥b
+where λ
+µt − µt ∥2 ≤ ε.
+38
+
+Step 2 For any ε > 0, there exists s transformer TFθ (·) with
+√
+(ℓ)
+L = Õ( T ), max M (ℓ) = Õ(AT 1/4 ), max D′ = Õ(T 1/4 Ad),
+ℓ∈[L]
+
+|||θ||| ≤ Õ(T + AT 1/4 )
+
+ℓ∈[L]
+
+\
+1/2
+1/2
+that implements step 2 in (21) such that ∥Σt at,k − Σt at,k ∥2 ≤ ε for all k ∈ [A].
+Step 3 Under the high probability event Eδ0 , for√any ε > 0, assume Step 1, 2 above are implemented with the
+approximation error less than ε/Ba , ελ̃/ 4r respectively, then there exists a transformer TFθ (·) with
+q
+q
+√
+√
+2
+L = ⌈2 + 2 2T (Ba + λ̃)/λ̃ log((1 + κ̃)4 r T (Ba2 + λ̃)Ba /ε)⌉ = Õ( T ), max M (l) = 4A,
+ℓ∈[L]
+
+max D
+
+′ (ℓ)
+
+≤ 4Ad,
+
+|||θ||| ≤ Õ(T + A)
+
+ℓ∈[L]
+
+√ −1/2
+√ −1/2
+\
+that implements step 3 in (21) with ∥ rΣt
+at,k − rΣt
+at,k ∥2 ≤ ε, | ⟨b
+µt , at,k ⟩ − ⟨µt , at,k ⟩ | ≤ ε for
+all k ∈ [A].
+Step 4 Under Assumption B, C and the
+√ high probability event Eδ0 , suppose the approximation error ε3 in
+Step 3 satisfies ε3 ≤ Rδ0 /2 = Õ( λd), and suppose the vector
+√ −1/2
+√ −1/2
+\
+\
+at,1 , . . . rΣt
+at,A , ⟨µbt , at,1 ⟩ . . . ⟨µbt , at,A ⟩)
+v := ( rΣt
+lies in Dη/2 , for any ε > 0 there exists an MLP-only transformer TFθ (·) with
+p
+L = 1, D′ = M0 A, ∥W1 ∥op ≤ M0 A, ∥W2 ∥op ≤ C0
+that implements step 4 in (21) such that |b
+vtk − gk,η1 (v)| ≤ ε for all k ∈ [A] amd η1 = cε/A for some
+universal constant c > 0.1
+To complete the proof, we in addition present the following lemma.
+Lemma 24. For any η1 ∈ (0, 1), η > 0, gk,η1 (x1 , . . . , xA , y1 , . . . , yA ) is 1/2-Holder continuous in its arguments on Dη , namely,
+|gk,η1 (x1 , . . . , xj , . . . , xA , y1 , . . . , yA ) − gk,η1 (x1 , . . . , x′j , . . . xA , y1 , . . . , yA )|
+s
+2∥xj − x′j ∥2 
+2A  2∥xj − x′j ∥2
++
+,
+≤
+η1
+η
+η
+|gk,η1 (x1 , . . . , xA , y1 , . . . , yj , . . . , yA ) − gk,η1 (x1 , . . . xA , y1 , . . . , yj′ , . . . , yA )|
+≤
+
+2A|yj − yj′ |
+ηη1
+
+for any
+(x1 , . . . , xj , . . . , xA , y1 , . . . , yA ), (x1 , . . . , x′j , . . . , xA , y1 , . . . , yA ) ∈ Dη ,
+(x1 , . . . , xA , y1 , . . . , yj , . . . , yA ), (x1 , . . . , xA , y1 , . . . , yj′ , . . . , yA ) ∈ Dη
+for all k, j ∈ [A].
+See the proof in Section F.5.
+Now, we complete the proof by combining Step 1— 4 and using Lemma 24.
+Let ε1 , ε2 , ε3 , ε4 denote the approximation errors ε appearing in Step 1, 2, 3, 4, respectively. W.l.o.g., we
+assume ε1 , ε2 , ε3 , ε4 < 1/4 ∧ η/4. Define the vector
+√ −1/2
+√ −1/2
+v∗ := ( rΣt
+at,1 , . . . rΣt
+at,A , ⟨µt , at,1 ⟩ . . . ⟨µt , at,A ⟩).
+1 Note M , C in the formula implicitly depend on 1/ε.
+0
+0
+
+39
+
+By Assumption C and a triangular inequality, we have v, v∗ ∈ Dη/2 . By the Lipschitz continuity of f (x) =
+exp(x) on (−∞, 1.5], we have
+| exp(b
+vtk ) − AlgTS (at,k |Dt−1 , st )| ≤ | exp(b
+vt,k ) − AlgTS (at,k |Dt−1 , st ) ∨ η1 | + η1
+≤ e3/2 (|b
+vtk − gk,η1 (v)| + |gk,η1 (v) − gk,η1 (v∗ )|) + η1 ,
+r
+
+2ε3  2A2 ε3 
+2A2  2ε3
+3/2
++
++
++ η1 =: ε5 ,
+≤e
+ε4 +
+η1
+η
+η
+ηη1
+where the second inequality uses
+gk,η1 (v∗ ) = log[AlgTS (at,k |Dt−1 , st ) ∨ η1 ],
+and the third inequality uses Lemma 24 and Step 4. Therefore,
+|
+
+A
+X
+
+exp(b
+vt,k ) − 1| ≤ Aε5 .
+
+k=1
+
+and the constructed transformer TFθ satisfies (assume Aε5 < 1)
+log AlgTS (at,k |Dt−1 , st ) − log Algθ (at,k |Dt−1 , st )
+≤ (log[AlgTS (at,k |Dt−1 , st ) ∨ η1 ] − vbt,k ) + log(
+
+A
+X
+
+exp(b
+vt,k ))
+
+k=1
+
+≤ |b
+vtk − gk,η1 (v)| + |gk,η1 (v) − gk,η1 (v∗ )| + Aε5
+≤ (A + 1)ε5 ,
+where third line uses log(1 + x) < x. Finally, for the prespecified ε > 0, choosing ε1 , ε2 , ε3 , ε4 , η1 such that
+ε5 ≤ ε/(2A) gives
+log AlgTS (at,k |Dt−1 , st ) − log Algθ (at,k |Dt−1 , st ) ≤ ε.
+This can be done via choosing ε1 = c1 ε4 , ε2 = c2 ε4 , ε3 = c3 ε4 , ε4 = c4 ε, η1 = ε/(4A), where ci (i = 1, 2, 3, 4)
+hide values that could depend polynomially on (A, 1/η), such that ε5 ≤ ε/(4A).
+Combining the construction in Step 1— 4 yields Theorem 23.
+Similar to the proof of Theorem 8, from the proof of each step, we can verify that the token dimension D can
+be chosen to be of order Õ(T 1/4 Ad) (see the proof of Step 2b for details). Moreover, due to the convergence
+guarantee for each iteration of AGD in Proposition 19, we can be verified that there exists some sufficiently
+(ℓ)
+large value R > 0 with log R = Õ(1) such that we have ∥hi ∥2 ≤ R for all layer ℓ ∈ [L] and all token i ∈ [2T ]
+in our TF construction. Therefore, TFRθ and TF∞
+θ yield identical outputs for all token matrices considered,
+and hence we do not distinguish them in the proof of each step.
+e = r/λ and the noise sup |εt | ≤
+Proof
+of Step 1 Note that µt is a ridge estimator of w∗ with parameter λ
+t
+p
+2r log(T /δ0 ). Step 1 follows immediately from the second part of Lemma 21.
+Proof of Step 2 By the boundedness assumption of the actions, we have
+λ̃ ≤ σmin (Σt ) ≤ σmax (Σt ) ≤ T (Ba2 + λ̃).
+q
+Define the condition number κ̃ = T (Ba2 + λ̃)/λ̃ and µ := T λ̃(Ba2 + λ̃). Using the Pade decomposition for
+the square root function in Theorem 3.1 and the discussion afterward in Lu (1998), we have
+1/2
+
+Σt
+
+= (λ̃Id +
+
+t−1
+X
+j=1
+
+1/2
+aj a⊤
+=
+j )
+
+(Σt − µId ) 1/2
+√ 
+µ Id +
+µ
+40
+
+(m)
+
+m
+
+=
+
+X
+bj
+√ h
+µ Id +
+Id +
+j=1
+
+(m)
+
+(Σt − µId ) −1 aj
+µ
+
+(Σt − µId ) i
++ Em
+µ
+
+for any m ≥ 0, where
+(m)
+
+aj
+
+=
+
+2
+jπ
+sin2
+,
+2m + 1
+2m + 1
+
+(m)
+
+bj
+
+= cos2
+
+jπ
+,
+2m + 1
+
+and the error term Em satisfies
+∥Em ∥op
+
+
+2m+1 −1
+q
+
+
+2 + λ̃) + √µ
+ q
+T
+(B
+a
+
+
+
+≤ max 2 T (Ba2 + λ̃) 1 +  q
+ ,
+√
+
+
+T (Ba2 + λ̃) − µ
+
+
+
+−1 
+p !2m+1
+
+
+p
+µ + λ̃
+
+
+p
+2 λ̃
+−
+1
+√
+
+
+µ − λ̃
+
+
+
+√
+
+o
+n q
+κ̃1/4 + 1 2m+1 −1 p κ̃1/4 + 1 2m+1
+)
+] , 2 λ̃[( 1/4
+)
+− 1]−1
+= max 2 T (Ba2 + λ̃)[1 + ( 1/4
+κ̃ − 1
+κ̃ − 1
+nq
+i−1 o
+2 −2m−1 p h
+2 2m+1
+2
+≤ 2 max
+T (Ba + λ̃)(1 + 1/4 )
+, λ̃ (1 + 1/4 )
+−1
+.
+κ̃
+κ̃
+Since (1 + 2/κ̃1/4 )κ̃
+
+1/4
+
+/2+1
+
+> e, it follows that choosing
+q
+p
+
+nl
+ 2 T (Ba2 + λ̃) m l
+mo
+ κ̃1/4
+ 2 λ̃
++ 1 max
+log
++1
+= Õ(T 1/4 ).
+m=
+, log
+4
+ε
+ε
+
+gives ∥Em ∥op ≤ ε for any 0 < ε < 1.
+Thus, using Pade decomposition, we can write
+m
+
+1/2
+
+Σt at,k =
+
+−1
+i
+X
+√ h
+(m)
+(m)
+µ at,k +
+µId + bj (Σt − µId )
+aj (Σt − µId )at,k + Ekm
+j=1
+
+with Ekm 2 ≤ ε for all k ∈ [A] and some m = Õ(T 1/4 ). Next, we show that there exists a transformer that
+can implement the following intermediate steps that give Step 2.
+
+
+pre,{a,b,c}
+h2t−1
+
+
+µbt
+
+
+ pre,{a,b,c} 
+
+
+0dA
+
+
+h2t−1
+
+
+
+
+(Σ
+−
+µI
+)a
+t
+d
+t,1
+
+
+µ
+b
+t
+
+ step 2a 
+
+.
+
+ −−−−→ 
+.
+
+⋆
+
+
+.
+
+
+
+
+(Σ − µI )a 
+0
+d t,A 
+ t
+
+
+pos
+⋆
+
+
+
+
+0
+pos
+
+41
+
+pre,{a,b,c}
+
+
+
+
+
+h2t−1
+µbt
+0dA
+(Σt − µId )at,1
+..
+.
+
+
+
+ pre,{a,b,c} 
+
+
+
+
+h2t−1
+
+
+
+
+
+
+µbt
+
+
+
+
+
+
+\
+
+
+1/2
+
+Σt at,1 
+
+
+
+
+
+
+
+
+..
+
+
+
+
+(Σt − µId )at,A
+
+
+.
+
+
+−1
+step
+2c
+step 2b  
+
+,
+
+(m)
+−−−−→  µI + b(m) (Σ − µI )
+ −−−−→  \
+1/2
+a
+(Σ
+−
+µI
+)a
+d
+t
+d
+t
+d
+t,1
+
+
+Σt at,A 
+1
+1
+
+
+
+
+
+
+..
+..
+
+
+
+
+
+
+.
+.
+
+
+
+
+
+
+
+−1
+
+
+⋆
+(m)
+(m)
+
+
+ µId + bm (Σt − µId )
+am (Σt − µId )at,A 
+
+
+
+
+0
+
+
+⋆
+
+
+pos
+
+
+0
+pos
+
+(22)
+
+where ⋆ denotes additional terms in hd that are not of concern to our analysis.
+Step 2a There exists an attention-only transformer TFθ (·) with
+max M (ℓ) = 3A,
+
+L = 2,
+
+|||θ||| ≤ T + 2 + µ ≤ O(T )
+
+that implements step 2a in (22).
+Step 2b Denote (Σt − µId )at,k by qk and
+
+
+
+(m)
+
+µId + bm (Σt − µId )
+
+
+
+by Mm . For any ε > 0, there exists a
+
+transformer TFθ (·) with
+q
+√
+L = 2 2T (Ba2 + λ̃)/λ̃ log((1 + κ̃)Ba T (Ba2 + λ̃)/(λ̃ε))⌉ = Õ( T ),
+max M (l) = 4Am = Õ(T 1/4 A), max D′
+ℓ∈[L]
+
+(ℓ)
+
+≤ O(Adm) = Õ(T 1/4 Ad), |||θ||| ≤ O(Am) ≤ Õ(T 1/4 A)
+
+ℓ∈[L]
+
+\
+(m)
+−1
+\
+approximately implements step 2b in (22) such that the output component M
+M−1
+m qk satisfies ∥aj
+m qk −
+(m)
+
+aj
+
+Mj−1 qk ∥2 ≤ ε for all j ∈ [m] and k ∈ [A].
+
+Step 2c There exists an MLP-only transformer TFθ (·) with
+L = 1, D′ = 2Ad(m + 1) = Õ(T 1/4 Ad),
+
+∥W1 ∥op =
+
+√
+
+2,
+
+∥W2 ∥op ≤
+
+√
+
+µ(1 + m) = Õ(T 3/4 )
+
+that implements step 2c in (22).
+Combining the intermediate steps with the approximation error in Step 2b chosen as ε/m gives Step 2 as
+desired.
+(1)
+
+(1)
+
+(1)
+
+Proof of Step 2a For all k ∈ [A], we choose Qk1,k2,k3 , Kk1,k2,k3 , Vk1,k2,k3 such that for even token indices
+2j with j ≤ t − 1 and odd token indices with j ≤ t
+ 
+
+
+ 
+0
+ 
+ 
+at,k
+aj
+(1) (0)
+(1) (0)
+(1) (0)
+(1) (0)
+(1) (0)
+Qk1 h2t−1 =
+, Kk1 h2j =
+, Vk1 h2j = aj  , Kk1 h2j−1 = 0 , Vk1 h2j−1 = 0
+0
+0
+0
+(1)
+
+(1)
+
+(1)
+
+(1)
+
+(1)
+
+(1)
+
+Qk2 = −Qk1 , Kk2 = Kk1 , Vk2 = −Vk1 ,
+
+
+
+
+ 
+
+
+1
+1
+1
+0
+−(2t − 1)
+ 1 
+1
+(1) (0)
+(1)
+(0)
+(1)
+(0)
+(1)
+(0)
+, K h
+
+
+ 
+
+
+Qk3 h2t−1 = 
+k3 2j−1 = 2j − 1 , Kk3 h2j = 2j  , Vk3 h2t−1 = (λ̃ − µ)at,k ,
+
+
+1
+0
+0
+0
+0
+
+42
+
+(1) (0)
+
+(1) (0)
+
+where for each k ∈ [A], Vk1 h2j , Vk3 h2t−1 are supported on the same d entries of hd . It is readily verified
+that summing over the attention heads and k ∈ [A] gives the updates
+0d 7→
+
+(Σt − µId )at,k
+2t − 1
+
+for all k ∈ [A]. We assume the updated vectors are supported on some Ad coordinates of hd2t−1 . Moreover, one
+(1)
+(1)
+(1)
+can choose the matrices such that ∥Qk1,k2,k3 ∥op ≤ 1, ∥Kk1,k2,k3 ∥op ≤ 1, ∥Vk1,k2,k3 ∥op ≤ max{1, |λ̃ − µ|} ≤
+1 + µ. Therefore the norm of the first layer of the attention-only transformer θ (1) ≤ 2 + µ.
+The second layer is used to multiply the updated vectors by a factor of 2t − 1, namely, to perform the map
+(Σt − µId )at,k
+7→ (Σt − µId )at,k
+2t − 1
+for all k ∈ [A], where the output vectors are supported on coordinates different from the input vectors
+(therefore we need 2Ad coordinates for embedding in step 2a). This can be achieved by choosing ∥Q(2) ∥op ≤
+T, ∥K(2) ∥op ≤ T, ∥V(2) ∥op ≤ 1 such that
+
+
+
+
+
+
+(2t − 1)2
+1
+1
+−T (2t − 1)2 
+
+
+ 1 
+1
+(2) (1)
+(1) (1)
+ , K(2) h(1) = 
+
+
+
+Q1 h2t−1 = 
+1
+2j−1
+
+
+T (2j − 1)2  , Kk3 h2j = T (2j)2  ,
+1
+0
+0
+0
+
+
+0
+ (Σt −µId )at,1 
+ (2t−1) 
+
+
+(2) (1)
+..
+.
+V1 h2t−1 = 
+.
+
+
+ (Σt −µId )at,A 
+ (2t−1) 
+0
+Therefore
+
+θ (2) ≤ T + 1 and hence the two layer transformer we constructed has norm |||θ||| ≤ T + 2 + µ.
+
+Proof of step 2b The construction is similar to the construction in Step 2 of the proof of Theorem 8.
+Hence we only provide a sketch of proof here. Note that
+(m)
+
+aj
+
+M−1
+j qk = arg min
+x∈Rd
+
+E
+1
+1 D
+(m)
+x⊤ Mj x −
+x, aj qk =: arg min Lk,j (x)
+2(2t − 1)
+2t − 1
+x∈Rd
+
+is the global minimizer of a λ̃/(2t − 1)-convex and (Ba2 + λ̃)-smooth function with the conditional number
+κ̃ ≤ 2T (Ba2 + λ̃)/λ̃. Since
+(m)
+
+∥aj
+
+(m)
+
+M−1
+j qk ∥2 ≤ |aj
+
+2
+|∥M−1
+j ∥op ∥qk ∥2 ≤ Ba T (Ba + λ̃)/λ̃.
+
+q
+Therefore by Proposition 19 we have L = ⌈2 2T (Ba2 + λ̃)/λ̃ log((1 + κ̃)Ba T (Ba2 + λ̃)/(λ̃ε))⌉ steps of ac\
+(m)
+(m)
+celerated gradient descent with step size η = 1/(Ba2 + λ̃) gives ∥aj M−1
+M−1
+j qk − aj
+j qk ∥2 ≤ ε. Now, it
+remains to construct a transformer that can implement the accelerated gradient descent steps. Here we only
+d
+provide the construction of the gradient ∇Lk,j (x) at the l-th iteration x = xℓ−1
+k,j ∈ R which belongs to the
+output after ℓ − 1 transformer layers. The full construction of AGD steps follows from similar techniques
+as in Step 2 of the proof of Theorem 8. Concretely, for each layer ℓ ∈ [L] and k ∈ [A], j ∈ [m], we choose
+(ℓ)
+(ℓ)
+(ℓ)
+Qkj1,kj2,kj3 , Kkj1,kj2,kj3 , Vkj1,kj2,kj3 such that for even token indices 2j with s ≤ t − 1 and odd token indices
+with s ≤ t
+ ℓ−1 
+ 
+xk,j
+a
+(ℓ) (ℓ−1)
+(ℓ) (ℓ−1)
+(ℓ) (ℓ−1)
+Qkj1 h2t−1 =
+, Kkj1 h2s
+= s , Kkj1 h2s−1 = 0,
+0
+0
+43
+
+
+(ℓ)
+
+(ℓ−1)
+
+Vkj1 h2s
+(ℓ)
+
+(ℓ)
+
+0
+
+
+(ℓ)
+
+(ℓ−1)
+
+= −η b(m)
+as  , Vkj1 h2s−1 = 0,
+j
+0
+(ℓ)
+
+(ℓ)
+
+(ℓ)
+
+(ℓ)
+
+Qkj2 = −Qkj1 , Kkj2 = Kkj1 , Vkj2 = −Vkj1 ,
+
+
+
+
+1
+1
+−(2t − 1)
+
+
+(ℓ) (ℓ−1)
+ , K(ℓ) h(ℓ) =  1  ,
+Qkj3 h2t−1 = 
+2s−1
+kj3
+
+
+
+1
+(2s − 1)
+0
+0
+
+
+0
+(ℓ) (ℓ−1)
+(m)
+(m)
+.
+Vkj3 h2t−1 = η a(m)
+qk − [(1 − bj )µ + bj λ̃]xℓ−1
+j
+k,j
+0
+Similarly, it can be verified that the constructed attention layer generates
+−η · ∇Lk,j (xℓ−1
+k,j ) = −
+
+(m)
+t−1
+i
+X
+ηaj qk
+η h
+(m)
+(m)
+(m)
+ℓ−1
+[(1 − bj )µId + bj λ̃] + bj
+.
+as a⊤
+x
++
+s
+k,j
+2t − 1
+2t − 1
+s=1
+
+Therefore, a construction similar to Step 2 of the proof of Theorem 8 yields Step 2b. Moreover, note that
+for the construction to exist we need the embedding dimension D = O(Adm) = Õ(T 1/4 Ad) and the number
+of hidden neurons D′ = O(Adm) = Õ(T 1/4 Ad).
+\
+(m)
+Proof of Step 2c Note that step 2c is a linear transformation from at,k , aj M−1
+j qk , k ∈ [A], j ∈ [m] to
+Pm
+√
+(m)
+−1 (m)
+µ[at,k + j=1 (µId +bj (Σt − µId )) aj (Σt − µId )at,k ] and we have the fact x = σ(x)−σ(−x). One can
+
+
+√
+thus choose W1 = IA(m+1)d −IA(m+1)d 0 with D′ = 2A(m + 1)d and W2 with ∥W2 ∥op ≤ µ(1 + m)
+that implements the linear map.
+\
+\
+1/2
+1/2
+Proof of Step 3 Similar to the proof of Step 2b, given Σt at,k we can apprxoimate Σ−1
+t Σt at,k ≈
+−1/2
+Σt
+at,k using accelerated gradient descent. Concretely, note that
+
+
+√ −1 \
+√ \
+1
+1
+1/2
+1/2
+rΣt Σt at,k = arg min
+x⊤ Σt x −
+x, rΣt at,k =: arg min Lk (x)
+2t − 1
+x∈Rd 2(2t − 1)
+x∈Rd
+is the global minimizer of a λ̃/(2t − 1)-convex and (Ba2 + λ̃)-smooth function with the conditional number
+κ̃ ≤ 2T (Ba2 + λ̃)/λ̃. Since
+q
+√ −1 \
+√
+√
+\
+1/2
+1/2
+−1
+∥ rΣt Σt at,k ∥2 ≤ r∥Mj ∥op ∥Σt at,k ∥2 ≤ 2 r T (Ba2 + λ̃)Ba ,
+where the last inequality
+uses the assumption in Step
+q
+q 3. Therefore for any ε0 > 0, it follows from Proposi√
+2
+tion 19 that L = ⌈2 2T (Ba + λ̃)/λ̃ log((1+ κ̃)2 r T (Ba2 + λ̃)Ba /ε0 )⌉ steps of accelerated gradient descent
+with step size η = 1/(Ba2 + λ̃) gives
+√ −1/2
+√
+\
+\
+1/2
+at,k − rΣ−1
+∥ rΣt
+t Σt at,k ∥2 ≤ ε0 .
+Following the construction in Step 2 of the proof of Theorem 8 it can be verified that there exists a transformer
+TFθ (·) with
+q
+q
+√
+√
+L = ⌈2 2T (Ba2 + λ̃)/λ̃ log((1 + κ̃)2 r T (Ba2 + λ̃)Ba /ε0 )⌉ = Õ( T ), max M (l) = 4A,
+ℓ∈[L]
+
+max D
+
+′ (l)
+
+= 4Ad,
+
+|||θ||| ≤ O(A)
+
+ℓ∈[L]
+
+44
+
+that implements the AGD steps. Therefore, the approximation error
+√ −1/2
+√ −1/2
+\
+at,k − rΣt
+at,k ∥2
+∥ r Σt
+√ −1/2
+√
+√ −1 \
+√ −1 1/2
+\
+\
+1/2
+1/2
+≤ ∥ rΣt
+at,k − rΣ−1
+rΣt Σt at,k ∥2
+t Σt at,k ∥2 + ∥ rΣt Σt at,k −
+√
+\
+1/2
+1/2
+≤ ε0 + r∥Σ−1
+t ∥op ∥Σt at,k − Σt at,k ∥2
+√
+r \
+1/2
+1/2
+∥Σt at,k − Σt at,k ∥2 ≤ ε0 + ε/2,
+≤ ε0 +
+λ̃
+where the last inequality uses the assumption on the approximation error in Step 2. Letting ε0 = ε/2 yields
+√ −1/2
+√ −1/2
+\
+∥ rΣt
+at,k − rΣt
+at,k ∥2 ≤ ε.
+√ −1/2
+\
+at,k , we construct a two-layer attention-only transformer that
+In addition to the calculation of rΣt
+(1)
+(1)
+(1)
+computes ⟨b
+µt , at,k ⟩. Namely, we choose Qk1,k2 , Kk1,k2 , Vk1,k2 such that
+
+
+
+ 
+
+
+ 
+µ
+bt
+0
+aj,k
+0
+
+
+
+
+
+
+−(2t − 1)
+(1) (0)
+(1) (0)
+ B  , K(1) h(0) =  B  , V(1) h(0) = ek 
+,
+K
+h
+=
+Qk1 h2t−1 = 
+k1 2j
+k1 2j−1
+k1 2t−1
+2j 
+2j − 1
+
+
+B
+0
+0
+0
+0
+
+
+ 
+
+
+ 
+aj,k
+−b
+µt
+0
+0
+
+
+
+
+
+
+B
+B
+−(2t
+−
+1)
+(1) (0)
+ , V(1) h(0) = − ek  ,
+ , K(1) h(0) =   , K(1) h(0) = 
+Qk2 h2t−1 = 
+k2 2j−1
+k2 2t−1
+k2 2j
+2j − 1
+
+
+2j 
+B
+0
+0
+0
+0
+p
+where B = 2T Ba2 (Ba Bw + 2r log(T /δ0 )))/λ̃ = Õ(T ) is an upper bound of ⟨b
+µt , at,k ⟩ for all k ∈ [A] under the
+event Eδ0 , and ek = (0, 0, . . . , 1, 0, . . . , 0) ∈ RA is the one-hot vector supported on the k-th entry. Summing
+up the attention heads gives the update
+⟨b
+µt , at,k ⟩
+0 7→
+.
+2t − 1
+Note that one can choose the matrices such that
+(1)
+
+∥Qk1,k2 ∥op ≤ B,
+
+(1)
+
+∥Kk1,k2 ∥op ≤ B,
+
+(1)
+
+∥Vk1,k2 ∥op ≤ 1.
+
+Thus the norm of the attention layer θ (1) ≤ B + 2.
+Finally, as in the proof of Step 2a we can construct a single-layer single-head attention-only transformer with
+θ (2) ≤ T + 1 that performs the multiplication
+⟨b
+µt , at,k ⟩
+7→ ⟨b
+µt , at,k ⟩.
+2t − 1
+To estimate the approximation error, note that ∥at,k ∥2 ≤ Ba and ∥b
+µt − µt ∥2 ≤ ε/Ba by our assumption in
+Step 3, it follows immediately that | ⟨b
+µt , at,k ⟩ − ⟨µt , at,k ⟩ | ≤ ε for all k ∈ [A]. Combining the construction of
+the transformer layers above gives Step 3.
+Proof of Step 4 By Assumption B, gk,η1 (v) are (ε, Rδ0 , M0 , C0 )-approximable by sum of relus for some
+M0 , C0 depend polynomially on (1/ε, 1/η1 , 1/η, 1/δ0 , A). Since
+√
+√
+√ −1/2
+−1/2
+at,k ∥2 ≤ r∥Σt
+∥2 ∥at,k ∥2 ≤ λBa , | ⟨µt , at,k ⟩ | ≤ ∥µt ∥2 ∥at,k ∥2 = Bw Ba
+∥ rΣt
+√
+and Rδ0 = 2(Bw Ba + λBa ), it follows from the assumption ε3 ≤ Rδ0 /2 and a triangular inequality that
+∥v∥∞ ≤ Rδ . Therefore, using Assumption B and stacking up the approximation functions for each coordinate
+
+45
+
+√
+
+AM0 , ∥W1 ∥op ≤ C0 , D′ = M0 A such that
+
+
+0
+
+v
+ bt1 
+ .. 
+(1)
+W2 σ(W1 h2t−1 ) =  . 
+
+
+v
+btA 
+0,
+
+k ∈ [A] we construct a two-layer MLP with ∥W1 ∥op ≤
+
+btA ) is supported on hc2t−1 and |b
+where (b
+vt1 , . . . , v
+vtk − gk,η1 (v)| ≤ ε for all k ∈ [A].
+
+F.4
+
+Proof of Theorem 11
+
+Denote the transformer constructed in Theorem 23 by TFθ . From the proof of Theorem 23, we have
+log
+
+AlgTS (at |Dt−1 , st )
+≤ε
+Algθ (at |Dt−1 , st )
+
+under the event
+Eδ0 := {max |εt | ≤
+t∈[T ]
+
+p
+
+2r log(2T /δ0 )} ∪ {∥w∗ ∥2 ≤ Bw }
+
+for all t ∈ [T ]
+
+p
+√ √
+
+with probability at least 1 − δ0 , where Bw := λ d + 2 log(2/δ0 ) . Note that due to the unboundedness
+of the noise εt and parameter vector w∗ , Assumption A may not be satisfied. However, setting δ0 = δ/(2n)
+and applying a union bound gives
+log
+
+i
+, sit )
+AlgTS (ait |Dt−1
+≤ ε,
+i
+, sit )
+Algθ (ait |Dt−1
+
+for t ∈ [T ], i ∈ [n].
+
+(23)
+
+with probability at least 1 − δ/2. From the proof of Theorem 6 we see that Assumption A is only used in
+Eq. (14) in the proof of Lemma 20. Moreover, it can be verified that the same result holds with Assumption A
+replaced by the condition in Eq. (23). Therefore, we have
+r
+
+√
+log [NΘ · T /δ] √
+2
+RΛ,Algθb(T ) − RΛ,AlgTS (T ) ≤ cT R
++ εreal
+n
+r
+
+√
+√
+log [NΘ · T /δ]
+2
+≤ cT R
++ T
+n
+with probability at least 1 − δ as in Theorem 6, where the second inequality follows as in our setting
+εreal = ε = 1/(T 3 R). Now, it suffices to show Thompson sampling has the expected regret with
+EM∼Λ
+
+T
+hX
+t=1
+
+i
+√
+max ⟨at,k , w∗ ⟩ − RM,AlgTS (T ) = O(d T log(T d)).
+k
+
+The proof follows similar arguments as in Theorem 36.4 in Lattimore and Szepesvári (2020). Define
+q
+
+√ p
+λ̃ := r/λ, β := r
+2rd log(4d/δTS ) + 2 log(2/δTS ) + d log(1 + T Ba2 /λ̃d) ,
+p
+Pt−1
+⋆
+2λd log(4d/δTS ) with
+where δTS will be specified later, and recall Σt = λ̃Id + j=1 aj a⊤
+j . Since ∥w ∥2 ≤
+probability at least 1 − δTS /2 by a union bound, it follows from Theorem 20.5 in Lattimore and Szepesvári
+(2020) that
+p
+P(∥w⋆ ∥2 ≤ 2λd log(4d/δTS ), and ∥µt − w∗ ∥Σt ≥ β, for some i ∈ [T ]) ≤ δTS ,
+where the probability is taken over the both randomness of the noise and of the bandit instance M.
+46
+
+∗
+⋆
+Let
+p E be the event where ∥µt − w ∥Σt ≤ β for all i ∈ [T ], and let E0 be the event where {∥w ∥2 ≤
+2λd log(4d/δTS )}. Then P(E ∩ E0 ) ≥ 1 − δTS and the expected regret
+
+EM∼Λ
+
+T
+hX
+t=1
+
+i
+max ⟨at,k , w∗ ⟩ − RM,AlgTS (T )
+k
+
+T
+X
+= E[
+max ⟨w⋆ , at,k ⟩ − ⟨w⋆ , at ⟩]
+t=1
+
+j∈[A]
+
+T
+T
+hX
+i
+hX
+i
+=E
+(max ⟨w⋆ , at,k ⟩ − ⟨w⋆ , at ⟩)1E∩E0 + E
+max (⟨w⋆ , at,k ⟩ − ⟨w⋆ , at ⟩)1(E∩E0 )c
+t=1
+
+j∈[A]
+
+t=1
+
+j∈[A]
+
+T
+hX
+i
+≤E
+(max ⟨w⋆ , at,k ⟩ − ⟨w⋆ , at ⟩)1E∩E0 + E[2Ba T ∥w∗ ∥2 1(E∩E0 )c ]
+t=1
+
+j∈[A]
+
+T
+hX
+i
+≤E
+(max ⟨w⋆ , at,k ⟩ − ⟨w⋆ , at ⟩)1E∩E0 + 2Ba T E[∥w∗ ∥2 1(E∩E0 )c ].
+t=1
+
+j∈[A]
+
+Since
+Z ∞
+p
+E[∥w∗ ∥2 1(E∩E0 )c ] ≤ P((E ∩ E0 )c ) 2λd log(4d/δTS ) + √
+
+P(∥w∗ ∥2 ≥ t)dt
+
+2λd log(4d/δTS )
+
+Z ∞
+p
+≤ 2λd log(4d/δTS )δTS + d3/2 √
+≤
+
+p
+√
+2λd log(4d/δTS )δTS + 2 2d
+
+P(|w1⋆ | ≥ t)dt
+
+2λ log(4d/δTS )
+Z ∞
+3/2 1/2
+
+λ
+
+√
+
+exp(−t2 )dt
+
+log(4d/δTS )
+
+Z ∞
+p
+√
+≤ 2λd log(4d/δTS )δTS + 2d3/2 λ1/2
+log(4d/δTS )
+
+1
+t1/2
+
+exp(−t)dt
+
+p
+≤ 2 2λd log(4d/δTS )δTS ,
+where the second line follows from a union√bound over [d], and the third line uses properties of subgaussian
+variables. Therefore, choosing δTS = 1/[T d] gives
+EM∼Λ
+
+T
+hX
+t=1
+
+max ⟨at,k , w∗ ⟩ − RM,AlgTS (T )
+
+i
+
+k
+
+T
+hX
+i
+p
+≤E
+(max ⟨w⋆ , at,k ⟩ − ⟨w⋆ , at ⟩)1E∩E0 + 6Ba λ log(4d2 T ).
+t=1
+
+(24)
+
+j∈[A]
+
+Now define the event Et := {∥µt − w∗ ∥Σt ≤ β}, then we have Et ∈ Ft−1 and ∩Tt=1 Et = E. Also, we define the
+upper confidence bound Ut (a) := ⟨µt , a⟩ + β∥a∥Σ−1 , which does not depend on the true parameter w∗ . Let
+t
+(Ft )t≥0 denote the filtration generated by the data collected up to time t and the random parameter vector
+w∗ .
+Let a∗t denote the optimal action at time t. Due to the construction of Thompson sampling, we have the
+distribution of a∗t and at are the same conditioned on Ft−1 . Therefore, E[Ut (a∗t )|Ft−1 ] = E[Ut (at )|Ft−1 ] and
+h
+i
+h
+i
+
+E (⟨w⋆ , a∗t ⟩ − ⟨w⋆ , at ⟩)1E∩E0 | Ft−1 ≤ E ⟨w⋆ , a∗t ⟩ − Ut (a∗t ) + Ut (at ) − ⟨w⋆ , at ⟩ 1Et | Ft−1
+h
+i
+
+≤ E Ut (at ) − ⟨w⋆ , at ⟩ 1Et | Ft−1
+h
+i
+
+≤ E ∥at ∥Σ−1 ∥µt − w∗ ∥Σt + β∥at ∥Σ−1 1Et | Ft−1
+t
+
+t
+
+≤ 2βE[∥at ∥Σ−1 |Ft−1 ].
+t
+
+47
+
+Moreover, we have
+∥at ∥Σ−1 ≤ Ba /
+t
+
+p
+λ̃.
+
+Combining the last two displays, we obtain
+T
+hX
+i
+E
+(max ⟨w⋆ , at,k ⟩ − ⟨w⋆ , at ⟩)1E∩E0
+t=1
+
+≤
+
+j∈[A]
+
+T
+p i
+h
+X
+E 2β∥at ∥Σ−1 ∧ (Ba / λ̃)
+t
+
+t=1
+
+≤ 2 β ∨ (Ba /
+
+T
+p  hX
+i
+λ̃) E
+(∥at ∥Σ−1 ∧ 1)
+t
+
+t=1
+
+v
+T
+p √ u
+i
+u hX
+≤ 2 β ∨ (Ba / λ̃) T tE
+(∥at ∥2Σ−1 ∧ 1)
+t
+
+t=1
+
+p √ q
+≤ 2 β ∨ (Ba / λ̃) T 2d log(1 + T Ba2 /(λ̃d))
+√
+= O(d T log(T d)),
+where the fourth line uses Cauchy-Schwartz inequality and the fifth line follows from Lemma 19.4 in Lattimore and Szepesvári (2020). Combining the last display with Eq. (24) completes the proof of first part of
+Theorem 11. Moreover, the second part of Theorem 11 (i.e., the upper bound on log NΘ ) follows directly
+from Lemma 16 and Eq. (9).
+
+F.5
+
+Proof of Lemma 24
+
+For any j ̸= k, by definition of gk,η1
+|gk,η1 (x1 , . . . , xj , . . . , xA , y1 , . . . , yA ) − gk,η1 (x1 , . . . , x′j , . . . xA , y1 , . . . , yA )|
+1
+P(⟨xk − xi , z⟩ + yk − yi ≥ 0, for all i ∈ [A])
+≤
+η1
+− P(⟨xk − xi , z⟩ + yk − yi ≥ 0, for all i ̸= j, xk − x′j , z + yk − yj ≥ 0)
+≤
+
+1
+P( xk − x′j , z + yk − yj ≥ 0 ≥ ⟨xk − xj , z⟩ + yk − yj )
+η1
++ P( xk − x′j , z + yk − yj ≤ 0 ≤ ⟨xk − xj , z⟩ + yk − yj )
+
+≤
+
+1
+P( xj − x′j , z ≥ xk − x′j , z + yk − yj ≥ 0)
+η1
++ P( xk − x′j , z + yk − yj ≤ 0 ≤ ⟨xk − xj , z⟩ + yk − yj )
+
+≤
+
+
+
+
+
+
+1
+P( xj − x′j , z ≥ xk − x′j , z + yk − yj ≥ 0) + P( xj − x′j , z ≤ xk − x′j , z + yk − yj ≤ 0 .
+η1
+
+Note that conditioned on xj , x′j we have
+P(| xj − x′j , z | ≤ ∥xj − x′j ∥2
+
+p
+2 log(2/δ1 )) ≥ 1 − δ1
+
+for any δ1 > 0. Therefore we further have
+|gk,η1 (x1 , . . . , xj , . . . , xA , y1 , . . . , yA ) − gk,η1 (x1 , . . . , x′j , . . . xA , y1 , . . . , yA )|
+
+i
+p
+p
+1h 
+≤
+P xk − x′j , z + yk − yj ∈ [−∥xj − x′j ∥2 2 log(2/δ1 ), ∥xj − x′j ∥2 2 log(2/δ1 )] + δ1
+η1
+48
+
+1
+P( xk − x′j , z ∈ A) + δ1 ]
+[
+sup
+η1 A∈F ,µ(A)=2∥x −x′ ∥ √2 log(2/δ )
+1
+j
+j 2
+p
+′
+1 2∥xj − x′j ∥2
+1 2∥xj − xj ∥2 2 log(2/δ1 )
+√
++ δ1 ) ≤ (
+≤ (
++ δ1 )
+η1
+η1
+ηδ1
+2πη
+
+≤
+
+for any δ1 > 0, where the last inequality follows from the fact that standard Gaussian hasq
+probability density
+√
+2∥xj −x′j ∥2
+2
+′
+less than 1/ 2π everywhere, ∥xk − xj ∥2 ≤ η and log(2/δ1 ) ≤ 4/δ1 . Choosing δ1 = 1 ∧
+gives
+η
+|gk,η1 (x1 , . . . , xj , . . . , xA , y1 , . . . , yA ) − gk,η1 (x1 , . . . , x′j , . . . xA , y1 , . . . , yA )|
+s
+2∥xj − x′j ∥2 
+2  2∥xj − x′j ∥2
++
+≤
+η1
+η
+η
+Similarly, for xk ̸= x′k , we have
+|gk,η1 (x1 , . . . , xk , . . . , xA , y1 , . . . , yA ) − gk,η1 (x1 , . . . , x′k , . . . xA , y1 , . . . , yA )|
+1
+≤
+P(⟨xk − xi , z⟩ + yk − yi ≥ 0 ≥ ⟨x′k − xi , z⟩ + yk − yi , for some i ∈ [A])
+η1
+
++ P(⟨xk − xi , z⟩ + yk − yi ≤ 0 ≤ ⟨x′k − xi , z⟩ + yk − yi , for some i ∈ [A])
+X 1
+≤
+P(⟨xk − xi , z⟩ + yk − yi ≥ 0 ≥ ⟨x′k − xi , z⟩ + yk − yi )
+η1
+i̸=k
+
++ P(⟨xk − xi , z⟩ + yk − yi ≤ 0 ≤ ⟨x′k − xi , z⟩ + yk − yi )
+
+
+A
+≤
+max P(⟨xk − x′k , z⟩ ≥ ⟨xi − x′k , z⟩ + yi − yk ≥ 0) + P(⟨xk − x′k , z⟩ ≤ ⟨xi − x′k , z⟩ + yi − yk ≤ 0 .
+η1 i̸=k
+Following the same argument, we have
+|gk,η1 (x1 , . . . , xk , . . . , xA , y1 , . . . , yA ) − gk,η1 (x1 , . . . , x′k , . . . xA , y1 , . . . , yA )|
+s
+2∥xk − x′k ∥2 
+2A  2∥xk − x′k ∥2
++
+.
+≤
+η1
+η
+η
+Likewise, for any j ̸= k we have
+|gk,η1 (x1 , . . . , xA , y1 , . . . , yj , . . . , yA ) − gk,η1 (x1 , . . . , xA , y1 , . . . , yj′ , . . . , yA )|
+
+1
+P(⟨xk − xj , z⟩ ∈ [min{yk − yj , yk − yj′ }, max{yk − yj , yk − yj′ }]
+≤
+η
+1
+sup
+P(⟨xk − xj , z⟩ ∈ A)
+≤
+η1 A∈F ,µ(A)=2|yj −yj′ |
+≤
+
+2|yj − yj′ |
+1 2|yj − yj′ |
+√
+≤
+η1
+ηη1
+2πη
+
+and
+|gk,η1 (x1 , . . . , xA , y1 , . . . , yk , . . . , yA ) − gk,η1 (x1 , . . . , xA , y1 , . . . , yk′ , . . . , yA )|
+
+X 1
+P(⟨xk − xj , z⟩ ∈ [min{yk′ − yj , yk − yj }, max{yk′ − yj , yk − yj }]
+≤
+η
+j̸=k
+
+≤
+
+A
+sup
+P(⟨xk − xj , z⟩ ∈ A)
+η1 A∈F ,µ(A)=2|yj −yj′ |
+
+≤
+
+2A|yj − yj′ |
+A 2|yj − yj′ |
+√
+≤
+.
+η1
+ηη1
+2πη
+49
+
+G
+
+Learning in-context RL in markov decision processes
+
+Throughout this section, we use c > 0 to denote universal constants whose values may vary from line to line.
+Moreover, for notational simplicity, we use O(·) to hide universal constants, Õ(·) to hide poly-logarithmic
+terms in (H, K, S, A, 1/τ ).
+This section is organized as follows. Section G.1 discusses the embedding and extraction formats of transformers for Markov decision processes. Section G.2 describes the UCB-VI and the soft UCB-VI algorithms.
+We prove Theorem 12 in Section G.3 and prove Theorem 13 in Section G.4.
+
+G.1
+
+Embedding and extraction mappings
+
+To embed MDP problems into transformers, we consider an embedding similar to that for linear bandits.
+For each episode k ∈ [K], we construct 2H + 1 tokens. Concretely, for each t ∈ [T ] in the k-th episode, we
+write t = H(k − 1) + h and construct two tokens
+
+
+
+
+ak,h
+ a
+
+ a
+
+0A+1
+h2(t−1)+k
+
+
+rk,h
+h2t−1+k
+
+
+
+
+s
+hb
+
+k,h
+
+
+
+ b
+
+
+0S
+
+ =: 
+ =: h2t−1+k
+
+0A
+h2(t−1)+k = 
+ 2(t−1)+k
+ , h2t−1+k = 
+c
+c
+
+
+
+
+h2t−1+k  ,
+0A
+h2(t−1)+k 
+
+
+
+
+0
+
+
+hd2t−1+k
+0
+hd2(t−1)+k
+pos2(t−1)+k
+pos2t−1+k
+where sk,h , ak,h are represented using one-hot embedding (we let sk,H+1 = 0S ), hc2(t−1)+k is used to store
+the (unnormalized) policy at time t given current state sk,h , 0 in hd denotes an additional zero vector. At
+the end of each episode k, we add an empty token
+
+h(2H+1)k = hemp
+:= 0
+k
+
+pos(2H+1)k
+
+⊤
+
+to store intermediate calculations. We also include in the tokens the positional embedding posi := (k, h, vi , i, i2 , 1)⊤
+for i ∈ [2T + K], where vi := 1{hai =0} denote the tokens that do not embed actions and rewards. In addition,
+
+
+we define the token matrix Ht := h1 , . . . , h2t−1+k ∈ RD×(2t−1+k) for all t ∈ [T ].
+Offline pretraining Similar to the bandit setting, during pretraining the transformer TFθ takes in Hpre
+T :=
+pre
+)
+as
+the
+output.
+For
+each
+time
+t
+∈
+[T
+], we
+:=
+TF
+(H
+HT as the input token matrix, and generates Hpost
+θ
+T
+T
+exp(hpost,c
+
+)
+
+2(t−1)+k
+∈ ∆A , whose i-th entry is the probability of
+define the induced policy Algθ (·|Dt−1 , st ) := ∥ exp(hpost,c
+)∥
+2(t−1)+k
+
+1
+
+selecting the i-th action (denoted by the one-hot vector ei ) given (Dt−1 , st ). We then find the transformer
+θb ∈ Θ by solving Eq. (3).
+Rollout At each time t ∈ [T ], given the current state st and previous data Dt−1 , we first construct the
+D×2(t−1)+k
+token matrix Hpre
+that consists of tokens up to the first token for time t. The transformer
+roll,t ∈ R
+pre
+pre
+then takes Hroll,t as the input and generates Hpost
+roll,t = TFθ (Hroll,t ). Next, the agent selects an action at ∈ A
+exp(hpost,c
+
+)
+
+2(t−1)+k
+∈ ∆A and observes the reward rt and next
+following the induced policy Algθ (·|Dt−1 , st ) := ∥ exp(hpost,c
+)∥
+2(t−1)+k
+
+1
+
+state st+1 (st+1 ∼ µ1 if t is the last time step in an episode).
+Embedding and extraction mappings To integrate the above construction into our general framework
+in Section 2, for t = (k − 1)H + h, we have the embedding vectors
+h(st ) := h2(t−1)+k ,
+
+h(at , rt ) := h2t−1+k .
+
+For N ≥ 1, write
+⌈(N + 1)/2⌉ = (kN − 1)H + hN
+
+50
+
+for some hN ∈ [H], and define the concatenation operator
+emp
+N +kN −1
+,
+cat(h1 , . . . , hN ) := [h1 , . . . , h2H , hemp
+1 , h2H+1 , . . . , h4H , h2 , h4H+1 , . . . , hN ] ∈ R
+
+where we insert an empty token hemp
+(i.e., a token with h{a,b,c} = 0) at the end of each episode k.
+k
+In this case, we have the input token matrix
+D×[2(t−1)+k]
+H = Hpre
+,
+roll,t := cat(h(s1 ), h(a1 , r1 ), . . . , h(at−1 , rt−1 ), h(st )) ∈ R
+
+the output token matrix H = Hpost
+roll,t , and the linear extraction map A satisfies
+post
+
+A · h−1 = A · h2(t−1)+k = hpost,c
+2(t−1)+k .
+
+G.2
+
+UCB-VI and soft UCB-VI
+
+We show that transformers with the embedding in Section G.1 can approximately implement the UCB-VI
+algorithm in Azar et al. (2017). Namely, UCB-VI implements the following steps:
+for each episode k ∈ [K] and each step h = H, . . . , 1
+′
+
+Nh (s,a,s )
+1. Compute the estimated transition matrix Pbh (s′ |s, a) := N
+, where Nh (s, a, s′ ) denotes the numh (s,a)∨1
+′
+ber of timesPthe state-action-next-state tuple (s, a, s ) has been visited in the first k − 1 episodes, and
+Nh (s, a) = s′ Nh (s, a, s′ ) (we assume NH (s, a, s′ ) = 0 and let NH (s, a) be the number of times (s, a)
+is visited at timestep H).
+
+2. Calculate the estimated Q-function
+b h (s, a) = min{H, rh (s, a) + bh (s, a) +
+Q
+
+X
+
+Pbh (s′ | s, a)Vbh+1 (s′ )},
+
+s′ ∈S
+
+where the bonus bh (s, a) = 2H
+
+q
+
+log(SAT /δ) b
+b
+b
+Nh (s,a)∨1 , VH+1 (s) := 0 for all s ∈ S and Vh (s) := maxa∈A Qh (s, a).
+
+Throughout this section, we choose the small probability δ = 1/(KH).
+b h , a)
+During policy execution, at each step h ∈ [H], UCB-VI takes the greedy action ah := arg maxa Q(s
+and observes the reward and next state (rh , sh+1 ). To facilitate pretraining, in this work we consider a soft
+version of UCB-VI, which takes action ah following the softmax policy
+πh (a|sh ) =
+
+b h (sh , a)/τ )
+exp(Q
+b h (sh , a)/τ )
+exp(Q
+
+1
+
+using the estimated Q-function for some sufficiently small τ > 0. Note that soft UCB-VI recovers UCB-VI
+as τ → 0.
+
+G.3
+
+Proof of Theorem 12
+
+Throughout the proof, we abuse the notations h⋆i for ⋆ ∈ {a, b, c, d} to denote the corresponding positions
+in the token vector hi . For any t′ ∈ [T ], we let k(t′ ), h(t′ ) be the non-negative integers such that t′ =
+H(k(t′ ) − 1) + h(t′ ) and h(t′ ) ∈ [H]. For the current time t, we use the shorthands k = k(t), h = h(t). For
+a token index i ∈ [(2H + 1)K], let k(i), h(i) be the episode and time step the i-th token corresponds to (for
+the empty tokens we set h = H + 1). Given the input token matrix Hpre
+roll,t , we construct a transformer that
+
+51
+
+implements the following steps on the last token. h⋆2(t−1)+k = hpre,⋆
+2(t−1)+k for ⋆ ∈ {a, b, c, d}
+
+
+pre,{a,b,c}
+
+h2(t−1)+k
+N1 (s, a, s′ )
+..
+.
+
+
+
+
+
+ pre,{a,b,c} 
+
+
+h2(t−1)+k
+
+
+
+
+
+b 1 (s, a, s′ ) 
+
+
+ pre,{a,b,c} 
+
+Q
+
+
+′
+
+
+h
+
+
+..
+NH (s, a, s )
+2(t−1)+k
+
+
+ b
+
+
+.
+′ 
+
+
+
+ pre,a
+
+
+
+
+P1 (s, a, s )
+N1 (s, a)
+
+h2(t−1)+k
+
+
+
+
+b H (s, a, s′ ) 
+
+Q
+.
+.
+
+
+
+
+
+
+hpre,b
+..
+..
+ step 3 
+ step 2 
+ Vb1 (s) 
+ 2(t−1)+k  step 1 
+
+
+
+
+−
+−
+−
+−
+→
+−
+−
+−
+−
+→
+
+
+ −−−−→ 
+ pre,c
+′
+ PbH (s, a, s′ ) 
+
+NH (s, a, s )
+
+
+h2(t−1)+k 
+..
+
+
+
+
+
+
+.
+
+
+ N1 (s, a)r1 (s, a) 
+⋆
+
+
+hpre,d
+
+
+
+
+2(t−1)+k
+
+..
+
+
+
+
+VbH (s) 
+0
+
+
+
+
+.
+
+
+
+
+⋆
+pos2(t−1)+k
+
+
+NH (s, a, s′ )rH (s, a)
+
+
+
+
+0
+
+
+⋆
+
+
+pos2(t−1)+k
+
+
+0
+pos2(t−1)+k
+ pre,{a,b} 
+h
+ post,a 
+ Qb2(t−1)+k
+
+h2(t−1)+k
+ h (st ,a1 ) 
+
+hpost,b 
+
+τ
+step 4 
+
+
+
+..
+−−−−→ 
+ =:  2(t−1)+k
+,
+post,c
+.
+
+
+h2(t−1)+k 
+ Qbh (st ,a1 ) 
+
+
+hpost,d
+τ
+2(t−1)+k
+d
+h2(t−1)+k
+
+(25)
+
+b h (s, a, s′ ) ∈ RS 2 ×A , Nh (s, a) ∈ RS×A , Vbh (s) ∈ RS for all h ∈ [H], and ⋆
+where Nh (s, a, s′ ), Pbh (s, a, s′ ), Q
+denote additional quantities in hd2(t−1)+k . Given the current state st , the transformer TFθ (·) generates the
+policy
+exp(hpost,c
+2(t−1)+k )
+Algθ (·|Dt−1 , st ) :=
+∈ ∆A .
+post,c
+∥ exp(h2(t−1)+k )∥1
+We claim the following results which we will prove later.
+Step 1 There exists an attention-only transformer TFθ (·) with
+L = 4,
+
+max M (l) ≤ O(HS 2 A),
+
+|||θ||| ≤ O(HK + HS 2 A)
+
+ℓ∈[L]
+
+that implements step 1 in (21).
+Step 2 There exists a one-layer transformer TFθ (·) with
+L = 1, M ≤ O(HS 2 A),
+
+D′ ≤ O(K 2 HS 2 A),
+
+|||θ||| ≤ Õ(HS 2 A + K 3 + KH)
+
+that implements step 2 in (21).
+Step 3 There exists a transformer TFθ (·) with
+L = 2H,
+
+max M (l) ≤ 2SA,
+
+max D′
+
+ℓ∈[L]
+
+ℓ∈[L]
+
+(l)
+
+≤ 3SA,
+
+|||θ||| ≤ O(H + SA)
+
+that implements step 3 (i.e., value iteration) in (21).
+Step 4 There exists an attention-only transformer TFθ (·) with
+L = 3,
+
+max M (ℓ) = O(HA), |||θ||| ≤ O(H(K + A) + 1/τ )
+ℓ∈[L]
+
+that implements step 4 in (21).
+52
+
+From the construction of Step 1—4, we verify that one can choose the constructed transformer to have the
+embedding dimension D = O(HS 2 A). Moreover, due to the boundedness of the reward function, Q-function
+and the fact that the bonus b(s, a) ≤ Õ(H), we verify that there exists some R > 0 with log R = Õ(1) such
+(ℓ)
+that ∥hi ∥2 ≤ R for all layer ℓ ∈ [L] and all token i ∈ [K(2H + 1)]. Therefore, similar to what we do in
+the proof of Theorem 8, 10, we may w.l.o.g. consider transformers without truncation (i.e., R = ∞) in our
+construction of step 1—4 in (25).
+Proof of Step 1 We prove this step by constructing a transformer that implements the following two
+steps:
+Step 1a For each t′ < t with t′ = (k ′ − 1)H + h′ for some h′ ∈ [H], we add sk′ ,h′ , (ak′ ,h′ , rk′ ,h′ ) from hb2(t′ −1)+k′
+and ha2t′ −1+k′ to hd2t′ +k′ .
+Step 1b Compute Nh (s, a, s′ ), Nh (s, a) for h ∈ [H] and assign them to the current token hd2(t−1)+k .
+(1)
+
+(1)
+
+(1)
+
+For step 1a, we can construct a two-layer attention-only transformer with Q1,2,3 , K1,2,3 , V1,2,3 such that for
+all i ≤ 2(t − 1) + k
+
+
+
+
+
+
+−B
+0
+k(i) + 1 − vi
+
+
+
+0A+1 
+
+B
+(1) (0)
+ , K(1) h(0) =  k(i)  , V(1) h(0)′
+
+,
+Q1 hi = 
+′ = 
+1
+1
+i
+2(t
+−1)+k
+
+
+
+
+sk′ ,h′ 
+i+3
+1
+0
+−1
+i
+
+
+0
+ak′ ,h′ 
+
+
+(1) (0)
+
+V1 h2t′ −1+k′ = 
+ rk′ ,h′ 
+ 0S 
+0,
+(1)
+
+where we choose B = 4 and Vh(0) are supported on some entries in h(0),d . Moreover, we choose Q3
+(1)
+(1)
+(1)
+(1)
+(1)
+(1)
+(1)
+Q2 = Q1 , V2 = V3 = −V1 and K2 , K3 such that
+
+
+
+
+−B
+−B
+ k(i) 
+ k(i) 
+(1) (0)
+(1) (0)
+
+
+
+K2 hi = 
+i + 2 , K3 hi = i + 1
+−1
+−1.
+(1)
+
+(1)
+
+=
+
+(1)
+
+We verify that ∥Q⋆ ∥op , ∥K⋆ ∥op = 4, ∥V⋆ ∥op = 1 for ⋆ ∈ [3]. Summing up the heads, we obtain the
+(0),d
+following update on a subset of coordinates in h2t′ +k′ :
+′
+
+0S+A+1 → 0S+A+1 +
+
+3 2tX
++k
+X
+
+′
+
+D
+E
+(1) (0)
+(1) (0)
+(0)
+σ( Qj h2t′ +k′ , Kj hi )Vj hi
+
+j=1 i=1
+
+=
+
+1
+(1) (0)
+(1) (0)
+(1) (0)
+[(V1 h2t′ +k′ −2 + 2V1 h2t′ +k′ −1 + 3V1 h2t′ +k′ )
+2t′ + k ′
+(1) (0)
+
+(1) (0)
+
+(1) (0)
+
+− (V1 h2t′ +k′ −1 + 2V1 h2t′ +k′ ) − V1 h2t′ +k′ )]
+1
+(1) (0)
+(1) (0)
+= ′
+(V h ′ ′ + V1 h2t′ +k′ −1 )
+2t + k ′ 1 2t +k −2
+
+
+ak′ ,h′
+1
+ rk′ ,h′  .
+= ′
+2t + k ′
+sk′ ,h′
+D
+E
+(0)
+(0)
+Note that Q(1) hi , K(1) hj
+≤ 0 for i = 2t′ − 1 + k ′ (i.e., all tokens that embed the action and reward)
+since vi = 0, it follows that no update happens on the tokens in which we embed the action and reward (i.e.,
+53
+
+the corresponding part of hd remains zero). Moreover, it should be noted that no update happens on tokens
+with h = 1.
+We then use another attention layer to multiply the updated vectors by a factor of 2t′ + k ′ , namely, to
+perform the map
+
+
+
+
+ak′ ,h′
+ak′ ,h′
+1
+ rk′ ,h′  7→  rk′ ,h′  ,
+2t′ + k ′
+sk′ ,h′
+sk′ ,h′
+where the output vector is supported on coordinates different from the input vectors. This can be achieved
+(2)
+(2)
+(2)
+by choosing ∥Q1 ∥op ≤ (2H + 1)K, ∥K1 ∥op ≤ (2H + 1)K, ∥V1 ∥op ≤ 1 such that
+
+
+
+
+
+
+0
+i2
+1
+ak′ ,h′ 
+
+−(2H + 1)Ki2 
+
+
+
+1
+1
+(2) (1)
+(2) (1)
+(2) (1)
+
+
+
+
+ rk′ ,h′  ,
+(26)
+Q1 hi = 
+, K1 hj = 
+2  , V1 h2t′ +k′ =
+
+
+′
+′
+1
+(2H + 1)Kj
+2t + k  ′ ′ 
+sk ,h 
+0
+0
+0
+D
+E
+(2) (1)
+(2) (1)
+and noting that Q1 hi , Q1 hj
+= i when j = i and otherwise 0.
+For step 1b, we show that it can be implemented using a two-layer attention-only transformer.
+To compute Nh (s, a, s′ ), in the first layer we construct M = 10HS 2 A heads with the query, key, value
+(1)
+(1)
+(1)
+10
+10
+matrices {Qijkh,s }10
+s=1 , {Kijkh,s }s=1 , {Vijkh,s }s=1 such that for all i ≤ 2(t − 1) + k and i, k ∈ [S], j ∈ [A], h ∈ [H]
+
+
+
+
+1
+B(vi − 1)
+sk(i),h(i)−1 
+ Bei 
+
+
+
+
+
+
+ak(i),h(i)−1 
+ Bej 
+0
+
+
+
+
+(1)
+(0)
+(1)
+(0)
+(1)
+(0)
+
+
+
+ Nh 
+Qijkh,1 hi = 
+ Bek  , Kijkh,1 hi =  sk(i),h(i)  , Vijkh,1 hi = − eijk ,
+
+ −3B 
+
+1
+0
+
+
+
+
+
+ 1 − h(i) 
+
+1
+h
+1
+where we choose B = 2H and ehijk denotes the one-hot vector supported on the (i, j, k)-entry in Nh (s, a, s′ ).
+We similarly construct
+
+
+
+
+1
+B(vi − 1)
+ Bei 
+sk(i),h(i)−1 
+
+
+
+
+
+
+ Bej 
+ak(i),h(i)−1 
+0
+
+
+
+
+(1)
+(0)
+(1)
+(0)
+(1)
+(0)
+N
+
+
+
+ h
+Qijkh,2 hi = 
+ Bek  , Kijkh,2 hi =  sk(i),h(i)  , Vijkh,2 hi = eijk ,
+
+
+ −3B 
+1
+0
+
+
+
+
+
+
+ −h(i) 
+1
+h
+1
+
+
+
+
+1
+B(vi − 1)
+ Bei 
+sk(i),h(i)−1 
+
+
+
+
+
+
+ Bej 
+ak(i),h(i)−1 
+0
+
+
+
+
+(1)
+(0)
+(1)
+(0)
+(1)
+(0)
+N
+
+
+
+ h
+Qijkh,3 hi = 
+ Bek  , Kijkh,3 hi =  sk(i),h(i)  , Vijkh,3 hi = − eijk ,
+
+
+ −3B 
+1
+0
+
+
+
+
+
+
+ h(i) − 1 
+1
+−h
+1
+
+54
+
+
+
+
+
+1
+B(vi − 1)
+sk(i),h(i)−1 
+ Bei 
+
+
+
+
+
+
+ak(i),h(i)−1 
+ Bej 
+0
+
+
+
+
+(1)
+(0)
+(1)
+(0)
+(1)
+(0)
+
+
+
+ Nh 
+Qijkh,4 hi = 
+ Bek  , Kijkh,4 hi =  sk(i),h(i)  , Vijkh,4 hi = eijk ,
+
+
+
+
+1
+0
+ −3B 
+
+
+ h(i) − 2 
+
+
+1
+−h
+1
+
+
+
+
+1
+B(vi − 1)
+
+
+sk(i),h(i)−1 
+ Bei 
+0
+
+
+
+
+(1)
+(0)
+(1)
+(1)
+(0)
+(0)
+
+
+
+ Nh 
+Qijkh,5 hi = 
+ Bej  , Kijkh,5 hi = ak(i),h(i)−1  , Vijkh,5 hi = eijk .
+ s
+ Bek 
+
+0
+k(i),h(i)
+1
+−3B
+
+Summing up the first five heads, we verify that such attention updates the token with hai = 0 and has the
+form
+1e
+Nh
+0→0+ N
+h (i, j, k)eijk
+i
+eh (i, j, k) denote the number of visits to the state-action-next-state tuple (i, j, k) at time step h
+on hdi , where N
+(1)
+(1)
+(1)
+(1)
+before token i. For ⋆ ∈ [5], we choose Vijkh,⋆+5 = −Vijkh,⋆+5 and Qijkh,⋆+5 , Kijkh,⋆+5 be such that
+ (1) (0) 
+ (1) (0) 
+Kijkh,⋆ hi
+Qijkh,⋆ hi
+(1)
+(0)
+, K
+=  k(i) 
+B
+ijkh,⋆+5 hi
+−k(i)
+B
+
+(1)
+(0)
+Qijkh,⋆+5 hi = 
+
+which adds positional embedding about the current episode k(i). We verify that summing up the sixth to
+the tenth heads gives the update
+1
+eh (i, j, k))eNh
+0 → 0 + (Nh (i, j, k) − N
+ijk
+i
+on hdi for i ≤ 2(t − 1) + k with hai = 0. Therefore, combining all the heads together we have the update
+1
+h
+0 → 0 + Nh (i, j, k)eN
+for all i, k ∈ [S], j ∈ [A], h ∈ [H]
+ijk
+i
+on hdi for i ≤ 2(t − 1) + k with hai = 0, in particular when i = 2(t − 1) + k. Moreover, notice that the matrices
+(1)
+(1)
+(1)
+10
+10
+{Qijkh,s }10
+s=1 , {Kijkh,s }s=1 can be constructed with the operator norm less than 10B = 10H, and {Vijkh,s }s=1
+with the operator norm equals 1.
+Following a similar construction, we can also compute Nh (s, a), Nh (s, a)rh (s, a) for all h, s, a, s′ on different
+supports of coordinates in hdi via adding additional M = O(HSA) heads to the attention-only layer.
+Next, we construct the second attention layer to multiply the token vector by the index number i as in the
+proof of Step 1a. The construction is similar to that in Eq. (26) and we omit it here. Moreover, note that
+Step 1b can be implemented with the embedding dimension D ≤ O(HS 2 A) as we need O(1) dimensions for
+each quadruple (i, j, k, h). Combining Step 1a, 1b concludes the proof of Step 1.
+Proof of Step 2 After Step 1, for the current token i = 2(t − 1) + k, we have Nh (s, a, s′ ), rh (s, a), Nh (s, a),
+Nh (s, a)rh (s, a) lie in hdi for all h ∈ [H]. Given these vectors that store the number of visits and rewards,
+note that
+rh (s, a) =
+
+Nh (s, a)rh (s, a)
+,
+Nh (s, a) ∨ 1
+55
+
+when Nh (s, a) ≥ 1,
+
+s
+bh (s, a) = 2H
+
+log(SAT /δ)
+,
+Nh (s, a) ∨ 1
+′
+
+Nh (s, a, s )
+Pbh (s, a, s′ ) =
+.
+Nh (s, a) ∨ 1
+b
+Therefore, we may
+q compute Ph , bh via using a transformer layer to implement the functions f1 (x, y) =
+
+log(SAT /δ)
+x
+x
+, f3 (x, y) = y∨1
++ H1y=0 for x, y ∈ {0} ∪ [K]. We demonstrate the computation
+y∨1 , f2 (y) = 2H
+y∨1
+′
+b
+of Ph (s, a, s ) (i.e., the computation of f1 (x, y)) here. We start with constructing an attention layer with
+M = O(HS 2 A) heads such that it implements x 7→ x2 for x = Nh (s, a, s′ ), Nh (s, a). For Nh (s, a, s′ ), this can
+(1)
+(1)
+(1)
+be done by choosing ∥Qijkh ∥op ≤ K, ∥Kijkh ∥op ≤ K, ∥Vijkh ∥op = 1 such that
+
+
+
+
+
+
+ 
+j
+0
+K
+(1) (0)
+(1) (0)
+ , K(1) h(0)
+
+
+
+−i
+K
+j ,
+Qijkh hi = 
+=
+,
+V
+h
+=
+ijkh j
+ijkh j
+Nh (ei , ej , ek )
+Nh (ei , ej , ek )
+0
+where ei , ek denote the i, j-th states and esj denotes the k-th action. Similarly, we can construct HSA
+additional heads to compute Nh (s, a)2 for all possible s, a.
+(1)
+
+Next, we compute the exact values of Pb(s, a, s′ ) using an MLP layer. Namely, we construct W1 =
+(1)
+(1)
+(1)
+(1)
+(1)
+(1)
+W12 W11 , W2 = W23 W22 W21 such that for all h, s, a, s′ , on the corresponding vector component we
+have
+
+ 
+
+1
+1
+
+ 
+ Nh (s, a, s′ )2
+Nh (s, a, s′ )2
+
+ 
+
+
+ 
+
+..
+..
+
+ 
+
+.
+.
+
+
+
+
+(1) (0)
+′ 2
+2
+′ 
+′
+2
+
+N
+(s,
+a,
+s
+)
++
+K
+−
+2KN
+(s,
+a,
+s
+)
+(N
+(s,
+a,
+s
+)
+−
+K)
+=
+W11 hi = 
+h
+h
+,
+
+
+ h
+2
+2
+
+
+
+
+N
+(s,
+a)
+N
+(s,
+a)
+h
+h
+
+ 
+
+
+ 
+
+..
+..
+
+
+
+
+.
+.
+2
+2
+2
+Nh (s, a) + K − 2KNh (s, a)
+(Nh (s, a) − K)
+
+
+′ 2
+1 − Nh (s, a, s ) − Nh (s, a)2
+
+
+..
+
+
+.
+
+
+(1)
+(1) (0)
+′
+2
+2 
+
+W12 W11 hi =  1 − (Nh (s, a, s ) − x) − (Nh (s, a) − y)  ,
+
+
+..
+
+
+.
+1 − (Nh (s, a, s′ ) − K)2 − (Nh (s, a) − K)2
+(1)
+
+where x, y ∈ {0} ∪ [K]. Moreover, we construct W21 so that on the entries corresponding to h, s, a, s′ it
+implements
+i
+i h
+hP
+(1)
+(1) (0)
+K
+Nh (s,a,s′ )
+x
+′
+2
+2
+W2 σ(W1 hi ) =
+x,y=0 σ(1 − (Nh (s, a, s ) − x) − (Nh (s, a) − y) ) · y∨1 = Nh (s,a)∨1 .
+(1)
+
+(1)
+
+It can be verified that we can find such W1 , W2
+(1)
+
+(1)
+
+with
+
+(1)
+
+∥W1 ∥op ≤ ∥W11 ∥op ∥W12 ∥op ≤ O(K 2 ) · O(K) = O(K 3 ),
+(1)
+
+∥W2 ∥op ≤ O(K), and the number of hidden neurons D′ = O(K 2 HS 2 A). Simlarly, we can compute f2 (·)
+(1)
+(or f3 (·)) exactly following the same construction but with a different W2 that records all possible values
+of f2 (·) (or f3 (·)). Combining the upper bounds on the operator norm of the weight matrices, we further
+have |||θ||| ≤ Õ(HS 2 A + K 3 + KH).
+
+56
+
+Proof of Step 3 Given VbH+1 = VbH+1 = 0, we show the there exists an transformer with
+L = 2,
+
+max M (ℓ) ≤ 2SA,
+
+max D′
+
+ℓ∈[L]
+
+ℓ∈[L]
+
+(ℓ)
+
+≤ 3SA,
+
+|||θ||| ≤ O(H + SA)
+
+that implements one step of value iteration
+b h (s, a) = max{min{H, rh (s, a) + bh (s, a) +
+Q
+
+X
+
+Pbh (s′ | s, a)Vbh+1 (s′ )}, 0},
+
+s′ ∈S
+
+b h (s, a)
+Vbh (s) = max Q
+a∈A
+
+(1)
+
+for some h ∈ [H]. Namely, we start with constructing an-attention layer with M = 2SA and {Qijh,s }2s=1 ,
+(1)
+(1)
+{Kijh,s }2s=1 , {Vijh,s }2s=1 such that for all i ≤ 2(t − 1) + k
+
+
+
+
+
+
+
+
+0
+B
+i
+(1) (0)
+(1) (0)
+h
+ , V(1) h(0)
+B
+Qij,1 hi =  −i  , Kij,1 hi = 
+= ieQ
+ij,1 i
+ij
+b
+b
+Vh+1 (·)
+Ph+1 (·|s, a)
+0,
+
+
+B
+(1) (0)
+(1)
+(1)
+(1)
+(1)
+Qij,2 hi =  −i  , Kij,2 = Kij,1 , Vij,2 = −Vij,2
+−Vbh+1 (·)
+h
+SA
+b h . Moreover,
+where B = 3H and eQ
+is a vector supported on some coordinates in hdi reserved for Q
+ij ∈ R
+
+(1)
+
+(1)
+
+(1)
+
+we have ∥Qijh,s ∥op , ∥Kijh,s ∥op ≤ B, ∥Vijh,s ∥op = 1. Since
+D
+E
+Vbh+1 (·), Pbh+1 (·|s, a) ≤ Vbh+1 (·)
+as Vbh+1 (s) ∈ [0, H] and Pbh+1 (·|s, a)
+i ≤ 2(t − 1) + k
+
+∞
+
+· Pbh+1 (·|s, a)
+
+≤H
+1
+
+= 1, it follows that summing up two heads gives the update for
+1
+
+h D
+E
+D
+Ei
+(1) (0)
+(1) (0)
+(1) (0)
+(1) (0)
+h
+0 7→ 0 + σ( Qij,1 hi , Kij,1 hj ) − σ( Qij,1 hi , Kij,1 hj ) eQ
+ij
+D
+E
+(1) (0)
+(1) (0)
+h
+= Qij,1 hi , Kij,1 hj
+eQ
+ij .
+(1)
+
+Denote the resulting token vector by hi . Moreover, we can construct a two-layer MLP with
+(1)
+
+(1)
+
+∥W1 ∥op = O(H), ∥W2 ∥op ≤ 3, D′ = 3SA
+such that for any state-action pair (s, a) ∈ S × A on the corresponding coordinates
+
+
+..
+.
+
+
+ −[r (s, a) + b (s, a) + P
+bh (s′ | s, a)Vbh+1 (s′ )] 
+P
+′
+
+
+h
+h
+P s ∈S
+
+
+(1) (1)
+W1 hi = rh (s, a) + bh (s, a) + s′ ∈S Pbh (s′ | s, a)Vbh+1 (s′ ) − H 
+P
+
+
+ rh (s, a) + bh (s, a) + s′ ∈S Pbh (s′ | s, a)Vbh+1 (s′ ) 
+
+
+..
+.
+and
+(1)
+
+(1) (1)
+
+W2 σ(W1 hi ) = σ(−[rh (s, a) + bh (s, a) +
+
+X
+
+− σ(rh (s, a) + bh (s, a) +
+
+X
+
+Pbh (s′ | s, a)Vbh+1 (s′ )])
+
+s′ ∈S
+
+s′ ∈S
+
+57
+
+Pbh (s′ | s, a)Vbh+1 (s′ ) − H)
+
++ σ(rh (s, a) + bh (s, a) +
+
+X
+
+Pbh (s′ | s, a)Vbh+1 (s′ ))
+
+s′ ∈S
+
+= max{min{H, rh (s, a) + bh (s, a) +
+
+X
+
+b h (s, a).
+Pbh (s′ | s, a)Vbh+1 (s′ )}, 0} = Q
+
+s′ ∈S
+(2)
+
+Denote the resulting token vector by hi . Next, we construct a second MLP layer with
+√
+(2)
+(2)
+∥W1 ∥op ≤ 2, ∥W2 ∥op ≤ A, D′ = AS
+such that for any s ∈ S on the corresponding coordinates we have
+
+
+..
+.
+
+
+
+
+b h (s, a1 )
+Q
+
+
+
+ b
+b
+Q
+(s,
+a
+)
+−
+Q
+(s,
+a
+)
+
+
+h
+2
+h
+1
+(2) (2)
+,
+W1 hi = 
+..
+
+
+
+
+.
+
+
+b h (s, aA ) − Q
+b h (s, aA−1 )
+Q
+
+
+..
+.
+where aj denotes the j−th action, and
+(2)
+
+(2) (2)
+
+b h (s, a1 )) +
+W2 σ(W1 hi ) = σ(Q
+
+A
+X
+
+b h (s, aj ) − Q
+b h (s, aj−1 ))
+σ(Q
+
+j=2
+
+b h (s, a) = Vbh (s).
+= max Q
+a∈A
+
+Using the upper bounds on the operator norm of the weight matrices, we further have |||θ||| ≤ O(SA + H).
+Combining the steps concludes the construction in Step 3.
+Proof of Step 4
+
+(1)
+
+(1)
+
+we start with constructing an-attention layer with M = 2HA and {Qjh,s }2s=1 , {Kjh,s }2s=1 ,
+
+(1)
+
+{Vjh,s }2s=1 such that for all the current token i = 2(t − 1) + k and j ≤ i
+
+
+
+
+
+
+b h (·, aj )
+sk(i),h(i)
+0
+Q
+(1) (0)
+(1)
+(0)
+(1)
+(0)
+Qjh,1 hi =  −i  , Kjh,1 hj =  B  , Vjh,1 hi = iejh 
+0,
+B
+j
+
+
+−sk(i),h(i)
+(1) (0)
+ , K(1) = K(1) , V(1) = −V(1) ,
+Qjh,2 hi = 
+−i
+jh,2
+jh,1
+jh,2
+jh,1
+B
+(1)
+
+(0)
+
+where we choose B = 2H and Vjh,1 hi is a one-hot vector supported on some entry of hdi . We verify that
+summing up the heads gives the update
+b h (sk,h , aj )ejh
+0 7→ Q
+(1)
+
+(1)
+
+(1)
+
+for all h ∈ [H], j ∈ [A]. Moreover, we have ∥Qjh,s ∥op ≤ 2H, ∥Kjh,s ∥op ≤ 2H, ∥Vjh,s ∥op ≤ 1 for s = 1, 2.
+b h (sk,h , aj ) for all h ∈ [H] from the Q-function.
+Through this attention-only layer, we extract the values Q
+(2)
+
+Similar to the proof of Step 1b, we construct a second attention-only layer with attention heads {Qjh,s }2s=1 ,
+(2)
+
+(2)
+
+{Kjh,s }2s=1 , {Vjh,s }2s=1 that
+
+ 
+1
+h
+1
+−h(i)
+(2)
+(1)
+(2) (1)
+
+ 
+Qjh,1 hi = 
+ −i  , Kjh,1 hj = B ,
+j
+B
+
+
+58
+
+
+(2)
+
+(1)
+
+Vjh,1 hi
+
+0
+
+
+
+b h (sk,h , aj )ej  ,
+= − Q
+0
+
+
+
+h−1
+ 1 
+(2)
+(2)
+(2) (1)
+
+Qjh,2 = Qjh,1 , Kjh,2 hj = 
+ B ,
+j
+(2)
+
+(1)
+
+where Vjh,1 hi
+
+(2)
+
+(2)
+
+Vjh,2 = −Vjh,2 ,
+
+are supported on some entry of hdi for s = 1, 2. Summing up the heads gives the update
+H
+X
+
+0 7→ −
+
+1b
+Qs (sk,h , aj ).
+i
+
+s=h(i)+1
+(2)
+
+(2)
+
+(2)
+
+Similarly, we can construct attention heads {Qjh,s }4s=3 , {Kjh,s }4s=3 , {Vjh,s }4s=3 that implements
+0 7→ −
+(2)
+
+(2)
+
+h(i)−1
+1 X b
+Qs (sk,h , aj ).
+i s=1
+
+(2)
+
+Moreover, we construct Qjh,5 , Kjh,5 , Vjh,5 with
+ 
+ 
+1
+1
+(2) (1)
+(2) (1)
+Qjh,5 hi = −i , Kjh,5 hj = B ,
+j
+B
+
+
+(2)
+
+(1)
+
+Vjh,1 hi
+
+0
+
+
+
+b h (sk,h , aj )ej 
+= Q
+0,
+
+that implements
+H
+
+1Xb
+Qs (sk,h , aj ).
+0→
+7
+i s=1
+Therefore, summing up the M = 5HA heads we obtain the update
+0A 7→
+(1)
+
+(1)
+
+1b
+Qh (sk,h , ·).
+i
+
+(1)
+
+Note that ∥Qjh,s ∥op ≤ 4H, ∥Kjh,s ∥op ≤ 4H, ∥Vjh,s ∥op ≤ 1 for s ∈ [5].
+Finally, we apply an attention-only layer to implement the multiplication by a factor of i/τ using a similar
+(3)
+(3)
+(3)
+construction as in Eq. (26) with ∥Q1 ∥op = O(HK), ∥K1 ∥op = O(HK), ∥V1 ∥op = O(1/τ ), and assign
+b k,h , ·)/τ to hc . Combining the three attention-only layers completes Step 4.
+the resulting vector Q(s
+i
+
+G.4
+
+Proof of Theorem 13
+
+By Theorem 6 and 12, it suffices to show the regret of soft UCB-VI satisfies
+√
+E[KVM (π ∗ ) − RM,AlgsUCBVI (τ ) (T )] ≤ Õ(H 2 SAK + H 3 S 2 A)
+for all MDP instances M, where τ = 1/K and Õ(·) hides logarithmic dependencies on (H, K, S, A).
+Throughout the proof, we may drop the dependence on M for notational simplicity when there is no confub k , Vb k , bk denote the corresponding quantities Nh , Pbh , Q
+b h , Vbh , bh
+sion. For each episode k ∈ [K], let Nhk , Pbhk , Q
+h
+h
+h
+introduced in UCB-VI (see Section G.2).
+For a policy π and time step h ∈ [H], we define the Q-function Qπh and the value function Vhπ
+Qπh (s, a) := E[
+
+H
+X
+
+r(st , at ) | sh = s, ah = a, π],
+
+t=h
+
+Vhπ (s) := E[
+
+H
+X
+
+r(st , a) | sh = s, π].
+
+t=h
+
+59
+
+k
+k
+k
+k
+k
+We use π k = (π1k , . . . , πH
+), πsm
+= (πsm,1
+, . . . , πsm,h
+, . . . πsm,H
+) to denote the policies given by UCB-VI and
+soft UCB-VI in the k-th episode, respectively. Note that we have VM (π) = Es∼µ1 [Vhπ (s)] and cumulative the
+regret
+K
+hX
+i
+∗
+πk
+E[KVM (π ∗ ) − RM,AlgsUCBVI (τ ) (T )]] = E
+[V1π (sk,1 ) − V1 sm (sk,1 )]
+k=1
+
+where the expectation is taken over the collected data
+sUCBVI(τ )
+
+DT = {(sk,h , ak,h , rk,h )}k∈[K],h∈[H] ∼ PM
+
+.
+
+For any function f = f (s, a), we abuse the notation f (s, π(·)) := Ea∼π [f (s, a)]. Lastly, we define
+εsfmax =
+
+max
+k∈[K],h∈[H],s∈S
+
+b k (s, π k (·)) − Q
+b k (s, π k (·))].
+[Q
+h
+h
+h
+sm,h
+
+We claim the following which we will prove later
+εsfmax ≤ Aτ.
+
+(27)
+
+The proof follows from similar arguments as in the proof of Theorem 1 in Azar et al. (2017) (see also Theorem
+7.6 in Agarwal et al. (2019)). Hence we only provide a sketch of proof here. First, from the proof of Theorem
+7.6 in Agarwal et al. (2019) , it can be shown that
+∗
+Vbhk (s) ≥ Vhπ (s)
+
+for any k, h, s with probability at least 1 − δ. Thus with probability at least 1 − δ for all h ∈ [H], k ∈ [K]
+πk
+
+∗
+
+Vhπ (sk,h ) − Vh sm (sk,h )
+πk
+
+≤ Vbhk (sk,h ) − Vh sm (sk,h )
+k
+
+π
+k
+k
+k
+b kh (sk,h , πhk (·)) − Q
+b kh (sk,h , πsm,h
+b kh (sk,h , πsm,h
+=Q
+(·)) + Q
+(·)) − Qh sm (sk,h , πsm,h
+(·))
+πk
+
+k
+k
+b kh (sk,h , πsm,h
+≤Q
+(·)) − Qh sm (sk,h , πsm,h
+(·)) + εsfmax
+πk
+
+(1)
+
+b kh (sk,h , ak,h ) − Q sm (sk,h , ak,h ) + MD + εsfmax ,
+=Q
+h
+k,h
+b k (sk,h , ak,h ) = Q
+b k (sk,h , π k (·)), and in the last line
+where the first equality uses Vbhk (sk,h ) = arg maxa Q
+h
+h
+h
+πk
+
+(1)
+
+πk
+
+k
+k
+b kh (sk,h , πsm,h
+b kh (sk,h , ak,h ) − Q sm (sk,h , ak,h )].
+MDk,h := [Q
+(·)) − Qh sm (sk,h , πsm,h
+(·))] − [Q
+h
+(1)
+
+Note that for any fixed h ∈ [H], {MDk,h }K
+k=1 is a bounded martingale difference sequence. Following the
+proof of Theorem 7.6 in Agarwal et al. (2019), we further have
+∗
+
+πk
+
+Vhπ (sk,h ) − Vh sm (sk,h )
+πk
+
+(1)
+
+b k (sk,h , ak,h ) − Q sm (sk,h , ak,h ) + MD + εsfmax
+≤Q
+h
+h
+k,h
+i
+
+k
+1 h b k
+πsm
+Vh+1 (sk,h+1 ) − Vh+1 (sk,h+1 ) + 2bkh (sk,h , ak,h )
+≤ 1+
+H
+c0 L0 H 2 S
+(2)
+(1)
++ k
++ MDk,h + MDk,h + εsfmax ,
+Nh (sk,h , ak,h )
+with probability at least 1 − cδ for some universal constant c > 0, where L0 = log(SAKH/δ), c0 > 0 is some
+universal constant and
+(2)
+
+∗
+
+πk
+
+∗
+
+πk
+
+π
+π
+sm
+sm
+MDk,h := Ph (· | sk,h , ak,h ) · (Vh+1
+− Vh+1
+) − (Vh+1
+(sk,h+1 ) − Vh+1
+(sk,h+1 ))
+
+60
+
+is a bounded martingale difference sequence for any fixed h ∈ [H]. Using the recursive formula and the fact
+that (1 + 1/H)H < e, we obtain
+K
+hX
+i
+∗
+πk
+E
+[V1π (sk,1 ) − V1 sm (sk,1 )]
+k=1
+
+#
+H−1
+i
+X
+c0 L0 H 2 S
+1
+(2)
+(1)
++
+MD
++
+MD
++
+E[K
+(1 + )h εsfmax ]
+k,h
+k,h
+k (s
+H
+N
+,
+a
+)
+k,h k,h
+h
+h=0
+k=1 h=1
+" K H
+#
+i
+2
+XXh
+c0 L0 H S
+(2)
+(1)
+2bkh (sk,h , ak,h ) + k
+≤ cE
++ MDk,h + MDk,h + cKHAτ
+N
+(s
+,
+a
+)
+k,h k,h
+h
+k=1 h=1
+√
+2
+3 2
+≤ Õ(H SAK + H S A) + cKHAτ
+√
+≤ Õ(H 2 SAK + H 3 S 2 A),
+" K H
+XXh
+2bkh (sk,h , ak,h ) +
+≤ cE
+
+where c > 0 is some universal constant, Õ(·) hides logarithmic dependencies on (H, K, S, A), and the last
+line follows again from the proof of Theorem 7.6 in Agarwal et al. (2019), and the assumption that τ = 1/K.
+We omit the detailed derivations here as they are similar to those in Azar et al. (2017); Agarwal et al. (2019).
+Therefore, we conclude the proof of the first part of Theorem 13. Moreover, the second part of Theorem 13
+(i.e., the upper bound on log NΘ ) follows immediately from Lemma 16 and Eq. (10).
+Proof of Eq. (27)
+
+b k and π k , π k , we have
+By definition of Q
+h
+h
+sm,h
+
+k
+b kh (s, πhk (·)) − Q
+b kh (s, πsm,h
+b kh (s, a) −
+Q
+(·)) = max Q
+a
+
+=
+
+X
+
+≤
+
+X
+
+a
+
+a
+
+X
+a
+
+b k (s, a)/τ )
+exp(Q
+h
+b k (s, a)
+·Q
+P
+h
+b k (s, a)/τ )
+exp(Q
+a
+
+h
+
+b k (s, a)/τ )
+exp(Q
+h
+b kh (s, a) − Q
+b kh (s, a)]
+· [max Q
+P
+a
+b k (s, a)/τ )
+exp(Q
+a
+
+h
+
+b k (s, a)/τ )
+exp(Q
+h
+b kh (s, a) − Q
+b kh (s, a)]
+· [max Q
+k
+a
+b
+exp(maxa Q (s, a)/τ )
+h
+
+≤ A · [sup t exp(−t/τ )] ≤ Aτ.
+t≥0
+
+61
+
+

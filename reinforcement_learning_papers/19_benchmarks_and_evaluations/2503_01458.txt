@@ -1,0 +1,1126 @@
+SrSv: Integrating Sequential Rollouts with Sequential Value Estimation for
+Multi-agent Reinforcement Learning
+Xu Wan1,3 , Chao Yang3 , Cheng Yang3 , Jie Song2 , Mingyang Sun* 2
+1
+
+Zhejiang University
+Peking University
+3
+Alibaba DAMO Acedemy
+wanxu@zju.edu.cn, xiuxin.yc@alibaba-inc.com, charis.yangc@alibaba-inc.com, jie.song@pku.edu.cn, smy@pku.edu.cn
+
+arXiv:2503.01458v1 [cs.AI] 3 Mar 2025
+
+2
+
+Abstract
+Although multi-agent reinforcement learning (MARL) has
+shown its success across diverse domains, extending its application to large-scale real-world systems still faces significant
+challenges. Primarily, the high complexity of real-world environments exacerbates the credit assignment problem, substantially reducing training efficiency. Moreover, the variability of agent populations in large-scale scenarios necessitates scalable decision-making mechanisms. To address these
+challenges, we propose a novel framework: Sequential rollout with Sequential value estimation (SrSv). This framework
+aims to capture agent interdependence and provide a scalable solution for cooperative MARL. Specifically, SrSv leverages the autoregressive property of the Transformer model to
+handle varying populations through sequential action rollout.
+Furthermore, to capture the interdependence of policy distributions and value functions among multiple agents, we introduce an innovative sequential value estimation methodology and integrates the value approximation into an attentionbased sequential model. We evaluate SrSv on three benchmarks: Multi-Agent MuJoCo, StarCraft Multi-Agent Challenge, and DubinsCars. Experimental results demonstrate that
+SrSv significantly outperforms baseline methods in terms of
+training efficiency without compromising convergence performance. Moreover, when implemented in a large-scale DubinsCar system with 1,024 agents, our framework surpasses
+existing benchmarks, highlighting the excellent scalability of
+SrSv.
+
+Introduction
+While multi-agent reinforcement learning (MARL) has
+demonstrated its feasibility in several decision-making domains such as games, robotic planning, and simulated industrial control (Kober, Bagnell, and Peters 2013; Vinyals
+et al. 2019; Andrychowicz et al. 2020; Wang et al. 2022), applying it to large-scale real-world systems remains an open
+challenge. The interaction complexity among a large population of agents creates a fundamental difficulty in identifying
+individual agents’ contributions to the global reward signal,
+which significantly exacerbates the credit assignment problem of MARL (Foerster et al. 2018). Most current MARL
+algorithms adopt the centralized training with decentralized
+* Corresponding Author
+Copyright © 2025, Association for the Advancement of Artificial
+Intelligence (www.aaai.org). All rights reserved.
+
+execution (CTDE) paradigm to partially alleviate this issue
+(Lowe et al. 2017), where the CTDE framework allows for
+a straightforward extension of single-agent policy gradient
+theorems by providing agents with access to global information and other agents’ observations during training.
+Within the CTDE framework, existing popular MARL algorithms such as QMIX (Rashid et al. 2018) and QualityDiversity Policy Pursuit (Q-DPP) (Yang et al. 2020) typically using value decomposition theory to represent the
+global Q-value as an aggregation of individual agent values,
+lacking effective modeling capabilities for intricate multiagent interactions. Despite achieving successes on smallscale tasks, these value decomposition-based methods face
+limitations in scaling to complex multi-agent scenarios with
+high-dimensional joint policy spaces (Wang et al. 2020).
+To circumvent the restrictive assumptions on the decomposability of the joint value function, the multi-agent advantage decomposition theory and sequential policy update
+algorithms have been proposed (Kuba et al. 2021b; Zhang
+et al. 2021). The advantage decomposition lemma aims to
+characterize an agent’s advantage increment over preceding
+agents’ decisions, providing insights into the emergence of
+cooperative behavior through a sequential decision-making
+process.
+Building upon this theory, the advantage decompositionbased methods such as Heterogeneous-Agent PPO
+(HAPPO) and Heterogeneous-Agent Soft Actor-Critic
+(HASAC) (Kuba et al. 2022; Liu et al. 2024) have been
+developed to enable policy iteration with monotonic improvement guarantees. Meanwhile, unlike the sequential
+policy updates, some researchers, exemplified by the
+Multi-Agent Transformer (MAT) and Action-dependent
+Q-learning (ACE) (Wen et al. 2022; Li et al. 2023), capture
+cooperative intentions among multiple agents from the
+perspective of multi-agent action rollouts. They leverage
+the sequence model to generate actions agent by agent.
+By incorporating the multi-agent advantage decomposition
+theorem into an encoder-decoder architecture, it realizes
+sequential action generation with a monotonic performance
+improvement guarantee.
+Nonetheless, a potential limitation of MAT lies in that
+it estimates solely the joint advantage function, lacking
+the fine-grained estimation of individual agents’ advantage functions compared to individual advantage-based ap-
+
+proaches. As the scale of the system increases, the joint estimation process will become more sample-inefficient and
+computationally demanding.
+While prior work has proposed sequential policy update
+algorithms, like preceding-agent off-policy correction (PreOPC) (Wang et al. 2023) and agent-by-agent policy optimization (A2PO) (Wang et al. 2023) to estimate individual advantage functions, retaining monotonic improvement
+guarantees on both the joint policy and each agent’s policy, determining the optimal decision-making order among
+agents can be computationally intractable, especially in
+large-scale systems. Moreover, the ”all agents at once” rollout strategy of PreOPC and A2PO, also neglects the sequential correlations inherent in multi-agent decision-making
+processes.
+To address these challenges, we propose a novel paradigm
+that synergizes the individual-centric value estimation from
+sequential update methods with the sequential rollout strategy, termed SrSv (Sequential rollouts with Sequential value
+estimation). The SrSv paradigm leverages the inherent autoregressive property of Transformer models, making it possible to effectively capture inter-agent correlations during
+the action rollout process. Simultaneously, by estimating
+individual-centric value functions sequentially, SrSv significantly enhances the training efficiency of MARL, especially
+in dealing with complex tasks.
+Experimental results on three benchmarks - Multi-Agent
+MuJoCo (MAMuJoCo) (de Witt et al. 2020), StarCraft
+Multi-Agent Challenge (SMAC) (Samvelyan et al. 2019),
+and DubinsCar (Zhang, Garg, and Fan 2023) - demonstrate
+that SrSv can outperform strong baselines in terms of convergence speed without sacrificing training performance.
+Furthermore, scaling SrSv to a large-scale DubinsCar system with 1024 agents further evidences its excellent scalability.
+
+Related Work
+The CTDE paradigm has been widely adopted in the MARL
+community. Early works such as VDN (Sunehag et al.
+2017) and QMIX (Rashid et al. 2018) proposed value decomposition methods satisfying the Individual-Global-Max
+(IGM) condition. Building upon this foundation, more advanced approaches like QTRAN (Son et al. 2019) and
+QPLEX (Wang et al. 2020), aimed to relax the IGM constraints while maintaining factorized value functions. However, these methods often struggle with complex multi-agent
+tasks due to their restrictive assumptions and limited expressiveness in capturing inter-agent dependencies.
+To address these limitations, recent research has introduced advantage decomposition theory, eliminating the need
+for any assumptions on agents sharing parameters or the
+joint value function being decomposable. This breakthrough
+has led to the development of two parallel frameworks: the
+sequential update scheme and the sequential rollout scheme.
+The sequential update scheme, represented by methods
+such as HAPPO (Kuba et al. 2021a) and A2PO (Wang
+et al. 2023), leverages individual advantage estimations to
+improve training efficiency and stability in multi-agent settings. In particular, HAPPO introduces a trust region method
+
+for multi-agent policy optimization, ensuring monotonic improvement of the joint policy. A2PO further enhances this
+approach to improve the sample efficiency and addresses
+non-stationarity issues in their theory. However, these methods may struggle with scalability in environments with
+a large number of agents due to the high computational
+complexity during sequential policy updates. Simultaneously, the sequential rollout scheme, exemplified by MAT
+(Wen et al. 2022), utilizes a Transformer-based architecture
+to model the sequential decision-making process, enabling
+more effective coordination among agents. Experiments on
+both SMAC and multi-agent MuJoCo tasks have shown that
+MAT can effectively transfer knowledge from simpler tasks
+to more complex and diverse scenarios, showcasing the potential of Transformer-based models in the scalability of
+MARL. Nevertheless, in MAT, each agent’s policy is updated according to the joint advantage function, which may
+lead to overall low training efficiency, especially in complex
+cooperative scenarios.
+
+Preliminaries
+Cooperative MARL Problems Formulation
+We consider formulating the cooperative MARL problems
+as a Dec-POMDP (Bernstein et al. 2002), which can be
+described by a tuple ⟨N, S, A, O, P, R, γ⟩. Here, N =
+{1, ..., n} represents
+Q the set of n agents.
+Q S denotes the global
+state space, A = i Ai and O = i Oi represent the joint
+action and observation spaces, respectively, where Ai and
+Oi are the individual action and observation spaces for agent
+i. The transition function P : S ×A×S → [0, 1] determines
+the probability of transitioning to a new state given the current state and joint action. R : S × A → [−Rmax , Rmax ]
+is the bounded global reward function, shared by all agents,
+and γ ∈ [0, 1) is the discount factor.
+At time step t, every agent i ∈ N receives a local observation oit ∈ Oi from the global state st and selects an action
+ait based on its policy π i . The joint action at = (a1t , ..., ant )
+leads to a new state st+1 according to P , and a team reward rt = R(st , at ). We define the joint policy π(at |ot )
+as a conditional probability of the joint action at given all
+the agents’ observations ot = (o1t , ..., ont ). The objective in
+cooperative MARL is to find an optimal joint policy π ∗ that
+maximizes the expected cumulative discounted reward:
+∗
+
+π = arg max Eπ
+π
+
+"∞
+X
+
+#
+t
+
+γ R(st , at )
+
+(1)
+
+t=0
+
+Advantage Decomposition Theorem
+The advantage decomposition theory decomposes the joint
+advantage function into individual agent advantages, allowing for more efficient and effective multi-agent learning. The
+key insight is that the joint advantage function can be expressed as:
+A(ot , at ) =
+
+n
+X
+i=1
+
+Ait (ot , ait |at1:i−1 )
+
+(2)
+
+where A(ot , at ) is the joint advantage function in time
+step t, Ai (ot , ai |at1:i−1 ) is the advantage function for agent
+i conditioned on the actions of preceding agents, and
+a1:i−1
+= (a1t , ..., ai−1
+) represents the actions of agents with
+t
+t
+decision order lower than i.
+This decomposition allows for the factorization of the
+joint policy into a product of individual policies:
+π(at |ot ) =
+
+n
+Y
+
+π i (ait |ot , a1:i−1
+)
+t
+
+(3)
+
+i=1
+
+where π i (ait |ot , at1:i−1 ) is the policy of agent i at time step
+t, conditioned on the joint observation and the actions of
+agents with lower decision order.
+
+Multi-Agent Transformer
+Based on the decomposition of advantage, MAT treats the
+MARL process as a sequence of tokens and uses a transformer architecture to model the dependencies among multiagents decision-making.
+Specifically, the sequence of input tokens for each time
+step t is represented as [o1t , . . . , ont ]. MAT uses a transformer
+encoder to process the sequence of tokens and generate obc1 , . . . , o
+cnt ] and n value functions
+servation embeddings as [o
+t
+c1 ), . . . , V (o
+cnt )]. Note that obit capture both the inforas [V (o
+t
+mation specific to agent i and the high-level interrelationships that represent agents’ interactions. The decoder then
+autoregressively generates actions for each agent. For the
+i-th agent, the decoder takes the concatenation of the obd
+c1 , . . . , obi ] and the preced1:i = [o
+servation embeddings o
+t
+t
+t
+1:i−1
+ing generated actions [at
+] as input. The output of the
+d
+1:i , a1:i−1 ). In the actual code
+decoder is the policy π i (ait |o
+t
+t
+implementation, the transformer decoder estimates the joint
+d
+1:i , a1:i−1 ) for all agents and only
+policy distribution π(ait |o
+t
+t
+the i-th agent’s policy is used.
+
+Methodology
+In this section, we first introduce the modeling of agent interdependence when multiple agents follow the paradigm of
+sequential decision-making, as shown in Fig 1. Based on
+the modeling of agent interdependence, we can obtain an
+accurate description of policy distribution and value function. Then, we present the details of SrSv, including the
+transformer-based neural network architecture and the corresponding algorithm for training neural networks.
+
+Figure 1: The modeling of agent interdependence for sequential decision-making.
+at time t, its action can be recursively expressed as:
+
+
+c1
+a1t ∼ πt1 ·|o
+t
+
+
+1:i−1
+i
+i
+d
+at ∼ πt ·|o1:i
+, i = 2, · · · , n
+t , at
+
+(4a)
+(4b)
+
+where πti is the policy distribution of agent i in time step t,
+1:n is the global observation embeddings. The decision of
+od
+t
+the following agent depends on the decisions of its previous
+agents.
+Each agent aims to maximize its expected return, namely
+the value function, by optimizing its policy distribution
+given its predecessors’ strategies. For the value function of
+agent i at time t, there are also temporal dependence characteristics. Here, the i-th value function V i is not only related
+to the observation embedding obit , but also related to the predecessors’ behavior and its successor’s policy distribution as
+follows:
+ 
+h 1:n 
+i
+c1 , a1:n
+c1 = E
+V1 o
+V πt
+o
+(5a)
+t
+t
+t
+a1:n
+∼πt1:n
+t
+
+
+
+
+
+V i obit , a1:i−1
+=
+t
+
+h i:n 
+i
+V πt
+obit , a1:i−1
+, ai:n
+,
+E
+t
+t
+i:n
+i:n
+
+at ∼πt
+
+Modeling of Agent Interdependence for Sequential
+Decision-making
+
+i = 2, ..., n
+
+Here, we mainly focus on sequential decision-making scenarios where all agents make decisions in sequence the current agent can access its predecessors’ behaviors, and then
+takes its optimal decision. Such a decision-making paradigm
+can better utilize the interdependence between agent strategies to achieve better decisions. In this way, for the i-th agent
+
+where V πt refers to the global action value based on the
+policies πti:n after the preceding i−1 agents have made their
+i:n
+decisions. Note that the physical meaning of V πt is more
+i:n
+closely related to Qπt in traditional RL definition. For the
+i:n
+sake of simplicity in our notation, we use V πt here.
+
+(5b)
+i:n
+
+Figure 2: The encoder-decoder architecture of SrSv.
+In order to capture the interdependence of policy distribution and value functions between different agents, in the
+next section, we design an attention-based neural network
+architecture for approximating each agent’s value function
+and making decisions sequentially.
+
+Attention-based Neural Network for Value
+Approximation and Policy Optimization
+We use an encoder-decoder-based neural network architecture like Transformer so that agents can make decisions in
+an auto-regressive way. The framework of SrSv is shown in
+Fig. 2. The pseudo-code of SrSv is listed in Alg. 1.
+Encoder. In the encoder network, we adopt the popular architecture similar to the Transformer framework. Each block
+in the encoder consists of a self-attention mechanism and
+a multi-layer perceptron (MLP), complemented by residual connections. These residual connections serve to mitigate gradient vanishing and prevent network degradation as
+the depth increases, thereby facilitating the extraction of robust observation embeddings for each agent. Different from
+MAT, here we remove the MLP for value function calculation in the encoder. This modification is motivated by the
+understanding that each agent’s value function is not solely
+dependent on its observation embedding. As demonstrated
+in Eq. (5), the value function should also account for the
+actions of preceding agents and the policy distributions of
+succeeding agents.
+Decoder. The decoder network retains the sequence of decoding blocks with masked attention for maintaining the
+auto-regressive property of the decision-making process.
+Besides, we employ a shared-parameter MLP, denoted as fθ ,
+across all agents after the decoder blocks. For each agent i,
+the input to fθ is the observation embedding obit from encoder and (i − 1)-th agent’s embedding obtained through
+
+auto-regressive decoding, denoted as ei−1 . The output of fθ
+can be interpreted as an individual value function estimate
+for the i-th agent.
+To capture the interdependencies between agents and obi:n
+tain the estimate of V πt in Eq. (5), we utilize the decoder’s
+attention matrix w to weight each agent’s MLP-derived
+value function. Crucially, the use of masked attention ensures that we adhere to the assumptions of advantage decomposition, as each agent can only consider the actions of
+preceding agents in the decision sequence. Similar in MAT,
+we introduce an arbitrary symbol a0 to indicate the start of
+c1 ) into V 1 (o
+c1 , a0 ).
+decoding, allowing us to transform V 1 (o
+t
+t
+i:n
+Besides, V πt is estimated by using the last row of the attention matrix to weight the individual fθ as follows:
+i:n
+
+V πt (obit , a1:i−1
+, ati:n ) =
+t
+
+n+1
+X
+
+c
+wn+1,j · fθ (ojt , ej−1 ) (6a)
+
+j=1
+n+1
+o[
+= obit , i = 1, ..., n
+t
+
+(6b)
+
+where wn+1,j is the attention weight from the (n+1)-th row
+of the attention matrix w, corresponding to the j-th agent.
+To simplify the calculation of V i , we approximate the
+i:n
+i:n
+expected form of V πt (obit , at1:i−1 , ai:n
+∼ πti:n
+t ) over at
+i:n
+1:i−1
+b
+πt
+i:n
+i
+with V
+(ot , at
+, argmax πt ) in the code implemenai:n
+t
+
+tation.
+In the training phase of neural networks, Proximal Policy
+Optimization (PPO) (Schulman et al. 2017) is used to update
+neural network parameters for value function approximation
+and policy optimization. For the value function approximation, we minimize the sum of Bellman errors of all agents as
+
+Algorithm 1: Sequential rollout with Sequential value estimation (SrSv)
+1: Input: Batch size B, number of agents n, number of
+
+episodes K, max steps per episode T
+2: Initialize: The encoder {Φ}, decoder {θd } including
+
+MLP θ for value estimation, the replay buffer B.
+{// Inference Phase}
+3: for = 0 to K − 1 do
+4:
+for t = 0 to T − 1 do
+5:
+Collect o1t , o2t , ..., ont from environments.
+c1 , o
+c1 , ..., o
+cnt
+6:
+Output the representation sequence o
+t
+t
+by feeding embedded observations to the encoder.
+7:
+for i = 0 to n do
+1:n in
+8:
+Generate ait with the decoder based on od
+t
+1:i−1
+environments and at
+.
+9:
+end for
+10:
+Execute joint actions a1:n
+and collect reward rt .
+t
+1:n
+11:
+Insert (o1:n
+t , at , rt ) into B.
+12:
+end for
+{// Training Phase}
+13:
+Random sample a batch of B transitions from B.
+14:
+for i = 0 to n do
+i:n
+15:
+Calculate V πt (obit , a1:i−1
+, argmax πti:n ) using att
+ai:n
+t
+
+tention matrix w and the decoder
+e
+ block’s output
+
+as the i-th value estimation V i obi , a1:i−1
+Compute the joint advantage function Ait using
+GAE by Eq. (9).
+17:
+end for
+18:
+Update the encoder and decoder by minimizing LV +
+Lπ with gradient descent.
+19: end for
+16:
+
+follows:
+
+
+
+ 
+
+1:i−1
+d
+i
+n T
+−1
+i
+X
+X
+R st , a1:n
++
+γV
+o
+,
+a
+t+1
+t+1
+
+ t
+
+
+Lv =
+1:i−1
+i bi
+−V o , a
+i=1 t=0
+
+t
+
+t
+
+(7)
+As to policy optimization, we maximize the following
+clipping PPO objective and use policy gradient to update the
+neural network parameters:
+Lπ =
+
+n T
+−1
+X
+X
+
+min αti Ait , clip αti , 1 ± ϵ At
+
+
+
+i
+
+(8)
+
+i=1 t=0
+
+where αti =
+
+d
+1:i ,a1:i−1 )
+π(ait |o
+t
+t
+d
+1:i ,a1:i−1 )
+πold (ait |o
+t
+t
+
+is the probability ratio. The
+
+advantage of the i-th agent is approximated using Generalized Advantage Estimation (GAE) (Schulman et al. 2015) as
+follows:
+
+
+ 
+
+1:i−1
+d
+1:n
+i
+h
+i
+X
+R
+s
+,
+a
++
+γV
+o
+,
+a
+t t
+t+1
+t+1
+j
+
+
+
+Ait =
+(γλ) 
+1:i−1
+i bi
+−V o , a
+j=0
+
+t
+
+t
+
+(9)
+where h is the step length of GAE.
+
+Experiments and Results
+Benchmarks. In this section, we empirically evaluate and
+analyze SrSv in the widely adopted cooperative multi-agent
+benchmarks, including the StarCraftII Multi-agent Challenge (SMAC) (Samvelyan et al. 2019) with discrete action space and Multi-agent MuJoCo (MA-MuJoCo) (de Witt
+et al. 2020) with continuous action space. Besides, we introduced the DubinsCar (Zhang, Garg, and Fan 2023; Zhang
+et al. 2024) benchmark, which is a fundamental task in mobile robotics, to test the SrSV scalability in large-scale scenarios. To facilitate understanding, we explain the modeling
+and training target of the DubinsCar benchmark.
+For DubinsCar, the local observation of agent i is given
+by:
+(10)
+oi = [pxi , pyi , θi , v i ]⊤
+where [pxi , pyi ]⊤ is the position of the agent, θi is the heading, and v i is the speed. The state variables include each
+agent’s local observation, target, and obstacle coordinates.
+Crucially, the target and obstacle positions are randomly reset upon each episode. The action of agent i is defined as:
+ai = [ω i , v̇ i ]⊤
+i
+
+(11)
+i
+
+where ω is the angular velocity and v̇ is the longitudinal
+acceleration for agent i. The dynamics function for agent i
+is given by:
+ȯi = [v i cos(θi ), v i sin(θi ), ωi , v̇i ]⊤
+
+(12)
+
+We model the reward function for DubinsCar navigation
+similar to the settings in (Zhang et al. 2024), incorporating
+components for nominal control, goal achievement, and collision avoidance. The specific hyperparameter settings are
+adapted from (Zhang et al. 2024) to ensure consistency and
+effectiveness.
+Baselines. We compare SrSV with three baselines: the
+value decomposition-based method MAPPO, as well as
+two advantage decomposition-based methods, A2PO and
+MAT, serving as baselines for sequential update and sequential rollout scheme, respectively. To ensure optimal performance, we use the same hyper-parameters for the baseline
+algorithms as stated in their original papers. For our methods, we adopt the same hyper-parameter tuning process.
+Metrics. Without loss of generality, we use the win rate as
+w
+the primary metric for SMAC and define it as N
+Nt , where Nw
+is the number of wins and Nt is the total number of games
+d
+played. We also use the dead ratio metric, defined as NN
+,
+total
+where Nd is the number of agents that die during an episode,
+and Ntotal is the total number of agents.
+For the MA-MuJoCo, we use the average step reward
+PNs
+metric, defined as N1s t=1
+rt , where Ns is the total number
+of steps taken and rt is the reward received at step t.
+For the DubinsCar, we align with the settings in (Zhang
+et al. 2024) and evaluate performance using the reach rar
+tio metric, defined as N
+Nc , where Nr is the number of cars
+that successfully reach the target location within the defined
+time, and Nc is the total number of cars.
+
+(a) ﻿MMM2
+
+(b) ﻿Half-Cheetah
+
+(c) ﻿DubinsCar
+
+Figure 3: Demonstrations of the multi-agent benchmarks: MMM3 in SMAC, Half-Cheetah in MA-MuJoCo and DubinsCar.
+
+Figure 4: Performance comparisons on cooperative MARL benchmarks among SrSv and other baselines.
+
+Performance on Cooperative MARL Benchmarks
+We evaluate the algorithms in 5 maps of SMAC with various difficulties, 2 tasks of 1 scenario in MA-MuJoCo, and
+the DubinsCar scenario with 8-1024 agents and 8 obstacles.
+Results in Tab. 1, Tab. 3, Fig. 4, Fig. 5 demonstrate SrSv’s
+superior performance in both training efficiency and equilibrium convergence, while significantly outperforming in all
+baselines when scaling it to large-scale systems.
+In particular, as shown in Fig. 4, whether for homogeneous tasks, such as 8m vs 9m or for heterogeneous tasks,
+like MMM2 and multi-agent MuJoCo agents, which feature
+continuous action spaces, SrSv leads to significantly higher
+training efficiency without compromising convergence performance. More importantly, while SrSv only shows slight
+improvements in the win rate metric compared to MAT for
+SMAC tasks (Fig. 4), it converges to a substantially better
+equilibrium. As shown in Fig. 5, SrSv consistently achieves
+a lower cost of dead ratio metric in the training phase across
+all SMAC tasks, indicating that its individual value estima-
+
+tion leads to more effective agent behavior and better individual performance.
+Besides, we adopted the shared parameter mechanism for
+all the algorithms to verify the model’s scalability. As shown
+in Tab. 1, we directly transfer the trained models from the
+small-scale (8 agents) DubinsCar system to evaluation scenarios with varying population sizes (ranging from 8 to 1024
+agents). We demonstrate that SrSv exhibits significantly better scalability than A2PO and MAPPO, whether in the early,
+or late stages of training. Although in the late stages of training, MAT shows comparable model scalability for smallscale tasks, once scaled up to larger tasks, such as with 1024
+agents, MAT’s scalability is significantly lower than that of
+SrSv.
+Tab. 3 further quantitatively validates SrSv’s training efficiency on SMAC tasks using established metrics from (Mai,
+Mani, and Paull 2022), including steps to first reach x% performance threshold (SRT) and average training time (ATT).
+On average across 3s5z scenario with 4 random seeds,
+
+Eval
+Populations
+
+MAPPO
+
+8 agents
+64 agents
+256 agents
+512 agents
+
+0.33(±0.027)
+0.06(±0.000)
+0.06(±0.000)
+0.03(±0.000)
+
+Train 100 epoch with 8 agents
+A2PO
+MAT
+0.25(±0.019)
+0.08(±0.001)
+0.06(±0.000)
+0.02(±0.000)
+
+0.78(±0.001)
+0.56(±0.002)
+0.57(±0.002)
+0.25(±0.000)
+
+SrSv
+
+MAPPO
+
+0.82(±0.029)
+0.63(±0.006)
+0.66(±0.002)
+0.34(±0.000)
+
+0.38(±0.019)
+0.07(±0.001)
+0.07(±0.000)
+0.02(±0.000)
+
+Train 300 epoch with 8 agents
+A2PO
+MAT
+0.16(±0.016)
+0.04(±0.000)
+0.04(±0.000)
+0.03(±0.000)
+
+0.93(±0.004)
+0.86(±0.001)
+0.87(±0.001)
+0.68(±0.000)
+
+SrSv
+0.93(±0.005)
+0.91(±0.001)
+0.92(±0.000)
+0.81(±0.000)
+
+Table 1: Scalability test on the DubinsCar with an increasing number of agents in the early and mid-stages of training. Each
+value is reported as the mean ± standard deviation of reach ratio over 10 episodes and 10 seeds.
+Eval
+Populations
+
+MAPPO
+
+8 agents
+64agents
+256agents
+512agents
+1024agents
+
+0.18(±0.035)
+0.07(±0.000)
+0.07(±0.000)
+0.04(±0.000)
+0.04(±0.000)
+
+Train 100 epoch with 16 agents
+A2PO
+MAT
+0.11(±0.011)
+0.03(±0.011)
+0.03(±0.011)
+0.02(±0.011)
+0.02(±0.000)
+
+0.79(±0.013)
+0.49(±0.005)
+0.47(±0.001)
+0.16(±0.000)
+0.16(±0.000)
+
+SrSv
+
+MAPPO
+
+0.76(±0.019)
+0.48(±0.004)
+0.50(±0.001)
+0.30(±0.000)
+0.30(±0.000)
+
+0.18(±0.035)
+0.07(±0.000)
+0.07(±0.000)
+0.04(±0.000)
+0.04(±0.000)
+
+Train 100 epoch with 32 agents
+A2PO
+MAT
+0.30(±0.022)
+0.11(±0.002)
+0.10(±0.011)
+0.04(±0.000)
+0.04(±0.000)
+
+0.85(±0.004)
+0.78(±0.001)
+0.48(±0.000)
+0.22(±0.000)
+0.21(±0.000)
+
+SrSv
+0.80(±0.008)
+0.80(±0.002)
+0.62(±0.000)
+0.24(±0.000)
+0.22(±0.000)
+
+Table 2: Ablation study of training agent population comparing 16 and 32 agents. Performance evaluation after 100 epochs of
+training. Each value is reported as the mean ± standard deviation of reach ratio over 10 episodes and 10 seeds
+
+Figure 6: Win rate comparison of different architectures of
+SrSv on 3s5z scenario over 4 seeds.
+
+Figure 5: Dead ratio metric comparisons on SMAC benchmark between SrSv and MAT.
+
+SrSv requires only 1.12M timesteps (59m) to reach 50%
+win rate, significantly outperforming MAPPO (1.30M, 1h),
+A2PO (1.62M, 1h28m), and MAT (2.00M, 1h42m). Notably, SrSv is the only algorithm besides MAT to achieve
+100% win rate on these SMAC tasks, doing so in considerably less time (3.56M vs 4.92M timesteps).
+
+Ablations of SrSv Using Alternative Architectures
+To further demonstrate the necessity of using transformerbased modules for SrSv framework and to explore the performance of alternative architectures, we performed a detailed ablation study include:
+Non-Attention Methods: (1) SrSv-mlp: This variant re-
+
+places the self-attention module with MLPs. All residual
+connections, layer normalization, and information fusion
+mechanisms from the SrSv architecture were retained. (2)
+SrSv-gnn: For this variant, we substituted the self-attention
+module with Graph Neural Networks (GNNs). We adapted
+the original environment to a graph-based version, with each
+agent being equally connected to all other agents.
+Non-Transformer Methods: (1) SrSv-enc: Here, we utilized only the encoder component, excluding the autoregressive mechanism typically present in the decoder. (2)
+SrSv-dec: In this setup, we used only the decoder component
+of the transformer, maintaining the auto-regressive property
+while removing the encoder component, with each agent
+seeing only its own observation.
+As illustrated in Fig. 6, taking the 3s5z scenario as an
+example, both the SrSv-mlp and SrSv-gnn variants demonstrate the ability to eventually reach the similar performance
+of SrSv when maintaining the core architectural features,
+such as residual connections, layer normalization, and information fusion. Nevertheless, these variants exhibit increased training variance and reduced initial learning efficiency compared to SrSv. Meanwhile, directly employing
+an encoder or decoder without integrating the transformer
+
+Algo
+
+25%
+SRT (ATT)
+
+50%
+SRT (ATT)
+
+75%
+SRT (ATT)
+
+100%
+SRT (ATT)
+
+Total
+SRT (ATT)
+
+MAPPO
+A2PO
+MAT
+SrSv
+
+0.98M (45m)
+0.82M (45m)
+1.44M (1h13m)
+0.96M (50m)
+
+1.30M (1h)
+1.62M (1h28m)
+2.00M (1h42m)
+1.12M (59m)
+
+4.34M (3h18m)
+2.74M (2h29m)
+2.88M (2h26m)
+1.52M (1h20m)
+
+4.92M (4h12m)
+3.56M (3h7m)
+
+5M (3h49m)
+5M (4h32m)
+5M (4h15m)
+5M (4h23m)
+
+Each cell contains SRT (ATT) values. -: not reach x% win rate during the training phase. M: million timesteps, h: hours, m: minutes.
+
+Table 3: Training efficiency comparison using SRT/ATT metrics for 3s5z task
+
+Is Scalability Related to the Training Population?
+
+Figure 7: Ablation study between SrSv and SrSv (w/o π).
+architecture of SrSv led to performance degradation. SrSvdec, in particular, showed a more pronounced decline in win
+rate metric than SrSv-enc, indicating that observation sharing and embedding among agents are valuable.
+
+Discussion
+This section studies how SrSv affects training efficiency and
+scalability performance.
+
+Furthermore, to better investigate the impact of different
+numbers of agents during the training phase on scalability, we conducted additional training in the DubinsCar environment using 16 and 32 agents as the number of training
+agents, training for 100 epochs under the same settings of
+8 agents. Then, we transferred the models to handle the test
+DubinsCar systems with 8 to 1024 agents.
+The experimental results are shown in Tab. ??. Overall,
+within the tested population sets, as the number of agents
+during the training phase increases, the overall training complexity also rises. However, SrSv’s high training efficiency
+and scalability capabilities are not affected by the number
+of training agents, consistently demonstrating significantly
+better performance than other baselines. Under the same 100
+training epochs, the scalability of SrSv declines with an increase in the training population. This trend is also observed
+in the performance of other baselines.
+
+Is the Training Efficiency Related to a1:i−1
+or πti:n ?
+t
+
+Conclusion and Future Work
+
+In Eq. (5) and Eq. (6), the value function estimation used
+by SrSv incorporates the specific actions a1:i−1
+executed
+t
+by predecessor agents and the policy distribution πti:n for
+successor agents based on the current global policy πt . Although the necessity of a1:i−1
+has been thoroughly explored
+t
+in HAPPO and A2PO, its application in sequence value estimation has not been studied. Therefore, to validate the impact of a1:i−1
+and πti:n solely on training efficiency, we det
+signed a variant of SrSv called SrSv (w/o π). Instead of using
+i:n
+V πt (obit , a1:i−1
+, argmax πti:n ) for individual agent value
+t
+
+In this paper, we investigate the potential of leveraging sequential value estimation for sequential decision-making. In
+particular, a novel paradigm named SrSv, which synergizes
+individual-centric value estimation from sequential update
+methods with a sequential rollout strategy, is introduced. It
+aimed at enhancing the applicability of existing cooperative
+MARL algorithms in large-scale real-world systems.
+We highlight the advantages of the SrSv paradigm from
+two key perspectives: training efficiency and scalability,
+comparing it to value decomposition-based and advantage
+decomposition-based methods. Specifically, through comparative experiments in SMAC and MA-MuJoCo benchmarks, we demonstrate that SrSv significantly improves
+training efficiency without compromising convergence performance. More importantly, by training in a small-scale
+DubinsCar system and then transferring to a large scale with
+1024 agents, we further affirm the superior scalability of
+SrSv.
+In the future, we will explore how to leverage the advantages of SrSv in capturing inter-agent decision correlations
+to broaden its application within safe RL, enabling efficient
+learning of safety-constrained objectives and accelerating
+the real-world implementation of MARL in industrial scenarios.
+
+ai:n
+t
+
+i:n
+
+estimation, SrSv (w/o π) uses V πt (obit , a1:i−1
+) as follows:
+t
+i:n
+
+V πt (obit , a1:i−1
+)=
+t
+
+i
+X
+
+c
+wi,j · fθ (ojt , ej−1 )
+
+(13)
+
+j=1
+
+As shown in Fig. 7, SrSv (w/o π) exhibits its training efficiency between that of the complete SrSv and MAT, indicating that both π and a are beneficial for individual value estimation for cooperative multi-agent tasks. Moreover, since
+i:n
+V πt (obit , a1:i−1
+, argmax πti:n ) aggregates the policy infort
+ai:n
+t
+
+mation of all agents, we do not need to consider the impact
+of decision order on value estimation.
+
+Acknowledgments
+This work was supported in part by the National Natural Science Foundation of China under Grants 62103371,
+52161135201, the Natural Science Foundation of Zhejiang
+Province under Grant LZ23F030009, and Alibaba DAMO
+Academy.
+
+References
+Andrychowicz, O.; Baker, B.; Chociej, M.; Jozefowicz, R.;
+McGrew, B.; Pachocki, J.; Petron, A.; Plappert, M.; Powell,
+G.; Ray, A.; et al. 2020. Learning dexterous in-hand manipulation. The International Journal of Robotics Research,
+39(1): 3–20.
+Bernstein, D. S.; Givan, R.; Immerman, N.; and Zilberstein,
+S. 2002. The complexity of decentralized control of Markov
+decision processes. In Proceedings of the Eighteenth conference on Uncertainty in artificial intelligence, 32–37. Morgan Kaufmann Publishers Inc.
+de Witt, C. S.; Peng, B.; Kamienny, P.-A.; Torr, P.; Böhmer,
+W.; and Whiteson, S. 2020. Deep multi-agent reinforcement
+learning for decentralized continuous cooperative control.
+arXiv preprint arXiv:2003.06709, 19.
+Foerster, J.; Farquhar, G.; Afouras, T.; Nardelli, N.; and
+Whiteson, S. 2018. Counterfactual multi-agent policy gradients. In Proceedings of the AAAI Conference on Artificial
+Intelligence, volume 32.
+Kober, J.; Bagnell, J. A.; and Peters, J. 2013. Reinforcement
+learning in robotics: A survey. The International Journal of
+Robotics Research, 32(11): 1238–1274.
+Kuba, J. G.; Chen, R.; Wen, M.; Wen, Y.; Sun, F.; Wang,
+J.; and Yang, Y. 2021a. Trust region policy optimisation in multi-agent reinforcement learning. arXiv preprint
+arXiv:2109.11251.
+Kuba, J. G.; Chen, R.; Wen, M.; Wen, Y.; Sun, F.; Wang,
+J.; and Yang, Y. 2022. Trust region policy optimisation in multi-agent reinforcement learning. arXiv preprint
+arXiv:2109.11251.
+Kuba, J. G.; Wen, M.; Meng, L.; Zhang, H.; Mguni, D.;
+Wang, J.; Yang, Y.; et al. 2021b. Settling the variance of
+multi-agent policy gradients. Advances in Neural Information Processing Systems, 34: 13458–13470.
+Li, C.; Liu, J.; Zhang, Y.; Wei, Y.; Niu, Y.; Yang, Y.; Liu,
+Y.; and Ouyang, W. 2023. Ace: Cooperative multi-agent qlearning with bidirectional action-dependency. In Proceedings of the AAAI conference on artificial intelligence, volume 37, 8536–8544.
+Liu, J.; Zhong, Y.; Hu, S.; Fu, H.; FU, Q.; Chang, X.; and
+Yang, Y. 2024. Maximum Entropy Heterogeneous-Agent
+Reinforcement Learning. In The Twelfth International Conference on Learning Representations.
+Lowe, R.; Wu, Y.; Tamar, A.; Harb, J.; Abbeel, P.; and
+Mordatch, I. 2017. Multi-agent actor-critic for mixed
+cooperative-competitive environments. In Advances in Neural Information Processing Systems, 6379–6390.
+Mai, V.; Mani, K.; and Paull, L. 2022. Sample Efficient Deep
+Reinforcement Learning via Uncertainty Estimation. arXiv
+preprint arXiv:2201.01666.
+
+Rashid, T.; Samvelyan, M.; Schroeder, C.; Farquhar, G.; Foerster, J.; and Whiteson, S. 2018. QMIX: Monotonic value
+function factorisation for deep multi-agent reinforcement
+learning. In International Conference on Machine Learning, 4295–4304. PMLR.
+Samvelyan, M.; Rashid, T.; De Witt, C. S.; Farquhar, G.;
+Nardelli, N.; Rudner, T. G.; Hung, C.-M.; Torr, P. H.; Foerster, J.; and Whiteson, S. 2019. The starcraft multi-agent
+challenge. arXiv preprint arXiv:1902.04043.
+Schulman, J.; Moritz, P.; Levine, S.; Jordan, M.; and
+Abbeel, P. 2015. High-dimensional continuous control
+using generalized advantage estimation. arXiv preprint
+arXiv:1506.02438.
+Schulman, J.; Wolski, F.; Dhariwal, P.; Radford, A.; and
+Klimov, O. 2017. Proximal policy optimization algorithms.
+arXiv preprint arXiv:1707.06347.
+Son, K.; Kim, D.; Kang, W. J.; Hostallero, D. E.; and Yi, Y.
+2019. Qtran: Learning to factorize with transformation for
+cooperative multi-agent reinforcement learning. In International conference on machine learning, 5887–5896. PMLR.
+Sunehag, P.; Lever, G.; Gruslys, A.; Czarnecki, W. M.;
+Zambaldi, V.; Jaderberg, M.; Lanctot, M.; Sonnerat, N.;
+Leibo, J. Z.; Tuyls, K.; and Graepel, T. 2017. ValueDecomposition Networks For Cooperative Multi-Agent
+Learning. arXiv:1706.05296.
+Vinyals, O.; Babuschkin, I.; Czarnecki, W. M.; Mathieu, M.;
+Dudzik, A.; Chung, J.; Choi, D. H.; Powell, R.; Ewalds,
+T.; Georgiev, P.; et al. 2019. Grandmaster level in StarCraft II using multi-agent reinforcement learning. Nature,
+575(7782): 350–354.
+Wang, J.; Ren, Z.; Liu, T.; Yu, Y.; and Zhang, C. 2020.
+Qplex: Duplex dueling multi-agent q-learning. In International Conference on Learning Representations.
+Wang, M.; Feng, M.; Zhou, W.; and Li, H. 2022. Stabilizing
+voltage in power distribution networks via multi-agent reinforcement learning with transformer. In Proceedings of the
+28th ACM SIGKDD Conference on Knowledge Discovery
+and Data Mining, 1899–1909.
+Wang, X.; Tian, Z.; Wan, Z.; Wen, Y.; Wang, J.; and Zhang,
+W. 2023. Order matters: Agent-by-agent policy optimization. arXiv preprint arXiv:2302.06205.
+Wen, M.; Shen, Y.; Lin, H.; Zhao, W.; Qiu, P.; Wang, Y.; Wu,
+F.; and Liu, C. 2022. Multi-agent reinforcement learning
+via multi-step consistency. In International Conference on
+Learning Representations.
+Yang, Y.; Hao, J.; Liao, G.; Shao, M.; Meng, G.; Liu, Y.;
+Chen, D.; and Wang, W. 2020. Q-value path decomposition
+for deep multiagent reinforcement learning. arXiv preprint
+arXiv:2002.03950.
+Zhang, L.; Yang, J.; Jin, M.; Shen, Y.; Liu, J.; and Yu, H.
+2021. Fop: Factorizing optimal joint policy of maximumentropy multi-agent reinforcement learning. arXiv preprint
+arXiv:2109.11875.
+Zhang, S.; Garg, K.; and Fan, C. 2023. Neural graph control barrier functions guided distributed collision-avoidance
+multi-agent control. In Conference on robot learning, 2373–
+2392. PMLR.
+
+Zhang, S.; So, O.; Garg, K.; and Fan, C. 2024. Gcbf+: A neural graph control barrier function framework for distributed
+safe multi-agent control. arXiv preprint arXiv:2401.14554.
+
+

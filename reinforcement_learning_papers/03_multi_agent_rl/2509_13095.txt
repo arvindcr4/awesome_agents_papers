@@ -1,0 +1,2200 @@
+E MPOWERING M ULTI -ROBOT C OOPERATION VIA S E QUENTIAL W ORLD M ODELS
+Zijie Zhao1,2 , Honglei Guo2 , Shengqian Chen2 , Kaixuan Xu1,2 , Bo Jiang2,1 ,
+Yuanheng Zhu2,1,∗ , Dongbin Zhao2,1
+1
+School of Artificial Intelligence, University of Chinese Academy of Sciences
+2
+Institute of Automation, Chinese Academy of Sciences
+
+arXiv:2509.13095v2 [cs.RO] 26 Sep 2025
+
+A BSTRACT
+Model-based reinforcement learning (MBRL) has shown significant potential
+in robotics due to its high sample efficiency and planning capability. However,
+extending MBRL to physical multi-robot cooperation remains challenging due to
+the complexity of joint dynamics and the reliance on synchronous communication.
+To address this, we propose the Sequential World Model (SeqWM), a novel
+framework that integrates the sequential paradigm into model-based multi-agent
+RL. SeqWM employs independent, autoregressive agent-wise world models to
+represent joint dynamics, where each agent generates its future trajectory and plans
+its actions based on the predictions of its predecessors. This design lowers modeling
+complexity, alleviates the reliance on communication synchronization, and enables
+the emergence of advanced cooperative behaviors through explicit intention sharing.
+Experiments in challenging simulated environments (Bi-DexHands and MultiQuad) demonstrate that SeqWM outperforms existing state-of-the-art model-based
+and model-free baselines in both overall performance and sample efficiency, while
+exhibiting advanced cooperative behaviors such as predictive adaptation, temporal
+alignment, and role division. Furthermore, SeqWM has been successfully deployed
+on physical quadruped robots, validating its effectiveness in real-world multi-robot
+systems. Demos and code are available at: SeqWM-MARL.
+
+1
+
+I NTRODUCTION
+
+Model-based reinforcement learning (MBRL) has been widely applied to robotic systems due to
+its high sample efficiency (Wu et al., 2023) and planning capability (Sun et al., 2023). However,
+extending MBRL to multi-robot cooperation remains challenging. Early decentralized model-based
+multi-agent reinforcement learning (MARL) approaches built independent world models for each
+agent (Egorov & Shpilman, 2022), overlooking inter-agent couplings and hindering coordination.
+More recent centralized methods, by contrast, assume full observability or unrestricted communication (Chai et al., 2024; Toledo, 2024; Liu et al., 2024b), performing dynamics modeling and policy
+optimization in the joint space. These methods face challenges related to modeling complexity and
+synchronous communication in robotic systems with high-dimensional observation and action spaces,
+limiting their deployment in real-world scenarios.
+Between centralized and decentralized
+Decentralized
+Centralized
+Distributed Sequential
+paradigms, the distributed sequential
+paradigm has rapidly developed in recent years and demonstrated unique advantages (Khan, 2025). It reformulates multiagent decision-making as an autoregressive
+Multi-Robot Env
+Multi-Robot Env
+Multi-Robot Env
+process: agents communicate and act in a
+certain order, with each updating its policy conditioned on messages and actions
+Policy / Planner
+Communication
+from predecessors (Wen et al., 2022; Hu
+et al., 2025). This design enables more consistent joint reasoning (Ding et al., 2024) Figure 1: Comparison of SeqWM’s distributed sequential
+and finer-grained credit assignment (Kuba paradigm with existing centralized/decentralized paradigms.
+et al., 2022; Wang et al., 2023) without relying on full communication. From a real-world deployment
+1
+
+perspective, it reduces the reliance on communication synchronization and offers improved robustness
+against packet loss or disturbances (Ding et al., 2024).
+Motivated by these advantages, as shown in Figure 1, we propose the Sequential World Model
+(SeqWM), which integrates the sequential paradigm into model-based MARL to structurally decompose dynamics modeling and action planning. For trajectory prediction, SeqWM represents the joint
+dynamics as sequential agent-wise rollouts following the communication order, where each agent
+maintains an independent world model and conditions on the predicted trajectories and actions of
+its predecessors. For action planning, each agent performs multi-step lookahead conditioned on
+its predecessors’ predictions, thereby preserving cooperative performance while constraining the
+search to a low-dimensional subspace consistent with the sequential structure. We evaluate SeqWM
+in two challenging multi-robot cooperation environments: Bi-DexHands (Chen et al., 2024a) and
+Multi-Quad (Xiong et al., 2024), and further validate its effectiveness on physical multi-robot tasks
+using two Unitree Go2-W robots. The key contributions are as follows:
+(1) By integrating the sequential paradigm, SeqWM decomposes joint dynamics into autoregressive
+agent-wise models, reducing modeling complexity and the need for synchronized communication, thereby extending model-based MARL to multi-robot cooperation.
+(2) Through explicit intention sharing, SeqWM enables the emergence of advanced cooperative
+behaviors such as predictive adaptation, temporal alignment, and role division.
+(3) SeqWM achieves state-of-the-art performance in both simulation and real-world quadruped
+experiments, notably becoming the first multi-agent method to succeed on BottleCap and
+PushBox.
+These results collectively demonstrate that SeqWM, by leveraging sequential world modeling and
+planning, offers an effective pathway for multi-robot cooperation, balancing performance, efficiency,
+and real-world applicability.
+
+2
+
+R ELATED W ORK
+
+Model-based RL. In single-agent robotics, model-based RL has shown remarkable success due
+to its high sample efficiency (Zhou et al., 2024; Lancaster et al., 2024), with approaches such
+as PlanCP (Sun et al., 2023) and GPC (Qi et al., 2025) leveraging learned dynamics models to
+predict trajectories and optimize actions for physical robots. In contrast, existing model-based
+MARL methods often rely on centralized paradigms (Zhao et al., 2025b), hindering their practical
+deployment in multi-robot systems. For example, MACD (Chai et al., 2024) and CoDreamer (Toledo,
+2024) use transformers or GNNs to integrate full state-action across all agents. Recent efforts
+such as MARIE (Zhang et al., 2025a) explored decentralized dynamics modeling, but still require
+communication at each prediction step for agent-wise aggregation. Different from these works,
+SeqWM assigns each agent an independent world model and predicts trajectories sequentially, which
+not only lowers modeling complexity but also substantially reduces the reliance on synchronous
+communication, thereby making it applicable to real-world scenarios.
+Sequential Paradigm. Recent studies in MARL have highlighted the advantages of the sequential
+paradigm (Khan, 2025), which enables fine-grained credit assignment (Kuba et al., 2022), efficient
+dynamics modeling (Zhang et al., 2025b), and scalable coordination (Xu et al., 2025). For example,
+MAT (Wen et al., 2022) and PMAT (Hu et al., 2025) model the multi-agent decision-making process
+as a sequence prediction problem, employing transformers to autoregressively predict each agent’s
+actions. A2PO (Wang et al., 2023) and HARL (Liu et al., 2024a; Zhong et al., 2024) further introduce
+the sequential update scheme that bring clearer interpretability and ensure monotonic improvement.
+SeqComm (Ding et al., 2024) extends this idea to the communication domain, where agents exchange
+information in a sequential order, effectively mitigating non-stationarity. Motivated by these benefits,
+we integrate the sequential paradigm into model-based MARL, leveraging world models to enhance
+planning and coordination.
+
+3
+
+P RELIMINARIES
+
+Problem Formulation. We model the fully cooperative task as a decentralized partially observable
+Markov decision process (dec-POMDP) (Zhao et al., 2025a), M = ⟨I, S, O, A, Ω, P, R, γ⟩, where
+2
+
+Qn
+I = {v 1 , . . . , v n } is the set
+S is the global state space, O = i=1 Oi is the joint
+Qnof agents,
+observation space, and A = i=1 Ai is the joint action space. The observation function Ω : S × I →
+O defines each agent’s perception of the environment, while the transition function P : S × A → S
+specifies the environment dynamics. The reward function R : S × A → R provides a shared scalar
+signal, and γ is the discount factor. Each agent v i learns a local policy π i : OQi → Ai , which maps its
+n
+observation oi to an action ai . The
+is to learn a joint policy π = i=1 π i that maximizes
+P∞objective
+the expected discounted return τ =t γ τ rτ .
+Sequential Communication and Decision-Making. In many real-world applications, multi-robot
+systems are often distributed rather than fully decentralized (Negenborn & Maestre, 2014), allowing
+inter-agent communication to enhance cooperative performance. A Dec-POMDP can thus be extended
+to a multi-agent POMDP (Oliehoek et al., 2016), where each agent v i receives messages eit from
+other agents and updates its policy π i : Oi × E → Ai . To balance efficiency and decision quality,
+agents adopt communication protocols (Yu et al., 2023), defined as ϕi : Oi × E × Ai → E. Among
+them, sequential communication is especially popular for its simplicity and effectiveness (Ding et al.,
+2024). It organizes agents in a certain order, where each agent acts on its own observation and the
+message from its predecessor, then passes information forward. Formally, the process is defined as:
+ait = π i (oit , eit ),
+
+ei+1
+= ϕi (eit , oit , ait ),
+t
+
+(1)
+
+Such a sequential structure naturally motivates us to design a world model that predicts trajectories in
+the same manner, enabling efficient multi-agent planning.
+
+4
+
+M ETHODOLOGY
+
+In this section, we propose SeqWM, a Sequential World Model for multi-robot cooperation. Unlike
+existing centralized or decentralized multi-agent world models, SeqWM decomposes the joint
+dynamics into agent-wise models arranged in a sequence. This design substantially reduces modeling
+complexity and the reliance on synchronous communication, enabling deployment in physical multirobot systems.
+4.1
+
+S EQUENTIAL M ULTI -AGENT W ORLD M ODEL
+
+Decomposed Dynamics Modeling. At each timestep t, the observation-action pair of a single
+agent (oit , ait ) can be regarded as a token, and the entire multi-agent system as a sequence of such
+tokens. This perspective reformulates multi-agent joint dynamics as a sequence modeling problem: given the token sequence [(o1t , a1t ), . . . , (ont , ant )], the model generates the next-step outcomes
+1
+n
+[(o1t+1 , rt+1
+), . . . , (ont+1 , rt+1
+)]. Unlike existing centralized world models (Chai et al., 2024; Zhang
+et al., 2025a), which assume full communication and fuse all tokens simultaneously for prediction,
+as shown in Figure 1, our method adopts an autoregressive paradigm. In this setup, agent v 1 first
+1
+predicts (o1t+1 , rt+1
+) from its local information (o1t , a1t ), and passes the result to v 2 . Subsequently,
+i
+each agent v conditions on its own observation–action pair (oit , ait ) together with the predictions
+j
+i
+of all predecessors {(ojt+1 , rt+1
+)}j<i to produce (oit+1 , rt+1
+). Such a sequential design reduces
+communication frequency and modeling complexity in a structured, scalable manner, making the
+approach well-suited for real-world deployment.
+Multi-Agent World Model. As noted in I NTRODUCTION, multi-robot cooperative tasks involve
+high-dimensional observation and action spaces (Zhu et al., 2025a), making it unsuitable to use
+reconstructing raw observations as the learning objective of the world model (Hafner et al., 2025).
+Therefore we remove the explicit decoder and instead perform dynamics prediction entirely in a
+latent space. To facilitate distributed deployment, each agent maintains an independent world model
+without parameter sharing. Let zti denote the latent state of agent v i at timestep t, the world model
+can be defined as follows:
+Encoder:
+Dynamics:
+Reward:
+Communication:
+Critic:
+Actor:
+
+zti
+i
+ẑt+1
+r̂t+1
+ei+1
+t
+q̂ti
+âit
+
+3
+
+
+= E i oit
+
+= Di zti , ait , eit
+i
+i
+i
+i
+= R zt , at , et
+= eit ⊕ zti , ait 
+= Qi zti , ait , eit
+= π i,Act zti , eit .
+
+(2)
+
+All modules in SeqWM are implemented using MLPs, ensuring architectural simplicity and consistency. For communication function, we adopt concatenation operator ⊕ to facilitate modular
+training.1 As shown in Section 5.5, this concise design achieves more stable training performance
+compared to alternatives such as cross-attention and recurrent neural networks (RNNs).
+Learning Objective. Let θE , θD , θR , θQ , and ψ denote the parameters of the encoder, dynamics
+predictor, reward predictor, critic, and actor, respectively. Following the self-supervised training
+framework (Hafner et al., 2025; Hansen et al., 2024), the loss functions can be defined as:
+
+Li (θ) =
+
+H
+X
+t
+
+
+
+
+
+
+
+
+2
+ i
+
+i
+λt  ẑt+1
+− sg(zt+1
+) + Soft-CE r̂ti , rt + Soft-CE q̂ti , Gt  ,
+|
+{z
+} |
+{z
+} |
+{z
+}
+dynamics loss for θD ,θE
+
+reward loss for θR ,θE
+
+(3)
+
+Q Loss for θQ ,θE
+
+where θ = {θE , θD , θR , θQ }, H is the prediction horizon, λ ∈ (0, 1] is a constant that balances
+i
+the contribution
+ of each rollout step, rt is the ground-truth reward, Gt is TD target, and ẑt+1 =
+i
+i i i
+D zt , at , et is the predicted latent state. The loss can be backpropagated to the encoder via
+i
+= E i oit+1 is detached
+zti = E i oit , so do the dynamics and reward losses. The latent target zt+1
+with the stop-gradient operator sg(·) to prevent cyclic gradient flow. Soft Cross-Entropy loss is used
+to match the discretized reward and Q-value predictions, with details provided in Appendix B.3.
+Additionally, to ensure modularity and scalability, each agent’s world model is trained independently,
+and the loss can not be backpropagated through the communication channel.
+Based on Eq. (3), the encoder learns a compact latent space, while the dynamics and reward predictors
+minimize prediction errors in this space, ensuring alignment with real environment dynamics. The
+actor generates initial action estimates in the latent space to warm-start planning and is trained using
+the Heterogeneous-Agent Soft Actor-Critic (HASAC) (Liu et al., 2024a) algorithm:
+L(ψ) =
+
+H
+X
+
+ 
+
+h
+
+i
+λt Qi zti , âit , eit − αH π i,Act · zti , eit
+,
+
+(4)
+
+t
+
+where α is the entropy coefficient, and H[·] denotes the entropy function.
+Sequential Update Scheme. We adopt the sequential update scheme (Kuba et al., 2022; Zhong et al.,
+2024) to train world models in a manner aligned with its autoregressive structure. When training the
+agent v i+1 , its inputs are conditioned on the predictions of the first i agents, produced by their most
+recently updated models. This preserves the sequential dependency, ensuring predictions exploit the
+most up-to-date outputs, which stabilizes training and improves monotonicity across agent indices.
+Random Masking. Inspired by Masked AutoEncoders (He et al., 2022) and their applications
+in MARL (Kang et al., 2025), we randomly permute the communication order among agents and
+allow each agent to skip communication with a certain probability. This random masking simulates
+realistic communication interruptions and forces the world model to robustly adapt to communication
+uncertainties, significantly enhancing the model’s resilience against communication failures.
+4.2
+
+P LANNING WITH S EQUENTIAL C OMMUNICATION
+
+Although Eq. (2) includes an actor, it does not serve directly as an explicit decision policy; instead, it
+provides initial action estimates for the planner. We next propose a sequential multi-agent planner
+based on Model Predictive Path Integral (MPPI) (Williams et al., 2015) that leverages the predictions
+of world models to optimize each agent’s action. In this framework, the actor contributes by narrowing
+the action search space to promising regions, while the planner ensures robust long-term decisionmaking and corrects suboptimal proposals from the actor.
+At each timestep t, agent v i samples N candidate action sequences of horizon H, denoted ait:t+H ,
+from the initial distribution guided by the actor. Conditioned on its latent state and the received
+message, the agent performs latent rollouts with its local world model to predict future trajectories.
+1
+We implement the concatenation using a mask-based scheme to ensure consistent dimensionality, with
+details provided in Appendix A.1.
+
+4
+
+The value of each trajectory is then estimated as
+i
+i
+Vt+H
+= γ H Qi (ẑt+H
+, ait+H , eit+H ) +
+
+γ h−t Ri (ẑhi , aih , eih ),
+
+(5)
+
+h=t
+
+Planner
+
+Latent Rollout
+Ƹ
+
+𝑖
+
+Ƹ
+
+Ƹ
+
+𝑖
+
+𝑜 𝑡
+
+𝑖
+
+Ƹ
+
+𝑟𝑡+ 1
+
+𝑟𝑡
+
+𝑖
+
+⋯
+
+Ƹ
+
+𝑧 𝑡
+
+enc
+
+i
+where Vt+H
+represents the value estimate
+of a sampled action sequence, computed
+as the sum of predicted rewards over the
+horizon plus the terminal value given by
+the critic. Then, candidate sequences are
+ranked according to their evaluated values,
+and the highest-scoring subset is selected
+as the elite set. The action distribution is
+updated toward the statistics of these elite
+trajectories, thereby concentrating future
+sampling around high-value regions and
+progressively refining the search space. 2
+
+t+H−1
+X
+
+𝑧
+
+𝑖
+
+𝑟𝑡
+
++ 𝐻
+
+𝑖
+
+Ƹ
+
+𝑧
+
+𝑡+ 1
+⋯
+
+ෙ◌
+
+𝑖
+
+ෙ◌
+
+𝑖
+
+𝑎 𝑡+ 1
+
+𝑎 𝑡
+
+ෙ◌
+⋯
+
+𝑖
+𝑡+ 𝐻
+
+ෙ◌
+
+Critic
+
+𝑖
+
+𝑎 𝑡+ 𝐻
+
+prior
+
+Dist.
+
+𝑖
+
+𝑉𝑡 + 𝐻
+
+Path
+Integral
+
+Sample
+Actor
+
+𝑖
+
+𝑞𝑡+ 𝐻
+
+Update
+
+elite
+outcast
+
+Concat
+Agent
+Agent
+After several iterations until convergence,
+𝑖
+𝑖
+the optimized action sequence and preCommunication
+dicted trajectory are transmitted as a communication message to the next agent,
+which repeats the same planning procedure. Figure 2: Sequential multi-agent planner: each agent optimizes its action sequence via local world model rollouts and
+This sequential communication–planning critic evaluations, then passes the optimized trajectory to the
+paradigm substantially reduces communi- next agent for efficient sequential cooperation.
+cation overhead and enhances multi-agent
+cooperation efficiency through explicit intention sharing.
+Ƹ
+
+𝑖
+
+𝑒 𝑡
+
+−
+
+𝑣
+
+Ƹ
+
+𝑖+ 1
+
+𝑒 𝑡
+
+1
+
+𝑣
+
++ 1
+
+Low-pass Action Smoothing. To prevent mechanical wear caused by abrupt action changes, we integrate a low-pass filtering strategy (Kicki, 2025). In each planning iteration, sampled action sequences
+are filtered along the temporal dimension to suppress high-frequency fluctuations. This smoothing
+enforces gradual action transitions across timesteps, reducing control discontinuities and promoting
+stable, consistent behavior on physical robots. Further details are provided in Appendix A.2.
+Heuristic Early-Stopping. Considering the computational constraints of physical robotic platforms,
+we design a motion-planning heuristic that terminates iterations when the KL (Kullback & Leibler,
+1951) divergence between consecutive action distributions falls below a threshold. This early-stopping
+criterion mitigates diminishing returns (Kobilarov, 2012), reducing computation while preserving
+plan quality. Further details and experiments regarding this design are provided in Appendix C.5.
+Communication Cache. Inspired by Q-chunking (Li et al., 2025) which reuses temporally extended
+action units to improve decision efficiency, we introduce a communication cache that stores the
+predicted messages from the previous agent, enabling the current agent to retrieve them when
+communication fails. For instance, if communication fails at t + 1, agent v i+1 retrieves the cached
+i
+i
+message zt+1
+= Di (E i (oit )) from agent v i instead of the ideally updated message ẑt+1
+= E i (oit+1 ).
+
+5
+
+E XPERIMENTS
+
+Environments. We evaluate SeqWM and baselines in two challenging multi-robot cooperative
+environments: Bimanual Dexterous Hands (Bi-DexHands) (Chen et al., 2024a) and Multi-Quadruped
+Environment (Multi-Quad) (Xiong et al., 2024). In Bi-DexHands, two agents control a pair of
+dexterous hands to accomplish high-dimensional manipulation tasks (up to O ∈ R229 , A ∈ R26 ). In
+Multi-Quad, multiple quadruped robots collaborate to solve coordination tasks, and we further deploy
+SeqWM on real Unitree Go2-W robots to assess its sim-to-real transfer.
+5.1
+
+C OMPARISONS
+
+Baselines. We select several competitive baselines, including: HASAC (Liu et al., 2024a), a state-ofthe-art model-free method extending SAC to multi-agent settings; MARIE (Zhang et al., 2025a), a
+2
+
+The details of the planner and its implementationare provided in Appendix A.1 and B.
+
+5
+
+model-based method employing a Transformer for dynamics prediction; MAT (Wen et al., 2022), a
+method adopting the sequential decision-making paradigm; and MAPPO (Yu et al., 2022), a most
+widely used algorithm, included as a general-purpose baseline.
+SeqWM (ours)
+
+HASAC
+
+MAT
+
+MARIE
+
+MAPPO
+
+Figure 3: Performance comparisons on selected tasks of SeqWM with other baselines. Task in Bi-DexHands
+report the episode return, while Multi-Quad (gray background) reports success rate. Bold lines indicate the mean
+over multiple seeds, with shaded regions denoting the 95% confidence intervals. The results on all other tasks
+are reported in Figure 13 in Appendix C.1.
+
+Results on Bi-DexHands. The representative tasks in Bi-DexHands include object transfer tasks
+(Over,CatchAbreast,CatchOver2Underarm), which require the two hands to transfer an
+object under different relative positions and grasping postures; and functional manipulation tasks
+(BottleCap,Pen,Scissors), which involve precise bimanual operations to achieve specific
+functional goals, such as opening a bottle cap, removing a pen lid, or spreading a pair of scissors.
+As shown in Figure 3, SeqWM achieves higher asymptotic returns and faster convergence across all
+tasks. In several tasks (Over, CatchOver2Underarm, Scissors), SeqWM reaches nearoptimal performance within 2–4M steps, while baselines require far more interactions or fail to match
+it. In more challenging tasks (Pen, CatchAbreast), SeqWM steadily improves and achieves
+the highest final returns with lower variance, demonstrating stability. Remarkably, in BottleCap,
+SeqWM is the only method that successfully grasps the bottle body and opens the cap.
+Results on Multi-Quad. In Gate, the robots are required to pass through a narrow gate as quickly
+as possible without collision. In PushBox, they jointly push a large box to a designated target
+location. In Shepherd„ the two quadruped robots (as sheepdogs) cooperatively guide another robot
+(as sheep) to a target area (as sheep pen).
+In Gate and Shepherd, it rapidly approaches near-100% success rates within the early phase,
+significantly surpassing baselines in terms of sample efficiency. In PushBox, SeqWM is the only
+method capable of completing the task, whereas all baselines fail to push the box to the target. 3 This
+superior performance stems from SeqWM’s sequential world model, which enables each agent to
+plan actions conditioned on its predecessors’ intentions, thereby enhancing coordination.
+5.2
+
+E MPOWERED C OOPERATIVE B EHAVIORS
+
+We further visualize the behaviors learned by SeqWM, showing that it not only acquires stable policies
+in high-dimensional state and action spaces, but also achieves advanced cooperative behaviors,
+including predictive adaptation, temporal alignment, and role division.
+Bi-DexHands Behaviors. In Catch-Over2Underarm, the throwing hand first performs prediction and planning, explicitly transmitting future trajectories to the catching hand. Guided by this
+message, the catching hand then exhibits predictive adaptation by anticipating the object’s motion
+and landing point and proactively adjusting its grasping posture. As shown in Frames C–D, the
+catching hand lowers and opens in advance, aligning its posture with the predicted landing point to
+enable a reliable grasp. In Pen, two hands achieve near-perfect temporal alignment by exchanging
+predictions of future actions in advance. As a result, they grasp the pen body and cap almost simultaneously in Frame D and efficiently complete the extraction in Frames E–F, substantially enhancing
+cooperative efficiency.
+Multi-Quad Behaviors. Figure 5 further shows the role division learned by SeqWM in the MultiQuad-PushBox. In Frames A–B (t = 1 → 2), the two quadruped robots navigate to opposite sides
+3
+SeqWM-MARL shows the behavior comparison between SeqWM and the next-best baseline on
+BottleCap and PushBox.
+
+6
+
+target
+
+A
+
+C
+
+B
+
+D
+
+E
+
+F
+
+D
+
+E
+
+F
+
+(a) Catch-Over2Underarm
+
+A
+
+C
+
+B
+
+(b) Pen
+
+Figure 4: Trajectory visualizations of Catch-Over2Underarm and Pen with SeqWM.
+
+of the box, establishing an effective pushing configuration. In Frames B–D (t = 2 → 4)„ both
+maintain high positive x-axis velocities, indicating continuous forward pushing force. At Frame
+C (t = 3), Robot 2 produces a downward y-axis velocity, adjusting the push direction toward
+the target, while Robot 1 gradually increases its negative y-axis velocity to assist in directional
+control. As the box approaches the target, Robot 1 reduces its x-axis velocity to avoid overshooting.
+These behaviors demonstrate that SeqWM supports not only effective force coordination but also
+fine-grained directional adjustments, resulting in precise and efficient task completion.
+②
+
+②
+
+②
+①
+
+②
+
+①
+
+①
+
+①
+
+Figure 5: Behavior visualizations in PushBox. The first row shows the execution process, where the box is
+significantly larger than the robots, requiring coordinated efforts from both quadrupeds to complete the task.
+The left side of second row visualizes the trajectories of the robots and the box, with the right side showing the
+x-axis and y-axis velocities and orientations of each robot.
+
+5.3
+
+S CALABILITY TO M ORE AGENTS
+
+We extend the Gate to 3–5 agents to evaluate the scalability of SeqWM with respect to the number
+of agents, and the behavioral visualizations of 5-robot-Gate are presented in Figure 6.
+⑤
+
+⑤
+④
+③
+
+④
+③
+
+②
+
+②
+
+②
+①
+
+⑤
+④
+
+A
+
+①
+
+B
+
+①
+
+⑤
+④
+①
+
+③
+
+C
+
+③
+②
+
+D
+
+⑤
+①
+
+③
+
+④
+②
+
+E
+
+①
+⑤
+
+④
+
+③
+②
+
+F
+
+Figure 6: Visualization of the learned behaviors on 5-robot-Gate.
+
+As the robots approach the narrow gate, they exhibit predictive adaptation, with certain agents
+proactively decelerating or waiting to avoid potential congestion. For instance, at Frame B (t≈2),
+Robot 3 maintains a near-unity positive x-command, while the other robots moderately reduce
+7
+
+their forward commands. In terms of temporal alignment, the x-command trajectories reveal a
+clear wave-like alternation, where the peak sequence (3 → 2 → 1 → 4 → 5) mirrors the actual
+passing order, reflecting a dynamic “first-pass–then-follow” sequence. Overall, the team establishes a
+coordinated rhythm of “prediction–waiting–passing–yielding,” which enables efficient multi-robot
+traversal under constrained environmental conditions. Further quantitative analyses and visualizations
+on 3-5 robot Gate and Mujoco-6a-Cheetah are provided in Appendix C.2.
+5.4
+
+R EAL -W ORLD D EPLOYMENT
+
+The real-world experimental setup is detailed in Appendix C.6, and the results are shown in Figure 7.
+
+A
+
+B
+
+C
+
+D
+
+E
+
+F
+
+E
+
+F
+
+E
+
+F
+
+(a) Push Box
+
+A
+
+B
+
+C
+
+D
+(b) Gate
+
+A
+
+B
+
+C
+
+D
+(c) Shepherd
+
+Figure 7: Real-world results of multi-robot cooperation tasks. The trajectories of Robot 1, Robot 2, and the
+Sheep are marked in different colors.
+
+In PushBox, the two quadrupeds approach the box from opposite sides and coordinate their pushing
+forces and directions to move it toward the target. Between Frames D-F, Robot 1 moves forward
+to provide the main pushing force, while Robot 2 makes slight lateral adjustments to steer the box.
+The overall pushing pattern, including the division of roles and the gradual directional adjustments,
+closely matches the behavior observed in simulation, confirming a successful sim-to-real transfer.
+In Gate, two clear yielding events are observed. Between Frames C-D, Robot 1 slows down and waits
+for Robot 2 to pass first, demonstrating priority management in constrained spaces. After crossing
+Frames E-F, Robot 2 actively veers aside to leave sufficient space for Robot 1, enabling smooth
+passage without collisions. These behaviors reflect SeqWM’s trajectory prediction and intentionsharing capabilities, allowing natural, efficient yielding without high-frequency communication.
+In Shepherd, Robot 1 accelerates between Frames A-B, causing the Sheep to move left. To prevent
+the Sheep from hitting the left gate frame, Robot 1 retreats while Robot 2 advances between Frames
+C-D. This maneuver drives the Sheep away from Robot 2 and into the target area. The sequence
+highlights SeqWM’s capacity for predictive coordination and adaptive role allocation, where the one
+agent’s motion influences the sheep robot’s response and the another agent adapts accordingly to
+achieve the common goal.
+5.5
+
+A BLATION S TUDIES
+
+Sequential Sample Generation. To evaluate the contribution of the sequential paradigm in SeqWM’s
+world model, we replace it with centralized and decentralized architectures, ensuring all models
+have an equal number of parameters for a fair comparison. Using BottleCap, we collect 50K
+environment steps with random actions and train each model for 2.5K steps using the loss in Eq. (3).
+After training, we gather 1K additional steps to measure dynamics and reward prediction errors across
+different horizons. As shown in Figure 8, the sequential and centralized models achieve similarly low
+errors, both substantially outperforming the decentralized model. The results confirm the advantage
+of sequential prediction, where each agent conditions its output on the predictions of its predecessors,
+yielding more accurate and coherent rollouts.
+8
+
+Figure 8: Accuracy of the world model prediction.
+
+Communication Function. We replaced the concat communication function in SeqWM with alternative fusion
+mechanisms, including MLP, cross-attn, and RNN, and
+evaluated them on BottleCap. The results in Figure 9
+show that the simplest concat approach achieves the highest and most stable performance. This advantage stems
+from two factors: (i) concat preserves the complete communication content, allowing the dynamics and reward
+predictors to autonomously identify and exploit the most
+informative features during training; and (ii) it introduces
+no additional learnable parameters, thereby maintaining
+stable gradient propagation in long-horizon prediction.
+Moreover, we observe that RNN-based fusion even under- Figure 9: Ablation study of the communicaperforms the no-communication baseline (dec), which we tion function in SeqWM.
+attribute to its sensitivity to input ordering—an undesirable
+property in multi-agent communication scenarios lacking a fixed semantic sequence.
+5.6
+
+A DDITIONAL E XPERIMENTS
+
+To further validate the effectiveness of SeqWM, we present the following additional analyses:
+1) Visualizations of the learned behaviors on all other tasks in Appendix C.3 and SeqWM-MARL;
+2) An ablation analysis of the complementary roles of the actor and planner in Appendix C.4;
+3) An evaluation of SeqWM’s scalability with respect to the number of agents in Appendix C.2;
+4) An experimental analysis of time consumption and early stopping in the planner in Appendix C.5.
+
+6
+
+C ONCLUSION
+
+This paper presented SeqWM, a novel model-based MARL framework that integrates the sequential
+paradigm into world model learning and planning. By structurally decomposing joint dynamics
+into autoregressive, agent-wise models, SeqWM offers a principled approach that reduces modeling
+complexity and naturally enables intention sharing through predicted trajectories. This methodological
+innovation not only improves scalability but also facilitates the emergence of advanced cooperative
+behaviors such as predictive adaptation, temporal alignment, and role division. Extensive experiments
+in Bi-DexHands and Multi-Quad show that SeqWM achieves state-of-the-art performance with
+superior sample efficiency, while real-world deployment on quadruped robots confirms that these
+cooperative behaviors transfer reliably from simulation to physical platforms. Beyond empirical
+results, SeqWM demonstrates that sequential paradigms provide an efficient and scalable principle
+for structuring multi-agent cooperation, paving the way for more robust and efficient deployment of
+cooperation in physical multi-robot systems.
+Future Work. Benefiting from the integration of the sequential paradigm and agent-wise world
+models, SeqWM naturally extends to heterogeneous robot teams and human–robot semantic
+understanding. With each agent maintaining an independent world model, the framework accommodates diverse dynamics and sensing modalities, enabling cooperation among quadrupeds,
+manipulators, and aerial robots. Moreover, the explicit trajectory rollouts can be shared not only across
+robots but also with humans as interpretable intention signals, fostering transparent collaboration,
+mutual understanding, and trust in human–robot teams.
+9
+
+E THICS S TATEMENT
+This work focuses on advancing multi-robot cooperation through model-based reinforcement learning. All experiments were conducted in simulated environments and on standard quadruped robot
+platforms, with no involvement of humans, animals, or sensitive personal data. The proposed methodology focuses on technical contributions to the fields of reinforcement learning, multi-agent systems,
+and robotics, without ethical implications beyond standard academic research practices.
+
+R EPRODUCIBILITY S TATEMENT
+To ensure the reproducibility of the results, we provide open-source code at https://github.
+com/zhaozijie2022/seqwm-marl. Hyperparameters and training procedures are detailed in
+Appendix B. All baseline comparisons use publicly available implementations, with the documented
+parameter settings as referenced in the respective sections.
+
+U SE OF L ARGE L ANGUAGE M ODELS
+Large Language Models (LLMs) were used in the preparation of this paper exclusively for writing
+assistance and language polishing. The conceptualization of the research, methodology design,
+experimental implementation, and analysis were all conducted entirely by the authors. The authors
+take full responsibility for the content of this paper.
+
+R EFERENCES
+Michel Aractingi, Pierre-Alexandre Léziart, Thomas Flayols, Julien Perez, Tomi Silander, and
+Philippe Souères. Controlling the solo12 quadruped robot with deep reinforcement learning.
+scientific Reports, 13(1):11945, 2023. URL https://dl.acm.org/doi/abs/10.5555/
+3600270.3601471.
+Marc G. Bellemare, Will Dabney, and Rémi Munos. A distributional perspective on reinforcement
+learning. In Proceedings of the 34th International Conference on Machine Learning, volume 70
+of Proceedings of Machine Learning Research, pp. 449–458. PMLR, 06–11 Aug 2017. URL
+https://proceedings.mlr.press/v70/bellemare17a.html.
+Jiajun Chai, Yuqian Fu, Dongbin Zhao, and Yuanheng Zhu. Aligning credit for multi-agent cooperation via model-based counterfactual imagination. AAMAS ’24, pp. 281–289, 2024. URL
+https://dl.acm.org/doi/abs/10.5555/3635637.3662876.
+Yuanpei Chen, Yiran Geng, Fangwei Zhong, Jiaming Ji, Jiechuang Jiang, Zongqing Lu, Hao Dong,
+and Yaodong Yang. Bi-dexhands: Towards human-level bimanual dexterous manipulation. IEEE
+Transactions on Pattern Analysis and Machine Intelligence, 46(5):2804–2818, 2024a. URL
+https://ieeexplore.ieee.org/abstract/document/10343126.
+Zixuan Chen, Xialin He, Yen-Jen Wang, Qiayuan Liao, Yanjie Ze, Zhongyu Li, S. Shankar Sastry,
+Jiajun Wu, Koushil Sreenath, Saurabh Gupta, and Xue Bin Peng. Learning smooth humanoid
+locomotion through lipschitz-constrained policies. 2024b. URL https://arxiv.org/abs/
+2410.11825.
+Guilherme Christmann, Ying-Sheng Luo, Hanjaya Mandala, and Wei-Chao Chen. Benchmarking
+smoothness and reducing high-frequency oscillations in continuous control policies. In 2024
+IEEE/RSJ International Conference on Intelligent Robots and Systems (IROS), pp. 627–634, 2024.
+URL https://ieeexplore.ieee.org/abstract/document/10802057.
+Gang Ding, Zeyuan Liu, Zhirui Fang, Kefan Su, Liwen Zhu, and Zongqing Lu. Multi-agent
+coordination via multi-level communication. Advances in Neural Information Processing Systems,
+37:118513–118539, 2024. URL https://openreview.net/forum?id=3l2HnZXNou.
+Vladimir Egorov and Alexei Shpilman. Scalable multi-agent model-based reinforcement learning.
+In Proceedings of the 21st International Conference on Autonomous Agents and Multiagent
+10
+
+Systems, AAMAS ’22, pp. 381–390, Richland, SC, 2022. ISBN 9781450392136. URL https:
+//dl.acm.org/doi/abs/10.5555/3535850.3535894.
+Danijar Hafner, Jurgis Pasukonis, Jimmy Ba, and Timothy Lillicrap. Mastering diverse control
+tasks through world models. Nature, 640(8059):647–653, 2025. URL https://doi.org/10.
+1038/s41586-025-08744-2.
+Nicklas Hansen, Hao Su, and Xiaolong Wang. TD-MPC2: Scalable, robust world models for
+continuous control. 2024. URL https://openreview.net/forum?id=Oxh5CstDJU.
+Kaiming He, Xinlei Chen, Saining Xie, Yanghao Li, Piotr Dollár, and Ross Girshick. Masked
+autoencoders are scalable vision learners. In 2022 IEEE/CVF Conference on Computer Vision and
+Pattern Recognition (CVPR), pp. 15979–15988, 2022. URL https://ieeexplore.ieee.
+org/abstract/document/9879206.
+Kun Hu, Muning Wen, Xihuai Wang, Shao Zhang, Yiwei Shi, Minne Li, Minglong Li, and Ying
+Wen. Pmat: Optimizing action generation order in multi-agent reinforcement learning. AAMAS
+’25, pp. 997–1005, 2025. URL https://dl.acm.org/doi/abs/10.5555/3709347.
+3743619.
+Sehyeok Kang, Yongsik Lee, Gahee Kim, Song Chong, and Se-Young Yun. Ma2e: Addressing partial
+observability in multi-agent reinforcement learning with masked auto-encoder. In The Thirteenth
+International Conference on Learning Representations, 2025. URL https://openreview.
+net/forum?id=klpdEThT8q.
+Nouman Khan. Sequential Decision Making in Cooperative Multi-Agent Systems with Constraints.
+PhD thesis, University of Michigan, 2025. URL https://deepblue.lib.umich.edu/
+handle/2027.42/199212. Accessed: 2025-09-08.
+Piotr Kicki. Low-pass sampling in model predictive path integral control. 2025. URL https:
+//arxiv.org/abs/2503.11717.
+Marin Kobilarov. Cross-entropy motion planning. The International Journal of Robotics Research,
+31(7):855–871, 2012. URL https://doi.org/10.1177/0278364912444543.
+Jakub Grudzien Kuba, Ruiqing Chen, Muning Wen, Ying Wen, Fanglei Sun, Jun Wang, and Yaodong
+Yang. Trust region policy optimisation in multi-agent reinforcement learning. In International
+Conference on Learning Representations, 2022. URL https://openreview.net/forum?
+id=EcGGFkNTxdJ.
+Solomon Kullback and Richard A Leibler. On information and sufficiency. The annals of mathematical statistics, 22(1):79–86, 1951. URL https://www.jstor.org/stable/2236703.
+Patrick Lancaster, Nicklas Hansen, Aravind Rajeswaran, and Vikash Kumar. Modem-v2: Visuomotor world models for real-world robot manipulation. In 2024 IEEE International Conference on
+Robotics and Automation (ICRA), pp. 7530–7537, 2024. URL https://ieeexplore.ieee.
+org/abstract/document/10611121.
+Samuel Lavoie, Christos Tsirigotis, Max Schwarzer, Ankit Vani, Michael Noukhovitch, Kenji
+Kawaguchi, and Aaron Courville. Simplicial embeddings in self-supervised learning and downstream classification. 2022. URL https://arxiv.org/abs/2204.00616.
+Qiyang Li, Zhiyuan Zhou, and Sergey Levine. Reinforcement learning with action chunking. arXiv
+preprint arXiv:2507.07969, 2025.
+Jiarong Liu, Yifan Zhong, Siyi Hu, Haobo Fu, QIANG FU, Xiaojun Chang, and Yaodong Yang.
+Maximum entropy heterogeneous-agent reinforcement learning. In The Twelfth International
+Conference on Learning Representations, 2024a. URL https://openreview.net/forum?
+id=tmqOhBC4a5.
+Qihan Liu, Jianing Ye, Xiaoteng Ma, Jun Yang, Bin Liang, and Chongjie Zhang. Efficient multiagent reinforcement learning by planning. In The Twelfth International Conference on Learning
+Representations, 2024b. URL https://openreview.net/forum?id=CpnKq3UJwp.
+11
+
+Diganta Misra. Mish: A self regularized non-monotonic activation function. 2020. URL https:
+//arxiv.org/abs/1908.08681.
+R.R. Negenborn and J.M. Maestre. Distributed model predictive control: An overview and roadmap
+of future research opportunities. IEEE Control Systems Magazine, 34(4):87–97, 2014. URL
+https://ieeexplore.ieee.org/abstract/document/6853439.
+Frans A Oliehoek, Christopher Amato, et al. A concise introduction to decentralized POMDPs,
+volume 1. Springer, 2016. URL https://link.springer.com/book/10.1007/
+978-3-319-28929-8.
+Bei Peng, Tabish Rashid, Christian Schroeder de Witt, Pierre-Alexandre Kamienny, Philip Torr,
+Wendelin Böhmer, and Shimon Whiteson. Facmac: Factored multi-agent centralised policy
+gradients. Advances in Neural Information Processing Systems, 34:12208–12221, 2021.
+Cristina Pinneri, Shambhuraj Sawant, Sebastian Blaes, Jan Achterhold, Joerg Stueckler, Michal
+Rolinek, and Georg Martius. Sample-efficient cross-entropy method for real-time planning.
+volume 155 of Proceedings of Machine Learning Research, pp. 1049–1065. PMLR, 16–18 Nov
+2021. URL https://proceedings.mlr.press/v155/pinneri21a.html.
+Han Qi, Haocheng Yin, Aris Zhu, Yilun Du, and Heng Yang. Strengthening generative robot policies
+through predictive world modeling. 2025. URL https://arxiv.org/abs/2502.00622.
+Xujie Song, Liangfa Chen, Tong Liu, Wenxuan Wang, Yinuo Wang, Shentao Qin, Yinsong Ma,
+Jingliang Duan, and Shengbo Eben Li. Lipsnet++: Unifying filter and controller into a policy
+network. In Forty-second International Conference on Machine Learning, 2025. URL https:
+//openreview.net/forum?id=KZo2XhcSg6.
+Jiankai Sun, Yiqi Jiang, Jianing Qiu, Parth Nobel, Mykel J Kochenderfer, and Mac Schwager.
+Conformal prediction for uncertainty-aware planning with diffusion dynamics model. In Advances
+in Neural Information Processing Systems, volume 36, pp. 80324–80337. Curran Associates, Inc.,
+2023. URL https://dl.acm.org/doi/abs/10.5555/3666122.3669643.
+Edan Toledo. Codreamer: Communication-based decentralised world models. In Coordination and
+Cooperation for Multi-Agent Reinforcement Learning Methods Workshop, 2024. URL https:
+//openreview.net/forum?id=f2bgGy7Af7.
+Bogdan Vlahov, Jason Gibson, David D Fan, Patrick Spieler, Ali-akbar Agha-mohammadi, and
+Evangelos A Theodorou. Low frequency sampling in model predictive path integral control. IEEE
+Robotics and Automation Letters, 9(5):4543–4550, 2024. URL https://ieeexplore.ieee.
+org/abstract/document/10480553.
+Xihuai Wang, Zheng Tian, Ziyu Wan, Ying Wen, Jun Wang, and Weinan Zhang. Order matters:
+Agent-by-agent policy optimization. In The Eleventh International Conference on Learning
+Representations, 2023. URL https://openreview.net/forum?id=Q-neeWNVv1.
+Yinuo Wang, Wenxuan Wang, Xujie Song, Tong Liu, Yuming Yin, Liangfa Chen, Likun Wang,
+Jingliang Duan, and Shengbo Eben Li. ODE-based smoothing neural network for reinforcement
+learning tasks. In The Thirteenth International Conference on Learning Representations, 2025.
+URL https://openreview.net/forum?id=S5Yo6w3n3f.
+Muning Wen, Jakub Kuba, Runji Lin, Weinan Zhang, Ying Wen, Jun Wang, and Yaodong Yang. Multiagent reinforcement learning is a sequence modeling problem. Advances in Neural Information
+Processing Systems, 35:16509–16521, 2022. URL https://openreview.net/forum?
+id=1W8UwXAQubL.
+Grady Williams, Andrew Aldrich, and Evangelos Theodorou. Model predictive path integral control
+using covariance variable importance sampling. 2015. URL https://arxiv.org/abs/
+1509.01149.
+Philipp Wu, Alejandro Escontrela, Danijar Hafner, Pieter Abbeel, and Ken Goldberg. Daydreamer:
+World models for physical robot learning. volume 205 of Proceedings of Machine Learning
+Research, pp. 2226–2240. PMLR, 14–18 Dec 2023. URL https://proceedings.mlr.
+press/v205/wu23c.html.
+12
+
+Ziyan Xiong, Bo Chen, Shiyu Huang, Wei-Wei Tu, Zhaofeng He, and Yang Gao. Mqe: Unleashing
+the power of interaction with multi-agent quadruped environment. In 2024 IEEE/RSJ International
+Conference on Intelligent Robots and Systems (IROS), pp. 5918–5924. IEEE, 2024. URL https:
+//ieeexplore.ieee.org/abstract/document/10801682.
+Kaixuan Xu, Jiajun Chai, Sicheng Li, Yuqian Fu, Yuanheng Zhu, and Dongbin Zhao. DipLLM:
+Fine-tuning LLM for strategic decision-making in diplomacy. In Forty-second International
+Conference on Machine Learning, 2025. URL https://openreview.net/forum?id=
+hfPaOxDWfI.
+Chao Yu, Akash Velu, Eugene Vinitsky, Jiaxuan Gao, Yu Wang, Alexandre Bayen, and Yi Wu. The
+surprising effectiveness of ppo in cooperative multi-agent games. Advances in neural information
+processing systems, 35:24611–24624, 2022. URL https://openreview.net/forum?
+id=YVXaxB6L2Pl.
+Chao Yu, Xinyi Yang, Jiaxuan Gao, Jiayu Chen, Yunfei Li, Jijia Liu, Yunfei Xiang, Ruixin Huang,
+Huazhong Yang, Yi Wu, and Yu Wang. Asynchronous multi-agent reinforcement learning for
+efficient real-time multi-robot cooperative exploration. AAMAS ’23, pp. 1107–1115, 2023. URL
+https://dl.acm.org/doi/abs/10.5555/3545946.3598752.
+Yang Zhang, Chenjia Bai, Bin Zhao, Junchi Yan, Xiu Li, and Xuelong Li. Decentralized transformers with centralized aggregation are sample-efficient multi-agent world models. Transactions
+on Machine Learning Research, 2025a. URL https://openreview.net/forum?id=
+xT8BEgXmVc.
+Yang Zhang, Xinran Li, Jianing Ye, Delin Qu, Shuang Qiu, Chongjie Zhang, Xiu Li, and Chenjia
+Bai. Revisiting multi-agent world modeling from a diffusion-inspired perspective. 2025b. URL
+https://arxiv.org/abs/2505.20922.
+Zijie Zhao, Yuqian Fu, Jiajun Chai, Yuanheng Zhu, and Dongbin Zhao. Meta learning task representation in multiagent reinforcement learning: From global inference to local inference. IEEE
+Transactions on Neural Networks and Learning Systems, 36(8):14908–14921, 2025a. URL
+https://ieeexplore.ieee.org/abstract/document/10905042.
+Zijie Zhao, Zhongyue Zhao, Kaixuan Xu, Yuqian Fu, Jiajun Chai, Yuanheng Zhu, and Dongbin
+Zhao. Learning and planning multi-agent tasks via a moe-based world model. In The Thirtyninth Annual Conference on Neural Information Processing Systems, 2025b. URL https:
+//openreview.net/forum?id=fi24ry0BX5.
+Yifan Zhong, Jakub Grudzien Kuba, Xidong Feng, Siyi Hu, Jiaming Ji, and Yaodong Yang.
+Heterogeneous-agent reinforcement learning. Journal of Machine Learning Research, 25(32):
+1–67, 2024. URL http://jmlr.org/papers/v25/23-0488.html.
+Siyuan Zhou, Yilun Du, Jiaben Chen, Yandong Li, Dit-Yan Yeung, and Chuang Gan. RoboDreamer:
+Learning compositional world models for robot imagination. In Proceedings of the 41st International Conference on Machine Learning, volume 235 of Proceedings of Machine Learning
+Research, pp. 61885–61896. PMLR, 21–27 Jul 2024. URL https://proceedings.mlr.
+press/v235/zhou24f.html.
+Xiaomeng Zhu, Yuyang Li, Leiyao Cui, Pengfei Li, Huan ang Gao, Yixin Zhu, and Hao Zhao.
+Afford-x: Generalizable and slim affordance reasoning for task-oriented manipulation. 2025a.
+URL https://arxiv.org/abs/2503.03556.
+Xiaomeng Zhu, Changwei Wang, Haozhe Wang, Xinyu Liu, and Fangzhen Lin. Ootsm: A decoupled
+linguistic framework for effective scene graph anticipation. 2025b. URL https://arxiv.
+org/abs/2509.05661.
+
+13
+
+A PPENDICES
+A Multi-Agent Planner
+
+15
+
+A.1 Planning Process . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+
+15
+
+A.2 Low-Pass Action Smoothing . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+
+16
+
+B Implementation Details
+
+16
+
+B.1 Pseudocode . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+
+16
+
+B.2 Model Architecture . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+
+16
+
+B.3 Reward and Value Prediction . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+
+17
+
+B.4 Hyperparameters . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+
+19
+
+C Additional Experiments
+
+19
+
+C.1 Comparisons on Other Tasks . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+
+19
+
+C.2 Scalability with the Number of Agents . . . . . . . . . . . . . . . . . . . . . . . .
+
+20
+
+C.3 Additional Behavior Visualization . . . . . . . . . . . . . . . . . . . . . . . . . .
+
+22
+
+C.4 Role of Actor and Planner . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+
+23
+
+C.5 Early-Stopping Planner . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+
+23
+
+C.6 Sim-to-Real Deployment . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+
+24
+
+14
+
+A
+
+M ULTI -AGENT P LANNER
+
+A.1
+
+P LANNING P ROCESS
+
+As shown in Figure 10, at timestep t, the
+action planning process for agent v i can be
+divided into the following steps:
+
+Ƹ
+
+𝑖
+
+Ƹ
+
+Ƹ
+
+𝑖
+
+𝑜 𝑡
+
+𝑖
+
+Ƹ
+
+𝑟𝑡+ 1
+
+𝑟𝑡
+
+𝑖
+
+⋯
+
+Ƹ
+
+𝑧 𝑡
+
+enc
+
+S1 - Communication. Agents are organized to exchange messages in a sequential
+manner. Specifically, agent v i receives a
+message eit that aggregates the predicted
+latent states and planned actions from all
+its predecessors:
+(
+∅,
+i = 1,
+i
+et = L  j j 
+(6)
+j<i ẑt , at , i > 1,
+
+Planner
+
+Latent Rollout
+
+𝑧
+
+𝑖
+
+𝑟𝑡
+
++ 𝐻
+
+𝑖
+
+Ƹ
+
+𝑧
+
+𝑡+ 1
+
+𝑖
+𝑡+ 𝐻
+
+⋯
+
+ෙ◌
+
+𝑖
+
+ෙ◌
+
+𝑖
+
+ෙ◌
+
+𝑎 𝑡+ 1
+
+𝑎 𝑡
+
+⋯
+
+ෙ◌
+
+Critic
+
+𝑖
+
+𝑞𝑡+ 𝐻
+
+𝑖
+
+𝑉𝑡 + 𝐻
+
+𝑖
+
+𝑎 𝑡+ 𝐻
+
+Path
+Integral
+
+Sample
+Actor
+
+Agent
+𝑣
+
+𝑖
+
+−
+
+Ƹ
+
+prior
+
+Dist.
+
+Concat
+
+𝑖
+
+𝑒 𝑡
+
+Update
+
+Ƹ
+
+elite
+outcast
+
+Agent
+
+𝑖+ 1
+
+𝑒 𝑡
+
+Communication
+
+1
+
+𝑣
+
+𝑖+ 1
+
+where ⊕ denotes concatenation. To implement this efficiently, we employ a
+Figure 10: The multi-agent planner in SeqWM.
+masking-based concatenation scheme: a
+fixed-length vector of dimension n × (|A| + dz ) is pre-allocated, where n is the number of agents, |A|
+and dz are the action and latent dimensions. Agent v 1 maintains an empty message, while subsequent
+agents sequentially fill in their designated slots with their own predictions (ẑti , ait ) in addition to
+forwarding the received content. This design ensures that information is progressively accumulated
+along the communication chain with linear complexity in the number of agents.
+S2 - Action Sampling. The planner samples N candidate action sequences from two sources.
+We sample Np candidate action sequences from a diagonal Gaussian distribution ait:t+H ∼
+
+i
+i
+N µit:t+H , (σt:t+H
+)2 I , where µit:t+H , σt:t+H
+∈ R|A|×H represent the mean and standard deviation of the H-step horizon actions. Additionally, we sample Na action sequences directly from the
+actor module âih ∼ π i,Act (·|oih , eih ), h = t : t + H, and combine these two sets of action sequences
+to form N candidate action sequences.
+S3 - World Model Prediction. Following sampling, the world model predicts H-step trajectories for each sampled action sequence using Eq. (2), generating N predicted sequences
+Γ = {(ẑhi , aih , r̂hi )}h=t:t+H .
+S4 - Value Evaluation. Each predicted trajectory is assigned a value via the H-step return, combining
+the short-term cumulative predicted reward with the terminal value from the critic:
+i
+VΓi = γ H Qi (ẑt+H
+, ait+H , eit+H ) +
+
+t+H−1
+X
+
+γ h−t r̂hi .
+
+(7)
+
+h=t
+
+S5 - Action Optimization. The candidate action sequences are ranked by their evaluated values, and
+the top M are chosen as the elite set Γ∗ . The parameters of the action distribution are updated based
+on the elite set using:
+
+i,(k+1)
+
+µt:t+H =
+
+PM
+
+m=1
+P
+M
+
+αm Γ∗m
+
+m=1 αm
+
+,
+
+i,(k+1)
+
+σt:t+H
+
+v
+uP
+
+2
+u M
+i,(k+1)
+u m=1 αm Γ∗m − µt:t+H
+=t
+,
+PM
+m=1 αm
+
+where
+generated based on the evaluated values
+ the weights are 
+exp τ VΓ∗m − maxm∈M VΓ∗m , with τ being the temperature coefficient.
+
+as
+
+(8)
+
+αm
+
+=
+
+Iteration. For the default setting, the above process are iterated K times to derive the final action
+distribution. If the early-stopping heuristic is applied, after each iteration, we check whether the
+action optimization has converged by evaluating the KL divergence between the current and previous
+action distributions, DKL (N (k+1) ∥N (k) ) < η, where η is a small threshold.
+The detailed hyperparameters used in the model-based planner are summarized in Table 2.
+15
+
+A.2
+
+L OW-PASS ACTION S MOOTHING
+
+In real-world robotics, high-frequency changes in control inputs can cause severe mechanical impacts,
+accelerating wear and reducing execution stability. Therefore, many studies in reinforcement learning
+and motion planning incorporate action-smoothing constraints, such as adding penalties on differences
+between consecutive actions during policy updates (Aractingi et al., 2023; Christmann et al., 2024;
+Wang et al., 2025), introducing regularization in policy networks (Chen et al., 2024b; Song et al.,
+2025), or filtering noise in trajectory optimization (Pinneri et al., 2021; Vlahov et al., 2024; Kicki,
+2025), to reduce jitter and improve executability. Inspired by these methods, we apply frequencydomain low-pass filtering directly to the sampled action noise in our planner, explicitly suppressing
+the high-frequency components of the actions.
+
+Figure 11: Visualization of the low-pass filter. (Left): Amplitude–frequency response of the low-pass filter.
+(Middle): Filtering effects on random signals at 20% cutoff ratios, the different colors represent different action
+dimensions. (Right): Effects of low-pass filtering on control commands in PushBox, with different colors
+representing different agents.
+
+Specifically, during action sampling, we first sample noise from a standard normal distribution,
+apply low-pass filtering, and then add the filtered noise to the action mean to generate candidate
+action sequences. We use a Butterworth filter with oLBF = 1, whose transfer function and amplitude–frequency response are given by:
+H(s) =
+
+2πfc
+,
+s + 2πfc
+
+fc
+|H(f )| = p
+,
+2
+f + fc2
+
+(9)
+
+where fc is the low-pass cutoff frequency. As show in Figure 11, the amplitude–frequency response
+shows that the high-frequency components are exponentially attenuated (approaching linear decay in
+logarithmic coordinates). The corresponding discrete-time difference equation, obtained via bilinear
+transformation, is
+y[t] =
+
+1−β
+(x[t] + x[t − 1]) − βy[t − 1],
+2
+
+β=
+
+1 − tan (πfc/fs )
+,
+1 + tan (πfc/fs )
+
+(10)
+
+where fs is the sampling frequency, i.e., the frequency of the control signal.
+
+B
+
+I MPLEMENTATION D ETAILS
+
+B.1
+
+P SEUDOCODE
+
+B.2
+
+M ODEL A RCHITECTURE
+
+The proposed sequential world model is composed of five components: encoder, dynamics predictor,
+reward predictor, critic, and actor, all implemented using MLPs. We report the network configurations
+and the number of parameters in each module on Dex-BottleCap (|O| = 221, |A| = 26) in
+Table 1.
+We employ the Mish (Misra, 2020) activation function in the hidden layers, which is smooth and
+non-monotonic, ensuring stable gradient flow. For latent space construction, we adopt SEM Norm
+(Simplicial Embeddings Normalization) (Lavoie et al., 2022) to normalize the outputs of the encoder
+16
+
+Algorithm 1 Model Training
+Input: replay buffer B, parameterized networks θE , θD , θR , θQ , and ψ for encoder, dynamics
+predictor, reward predictor, critic, and actor, respectively;
+for episode = 1, 2, 3, . . . , do
+for step t = 1, 2, 3, . . . do
+Get real data ([oit ]i=1:n , [ait ]i=1:n , rt , [oit+1 ]i=1:n ) by interacting with the environment
+Add transition into buffer: B = B ∪ ([oit ]i=1:n , [ait ]i=1:n , rt , [oit+1 ]i=1:n )
+end for
+for epoch = 1, 2, 3, . . . , do
+Sample trajectories from B
+Update θE , θD , θR , θQ by minimizing Eq. (3)
+Update ψ by minimizing Eq. (4).
+end for
+end for
+Algorithm 2 Model Planning
+Input: learned parameters θE , θD , θR , θQ , ψ, hyperparameters H, K, τ, Np , M, Na , initial distribution;
+for step t = 1, 2, 3, . . . do
+for agent i = 1, 2, . . . , n do
+Get environment observation oit and encode it to latent space: zti = E i (oit )
+if i > 1 then
+
+L 
+Retrieve the message from the previous agent eit = j<i ẑtj , ajt
+else
+set eit = ∅
+end if
+for iteration = 1, 2, 3, . . . , Kp do 
+
+2
+
+i
+Sample Na actions ait:t+H ∼ N µit:t+H , (σt:t+H
+) I
+
+Sample Na actions from actor âih ∼ π i,Act (·|oih , eih ), h = t : t + H
+Get predictions by world model rollouts, Γ = {(ẑhi , aih , r̂hi )}h=t:t+H
+Evaluate the trajectories by Eq. (7) and select top-M elite action sequences
+Update action distribution following Eq. (8)
+end for
+end for
+end for
+
+and dynamics predictor. It employs the softmax operator to project high-dimensional latent states onto
+a set of fixed-length simplices, thereby forming a soft sparse representation. This approach mitigates
+information degradation in high-dimensional latent spaces while preserving structural properties,
+striking a balance between expressive capacity and optimization feasibility. As shown in Figure 12
+(left), the transformation of SEM Norm is defined as:
+SEM(z) = ⊕si=1 g (i) ,
+
+exp(zi:i+L−1 )
+,
+g (i) = PL−1
+j=0 exp(zi+j )
+
+(11)
+
+where L is the dimension of the simplex, which is set to L = 8 in our implementation, and s = dz /L
+is the number of segments of the simplex.
+B.3
+
+R EWARD AND VALUE P REDICTION
+
+Discrete Regression. The reward prediction and critic in SeqWM are modeled as discrete regression
+problems, which helps enhance robustness to extreme values. Take reward prediction for example, we
+discretize the reward range into B intervals and use two-hot encoding (Bellemare et al., 2017; Hafner
+et al., 2025) to map the scalar reward to a B-dimensional vector. The two-hot encoding assigns
+weights to the two adjacent bins, reducing quantization errors and providing smoother gradients (Zhu
+17
+
+split
+
+softmax
+
+concat
+SEM
+
+Figure 12: Overview of implementation details. (Left): SEM Normalization. (Middle): Symlog transformation,
+where the y-axis represents the values encoded by two-hot encoding, and the x-axis represents the values aligned
+with the scalar target. (Right): Normalized Q-scale and return in Dex-BottleCap.
+Table 1: The network configurations.
+
+Module
+
+Dim
+
+Layers
+
+Act.
+
+Out Act.
+
+LayerNorm
+
+Param.
+
+Encoder
+Dynamics
+Reward
+Critic
+Actor
+
+512
+512
+512
+256
+256
+
+2
+2
+2
+2
+2
+
+Mish
+Mish
+Mish
+Mish
+Mish
+
+SEM Norm
+SEM Norm
+Linear
+Linear
+Tanh
+
+✓
+✓
+✓
+✓
+✓
+
+189,952
+553,984
+342,117
+736,970
+210,996
+
+et al., 2025b). Formally, for a scalar reward signal r, its two-hot encoding is defined as:
+
+
+B
+|bk+1 −r|/|bk+1 −bk |, if i = k
+X
+1(bj ≤ r).
+two-hot(r)i = |bk −r|/|bk+1 −bk |,
+if i = k + 1 , k =
+
+0,
+j=1
+else
+
+(12)
+
+For training, we use the soft cross-entropy loss to optimize the predictor’s output:
+Soft-CE(r̂, r) = −
+
+B
+X
+
+exp (r̂i )
+two-hot(r)i × P
+,
+j exp (r̂j )
+i=1
+
+(13)
+
+Symlog and Symexp Transformations. We employ symmetric logarithmic (symlog) and exponential
+(symexp) transformations (Hafner et al., 2025) to align the predicted and target values. These
+transformations maintain continuity and differentiability while smoothing out large numerical values,
+allowing the model to suppress gradient instability caused by exceptionally large values, thereby
+enhancing numerical stability in high-variance scenarios. These transformations are defined as:
+symlog(x) = sign(x) ln (|x| + 1) ,
+
+
+
+symexp(x) = sign(x) exp|x| −1 .
+
+(14)
+
+Figure 12 (middle) illustrates how the symlog and symexp transformations enhance numerical
+stability. The symlog transformation is approximately linear near x = 0 and logarithmic in the tails.
+This brings two stability benefits:
+1) Sensitivity dy/dx = 1/1+|x| decreases as the target value increases, leading to nearly zero
+gradients for extremely large values.
+2) Adaptive binning for two-hot targets. For a fixed width ∆x, the corresponding original scale
+span is ∆y ≈ (1 + |x|)∆x. Thus, extreme values are absorbed by the edge bins, preventing
+them from dominating the loss, while values near zero maintain fine granularity to preserve
+resolution.
+Percentile Scaling of Critic We employ a percentile-based scaling strategy to stabilize Q-value
+magnitudes. Specifically, we computes the dynamic range between the 5-th and 95-th percentiles of
+18
+
+each batch, which effectively suppresses the influence of outliers. This range is updated smoothly
+using an EMA (Exponential Moving Average) controlled by a factor τ :
+δ (k+1) = τ δ (k) + (1 − τ ) · (p95 − p5 ) ,
+
+(15)
+
+where p95 and p5 are the 95-th and 5-th percentiles of the Q-values in the current batch, respectively,
+and τ is a smoothing factor (e.g., τ = 0.99).
+Figure 12 (right) illustrates the empirical effect of percentile scaling on Q-value magnitudes. When
+the return rises rapidly at the beginning of training, the scaling coefficient also increases, adapting
+to the broader spread of Q-values while suppressing the destabilizing impact of extreme samples.
+As training progresses and the return gradually converges, the dynamic range of Q-values contracts
+and the scaling coefficient correspondingly decreases in a smooth manner, guided by the exponential
+moving average. This adaptive behavior ensures that the critic remains well-conditioned across
+different learning phases: it expands the effective range when exploration generates diverse values,
+and tightens the range when the policy stabilizes. Compared to naive normalization, this percentilebased strategy provides robustness against transient spikes or rare outliers, leading to more consistent
+value estimation and consequently more stable planning performance.
+B.4
+
+H YPERPARAMETERS
+
+We summarize the hyperparameters used in SeqWM in Table 2 and Table 3.
+Table 2: The Notations and Values of hyperparameters in the planner.
+
+Hyperparameters
+
+Notations
+
+Value
+
+Hyperparameters
+
+Notations
+
+Value
+
+rollout horizon
+planning iterations
+temperature
+
+H
+K
+τ
+
+3
+6
+0.5
+
+sampling actions
+elites
+actor samples
+
+Np
+M
+Na
+
+512
+64
+24
+
+Table 3: The hyperparameters used in the world model.
+
+Hyperparameters
+
+Value
+
+Hyperparameters
+
+Value
+
+Hyperparameters
+
+Value
+
+batch size
+encoder lr scale
+n-step return
+reward coef
+
+1000
+0.3
+20
+0.1
+
+buffer size
+entropy coef
+num bins
+step ρ
+
+1e6
+1e-4
+101
+0.5
+
+dynamics coef
+lr
+q coef
+
+20
+5e-4
+0.1
+
+C
+
+A DDITIONAL E XPERIMENTS
+
+C.1
+
+C OMPARISONS ON OTHER TASKS
+
+We report additional comparison results on other tasks to complement Figure 3.
+SeqWM (ours)
+
+HASAC
+
+MAT
+
+MARIE
+
+MAPPO
+
+]
+
+Figure 13: Comparison results on other tasks.
+
+19
+
+C.2
+
+S CALABILITY WITH THE N UMBER OF AGENTS
+
+Multi-Agent MuJoCo. To evaluate the scalability of SeqWM with respect to the number of agents,
+we conduct supplementary experiments on the 6a-Cheetah in the MA-Mujoco (Multi-Agent
+MuJoCo) (Peng et al., 2021) environment. MA-Mujoco partitions a robot into multiple agents
+according to different body parts; in 6a-Cheetah, six agents are required to coordinate to control a
+single joint to run faster. To achieve scalability, we modify the communication protocol in Eq. (2) to
+transmit only the action sequence:
+ei+1
+= eit ⊕ ait
+(16)
+t
+The results, reported in Figure 14, show that SeqWM achieves an average return exceeding 12,000 on
+the 6-agent Cheetah task, which is, to our best knowledge, the state-of-the-art performance for this
+task.
+
+6a-Cheetah
+
+Gate
+
+1.0
+Success Rate
+
+0.8
+
+Episode Return
+
+12000
+10000
+8000
+6000
+4000
+2000
+0
+0
+
+0.6
+0.4
+
+2M
+
+2
+3
+4
+5
+
+0.2
+
+SeqWM
+HASAC
+4M 6M 8M 10M
+Steps
+
+0.0
+0
+
+Figure 14: Performance on 6a-Cheetah.
+
+1M
+
+2M
+Steps
+
+3M
+
+4M
+
+Figure 15: Success rates on Gate with more robots.
+
+Gate with More Robots. We also evaluate scenarios with more robots on Gate, with success rates
+reported in Figure 15. As the number of robots increases, the task becomes more complex, but
+SeqWM still successfully learns effective cooperative strategies, achieving nearly 100% success rates
+in all settings within 4M time steps. Additionally, we visualize the learned behaviors of SeqWM with
+different numbers of robots in Figure 16, Figure 17, and Figure 18.
+
+③
+
+③
+
+②
+
+②
+
+①
+
+X: 4.45=1m
+Y: 4.27=1m
+
+①
+
+③
+
+②
+①
+
+③
+
+②
+①
+
+②
+③
+①
+
+Figure 16: Visualization of the learned behaviors on Gate with 3 robots.
+
+As shown in Figure 16, from t=1 (Frame A) to t=2 (Frame B) all agents head toward the passage with
+high x-velocity commands. Around t≈2 (Frame B), priority is established: Robot 2 maintains forward
+x-command while Robot 1 and Robot 3 reduce theirs, preventing congestion (see “X Command”).
+From t=2→3 (Frame B → C), Robot 1 clears the gate and issues a lateral y-command to move aside
+and create space (panel “Y Command”), with yaw staying near zero for all agents (“Robots’ Yaw”).
+Finally, from t=3→4 (Frame C & D), Robot 1 passes as Robot 3 decelerates and holds position;
+Robot 3 proceeds last, completing a smooth, collision-free sequence (order: 2 → 1 → 3).
+20
+
+④
+③
+②
+①
+
+④
+③
+②
+①
+
+④
+③
+①
+
+④
+
+②
+
+①
+
+③
+
+③
+
+④
+
+①
+
+②
+
+②
+
+X: 4.45=1m
+Y: 4.27=1m
+
+Figure 17: Visualization of the learned behaviors on Gate with 4 robots.
+
+As shown in Figure 17, frames A–B show all agents accelerating toward the passage with high
+x-velocity commands. Around t≈3 (Frame C), an implicit queue is established: Robot 2 keeps
+a near-unity x-command while Robot 1, Robot 3, and Robot 4 exhibit pronounced dips in the “X
+Command” panel, preventing blockage at the bottleneck. From t=3→4 (Frame D), Robot 2 clears
+the gate first and issues a strong negative y-command to drift downward and vacate the corridor (“Y
+Command”), with yaw traces remaining close to zero for all robots (“Robots’ Yaw”). Robot 1 then
+increases its x-command and passes second while slightly steering upward in y to avoid interference.
+Finally, from t=4→5 (Frame E), Robot 3 proceeds third, followed by Robot 4, which had maintained
+the lowest x-command during the queuing phase, completing a smooth, collision-free sequence
+(order: 2 → 1 → 3 → 4).
+
+⑤
+
+⑤
+④
+③
+
+④
+③
+
+②
+
+②
+
+②
+①
+
+⑤
+④
+
+A
+
+①
+
+B
+
+①
+
+⑤
+④
+①
+
+③
+
+C
+
+③
+②
+
+D
+
+⑤
+①
+
+③
+
+④
+②
+
+E
+
+①
+⑤
+
+④
+
+③
+②
+
+F
+
+Figure 18: Visualization of the learned behaviors on Gate with 5 robots.
+
+Across agents, the X Command traces show pronounced wave-like undulations: troughs denote the
+robot waiting at the gate, whereas crests indicate the robot currently traversing the passage. Around
+Frame B (t≈2), an implicit queue emerges in the “X Command” panel: Robot 3 sustains a near-unity
+forward command while Robot 1 and Robot 2 reduce theirs moderately; Robot 4 and Robot 5 exhibit
+the deepest dips, preventing congestion at the bottleneck. In Frames (C-D) (t=3→4), Robot 2 clears
+the gate first and issues a negative y-command to drift, vacating space for others. Robot 1 then
+accelerates forward to pass second, slightly shifting upward in y to prevent interference, followed by
+Robot 3. Finally, Robot 4 and Robot 5, which had consistently yielded earlier, complete the crossing.
+This progression underscores role specialization, with some agents acting as initiators and others as
+supporters, while the group achieves a well-aligned, collision-free sequence (order: 3 → 2 → 1 → 4
+→ 5).
+21
+
+C.3
+
+A DDITIONAL B EHAVIOR V ISUALIZATION
+
+For further validation of the effectiveness of SeqWM, we provide additional visualizations of the
+learned behaviors on other tasks in Figure 19, Figure 20 and Figure 21.
+
+(a) BottleCap
+
+(b) CatchAbreast
+
+(c) Over
+
+(d) Scissors
+
+Figure 19: Visualization of the learned behaviors on the Bi-DexHands tasks.
+
+For BottleCap, SeqWM learns effective division of labor and cooperation, with one hand stably
+grasping the bottle body while the other rotates and successfully unscrews the cap without tilting
+or dropping the bottle. For CatchAbreast, both hands successfully catch the object in parallel
+positions. The hand responsible for catching starts moving to the right before the object falls, adjusting
+its position to make the catching process more stable. Overall, these visualizations indicate that
+SeqWM can learn stable policies in high-dimensional state and action spaces, achieving advanced
+cooperative behaviors that surpass baseline methods through sequential communication, enabling
+early prediction, role division, temporal alignment, and intent sharing.
+
+②
+
+②
+①
+X: 4.45=1m
+Y: 4.27=1m
+
+①
+
+②
+①
+
+①
+
+②
+
+①
+②
+
+Figure 20: Visualization of the learned behaviors on Gate.
+
+In Gate, from t = 1 (Frame A) to t = 2 (Frame B), both robots accelerate toward the narrow passage
+with high x-velocity commands. Around t≈3 (Frame C), Robot 1 reduces its x-command while
+22
+
+Robot 2 maintains forward motion, implicitly yielding priority to avoid collision. From t=3 (Frame
+C) to t=4 (Frame D), Robot 2 clears the gate and issues a negative y-command to move downward
+and create space (panel “Y Command”), while yaw remains near zero for both robots, indicating
+stable headings (panel “Robots’ Yaw”). Finally, from t=4 → 5 (Frame D → E), Robot 1 proceeds
+through the gate as Robot 2 decelerates, completing the task with smooth, collision-free coordination.
+②
+
+①
+
+②
+
+②
+
+②
+
+①
+
+①
+
+①
+
+②
+①
+
+X: 5.6=1m
+Y: 4.27=1m
+
+Figure 21: Visualization of the learned behaviors on Shepherd.
+
+For the Shepherd, from t = 3 (Frame C) to t = 4 (Frame D), the sheep approaches the upper
+boundary. At this point, Robot 1 moves downward while Robot 2 advances to prevent the sheep from
+escaping, effectively guiding it back to the target area. This sequence highlights SeqWM’s predictive
+planning and adaptive role assignment: the leading robot influences the trajectory of the target robot,
+while the following robot adjusts accordingly to ensure successful shepherding.
+C.4
+
+ROLE OF ACTOR AND P LANNER
+
+As shown in Eq. (2), the world model consists of both an actor and a critic, but their roles are different.
+The actor is only used to generate candidate actions for the planner and does not directly participate
+in decision-making as an explicit policy. In contrast, the critic is crucial because it estimates the value
+of candidate actions in Eq. (7) and guides the update of the action distribution in Eq. (8).
+Table 4 presents the results of ablation studies that clearly demonstrate the complementary roles of
+the planner and actor. The planner-only setting, where the planner searches over randomly sampled
+actions without leveraging the estimates from the actor, achieves moderate performance across tasks
+but suffers from inefficiency and suboptimal exploration, as reflected in the consistent performance
+drop compared to the full planner-actor configuration. Conversely, the actor-only variant, which
+directly executes actions proposed by the actor without deliberation from the planner, performs even
+worse, indicating that the actor lacks the capability to independently handle task-level reasoning or
+long-term coordination. The planner-actor combination yields the best results in all tasks, showing
+that the actor contributes by narrowing the action search space toward promising regions, while
+the planner ensures robust long-term decision-making and correction of suboptimal actor proposals.
+This synergy allows the system to balance efficiency and accuracy, highlighting that the actor serves
+primarily as a prior for action generation, whereas the planner is responsible for structured search
+and task-level optimization.
+C.5
+
+E ARLY-S TOPPING P LANNER
+
+Inference Time Cost. We report the per-step execution time of SeqWM on BottleCap using a
+single RTX A6000 GPU on the left side of Figure 22. The execution time increases almost linearly
+with the rollout horizon H and the number of planner iterations K, which is consistent with the
+design of SeqWM. With the default settings, SeqWM achieves a per-step execution time of 12.8 ms,
+making it suitable for most real-time robotic tasks.
+Early-Stopping Heuristic. To further enhance the efficiency of SeqWM, we introduce an earlystopping heuristic in Section 4.2 that terminates iterations when the change in the action distribution
+23
+
+Table 4: Ablation studies of actor.
+
+Task
+
+Planner-Actor
+
+Planner-Only
+
+Actor-Only
+
+BottleCap
+CatchAbreast
+Over2Underarm
+Over
+Pen
+Scissors
+
+480.4 ± 2.8
+47.9 ± 0.8
+30.5 ± 0.3
+50.1 ± 0.4
+221.5 ± 2.2
+686.3 ± 3.1
+
+420.3 ± 15.8
+43.0 ± 1.3
+28.4 ± 0.9
+46.1 ± 1.5
+190.1 ± 6.6
+634.6 ± 22.1
+
+372.5 ± 9.8
+40.6 ± 1.0
+27.5 ± 0.7
+30.5 ± 1.1
+163.8 ± 5.0
+592.1 ± 17.1
+
+is not significant. The KL divergence is used as a measure of distribution change, and the execution
+time and performance under different thresholds on BottleCap are shown on the right side of
+Figure 22. When the threshold is set to 0.5, SeqWM reduces the execution time by approximately
+27.3% while incurring only about 5.9% performance loss.
+
+Figure 22: The per-step execution time of SeqWM. (Left): Time cost under different rollout horizons H and
+planner iterations K. (Right): Time cost and performance with and without early-stopping heuristic.
+
+C.6
+
+S IM - TO -R EAL D EPLOYMENT
+
+We implement all three Multi-Quad tasks in an 8m × 5m indoor space. Each task involves two
+Unitree Go2-W quadruped robots. The room is equipped with eight Mars cameras, and real-time
+localization of robots and objects is provided by the NOKOV 3D motion capture system.
+• PushBox: We use a cardboard box of 1.2m × 1.2m × 0.5m and approximately 6 kg in mass. The
+box is sufficiently large that a single robot cannot independently control its movement direction,
+making cooperation essential. The static and kinetic friction coefficients between the box and the
+ground are both approximately 0.5.
+• Gate: A 1m-wide doorway is set up. As shown in Figure 7 (b)-A, the two robots cannot pass
+through side-by-side, requiring coordinated navigation.
+• Shepherd: A DJI EP robot acts as the guided agent (sheep). It is equipped with an omnidirectional chassis to simulate sheep behavior: it moves away from the nearest herding robot and its
+speed is inversely proportional to the distance to that robot.
+We employ the following strategies to enhance the generalization capability of SeqWM and facilitate
+sim-to-real transfer:
+• Observation transformation: Positions of other robots are transformed from the global frame
+into the ego-centric frame of the current robot, reducing observation complexity and improving
+policy generalization.
+24
+
+Motion Capturing
+
+DJI EP Robot
+
+Unitree Go2-W Robot
+
+Figure 23: Real-world setups.
+
+• Domain randomization: Taking PushBox as an example, we randomize the initial positions/orientations of both robots and the box, the position and distance of the target, and the
+friction coefficient between the box and floor to improve robustness to environmental variations.
+• Sensor and actuation perturbations: Random noise is added to sensor readings, and small delays
+with noise are introduced into control commands to emulate real-world sensing errors and actuation
+inaccuracies.
+
+25
+
+

@@ -1,0 +1,4173 @@
+Multi-Agent Reinforcement Learning is
+A Sequence Modeling Problem
+
+arXiv:2205.14953v3 [cs.MA] 28 Oct 2022
+
+Muning Wen1,2 , Jakub Grudzien Kuba3 , Runji Lin4 ,
+Weinan Zhang1 , Ying Wen1 , Jun Wang2,5 , Yaodong Yang6,7,†
+1
+Shanghai Jiao Tong University, 2 Digital Brain Lab, 3 University of Oxford,
+4
+Institute of Automation, Chinese Academy of Science,
+5
+University College London, 6 Beijing Institute for General AI,
+7
+Institute for AI, Peking University
+
+Abstract
+Large sequence models (SM) such as GPT series and BERT have displayed outstanding performance and generalization capabilities in natural language process,
+vision and recently reinforcement learning. A natural follow-up question is how to
+abstract multi-agent decision making also as an sequence modeling problem and
+benefit from the prosperous development of the SMs. In this paper, we introduce a
+novel architecture named Multi-Agent Transformer (MAT) that effectively casts cooperative multi-agent reinforcement learning (MARL) into SM problems wherein
+the objective is to map agents’ observation sequences to agents’ optimal action
+sequences. Our goal is to build the bridge between MARL and SMs so that the modeling power of modern sequence models can be unleashed for MARL. Central to our
+MAT is an encoder-decoder architecture which leverages the multi-agent advantage
+decomposition theorem to transform the joint policy search problem into a sequential decision making process; this renders only linear time complexity for multiagent problems and, most importantly, endows MAT with monotonic performance
+improvement guarantee. Unlike prior arts such as Decision Transformer fit only precollected offline data, MAT is trained by online trial and error from the environment
+in an on-policy fashion. To validate MAT, we conduct extensive experiments on
+StarCraftII, Multi-Agent MuJoCo, Dexterous Hands Manipulation, and Google Research Football benchmarks. Results demonstrate that MAT achieves superior performance and data efficiency compared to strong baselines including MAPPO and
+HAPPO. Furthermore, we demonstrate that MAT is an excellent few-short learner
+on unseen tasks regardless of changes in the number of agents. See our project
+page at https://sites.google.com/view/multi-agent-transformer(1) .
+
+1
+
+Introduction
+
+Multi-agent reinforcement learning (MARL) [44, 8] is a challenging problem for its difficulty which
+arises not only from identifying each individual agent’s policy improvement direction, but also from
+combining agents’ policy updates jointly which should be beneficial for the whole team. Recently,
+such difficulty in multi-agent learning has been eased owing to the introduction of centralized
+training for decentralized execution (CTDE) [11, 45], which allows agents to access the global
+information and opponents’ actions during the training phase. This framework enables successful
+developments of methods that directly inherit single-agent algorithms. For examples, COMA replaces
+the policy-gradient (PG) estimate with a multi-agent PG (MAPG) counterpart [11], MADDPG
+(1)†
+Corresponding to <yaodong.yang@pku.edu.cn>. The source code could be accessed directly with this link
+https://github.com/PKU-MARL/Multi-Agent-Transformer.
+
+36th Conference on Neural Information Processing Systems (NeurIPS 2022).
+
+extends deterministic policy gradient into multi-agent settings with a centralized critic [20, 34],
+QMIX leverages deep Qnetworks for decentralized agents and introduces a centralized mixing
+network for Q-value decomposition [29, 36, 26]. MAPPO endowing all agents with the same set
+of parameters and then training by trust-region methods [46]. PR2 [42] and GR2 [43] methods
+conduct recursive reasoning under the CTDE framework. These methods, however, cannot cover the
+whole complexity of multi-agent interactions; in fact, some of them are shown to fail in the simplest
+cooperative task [15]. To resolve this issue, the multi-agent advantage decomposition theorem was
+proposed [15, Theorem 1] which captures how different agents contribute to the return and provides
+an intuition behind the emergence of cooperation through a sequential decision making process
+scheme. Based on it, HATRPO and HAPPO algorithms [15, 17, 16] were derived which, thanks to the
+decomposition theorem and sequential update scheme, established new state-of-the-art methods for
+MARL. However, their limitation is that the agents’ policies are unaware of the purpose to develop
+cooperation and still rely on a carefully handcrafted maximization objective. Ideally, a team of agents
+should be aware of the jointness of their training by design, thereby following a holistic and effective
+paradigm—an ideal solution that is yet to be proposed.
+In recent years, sequence models (SM) have made a substantial progress in natural language processing (NLP) [27]. For example, GPT series [3] and BERT models [9], built on autoregressive
+SMs, have demonstrated remarkable performance on a wide range of downstream tasks and achieved
+strong performance on few-shot generalization tasks. Although SM are mostly used in language
+tasks due to its natural fitting with the sequential property of languages, the sequential approaches
+are not confined to NLP only, but is instead a widely applicable general foundation model [2]. For
+example, in computer vision (CV), one can split an image into sub-images and align them in a
+sequence as if they were tokens in NLP tasks [9, 10, 12]. Although the idea of solving CV tasks by
+SM is straightforward, it serves as the foundation to some of the best-performing CV algorithms
+[38, 41, 39]. Furthermore, sequential methods are starting to spawn powerful multi-modal visual
+language models such as Flamingo [1], DALL-E [28], and GATO [30] in the recent past.
+Coming with effective and expressive network architectures such as Transformer [40], sequence
+modeling techniques have also attracted tremendous attention from the RL community, which results
+in a series of successful offline RL developments based on the Transformer architecture [5, 14, 30, 23].
+These methods show great potentials in tackling some of the most fundamental RL training problems,
+such as long-horizon credit assignment and reward sparsity [37, 24, 25]. For example, by training
+autoregressive models on pre-collected offline data in a purely supervised way, Decision Transformer
+[5] bypasses the need for computing cumulative rewards through dynamic programming, but rather
+generates future actions conditioning on the desired returns, past states and actions. Despite their
+remarkable successes, none of these methods have been designed to model the most difficult (also
+unique to MARL) aspect of multi-agent systems—the agents’ interactions. In fact, if we were
+to simply endow all agents with a Transformer policy and train them independently, their joint
+performance still could not be guaranteed to improve [15, Proposition 1]. Therefore, while a myriad
+of powerful SMs are available, MARL—an area that would greatly benefit from SM—has not truly
+taken advantage of their performance benefit. The key research question to ask is then
+How can we model MARL problems by sequence models ?
+In this paper, we take several steps to provide an affirmative answer to the above research question.
+Our goal is to enhance MARL studies with powerful sequential modeling techniques. To fulfill that,
+we start by proposing a novel MARL training paradigm which establishes the connection between
+cooperative MARL problems and sequence modeling problems. Central to the new paradigm are
+the multi-agent advantage decomposition theorem and sequential update scheme, which effectively
+transform multi-agent joint policy optimization into a sequential policy search process. As a natural outcome of our findings, we introduce Multi-Agent Transformer (MAT), an encoder-decoder
+architecture that implements generic MARL solutions through SM. Unlike Decision Transformer [5],
+MAT is trained online based on trials and errors in an on-policy fashion; therefore, it does not require
+collecting demonstrations upfront. Importantly, the implementation of the multi-agent advantage
+decomposition theorem ensures MAT to enjoy monotonic performance improvement guarantee during
+training. MAT establishes a new state-of-the-art baseline model for cooperative MARL tasks. We
+justify such a claim by evaluating MAT on the benchmarks of StarCraftII, Multi-Agent MuJoCo,
+Dexterous Hands Manipulation, and Google Research Football; results show that MAT achieves
+superior performance over strong baselines, such as MAPPO [46], HAPPO [15], QMIX [29] and
+UPDeT [13]. Finally, we show that MAT possesses great potentials in task generalizations, which
+holds regardless of the agent number in new tasks.
+2
+
+2
+
+Preliminaries
+
+In this section, we first introduce the cooperative MARL problem formulation and the multi-agent
+advantage decomposition theorem, which serves as the cornerstone of our work. We then review
+existing MARL methods that relate to MAT, and finally familiarize the reader with the Transformer.
+2.1
+
+Problem Formulation
+
+Cooperative MARL problems are oftenQ
+modeled by Markov games hN , O, A, R, P, γi [19]. N =
+n
+{1, . . . , n} is the set of agents, O = i=1 Oi is the
+Qnproduct of local observation spaces of the
+agents, namely the joint observation space, A = i=1 Ai is the product of the agents’ action
+spaces, namely the joint action space, R : O × A → [−Rmax , Rmax ] is the joint reward function,
+P : O × A × O → R is the transition probability function, and γ ∈ [0, 1) is the discount factor. At
+time step t ∈ N, an agent i ∈ N observes an observation oit ∈ Oi (2) (o = (o1 , . . . , on ) is a “joint”
+observation) and takes an action ait according to its policy π i , which is the ith component of the agents’
+joint policy π. At each time step, all agents take actions simultaneously based on their observation
+with no sequential dependencies. The transition
+P and the joint policy induce the (improper)
+P∞ kernel
+t
+marginal observation distribution ρπ (·) , t=0 γ Pr(ot = o|π). At the end of each time step, the
+whole team receives a joint reward R(ot , at ) and observe ot+1 , whose probability distribution is
+P (·|ot , at ). Following this process infinitely long, the agents earn a discounted cumulative return of
+P∞
+Rγ , t=0 γ t R(ot , at ).
+2.2
+
+Multi-Agent Advantage Decomposition Theorem
+
+The agents evaluate the value of actions and observations with Qπ (o, a) and Vπ (o), defined as
+
+
+Qπ (o, a) , Eo1:∞ ∼P,a1:∞ ∼π Rγ |o0 = o, a0 = a ,
+(1)
+ γ
+
+Vπ (o) , Ea0 ∼π,o1:∞ ∼P,a1:∞ ∼π R |o0 = o .
+The jointness of the objective causes difficulties associated with the credit assignment problem—
+having received a shared reward, individual agents are unable to deduce their own contribution to
+the team’s success or failure [4]. Indeed, applying traditional RL methods which simply employ the
+above value functions leads to obstacles in training, such as the growing variance of multi-agent
+policy gradient (MAPG) estimates [17]. Hence, to tackle these, notions of local value functions [21]
+and counterfactual baselines [11] have been developed. In this paper, we work with the most general
+notions of this kind—the multi-agent observation-value functions [15]. That is, for arbitrary disjoint,
+ordered subsets of agents i1:m = {i1 , . . . , im } and j1:h = {j1 , . . . , jh }, for m, h ≤ n, we define the
+multi-agent observation-value function by
+
+
+Qπ (o, ai1:m ) , E Rγ |o0i1:n = o, a0i1:m = ai1:m ,
+(2)
+which recovers the original state-action value function in Equation (1) when m = n, and the original
+observation-value function when m = 0 (i.e., when the set i1:m is empty). Based on Equation (2),
+we can further measure the contribution of a chosen subset of agents to the joint return and define the
+multi-agent advantage function by
+j1:h ,i1:m
+Aiπ1:m (o, aj1:h , ai1:m ) , Qπ
+(o, aj1:h , ai1:m ) − Qjπ1:h (o, aj1:h ).
+
+(3)
+
+The above quantity describes how much better/worse than average the joint action a will be if agents
+i1:m take the joint action ai1:m , once j1:h have taken aj1:h . Again, when h = 0, the advantage
+compares the value of ai1:m to the baseline value function of the whole team. This value-functional
+representation of agents’ actions enables studying interactions between them, as well to decompose
+the joint value function signal, thus helping alleviate the severity of the credit assignment problem
+[29, 35, 22]. The insights of Equation (3) is accomplished by means of the following theorem.
+(2)
+
+For notation convenience, we omit defining agents’ observation functions that take the global state as the
+input and outputs a local observation for each agent, but rather define agents’ local observations directly.
+
+3
+
+Theorem 1 (Multi-Agent Advantage Decomposition [17]). Let i1:n be a permutation of agents. Then,
+for any joint observation o = o ∈ O and joint action a = ai1:n ∈ A, the following equation always
+holds with no further assumption needed,
+n
+ X
+
+Aiπ1:n o, ai1:n =
+Aiπm o, ai1:m−1 , aim .
+m=1
+
+Importantly, this theorem provides an intuition guiding the choice of incrementally improving actions.
+Suppose that agent i1 picks an action ai1 with positive advantage, Aiπ1 (o, ai1 ) > 0. Then, imagine
+that for all j = 2, . . . , n, agent ij knows the joint action ai1:j−1 of its predecessors. In this case, it
+i
+can choose an action aij for which the advantage Aπj (o, ai1:j−1 , aij ) is positive. Altogether, the
+theorem assures that the joint action ai1:n has positive advantage. Furthermore, notice that the joint
+action has been chosen in n steps, each ofP
+which searched an individual agent’s action space. Hence,
+n
+the complexity of this search is additive, i=1 |Ai |, in the sizes of the action spaces. If we were to
+performQthe search directly in the joint action space, we would browse a set of multiplicative size,
+n
+|A| = i=1 |Ai |. Later, we will build upon this insight to design a SM that optimizes joint policies
+efficiently, agent by agent, without the necessity of considering the joint action space at once.
+2.3
+
+Existing Methods in MARL
+
+We now briefly summarize two state-of-the-art MARL algorithms. Both of them build upon Proximal
+Policy Optimization (PPO) [33]—a RL method famous for its simplicity and its performance stability.
+MAPPO [46] is the first, and the most direct, approach for applying PPO in MARL. It equips all
+agents with one shared set of parameters and use agents’ aggregated trajectories for the shared policy’s
+update; at iteration k + 1, it optimizes the policy parameter θk+1 by maximizing the clip objective of
+n
+X
+
+
+
+
+
+
+πθ (ai |o)
+πθ (ai |o)
+Eo∼ρπθ ,a∼πθk min
+A
+(o,
+a),
+clip
+,
+1
+±
+
+A
+(o,
+a)
+,
+π
+π
+θk
+k
+πθk (ai |o) θk
+πθk (ai |o)
+i=1
+
+where the clip operator clips the input value (if necessary) so that it stays within the interval [1−, 1+].
+However, enforcing parameter sharing is equivalent to putting a constraint θi = θj , ∀i, j ∈ N on
+the joint policy space, which can lead to an exponentially-worse sub-optimal outcome [15]. This
+motivates a more principled development of heterogeneous-agent trust-region methods, e.g., HAPPO.
+HAPPO [15] is currently one of the SOTA algorithm that fully leverages Theorem (1) to implement
+multi-agent trust-region learning with monotonic improvement guarantee. During an update, the
+agents choose a permutation i1:n at random, and then following the order in the permutation, every
+im
+agent im picks πnew
+= π im that maximizes the objective of
+h
+E
+
+i
+
+i
+
+i
+
+1:m−1 im
+m
+o∼ρπold ,a 1:m−1 ∼πnew
+,a
+∼πold
+
+i
+i1:m
+min r(π im )Aπ
+(o, ai1:m ), clip(r(π im ), 1 ± )Aiπ1:m
+(o, ai1:m ) ,
+old
+old
+
+im im
+where r(π im ) = π im (aim |o)/πold
+(a |o). Note that the expectation is taken over the newly-updated
+i1:m−1
+previous agents’ policies, i.e, πnew
+; this reflects an intuition that, under Theorem (1), the agent im
+reacts to its preceding agents i1:m−1 . However, one drawback of HAPPO is that agent’s policies has
+to follow the sequential update scheme in the permutation, thus it cannot be run in parallel.
+
+2.4
+
+The Transformer Model
+
+Transformer [40] was originally designed for machine translation tasks (e.g., input English, output
+French). It maintains an encoder-decoder structure, where the encoder maps an input sequence of
+tokens to latent representations and then the decoder generates a sequence of desired outputs in
+an auto-regressive manner wherein at each step of inference, the Transformer takes all previously
+generated tokens as the input. One of the most essential component in Transformer is the scaled
+dot-product attention, which captures the interrelationship of input sequences. The attention function
+T 
+√
+is written as Attention(Q, K, V) = softmax QK
+V, where the Q, K, V corresponds to the vector
+dk
+of queries, keys and values, which can be learned during training, and the dk represent the dimension
+of Q and K. Self-attentions refer to cases when Q, K, V share the same set of parameters.
+4
+
+Figure 1: Conventional multi-agent learning paradigm (left) wherein all agents take actions simultane-
+
+ously vs. the multi-agent sequential decision paradigm (right) where agents take actions by following
+a sequential order, each agent accounts for decisions from preceding agents as red arrows suggest.
+
+Inspired by the attention mechanism, UPDeT [13] handles various observation sizes by decoupling
+each agent’s observations into a sequence of observation-entities, matching them with different actiongroups, and modeling the relationship between the matched observation-entities with a Transformerbased function for better representation learning in MARL problems. Apart from this, based on the
+sequential property described in the Theorem (1) and the principle behind HAPPO [15], it is intuitive
+to think about another Transformer-based implementation for multi-agent trust-region learning. By
+treating a team of agents as a sequence, the Transformer architecture allows us to model teams of
+agents with variable numbers and types, while avoiding drawbacks of MAPPO/HAPPO. We will
+describe in more details how a cooperative MARL problem can be solved by a sequence model.
+
+3
+
+The Surprising Connection Between MARL and Sequence Models
+
+To establish the connection between MARL and sequence models, Theorem (1) provides a new angle
+of understanding the MARL problem from a SM perspective. If each agent knows its predecessors’
+i
+actions with an arbitrary decision order, the sum of agents’ local advantages Aπj (o, ai1:m−1 , aim ) will
+i1:n
+i1:n
+be exactly equal to the joint advantages Aπ (o, a ). This orderly decision setting across agents
+simplifies the update of their joint policy, where maximizing each agent’s own local advantage is
+equivalent to maximizing the joint advantage. As such, agents do not need to worry about interference
+from other agents anymore during the policy update; the local advantage functions have already
+captured the relationship between agents. This property revealed by Theorem (1) inspires us to
+propose a multi-agent sequential decision paradigm for MARL problems as show in Figure (1), where
+we assign agents with an arbitrary decision order (one permutation for each iteration); each agent can
+access its predecessors’ behaviors, based on which it then takes the optimal decision. This sequential
+paradigm motivates us to leverage a sequential model, e.g., Transformer, to explicitly capture the
+sequential relationship between agents described in Theorem (1).
+Underpinned by Theorem (1), sequence modeling reduces the complexity growth of MARL problems
+with the number of agents from multiplicative to additive, thus rendering linear complexity. With
+the help of the Transformer architecture, we can model policies of heterogeneous agents with an
+unified network but treat each agent discriminatively with different position, and thus ensuring high
+sample efficiency while avoiding the exponentially-worse outcome that MAPPO is facing. Besides,
+in order to guarantee the monotonic improvement of joint policies, HAPPO has to update each policy
+one-by-one during training, by leveraging previous update results of π i1 , ..., π im−1 to improve π im ,
+which becomes critical in computational efficiency at large size of agents. By contrast, the attention
+i
+mechanism of Transformer architectures allows for batching the ground truth actions ait0 , ..., atn−1 in
+i1
+in
+the buffer to predict at , ..., at and update policies simultaneously, which significantly improves the
+training speed and makes it feasible for large size of agents. Furthermore, in cases that the number
+and the type of agents are different, SM can incorporates them into an unified solution through its
+capability on modeling sequences with flexible sequence length, rather than treat different agent
+5
+
+Figure 2: The encoder-decoder architecture of MAT. At each time step, the encoder takes in a sequence of
+agents’ observations and encodes them into a sequence of latent representations, which is then passed into
+the decoder. The decoder generate each agent’s optimal action in a sequential and auto-regressive manner.
+The masked attention blocks ensures agents can only access its preceding agents’ actions during training. We
+list the full pseudocode of MAT in Appendix A and a video that shows the dynamic data flow of MAT in
+https://sites.google.com/view/multi-agent-transformer.
+
+numbers as different tasks. To realize the above idea, we introduce a practical architecture named
+Multi-Agent Transformer in the next section.
+
+4
+
+The Multi-Agent Transformer
+
+To implement the sequence modeling paradigm for MARL, our solution is Multi-Agent Transformer
+(MAT). The idea of applying the Transformer architecture comes from the fact that the mapping
+between the input of agents’ observation sequence (oi1 , . . . , oin ) and the output of agents’ action
+sequence (ai1 , . . . , ain ) are sequence modeling tasks similar to machine translations. As eluded by
+Theorem (1), the action aim depends on all previous agents’ decisions ai1:m−1 . Hence, our MAT
+in Figure (2) consists of an encoder, which learns representations of the joint observations, and a
+decoder which outputs actions for each individual agent in an auto-regressive manner.
+The encoder, whose parameters we denote by φ, takes a sequence of observations (oi1 , . . . , oin ) in
+arbitrary order and passes them through several computational blocks. Each such block consists of a
+self-attention mechanism and a multi-layer perceptron (MLP), as well as residual connections to
+prevent gradient vanishing and network degradation with the increase of depth. We denote the output
+encoding of the observations as (ôi1 , . . . , ôin ), which encodes not only the information of agents
+(i1 , . . . , in ) but also the high-level interrelationships that represent agents’ interactions. In order to
+learn expressive representations, in the training phase, we make the encoder to approximate the value
+functions, whose objective is to minimize the empirical Bellman error by
+LEncoder (φ) =
+
+n T −1
+i2
+1 X Xh
+m
+R(ot , at ) + γVφ̄ (ôit+1
+) − Vφ (ôitm ) ,
+T n m=1 t=0
+
+(4)
+
+where φ̄ is the target network’s parameter, which is non-differentiable and updated every few epochs.
+The decoder, whose parameters we denote by θ, passes the embedded joint action ai0:m−1 , m =
+{1, . . . n} (where ai0 is an arbitrary symbol indicating the start of decoding) to a sequence of decoding
+blocks. Crucially, every decoding block comes with a masked self-attention mechanism, where the
+th
+masking makes sure that, for every ij , attention is computed only between the ith
+r and the ij action
+heads wherein r < j so that the sequential update scheme can be maintained. This is then followed
+6
+
+(a) HalfCheetah
+
+(b) CatchOver2Underarm
+
+(c) DoorOpenInward
+
+(d) DoorCloseOutward
+
+Figure 3: Demonstrations of the Bi-DexHands and the HalfCheetah environments.
+HalfCheetah
+
+ShadowHandCatchOver2Underarm
+
+ShadowHandDoorOpenInward
+
+30
+
+MAT
+MAT-Dec
+MAPPO
+HAPPO
+
+2000
+0
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+Environment steps
+
+0.8
+
+15
+
+MAT
+MAT-Dec
+MAPPO
+HAPPO
+
+10
+5
+
+1.0
+1e7
+
+900
+
+0
+
+1
+
+2
+
+3
+
+Environment steps
+
+4
+
+reward
+
+4000
+
+1000
+
+350
+
+20
+
+reward
+
+reward
+
+reward
+
+25
+6000
+
+ShadowHandDoorCloseOutward
+
+400
+
+8000
+
+300
+
+MAT
+MAT-Dec
+MAPPO
+HAPPO
+
+250
+200
+
+5
+1e7
+
+1
+
+2
+
+3
+
+Environment steps
+
+4
+
+5
+1e7
+
+800
+700
+
+MAT
+MAT-Dec
+MAPPO
+HAPPO
+
+600
+500
+400
+
+0.0
+
+0.5
+
+1.0
+
+1.5
+
+2.0
+
+2.5
+
+3.0
+
+Environment steps
+
+3.5
+
+4.0
+1e7
+
+Figure 4: Performance comparisons on the Multi-Agent MuJoCo and the Bi-DexHands benchmarks.
+
+by a second masked attention function, which computes the attention between the action heads and
+observation representations. Finally, the block finishes with an MLP and skipping connections. The
+output to the last decoder block is a sequence of representations of the joint actions, {âi0 :i−1 }m
+i=1 .
+This is fed to an MLP that outputs the probability distribution of im ’s action, namely, the policy
+πθim (aim |ôi1:n , ai1:m−1 ). To train the decoder, we minimize the following clipping PPO objective of
+n
+
+LDecoder (θ) = −
+
+T −1
+
+
+
+1 XX
+min ritm (θ)Ât , clip(ritm (θ), 1 ± )Ât ,
+T n m=1 t=0
+
+(5)
+
+i
+
+ritm (θ) =
+
+πθim (aitm |ôit1:n , ât1:m−1 )
+i
+
+πθim
+(aitm |ôit1:n , ât1:m−1 )
+old
+
+,
+
+where Ât is an estimate of the joint advantage function. One can apply generalized advantage
+Pn
+estimation (GAE) [32] with V̂t = n1 m=1 V (ôitm ) as a robust estimator for the joint value function.
+Notably, the action generation process is different between the inference and the training stage. In
+the inference stage, each action is generated auto-regressively, in the sense that aim will be inserted
+back into the decoder again to generate aim+1 (starting with ai0 and ending with ain−1 ). While during
+the training stage, the output of all actions, ai1:n can be computed in parallel simply because ai1:n−1
+have already been collected and stored in the replay buffer.
+The attention mechanism, which lies in the heart of MAT, encodes observations and actions
+with a weight matrix calculated by multiplying the embedded queries, (q i1 , . . . , q in ), and keys,
+(k i1 , . . . , k in ), where each of the weight w(q ir , k ij ) = hq ir , k ij i. The embedded values
+(v i1 , . . . , v in ) are multiplied with the weight matrix to output representations. While the unmasked attention in the encoder uses a full weight matrix to extract the interrelationship between
+agents, i.e., ôi1:n , the masked attentions in the decoder capture ai1:m with triangular matrices where
+w(q ir , k ij ) = 0 for r < j (see an visual illustration in Appendix A). With the properly masked
+i
+attention mechanism, the decoder can safely output the policy πθm+1 (aim+1 |ôi1:n , ai1:m ), which
+finishes the implementation of Theorem (1).
+The monotonic improvement guarantee. An MAT agent im optimizes a trust-region objective
+that is conditioned on new decisions of agents i1:m−1 by means of conditioning its policy ratio on
+them (see Equation (5)). As such, it increases the joint return monotonically like if it followed the
+sequential update scheme of HAPPO [15, Theorem 2]. However, as oppose to that method, the MAT
+model does not require im to wait until its predecessors make their updates, nor it uses their updated
+action distribution for importance sampling calculations. In fact, as actions of all agents are outputs
+of MAT, their clipping objectives can be computed in parallel (during training), thus dominating
+7
+
+Table 1: Performance evaluations of win rate and standard deviation on the SMAC benchmark, where UPDeT’s
+official codebase supports several Marine-based tasks only.
+
+Task
+
+Difficulty
+
+MAT
+
+MAT-Dec
+
+MAPPO
+
+HAPPO
+
+QMIX
+
+UPDeT
+
+Steps
+
+3m
+
+Easy
+Easy
+Easy
+Easy
+Hard
+Hard
+Hard
+Hard
+Hard
+Hard
+Hard
+Hard+
+Hard+
+Hard+
+Hard+
+
+100.0(1.8)
+100.0(1.1)
+100.0(2.4)
+100.0(2.2)
+100.0(1.3)
+100.0(1.7)
+100.0(1.9)
+90.6(4.4)
+100.0(3.1)
+100.0(1.4)
+100.0(1.3)
+100.0(0.7)
+93.8(2.6)
+98.8(1.3)
+96.5(1.3)
+
+100.0(1.1)
+97.5(2.5)
+100.0(0.4)
+98.1(2.1)
+95.9(2.3)
+100.0(1.3)
+100.0(3.3)
+83.1(4.6)
+95.0(4.6)
+100.0(2.0)
+86.9(5.6)
+95.3(2.2)
+91.2(5.3)
+93.8(4.7)
+85.3(7.5)
+
+100.0(0.4)
+96.8(2.9)
+100.0(2.2)
+95.6(4.5)
+100.0(2.7)
+100.0(2.5)
+72.5(26.5)
+88.2(6.2)
+93.8(3.5)
+96.3(5.8)
+100.0(2.7)
+93.1(3.2)
+81.8(10.1)
+88.4(5.7)
+84.3(19.4)
+
+100.0(1.2)
+97.5(1.1)
+97.5(1.8)
+81.2(22.9)
+90.0(4.8)
+91.9(5.3)
+90.0(3.5)
+73.8(4.4)
+86.2(4.4)
+77.5(9.7)
+0.6(0.8)
+0.0(0.0)
+0.3(0.4)
+0.0(0.0)
+82.8(21.2)
+
+96.91.3
+97.71.9
+96.9(1.5)
+91.2(3.2)
+90.3(4.0)
+92.3(4.4)
+84.3(5.4)
+75.8(3.7)
+92.6(4.0)
+95.8(6.1)
+90.2(9.8)
+39.2(8.8)
+88.3(2.4)
+9.7(3.1)
+68.8(21.2)
+
+100.0(5.2)
+96.3(9.7)
+/
+/
+/
+/
+/
+90.6(6.1)
+/
+/
+2.8(3.1)
+/
+/
+/
+/
+
+5e5
+1e6
+2e6
+2e6
+5e6
+5e6
+3e6
+1e7
+5e6
+5e6
+2e6
+1e7
+1e7
+1e7
+2e7
+
+8m
+1c3s5z
+MMM
+2c vs 64zg
+3s vs 5z
+3s5z
+5m vs 6m
+8m vs 9m
+10m vs 11m
+25m
+27m vs 30m
+MMM2
+6h vs 8z
+3s5z vs 3s6z
+
+academy_3_vs_1_with_keeper
+
+academy_counterattack_easy
+1.0
+
+0.8
+
+0.8
+
+0.8
+
+0.6
+
+0.6
+
+0.6
+
+0.4
+
+MAT
+MAT-Dec
+MAPPO
+HAPPO
+
+0.2
+0.0
+0
+
+1
+
+2
+
+3
+
+Environment steps
+
+4
+
+scores
+
+1.0
+
+scores
+
+scores
+
+academy_pass_and_shoot_with_keeper
+1.0
+
+0.4
+
+MAT
+MAT-Dec
+MAPPO
+HAPPO
+
+0.2
+0.0
+
+5
+1e6
+
+0
+
+1
+
+2
+
+3
+
+Environment steps
+
+4
+
+5
+1e6
+
+0.4
+
+MAT
+MAT-Dec
+MAPPO
+HAPPO
+
+0.2
+0.0
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+Environment steps
+
+0.8
+
+1.0
+1e7
+
+Figure 5: Performance comparison on the Google Research Football tasks with 2-4 agents from left to
+
+right respectively.
+
+HAPPO on the time complexity. Lastly, to assure that the limiting joint policy is such that none of
+the agents is incentivized to change its policy (Nash equilibrium), MAT requires permutating the
+sequential order of updates at every iteration, which is inline with the discovery in HAPPO [15,
+Theorem 3].
+
+5
+
+Experiments and Results
+
+MAT provides a new solution paradigm for cooperative MARL problems. The key insights of MAT
+are the sequential update scheme, which is inspired by Theorem (1), as well as the encoder-decoder
+architecture, which provides a highly-efficient implementation for a sequence modeling perspective.
+Importantly, MAT inherits the monotonic improvement guarantee, and agents’ policies can be learned
+in parallel during training. We firmly believe MAT will become a game changer for MARL studies.
+To evaluate if MAT meets our expectations, we test MAT on the StarCraftII Multi-Agent Challenge
+(SMAC) benchmark [31] where MAPPO with parameter sharing [46] has shown superior performance,
+and the Multi-Agent MuJoCo benchmark [7] where HAPPO [15] shows the current state-of-the-art
+performance. SMAC and MuJoCo environments are common benchmarks in the MARL field. On
+top of them, we also test MAT on the Bimanual Dexterous Hands Manipulation (Bi-DexHands) [6]
+which provides a list of challenging bimanual manipulation tasks (see Figure (3)), and the Google
+Research Football [18] benchmark with a series of cooperation scenarios in football game.
+We apply the same hyper-parameters of baseline algorithms from their original paper to ensure their
+best performance, and adopt the same hyper-parameter tuning process for our methods with details
+in Appendix B. To ensure fair comparisons to CTDE methods, we also introduce a CTDE-variant
+of MAT called MAT-Dec, which essentially adopts a fully decentralized actor for each individual
+agent (rather than using the decoder proposed in MAT) while keeping the encoder fixed. The critic’s
+8
+
+back_foot
+
+back_shin
+
+back_thigh
+
+7000
+
+3000
+
+4000
+
+2000
+
+MAT
+MAT-Dec
+MAPPO
+HAPPO
+
+0
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+Environment steps
+fore_foot
+
+0.8
+
+3000
+
+0
+
+1.0
+1e7
+
+0.0
+
+7000
+
+6000
+
+6000
+
+5000
+
+reward
+
+5000
+4000
+3000
+
+MAT
+MAT-Dec
+MAPPO
+HAPPO
+
+2000
+1000
+0
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+Environment steps
+
+0.8
+
+1.0
+1e7
+
+MAT
+MAT-Dec
+MAPPO
+HAPPO
+
+1000
+
+0.2
+
+0.4
+
+0.6
+
+Environment steps
+fore_shin
+
+0.8
+
+4000
+3000
+2000
+
+MAT
+MAT-Dec
+MAPPO
+HAPPO
+
+1000
+0
+
+1.0
+1e7
+
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+Environment steps
+fore_thigh
+
+0.8
+
+1.0
+1e7
+
+8000
+
+4000
+
+reward
+
+2000
+
+5000
+
+reward
+
+5000
+
+1000
+
+reward
+
+6000
+
+6000
+
+4000
+
+reward
+
+reward
+
+5000
+
+3000
+2000
+
+MAT
+MAT-Dec
+MAPPO
+HAPPO
+
+1000
+0
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+Environment steps
+
+0.8
+
+1.0
+1e7
+
+6000
+4000
+
+MAT
+MAT-Dec
+MAPPO
+HAPPO
+
+2000
+0
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+Environment steps
+
+0.8
+
+1.0
+1e7
+
+Figure 6: Performance on the HalfCheetah task with different disabled joints shown in Figure (3a).
+
+2
+PT −1 
+Pn
+Pn
+m
+) − n1 m=1 Vφ (ôitm ) ,
+loss for MAT-Dec is L(φ) = T1 t=0 R(ot , at ) + γ n1 m=1 Vφ̄ (ôit+1
+and we apply the local advantage estimation At (ôitm , aim ) to guide the subsequent policy update.
+5.1
+
+Performance on Cooperative MARL Benchmarks
+
+According to Table (1) and Figure (4), MAPPO significantly outperforms HAPPO in SMAC with
+higher sample efficiency. This verified the homogeneity of SMAC agents and the heterogeneity of
+multi-agent MuJoCo agents, that are also discovered by Kuba et al. [15]. Take the SMAC task 25m
+as an example, all the marines are equivalent and interchangeable so that agents can learn from their
+teammate’s experience. Sharing parameters in this settings means leveraging 25 times more examples
+to train each agents comparing with separated network of HAPPO, and thus enjoying higher learning
+efficiency. On the other hand, with the heterogeneous settings of multi-agent MuJoCo, training
+a "foot" agent with experience from a "thigh" agent can surely harm its performance since they
+represent different functions on the Cheetah. However, MAT outperforms MAPPO and HAPPO in
+almost all tasks in Table (1) and Figure (4), indicating its modeling capability on both homogeneous
+and heterogeneous-agent tasks. MAT also enjoys the superior performance over MAT-Dec, which
+emphasize the importance of the decoder architecture in the MAT design. On the Bi-DexHands tasks,
+MAT outperforms MAPPO and HAPPO methods by a large margin. We save the Google Football
+results to Figure (5), where the conclusion stays the same.
+5.2
+
+MAT as Excellent Few-short Learners
+
+Since Transformer-based models often demonstrate strong generalization performance on few-short
+tasks [3, 9], we believe MAT can possess strong generalization ability on unseen MARL tasks as
+well. To validate such an assumption, we design zero-shot and few-shot experiments on SMAC and
+multi-agent MuJoCo tasks. For SMAC tasks, we pre-train agents on eight tasks involving five types
+of units (3m, 8m vs 9m, 10m vs 11m, 25m, 3s vs 3z, 2s3z, 3s5z, MMM ) with 10M examples in
+total and then apply them on six separate and much harder tasks (5m vs 6m, 8m, 27m vs 30m, 2s
+vs 1sc, 1c3s5z, MMM2 ) including seven types of units. This setting is designed to evaluate the
+generalization ability of MAT when training on simple tasks but transferring to more diverse and
+complex downstream tasks. In terms of multi-agent MuJoCo, we reuse the models trained on the
+complete HalfCheetah robot as the pre-trained agent and then directly apply it to six new tasks, each
+with a different leg being disfunctioned (see Figure (3a)). We investigate the generalization capability
+of pre-trained models on each downstream task with 0% (zero-shot), 1%, 5%, 10% few-short new
+examples, respectively. Note that common MARL baselines such as HAPPO assume fixed number of
+agents during training, thus it cannot directly handle the cases with changing number of agents.
+9
+
+Table 2: Median evaluation win rate and the standard deviation on the SMAC benchmark for pre-trained models
+with different number of online examples.
+Methods
+#examples
+
+0%
+
+1%
+
+MAT
+5%
+
+10%
+
+0%
+
+1%
+
+MAPPO
+5%
+
+5m vs 6m
+8m
+27m vs 30m
+2s vs 1sc
+1c3s5z
+MMM2
+
+0.0(0.0)
+100(0.0)
+0.0(0.0)
+0.0(0.0)
+3.1(1.8)
+0.0(3.6)
+
+0.0(0.0)
+100(1.2)
+6.3(2.4)
+15.6(13.8)
+5.6(5.0)
+0.0(1.8)
+
+5.8(3.1)
+100(0.3)
+53.8(16.4)
+100(9.7)
+82.5(5.5)
+33.8(13.7)
+
+18.8(7.1)
+100(2.1)
+71.2(8.2)
+100(0.0)
+100(2.7)
+62.5(12.1)
+
+0.0(0.0)
+100(0.0)
+9.4(3.6)
+0.0(0.0)
+3.1(1.8)
+0.0(0.0)
+
+0.0(0.0)
+100(1.4)
+15(5.9)
+43.1(17.6)
+4.3(4.9)
+0.0(1.4)
+
+4.3(3.8)
+100(0.3)
+26.2(7.8)
+100(1.1)
+73.8(13.0)
+13.8(7.0)
+
+10%
+
+0%
+
+MAT-from scratch
+1%
+5%
+
+10%
+
+21.9(12.2)
+100(1.4)
+26.8(9.7)
+100(1.8)
+97.5(2.1)
+36.2(9.6)
+
+0.0(0.0)
+0.0(0.0)
+0.0(0.0)
+0.0(0.0)
+0.0(0.0)
+0.0(0.0)
+
+0.0(0.0)
+10.6(23.8)
+0.0(0.0)
+19.3(33.3)
+7.5(4.8)
+0.0(0.0)
+
+3.8(2.1)
+100(1.4)
+0.3(15.6)
+100(0.3)
+100(1.4)
+0.0(0.7)
+
+1.9(1.3)
+92.5(3.7)
+0.0(0.3)
+96.3(6.2)
+87.5(3.9)
+0.0(0.0)
+
+Table 3: Average evaluation score and standard deviation on Multi-Agent MuJoCo for pre-trained models with
+different number of online examples.
+Methods
+#examples
+
+0%
+
+1%
+
+MAT
+5%
+
+10%
+
+0%
+
+back foot
+back shin
+back thigh
+fore foot
+fore shin
+fore thigh
+
+2100(89)
+4005(316)
+5361(45)
+1313(512)
+2435(13)
+5631(321)
+
+2837(95)
+4143(230)
+5641(150)
+1955(232)
+2617(71)
+6448(417)
+
+4691(235)
+6077(209)
+7101(119)
+4856(146)
+3851(57)
+7952(109)
+
+5646(79)
+7176(74)
+7460(61)
+6054(172)
+4373(83)
+8347(81)
+
+2936(301)
+2406(32)
+3043(79)
+623(44)
+1715(55)
+3087(110)
+
+MAPPO
+1%
+5%
+3017(135)
+2542(108)
+3060(143)
+970(185)
+2457(125)
+3171(83)
+
+3221(119)
+2796(137)
+3217(33)
+2025(371)
+3096(59)
+3340(52)
+
+10%
+
+0%
+
+3304(129)
+2955(127)
+3353(71)
+2480(239)
+3310(54)
+3519(59)
+
+-0.44(0.4)
+-0.31(0.1)
+-0.54(0.3)
+-0.37(0.2)
+-0.15(0.06)
+-0.29(0.3)
+
+MAT-from scratch
+1%
+5%
+-5.18(11)
+-3.95(17)
+-4.87(7.7)
+-2.25(7.9)
+-0.96(6.0)
+0.82(14)
+
+670(1098)
+743(537)
+930(589)
+1821(157)
+1461(101)
+1021(177)
+
+10%
+1635(1184)
+1252(1123)
+2067(861)
+2877(106)
+3003(316)
+2600(215)
+
+We summarize the zero-shot and few-shot results of each algorithm in Table (2) and (3), where the
+bold number indicates the best performance. We also provide the performance of MAT if it was
+given the same amount of data but is trained from scratch, the "MAT-from scratch", as the control
+group to demonstrate the effectiveness of pre-training process. As both tables suggest, bold numbers
+are mainly located in the area of MAT, which justify MAT’s strong generalisation performance as a
+few-short learner. Surprisingly, we find that the few-shot MAT with only 10% data show even higher
+rewards than its counterpart that is purely trained on HalfCheetah with the same disabled joints (back
+foot, back shin and back thigh ) and 100% full amount data, we believe it is because the pre-train
+process offers initial weights that are not only closer to optimum but also less likely to stuck in bad
+local optima than random initialization.
+
+6
+
+Conclusion
+
+In the past five years, large sequence models have achieved remarkable successes on solving visual
+language tasks. In this paper, we take the initial effort to build the connection between multi-agent
+reinforcement learning (MARL) problems and generic sequence models (SM), with the ambition that
+MARL researchers can hereafter benefit from the prosperous development on the sequence modeling
+side. Specifically, we contribute by unifying a general solution to cooperative MARL problems into a
+Transformer like encoder-decoder model. The proposed Multi-Agent Transformer (MAT) leverages
+the multi-agent advantage decomposition theorem, which essentially transforms the joint policy
+optimization process into a sequential decision making process that can be simply implemented by
+an auto-regressive model. We have demonstrated MAT’s strong empirical performance on three
+challenging benchmarks against current state-of-the-art MARL solutions including MAPPO and
+HAPPO. Based on the established connection between MARL and SM, in the future, we plan to
+bring multi-agent learning tasks into large multi-modal SM, chasing for more generally intelligent
+models as the most recent success of GATO has already demonstrated [30].
+
+Acknowledgment
+The SJTU team is partially supported by “New Generation of AI 2030” Major Project
+(2018AAA0100900), Shanghai Municipal Science and Technology Major Project
+(2021SHZDZX0102), Shanghai Sailing Program (21YF1421900), and National Natural Science Foundation of China (62076161, 62106141).
+
+10
+
+References
+[1] Jean-Baptiste Alayrac, Jeff Donahue, Pauline Luc, Antoine Miech, Iain Barr, Yana Hasson,
+Karel Lenc, Arthur Mensch, Katie Millican, Malcolm Reynolds, et al. Flamingo: a visual
+language model for few-shot learning. arXiv preprint arXiv:2204.14198, 2022.
+[2] Rishi Bommasani, Drew A Hudson, Ehsan Adeli, Russ Altman, Simran Arora, Sydney von
+Arx, Michael S Bernstein, Jeannette Bohg, Antoine Bosselut, Emma Brunskill, et al. On the
+opportunities and risks of foundation models. arXiv preprint arXiv:2108.07258, 2021.
+[3] Tom B Brown, Benjamin Mann, Nick Ryder, Melanie Subbiah, Jared Kaplan, Prafulla Dhariwal,
+Arvind Neelakantan, Pranav Shyam, Girish Sastry, Amanda Askell, et al. Language models are
+few-shot learners. NeurIPS, 2020.
+[4] Yu-Han Chang, Tracey Ho, and Leslie Kaelbling. All learning is local: Multi-agent learning in
+global reward games. Advances in neural information processing systems, 16, 2003.
+[5] Lili Chen, Kevin Lu, Aravind Rajeswaran, Kimin Lee, Aditya Grover, Michael Laskin, Pieter
+Abbeel, Aravind Srinivas, and Igor Mordatch. Decision transformer: Reinforcement learning
+via sequence modeling. arXiv preprint arXiv:2106.01345, 2021.
+[6] Yuanpei Chen, Yaodong Yang, Tianhao Wu, Shengjie Wang, Xidong Feng, Jiechuang Jiang,
+Stephen Marcus McAleer, Hao Dong, Zongqing Lu, and Song-Chun Zhu. Towards human-level
+bimanual dexterous manipulation with reinforcement learning. arXiv preprint arXiv:2206.08686,
+2022.
+[7] Christian Schröder de Witt, Bei Peng, Pierre-Alexandre Kamienny, Philip H. S. Torr, Wendelin
+Böhmer, and Shimon Whiteson. Deep multi-agent reinforcement learning for decentralized
+continuous cooperative control. CoRR, abs/2003.06709, 2020.
+[8] Xiaotie Deng, Yuhao Li, David Henry Mguni, Jun Wang, and Yaodong Yang. On the complexity
+of computing markov perfect equilibrium in general-sum stochastic games. arXiv preprint
+arXiv:2109.01795, 2021.
+[9] Jacob Devlin, Ming-Wei Chang, Kenton Lee, and Kristina Toutanova. Bert: Pre-training of
+deep bidirectional transformers for language understanding. In NAACL-HLT (1), 2019.
+[10] Alexey Dosovitskiy, Lucas Beyer, Alexander Kolesnikov, Dirk Weissenborn, Xiaohua Zhai,
+Thomas Unterthiner, Mostafa Dehghani, Matthias Minderer, Georg Heigold, Sylvain Gelly, et al.
+An image is worth 16x16 words: Transformers for image recognition at scale. In International
+Conference on Learning Representations, 2020.
+[11] Jakob Foerster, Gregory Farquhar, Triantafyllos Afouras, Nantas Nardelli, and Shimon Whiteson.
+Counterfactual multi-agent policy gradients. In Proceedings of the AAAI Conference on Artificial
+Intelligence, volume 32, 2018.
+[12] Kaiming He, Xinlei Chen, Saining Xie, Yanghao Li, Piotr Dollár, and Ross Girshick. Masked
+autoencoders are scalable vision learners. arXiv preprint arXiv:2111.06377, 2021.
+[13] Siyi Hu, Fengda Zhu, Xiaojun Chang, and Xiaodan Liang. Updet: Universal multi-agent reinforcement learning via policy decoupling with transformers. arXiv preprint arXiv:2101.08001,
+2021.
+[14] Michael Janner, Qiyang Li, and Sergey Levine. Offline reinforcement learning as one big
+sequence modeling problem. Advances in Neural Information Processing Systems, 34, 2021.
+[15] Jakub Grudzien Kuba, Ruiqing Chen, Munning Wen, Ying Wen, Fanglei Sun, Jun Wang, and
+Yaodong Yang. Trust region policy optimisation in multi-agent reinforcement learning. ICLR,
+2022.
+[16] Jakub Grudzien Kuba, Xidong Feng, Shiyao Ding, Hao Dong, Jun Wang, and Yaodong Yang.
+Heterogeneous-agent mirror learning: A continuum of solutions to cooperative marl. arXiv
+preprint arXiv:2208.01682, 2022.
+11
+
+[17] Jakub Grudzien Kuba, Muning Wen, Linghui Meng, Haifeng Zhang, David Mguni, Jun Wang,
+Yaodong Yang, et al. Settling the variance of multi-agent policy gradients. Advances in Neural
+Information Processing Systems, 34:13458–13470, 2021.
+[18] Karol Kurach, Anton Raichuk, Piotr Stańczyk, Michał Zajac,
+˛ Olivier Bachem, Lasse Espeholt,
+Carlos Riquelme, Damien Vincent, Marcin Michalski, Olivier Bousquet, et al. Google research
+football: A novel reinforcement learning environment. arXiv preprint arXiv:1907.11180, 2019.
+[19] Michael L Littman. Markov games as a framework for multi-agent reinforcement learning. In
+Machine learning proceedings 1994, pages 157–163. Elsevier, 1994.
+[20] Ryan Lowe, Yi Wu, Aviv Tamar, Jean Harb, Pieter Abbeel, and Igor Mordatch. Multi-agent actorcritic for mixed cooperative-competitive environments. In Proceedings of the 31st International
+Conference on Neural Information Processing Systems, pages 6382–6393, 2017.
+[21] Xueguang Lyu, Yuchen Xiao, Brett Daley, and Christopher Amato. Contrasting centralized and
+decentralized critics in multi-agent reinforcement learning. arXiv preprint arXiv:2102.04402,
+2021.
+[22] Anuj Mahajan, Tabish Rashid, Mikayel Samvelyan, and Shimon Whiteson. Maven: Multi-agent
+variational exploration. Advances in Neural Information Processing Systems, 32, 2019.
+[23] Linghui Meng, Muning Wen, Yaodong Yang, Chenyang Le, Xiyun Li, Weinan Zhang, Ying Wen,
+Haifeng Zhang, Jun Wang, and Bo Xu. Offline pre-trained multi-agent decision transformer:
+One big sequence model conquers all starcraftii tasks. arXiv preprint arXiv:2112.02845, 2021.
+[24] David Mguni, Jianhong Wang, Taher Jafferjee, Nicolas Perez-Nieves, Wenbin Song, Yaodong
+Yang, Feifei Tong, Hui Chen, Jiangcheng Zhu, Yali Du, et al. Learning to shape rewards using a
+game of switching controls. arXiv preprint arXiv:2103.09159, 2021.
+[25] David Henry Mguni, Taher Jafferjee, Jianhong Wang, Nicolas Perez-Nieves, Oliver Slumbers,
+Feifei Tong, Yang Li, Jiangcheng Zhu, Yaodong Yang, and Jun Wang. Ligs: Learnable intrinsicreward generation selection for multi-agent learning. In International Conference on Learning
+Representations, 2021.
+[26] Volodymyr Mnih, Koray Kavukcuoglu, David Silver, Andrei A Rusu, Joel Veness, Marc G
+Bellemare, Alex Graves, Martin Riedmiller, Andreas K Fidjeland, Georg Ostrovski, et al.
+Human-level control through deep reinforcement learning. nature, 518(7540):529–533, 2015.
+[27] Prakash M Nadkarni, Lucila Ohno-Machado, and Wendy W Chapman. Natural language processing: an introduction. Journal of the American Medical Informatics Association, 18(5):544–
+551, 2011.
+[28] Aditya Ramesh, Mikhail Pavlov, Gabriel Goh, Scott Gray, Chelsea Voss, Alec Radford, Mark
+Chen, and Ilya Sutskever. Zero-shot text-to-image generation. In International Conference on
+Machine Learning, pages 8821–8831. PMLR, 2021.
+[29] Tabish Rashid, Mikayel Samvelyan, Christian Schroeder, Gregory Farquhar, Jakob Foerster,
+and Shimon Whiteson. Qmix: Monotonic value function factorisation for deep multi-agent
+reinforcement learning. In International Conference on Machine Learning, pages 4295–4304.
+PMLR, 2018.
+[30] Scott Reed, Konrad Zolna, Emilio Parisotto, Sergio Gomez Colmenarejo, Alexander Novikov,
+Gabriel Barth-Maron, Mai Gimenez, Yury Sulsky, Jackie Kay, Jost Tobias Springenberg, Tom
+Eccles, Jake Bruce, Ali Razavi, Ashley Edwards, Nicolas Heess, Yutian Chen, Raia Hadsell,
+Oriol Vinyals, Mahyar Bordbar, and Nando de Freitas. A generalist agent. arXiv preprint
+arXiv:2205.06175, 2022.
+[31] Mikayel Samvelyan, Tabish Rashid, Christian Schroeder de Witt, Gregory Farquhar, Nantas Nardelli, Tim GJ Rudner, Chia-Man Hung, Philip HS Torr, Jakob Foerster, and Shimon
+Whiteson. The starcraft multi-agent challenge. 2019.
+12
+
+[32] John Schulman, Philipp Moritz, Sergey Levine, Michael Jordan, and Pieter Abbeel. Highdimensional continuous control using generalized advantage estimation. arXiv preprint
+arXiv:1506.02438, 2015.
+[33] John Schulman, F. Wolski, Prafulla Dhariwal, Alec Radford, and Oleg Klimov. Proximal policy
+optimization algorithms. ArXiv, abs/1707.06347, 2017.
+[34] David Silver, Guy Lever, Nicolas Heess, Thomas Degris, Daan Wierstra, and Martin Riedmiller.
+Deterministic policy gradient algorithms. In International conference on machine learning,
+pages 387–395. PMLR, 2014.
+[35] Kyunghwan Son, Daewoo Kim, Wan Ju Kang, David Earl Hostallero, and Yung Yi. Qtran:
+Learning to factorize with transformation for cooperative multi-agent reinforcement learning.
+In International Conference on Machine Learning, pages 5887–5896. PMLR, 2019.
+[36] Peter Sunehag, Guy Lever, Audrunas Gruslys, Wojciech Marian Czarnecki, Vinicius Zambaldi,
+Max Jaderberg, Marc Lanctot, Nicolas Sonnerat, Joel Z Leibo, Karl Tuyls, et al. Valuedecomposition networks for cooperative multi-agent learning. arXiv preprint arXiv:1706.05296,
+2017.
+[37] Richard S Sutton and Andrew G Barto. Reinforcement learning: An introduction. MIT press,
+2018.
+[38] Hugo Touvron, Matthieu Cord, Alexandre Sablayrolles, Gabriel Synnaeve, and Hervé Jégou. Going deeper with image transformers. In Proceedings of the IEEE/CVF International Conference
+on Computer Vision, pages 32–42, 2021.
+[39] Zhengzhong Tu, Hossein Talebi, Han Zhang, Feng Yang, Peyman Milanfar, Alan Bovik, and
+Yinxiao Li. Maxvit: Multi-axis vision transformer. arXiv preprint arXiv:2204.01697, 2022.
+[40] Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez,
+Łukasz Kaiser, and Illia Polosukhin. Attention is all you need. In Advances in neural information
+processing systems, pages 5998–6008, 2017.
+[41] Wenxiao Wang, Lu Yao, Long Chen, Binbin Lin, Deng Cai, Xiaofei He, and Wei Liu. Crossformer: A versatile vision transformer hinging on cross-scale attention. arXiv preprint
+arXiv:2108.00154, 2021.
+[42] Ying Wen, Yaodong Yang, Rui Luo, Jun Wang, and Wei Pan. Probabilistic recursive reasoning
+for multi-agent reinforcement learning. In International Conference on Learning Representations, 2018.
+[43] Ying Wen, Yaodong Yang, and Jun Wang. Modelling bounded rationality in multi-agent
+interactions by generalized recursive reasoning. In Christian Bessiere, editor, Proceedings of
+the Twenty-Ninth International Joint Conference on Artificial Intelligence, IJCAI-20, pages
+414–421. International Joint Conferences on Artificial Intelligence Organization, 7 2020. Main
+track.
+[44] Yaodong Yang and Jun Wang. An overview of multi-agent reinforcement learning from game
+theoretical perspective. arXiv preprint arXiv:2011.00583, 2020.
+[45] Yaodong Yang, Ying Wen, Jun Wang, Liheng Chen, Kun Shao, David Mguni, and Weinan
+Zhang. Multi-agent determinantal q-learning. In International Conference on Machine Learning,
+pages 10757–10766. PMLR, 2020.
+[46] Chao Yu, A. Velu, Eugene Vinitsky, Yu Wang, A. Bayen, and Yi Wu. The surprising effectiveness
+of mappo in cooperative, multi-agent games. ArXiv, abs/2103.01955, 2021.
+
+13
+
+Appendices
+A
+
+Algorithm Details
+
+A.1
+
+Pseudo Code of Multi-Agent Transformer.
+
+Algorithm 1 Multi-Agent Transformer
+1: Input: Stepsize α, batch size B, number of agents n, episodes K, steps per episode T .
+2: Initialize: Encoder {φ0 }, Decoder {θ0 }, Replay buffer B.
+3: for k = 0, 1, . . . , K − 1 do
+4:
+for t = 0, 1, . . . , T − 1 do
+5:
+Collect a sequence of observations oit1 , . . . , oitn from environments.
+
+{// The Inference Phase}
+Generate representation sequence ôit1 , . . . , ôitn by feeding observations to the encoder.
+Input ôit1 , . . . , ôitn to the decoder.
+for m = 0, 1, . . . , n − 1 do
+i
+Input ait0 , . . . , aitm and infer atm+1 with the auto-regressive decoder.
+end for
+Execute joint actions ait0 , . . . , aitn in environments and collect the reward R(ot , at ).
+Insert (ot , at , R(ot , at )) in to B.
+end for
+{// The Training Phase}
+14:
+Sample a random minibatch of B steps from B.
+15:
+Generate Vφ (ôi1 ), . . . , Vφ (ôin ) with the output layer of the encoder.
+16:
+Calculate LEncoder (φ) with Equation (4).
+17:
+Compute the joint advantage function Â based on Vφ (ôi1 ), . . . , Vφ (ôin ) with GAE.
+18:
+Input ôi1 , . . . , ôin and ai0 , . . . , ain−1 , generate πθi1 , . . . , πθin at once with the decoder.
+19:
+Calculate LDecoder (θ) with Equation (5).
+20:
+Update the encoder and decoder by minimising LEncoder (φ) + LDecoder (θ) with gradient descent.
+21: end for
+6:
+7:
+8:
+9:
+10:
+11:
+12:
+13:
+
+A.2
+
+Dynamic Process and Source Code of MAT
+
+Please refer to https://sites.google.com/view/multi-agent-transformer
+
+B
+
+Hyper-parameter Settings for Experiments
+
+During experiments, the implementations of baseline methods are consistent with their official
+repositories, all hyper-parameters left unchanged at the origin best-performing status. The hyperparameters adopted for different algorithms and tasks are listed in Table 4-12. In particular, the ppo
+epochs and ppo clip across different SMAC scenarios are unified to 10 and 0.05 respectively for
+pre-training and fine-tuning in few-shot experiments.
+Table 4: Common hyper-parameters used for MAT, MAT-Dec, MAPPO and HAPPO in the SMAC domain.
+
+hyper-parameters
+
+value
+
+hyper-parameters
+
+value
+
+hyper-parameters
+
+value
+
+critic lr
+gain
+training threads
+entropy coef
+optimizer
+
+5e-4
+0.01
+16
+0.01
+Adam
+
+actor lr
+optim eps
+num mini-batch
+max grad norm
+hidden layer dim
+
+5e-4
+1e-5
+1
+10
+64
+
+use gae
+batch size
+rollout threads
+episode length
+use huber loss
+
+True
+3200
+32
+100
+True
+
+14
+
+Table 5: Different hyper-parameters used for MAT and MAT-Dec in the SMAC domain.
+
+maps
+
+ppo epochs
+
+ppo clip
+
+num blocks
+
+num heads
+
+stacked frames
+
+steps
+
+γ
+
+3m
+8m
+1c3s5z
+MMM
+2c vs 64zg
+3s vs 5z
+3s5z
+5m vs 6m
+8m vs 9m
+10m vs 11m
+25m
+27m vs 30m
+MMM2
+6h vs 8z
+3s5z vs 3s6z
+
+15
+15
+10
+15
+10
+15
+10
+10
+10
+10
+15
+5
+5
+15
+5
+
+0.2
+0.2
+0.2
+0.2
+0.05
+0.05
+0.05
+0.05
+0.05
+0.05
+0.05
+0.2
+0.05
+0.05
+0.05
+
+1
+1
+1
+1
+1
+1
+1
+1
+1
+1
+1
+1
+1
+1
+1
+
+1
+1
+1
+1
+1
+1
+1
+1
+1
+1
+1
+1
+1
+1
+1
+
+1
+1
+1
+1
+1
+4
+1
+1
+1
+1
+1
+1
+1
+1
+1
+
+5e5
+1e6
+2e6
+2e6
+5e6
+5e6
+3e6
+1e7
+5e6
+5e6
+2e6
+1e7
+1e7
+1e7
+2e7
+
+0.99
+0.99
+0.99
+0.99
+0.99
+0.99
+0.99
+0.99
+0.99
+0.99
+0.99
+0.99
+0.99
+0.99
+0.99
+
+Table 6: Different hyper-parameters used for MAPPO and HAPPO in the SMAC domain.
+maps
+
+ppo epochs
+
+ppo clip
+
+hidden leyer
+
+stacked frames
+
+network
+
+steps
+
+γMAPPO
+
+γHAPPO
+
+3m
+8m
+1c3s5z
+MMM
+2c vs 64zg
+3s vs 5z
+3s5z
+5m vs 6m
+8m vs 9m
+10m vs 11m
+25m
+27m vs 30m
+MMM2
+6h vs 8z
+3s5z vs 3s6z
+
+15
+15
+15
+15
+5
+15
+5
+10
+15
+10
+10
+5
+5
+5
+5
+
+0.2
+0.2
+0.2
+0.2
+0.2
+0.05
+0.2
+0.05
+0.05
+0.2
+0.2
+0.2
+0.2
+0.2
+0.2
+
+2
+2
+2
+2
+2
+2
+2
+2
+2
+2
+2
+2
+2
+2
+2
+
+1
+1
+1
+1
+1
+4
+1
+1
+1
+1
+1
+1
+1
+1
+1
+
+rnn
+rnn
+rnn
+rnn
+rnn
+mlp
+rnn
+rnn
+rnn
+rnn
+rnn
+rnn
+rnn
+mlp
+mlp
+
+5e5
+1e6
+2e6
+2e6
+5e6
+5e6
+3e6
+1e7
+5e6
+5e6
+2e6
+1e7
+1e7
+1e7
+2e7
+
+0.99
+0.99
+0.99
+0.99
+0.99
+0.99
+0.99
+0.99
+0.99
+0.99
+0.99
+0.99
+0.99
+0.99
+0.99
+
+0.95
+0.95
+0.95
+0.95
+0.95
+0.95
+0.95
+0.95
+0.95
+0.95
+0.95
+0.95
+0.95
+0.95
+0.95
+
+Table 7: Common hyper-parameters used for all methods in the multi-agent MuJoCo domain.
+
+hyper-parameters
+
+value
+
+hyper-parameters
+
+value
+
+hyper-parameters
+
+value
+
+gamma
+gain
+training threads
+entropy coef
+optimizer
+
+0.99
+0.01
+16
+0.001
+Adam
+
+steps
+optim eps
+num mini-batch
+max grad norm
+hidden layer dim
+
+1e7
+1e-5
+40
+0.5
+64
+
+stacked frames
+batch size
+rollout threads
+episode length
+use huber loss
+
+1
+4000
+40
+100
+True
+
+15
+
+Table 8: Different hyper-parameter used in the mulit-agent MuJoCo domain.
+
+hyper-parameters
+
+MAT
+
+MAT-Dec
+
+MAPPO
+
+HAPPO
+
+critic lr
+actor lr
+ppo epochs
+ppo clip
+num hidden layer
+num blocks
+num head
+
+5e-5
+5e-5
+10
+0.05
+/
+1
+1
+
+5e-5
+5e-5
+10
+0.05
+/
+1
+1
+
+5e-3
+5e-6
+5
+0.2
+2
+/
+/
+
+5e-3
+5e-6
+5
+0.2
+2
+/
+/
+
+Table 9: Common hyper-parameters used for all methods in the Bi-DexHands domain.
+
+hyper-parameters
+
+value
+
+hyper-parameters
+
+value
+
+hyper-parameters
+
+value
+
+gamma
+gain
+ppo clip
+batch size
+entropy coef
+
+0.96
+0.01
+0.2
+6000
+0.001
+
+steps
+optim eps
+num mini-batch
+episode length
+max grad norm
+
+5e7
+1e-5
+1
+75
+0.5
+
+stacked frames
+ppo epochs
+rollout threads
+optimizer
+training threads
+
+1
+5
+80
+Adam
+16
+
+Table 10: Different hyper-parameter used in the Bi-DexHands domain.
+
+hyper-parameters
+
+MAT
+
+MAT-Dec
+
+MAPPO
+
+HAPPO
+
+critic lr
+actor lr
+hidden dim
+num hidden layer
+num blocks
+num head
+
+5e-5
+5e-5
+64
+/
+1
+1
+
+5e-5
+5e-5
+64
+/
+1
+1
+
+5e-4
+5e-4
+512
+1
+/
+/
+
+5e-4
+5e-4
+512
+1
+/
+/
+
+Table 11: Common hyper-parameters used for all methods in the Google Research Football domain.
+
+hyper-parameters
+
+value
+
+hyper-parameters
+
+value
+
+hyper-parameters
+
+value
+
+critic lr
+gain
+training threads
+entropy coef
+optimizer
+
+5e-4
+0.01
+16
+0.01
+Adam
+
+actor lr
+optim eps
+num mini-batch
+max grad norm
+hidden layer dim
+
+5e-4
+1e-5
+1
+0.5
+64
+
+gamma
+batch size
+rollout threads
+episode length
+stacked frames
+
+0.99
+4000
+20
+200
+1
+
+Table 12: Different hyper-parameter used in the Google Research Football domain.
+
+hyper-parameters
+
+MAT
+
+MAT-Dec
+
+MAPPO
+
+HAPPO
+
+ppo epochs
+ppo clip
+num hidden layer
+num blocks
+num head
+
+10
+0.05
+/
+1
+1
+
+10
+0.05
+/
+1
+1
+
+5
+0.2
+2
+/
+/
+
+5
+0.2
+2
+/
+/
+
+16
+
+Details of Experimental Results
+HalfCheetah
+
+ShadowHandCatchOver2Underarm
+
+ShadowHandDoorOpenInward
+
+30
+
+4000
+
+MAT
+MAT-Dec
+MAPPO
+HAPPO
+
+2000
+0
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+Environment steps
+
+0.8
+
+15
+
+MAT
+MAT-Dec
+MAPPO
+HAPPO
+
+10
+5
+
+1.0
+1e7
+
+1000
+900
+
+350
+
+20
+
+reward
+
+reward
+
+reward
+
+25
+6000
+
+ShadowHandDoorCloseOutward
+
+400
+
+8000
+
+0
+
+1
+
+2
+
+3
+
+Environment steps
+
+4
+
+reward
+
+C
+
+300
+
+MAT
+MAT-Dec
+MAPPO
+HAPPO
+
+250
+200
+
+5
+1e7
+
+1
+
+2
+
+3
+
+Environment steps
+
+4
+
+5
+1e7
+
+800
+700
+
+MAT
+MAT-Dec
+MAPPO
+HAPPO
+
+600
+500
+400
+
+0.0
+
+0.5
+
+1.0
+
+1.5
+
+2.0
+
+2.5
+
+3.0
+
+Environment steps
+
+3.5
+
+4.0
+1e7
+
+Figure 7: Performance comparisons on the Multi-Agent MuJoCo and the Bi-DexHands benchmarks,
+
+showing MAT’s advantages in robot control.
+back_foot
+
+back_shin
+
+back_thigh
+
+7000
+
+3000
+
+4000
+
+2000
+
+MAT
+MAT-Dec
+MAPPO
+HAPPO
+
+0
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+Environment steps
+fore_foot
+
+0.8
+
+3000
+
+1000
+0
+
+1.0
+1e7
+
+0.0
+
+7000
+
+6000
+
+6000
+
+5000
+
+reward
+
+5000
+4000
+3000
+
+MAT
+MAT-Dec
+MAPPO
+HAPPO
+
+2000
+1000
+0
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+Environment steps
+
+0.8
+
+MAT
+MAT-Dec
+MAPPO
+HAPPO
+
+1.0
+1e7
+
+0.2
+
+0.4
+
+0.6
+
+Environment steps
+fore_shin
+
+0.8
+
+4000
+3000
+2000
+
+MAT
+MAT-Dec
+MAPPO
+HAPPO
+
+1000
+0
+
+1.0
+1e7
+
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+Environment steps
+fore_thigh
+
+0.8
+
+1.0
+1e7
+
+8000
+
+4000
+
+reward
+
+2000
+
+5000
+
+reward
+
+5000
+
+1000
+
+reward
+
+6000
+
+6000
+
+4000
+
+reward
+
+reward
+
+5000
+
+3000
+2000
+
+MAT
+MAT-Dec
+MAPPO
+HAPPO
+
+1000
+0
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+Environment steps
+
+0.8
+
+1.0
+1e7
+
+6000
+4000
+
+MAT
+MAT-Dec
+MAPPO
+HAPPO
+
+2000
+0
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+Environment steps
+
+0.8
+
+1.0
+1e7
+
+Figure 8: Performance comparison on the HalfCheetah tasks with different disabled joints, where
+
+MAT significantly outperformed baseline methods. Together with performance on the complete
+HalfCheetah in Figure (7), it emphasises MAT’s capability for heterogeneous-agent tasks (agents are
+not interchangeable).
+
+Table 13: Performance evaluations of win rate and standard deviation on the SMAC benchmark, where UPDeT’s
+official codebase supports several Marine-based tasks only.
+
+Task
+
+Difficulty
+
+MAT
+
+MAT-Dec
+
+MAPPO
+
+HAPPO
+
+QMIX
+
+UPDeT
+
+Steps
+
+3m
+
+Easy
+Easy
+Easy
+Easy
+Hard
+Hard
+Hard
+Hard
+Hard
+Hard
+Hard
+Hard+
+Hard+
+Hard+
+Hard+
+
+100.0(1.8)
+100.0(1.1)
+100.0(2.4)
+100.0(2.2)
+100.0(1.3)
+100.0(1.7)
+100.0(1.9)
+90.6(4.4)
+100.0(3.1)
+100.0(1.4)
+100.0(1.3)
+100.0(0.7)
+93.8(2.6)
+98.8(1.3)
+96.5(1.3)
+
+100.0(1.1)
+97.5(2.5)
+100.0(0.4)
+98.1(2.1)
+95.9(2.3)
+100.0(1.3)
+100.0(3.3)
+83.1(4.6)
+95.0(4.6)
+100.0(2.0)
+86.9(5.6)
+95.3(2.2)
+91.2(5.3)
+93.8(4.7)
+85.3(7.5)
+
+100.0(0.4)
+96.8(2.9)
+100.0(2.2)
+95.6(4.5)
+100.0(2.7)
+100.0(2.5)
+72.5(26.5)
+88.2(6.2)
+93.8(3.5)
+96.3(5.8)
+100.0(2.7)
+93.1(3.2)
+81.8(10.1)
+88.4(5.7)
+84.3(19.4)
+
+100.0(1.2)
+97.5(1.1)
+97.5(1.8)
+81.2(22.9)
+90.0(4.8)
+91.9(5.3)
+90.0(3.5)
+73.8(4.4)
+86.2(4.4)
+77.5(9.7)
+0.6(0.8)
+0.0(0.0)
+0.3(0.4)
+0.0(0.0)
+82.8(21.2)
+
+96.91.3
+97.71.9
+96.9(1.5)
+91.2(3.2)
+90.3(4.0)
+92.3(4.4)
+84.3(5.4)
+75.8(3.7)
+92.6(4.0)
+95.8(6.1)
+90.2(9.8)
+39.2(8.8)
+88.3(2.4)
+9.7(3.1)
+68.8(21.2)
+
+100.0(5.2)
+96.3(9.7)
+/
+/
+/
+/
+/
+90.6(6.1)
+/
+/
+2.8(3.1)
+/
+/
+/
+/
+
+5e5
+1e6
+2e6
+2e6
+5e6
+5e6
+3e6
+1e7
+5e6
+5e6
+2e6
+1e7
+1e7
+1e7
+2e7
+
+8m
+1c3s5z
+MMM
+2c vs 64zg
+3s vs 5z
+3s5z
+5m vs 6m
+8m vs 9m
+10m vs 11m
+25m
+27m vs 30m
+MMM2
+6h vs 8z
+3s5z vs 3s6z
+
+17
+
+8m
+
+0.8
+
+0.8
+
+0.8
+
+0.6
+0.4
+
+MAT
+MAT-Dec
+MAPPO
+HAPPO
+UPDeT
+
+0.0
+100000
+
+200000
+
+300000
+
+400000
+
+Environment steps
+MMM
+
+0.0
+
+500000
+
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+Environment steps
+2c_vs_64zg
+
+0.8
+
+0.6
+0.4
+
+0.0
+
+1.0
+1e6
+
+0.00
+
+0.8
+
+0.8
+
+0.8
+
+0.6
+
+0.6
+
+0.6
+
+MAT
+MAT-Dec
+MAPPO
+HAPPO
+0.00
+
+0.25
+
+0.50
+
+0.75
+
+1.00
+
+1.25
+
+1.50
+
+1.75
+
+Environment steps
+3s5z
+
+winrate
+
+1.0
+
+0.4
+
+0.4
+
+MAT
+MAT-Dec
+MAPPO
+HAPPO
+
+0.2
+0.0
+
+2.00
+1e6
+
+0
+
+1
+
+2
+
+3
+
+Environment steps
+5m_vs_6m
+
+4
+
+0.6
+
+0.6
+
+1.0
+
+1.5
+
+2.0
+
+2.5
+
+Environment steps
+10m_vs_11m
+
+0.4
+
+0.0
+
+3.0
+1e6
+
+0.0
+
+1.0
+
+0.8
+
+0.8
+
+0.6
+
+0.6
+
+winrate
+
+1.0
+
+0.4
+
+MAT
+MAT-Dec
+MAPPO
+HAPPO
+
+0.2
+0.0
+0
+
+1
+
+2
+
+3
+
+Environment steps
+MMM2
+
+4
+
+MAT
+MAT-Dec
+MAPPO
+HAPPO
+UPDeT
+
+0.2
+
+0.2
+
+0.4
+
+0.6
+
+Environment steps
+25m
+
+0.8
+
+0.2
+0.0
+0.25
+
+0.50
+
+0.75
+
+1.00
+
+1.25
+
+1.50
+
+Environment steps
+6h_vs_8z
+
+1.75
+
+2.00
+1e6
+
+winrate
+
+winrate
+0.8
+
+0.4
+
+MAT
+MAT-Dec
+MAPPO
+HAPPO
+
+0.2
+0.0
+
+1.0
+1e7
+
+3
+
+0.0
+
+0.2
+
+4
+
+5
+1e6
+
+MAT
+MAT-Dec
+MAPPO
+HAPPO
+0.0
+
+0.6
+
+0.6
+
+2
+
+Environment steps
+27m_vs_30m
+
+0.0
+0.00
+
+0.6
+
+0.4
+
+1
+
+0.2
+
+0.6
+
+Environment steps
+
+5
+1e6
+
+0.4
+
+0.8
+
+0.2
+
+4
+
+0.6
+
+1.0
+
+0.0
+
+3
+
+0.8
+
+0.8
+
+0.0
+
+2
+
+Environment steps
+8m_vs_9m
+
+1.0
+
+MAT
+MAT-Dec
+MAPPO
+HAPPO
+UPDeT
+
+1.0
+
+0.2
+
+2.00
+1e6
+
+MAT
+MAT-Dec
+MAPPO
+HAPPO
+0
+
+0.8
+
+MAT
+MAT-Dec
+MAPPO
+HAPPO
+
+1
+
+0.0
+
+1.0
+
+0.4
+
+1.75
+
+0.4
+
+1.0
+1e7
+
+0.4
+
+5
+1e6
+
+1.50
+
+0.2
+
+winrate
+
+0.5
+
+1.25
+
+1.0
+
+winrate
+
+winrate
+
+0.8
+
+0.6
+
+0.0
+
+1.00
+
+MAT
+MAT-Dec
+MAPPO
+HAPPO
+0
+
+0.8
+
+0.0
+
+0.75
+
+Environment steps
+3s_vs_5z
+
+0.0
+
+5
+1e6
+
+0.8
+
+MAT
+MAT-Dec
+MAPPO
+HAPPO
+
+0.50
+
+0.2
+
+1.0
+
+0.2
+
+0.25
+
+0.4
+
+1.0
+
+0.4
+
+MAT
+MAT-Dec
+MAPPO
+HAPPO
+
+0.2
+
+1.0
+
+0.0
+
+winrate
+
+MAT
+MAT-Dec
+MAPPO
+HAPPO
+UPDeT
+
+1.0
+
+0.2
+
+winrate
+
+0.4
+0.2
+
+winrate
+
+winrate
+
+0
+
+0.6
+
+winrate
+
+1.0
+
+0.2
+
+winrate
+
+1c3s5z
+
+1.0
+
+winrate
+
+winrate
+
+3m
+1.0
+
+0.4
+
+0.6
+
+Environment steps
+
+0.8
+
+0.2
+
+0.4
+
+0.6
+
+Environment steps
+3s5z_vs_3s6z
+
+0.8
+
+1.0
+1e7
+
+0.4
+
+MAT
+MAT-Dec
+MAPPO
+HAPPO
+
+0.2
+0.0
+
+1.0
+1e7
+
+0.00
+
+0.25
+
+0.50
+
+0.75
+
+1.00
+
+1.25
+
+1.50
+
+Environment steps
+
+1.75
+
+2.00
+1e7
+
+Figure 9: Performance comparison on SMAC tasks. MAT consistently outperforms its rivals, indicating
+
+its modeling capability for homogeneous-agent tasks (agents are interchangeable).
+academy_3_vs_1_with_keeper
+
+academy_counterattack_easy
+1.0
+
+0.8
+
+0.8
+
+0.8
+
+0.6
+
+0.6
+
+0.6
+
+0.4
+
+MAT
+MAT-Dec
+MAPPO
+HAPPO
+
+0.2
+0.0
+0
+
+1
+
+2
+
+3
+
+Environment steps
+
+4
+
+5
+1e6
+
+scores
+
+1.0
+
+scores
+
+scores
+
+academy_pass_and_shoot_with_keeper
+1.0
+
+0.4
+
+MAT
+MAT-Dec
+MAPPO
+HAPPO
+
+0.2
+0.0
+0
+
+1
+
+2
+
+3
+
+Environment steps
+
+4
+
+5
+1e6
+
+0.4
+
+MAT
+MAT-Dec
+MAPPO
+HAPPO
+
+0.2
+0.0
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+Environment steps
+
+0.8
+
+1.0
+1e7
+
+Figure 10: Performance comparison on the Google Research Football tasks with 2-4 agents from left
+
+to right respectively, telling the same conclusion that MAT outperforms MAPPO and HAPPO.
+
+18
+
+back_foot
+
+6000
+
+back_shin
+
+back_thigh
+
+7000
+
+reward
+
+reward
+
+4000
+3000
+2000
+
+MAT
+MAT-Dec
+MAPPO
+MAT-from_scratch
+
+1000
+0
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+Environment steps
+fore_foot
+
+6000
+
+6000
+
+5000
+
+5000
+
+reward
+
+5000
+
+7000
+
+4000
+3000
+
+MAT
+MAT-Dec
+MAPPO
+MAT-from_scratch
+
+2000
+1000
+0
+
+1.0
+1e6
+
+0.0
+
+6000
+
+0.2
+
+0.4
+
+0.6
+
+Environment steps
+fore_shin
+
+0.8
+
+4000
+3000
+
+MAT
+MAT-Dec
+MAPPO
+MAT-from_scratch
+
+2000
+1000
+0
+
+1.0
+1e6
+
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+Environment steps
+fore_thigh
+
+0.8
+
+1.0
+1e6
+
+8000
+
+4000
+
+6000
+
+3000
+2000
+
+MAT
+MAT-Dec
+MAPPO
+MAT-from_scratch
+
+1000
+0
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+Environment steps
+
+0.8
+
+reward
+
+3000
+
+4000
+
+reward
+
+reward
+
+5000
+
+2000
+
+MAT
+MAT-Dec
+MAPPO
+MAT-from_scratch
+
+1000
+0
+
+1.0
+1e6
+
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+Environment steps
+
+0.8
+
+4000
+
+MAT
+MAT-Dec
+MAPPO
+MAT-from_scratch
+
+2000
+0
+
+1.0
+1e6
+
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+Environment steps
+
+0.8
+
+1.0
+1e6
+
+Figure 11: Few-shot performance comparison with pre-trained models on multi-agent MuJoCo tasks.
+
+MAT exhibits powerful generalisation capability when parts of the robot fail.
+
+5m_vs_6m
+
+0.6
+
+winrate
+
+winrate
+
+0.4
+0.3
+0.2
+
+27m_vs_30m
+
+MAT
+MAT-Dec
+MAPPO
+MAT-from_scratch
+
+0.7
+
+0.5
+
+0.6
+
+0.4
+0.3
+0.2
+
+0.1
+
+0.4
+0.2
+
+0.1
+
+0.0
+
+0.0
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+Environment steps
+2s_vs_1sc
+
+0.8
+
+1.0
+1e6
+
+0.0
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+Environment steps
+1c3s5z
+
+0.8
+
+1.0
+1e6
+
+0.0
+
+1.0
+
+1.0
+
+0.8
+
+0.8
+
+0.8
+
+0.6
+
+0.6
+
+0.6
+
+0.4
+
+MAT
+MAT-Dec
+MAPPO
+MAT-from_scratch
+
+0.2
+0.0
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+Environment steps
+
+0.8
+
+winrate
+
+1.0
+
+winrate
+
+winrate
+
+MAT
+MAT-Dec
+MAPPO
+MAT-from_scratch
+
+0.8
+
+winrate
+
+0.5
+
+MMM2
+
+0.8
+
+MAT
+MAT-Dec
+MAPPO
+MAT-from_scratch
+
+0.4
+
+MAT
+MAT-Dec
+MAPPO
+MAT-from_scratch
+
+0.2
+0.0
+
+1.0
+1e6
+
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+Environment steps
+
+0.8
+
+0.2
+
+0.4
+
+0.6
+
+Environment steps
+8m
+
+0.8
+
+1.0
+1e6
+
+0.4
+
+MAT
+MAT-Dec
+MAPPO
+MAT-from_scratch
+
+0.2
+0.0
+
+1.0
+1e6
+
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+Environment steps
+
+0.8
+
+1.0
+1e6
+
+Figure 12: Few-shot performance comparison with pre-trained models on SMAC tasks. Sequence-
+
+modeling-based methods, MAT and MAT-Dec, enjoy superior performance over MAPPO, justifying
+their strong generalisation capability as few-shot learners.
+
+27m_vs_30m
+0.8
+
+0.6
+
+0.6
+
+0.4
+
+MAT
+MAPPO
+HAPPO
+
+0.2
+0.0
+0
+
+20000
+
+40000
+
+60000
+
+80000
+
+Relative Wall Time
+
+100000
+
+reward
+
+0.8
+
+winrate
+
+winrate
+
+6h_vs_8z
+
+1.0
+
+0.4
+
+0.0
+0
+
+100000
+
+200000
+
+300000
+
+Relative Wall Time
+
+20.0
+
+18
+
+17.5
+
+16
+
+15.0
+
+14
+12
+10
+
+MAT
+MAPPO
+HAPPO
+
+0.2
+
+27m_vs_30m
+
+20
+
+reward
+
+6h_vs_8z
+1.0
+
+MAT
+MAPPO
+HAPPO
+
+8
+6
+
+400000
+
+0
+
+20000
+
+40000
+
+60000
+
+80000
+
+Relative Wall Time
+
+100000
+
+12.5
+10.0
+7.5
+
+MAT
+MAPPO
+HAPPO
+
+5.0
+2.5
+0
+
+100000
+
+200000
+
+300000
+
+Relative Wall Time
+
+400000
+
+Figure 13: Wall clock time comparison on scenarios with 10M environment steps and different size of
+
+agents, demonstrating that MAT enjoys better computational efficiency than HAPPO, especially with
+large number of agents. Since the winrate of HAPPO is close to zero in these super-hard settings, we
+present their episodic rewards as well for more details.
+
+19
+
+D
+
+Ablation studies
+
+In this section, we conduct ablation studies to investigate the importance of different components.
+Since agents are shuffled at every iteration, the position encoding in vanilla Transformer might not
+be very relevant in MARL tasks, and has been already discarded in our implementation. Instead,
+we bind each observation with corresponding one-hot agent id and build an ablation experiment to
+investigate their effect. The results in Figure (14) confirmed our choice, where the agent id encoding
+significantly outperforms position encoding with regard to episodic rewards and stability. Further,
+applying position encoding on top of agent id encoding can not enjoy extra performance boost.
+
+HalfCheetah
+10000
+
+reward
+
+8000
+6000
+4000
+
+MAT(id)
+MAT(pos)
+MAT(id+pos)
+
+2000
+0
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+Environment steps
+
+0.8
+
+1.0
+1e7
+
+Figure 14: Performance comparison for different observation encoding approaches on a heterogeneous
+
+scenario, i.e. HalfCheetah, where MAT(id) encodes inputs with one-hot agent id, which is applied
+in our implementation; MAT(pos) encodes inputs with their positions in sequences; MAT(id+pos)
+encodes inputs with both their agent id and positions.
+Besides, we also compared the implementation with different model architectures, i.e. encoderdecoder, encoder only, decoder only, and other sequence models (GRU) to verify the necessity of
+different architecture components. We build this ablation on both the homogeneous and heterogeneous
+scenarios as shown in Figure (15), where the complete Transformer architecture achieves the best
+performance, emphasizing the advantage of the Transformer and the necessity of encoder-decoder
+architectures.
+
+HalfCheetah
+
+1.0
+
+10000
+
+0.8
+
+8000
+
+0.6
+
+6000
+
+reward
+
+winrate
+
+6h_vs_8z
+
+0.4
+
+MAT
+MAT(decoder)
+MAT(encoder)
+GRU
+
+0.2
+0.0
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+Environment steps
+
+0.8
+
+4000
+
+MAT
+MAT(decoder)
+MAT(encoder)
+GRU
+
+2000
+0
+
+1.0
+1e7
+
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+Environment steps
+
+0.8
+
+1.0
+1e7
+
+Figure 15: Performance comparison for different model architectures to explore the effect of each
+
+component, where MAT is the the original implementation; MAT(decoder) is implemented with the
+decoder only, keeping the auto-regressive process; MAT(encoder) is implemented with the encoder
+only, without the the auto-regressive process; the GRU maintains the encoding and decoding process
+but implements them with GRU networks.
+
+20
+
+

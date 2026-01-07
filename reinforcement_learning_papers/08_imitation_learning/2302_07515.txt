@@ -1,0 +1,2242 @@
+TiZero: Mastering Multi-Agent Football
+with Curriculum Learning and Self-Play
+Fanqi Lin
+
+Tsinghua University
+Beijing, China
+lfq20@mails.tsinghua.edu.cn
+
+Shiyu Huang
+
+4Paradigm Inc.
+Beijing, China
+huangshiyu@4paradigm.com
+
+arXiv:2302.07515v2 [cs.AI] 21 Feb 2023
+
+Wenze Chen
+
+Tsinghua University
+Beijing, China
+cwz19@mails.tsinghua.edu.cn
+
+Tim Pearce
+
+Microsoft Research
+London, United Kingdom
+tim.pearce@microsoft.com
+
+Wei-Wei Tu
+
+4Paradigm Inc.
+Beijing, China
+tuweiwei@4paradigm.com
+
+ABSTRACT
+Multi-agent football poses an unsolved challenge in AI research.
+Existing work has focused on tackling simplified scenarios of the
+game, or else leveraging expert demonstrations. In this paper, we
+develop a multi-agent system to play the full 11 vs. 11 game mode,
+without demonstrations. This game mode contains aspects that
+present major challenges to modern reinforcement learning algorithms; multi-agent coordination, long-term planning, and
+non-transitivity. To address these challenges, we present TiZero;
+a self-evolving, multi-agent system that learns from scratch. TiZero
+introduces several innovations, including adaptive curriculum learning, a novel self-play strategy, and an objective that optimizes the
+policies of multiple agents jointly. Experimentally, it outperforms
+previous systems by a large margin on the Google Research Football
+environment, increasing win rates by over 30%. To demonstrate
+the generality of TiZero’s innovations, they are assessed on several
+environments beyond football; Overcooked, Multi-agent ParticleEnvironment, Tic-Tac-Toe and Connect-Four.
+
+KEYWORDS
+Multi-agent Reinforcement Learning; Self-play; Google Research
+Football; Large-scale Training
+ACM Reference Format:
+Fanqi Lin, Shiyu Huang, Tim Pearce, Wenze Chen, and Wei-Wei Tu. 2023.
+TiZero: Mastering Multi-Agent Football with Curriculum Learning and SelfPlay. In Proc. of the 22nd International Conference on Autonomous Agents
+and Multiagent Systems (AAMAS 2023), London, United Kingdom, May 29 –
+June 2, 2023, IFAAMAS, 29 pages.
+
+1
+
+INTRODUCTION
+
+Deep reinforcement learning (DRL) has achieved great success
+in many games, including Atari classics [2, 23, 38], first-personshooters [20, 25, 43], real-time-strategy titles [4, 57, 65], board
+games [49, 51] and card games [15, 67]. Yet modern DRL systems
+still struggle in environments containing challenges such as multiagent coordination [44, 63, 66], long-term planning [9, 56, 68] and
+non-transitivity [3, 8]. The Google Research Football environment
+(GFootball) contains all these challenges [29] and more. This paper
+Proc. of the 22nd International Conference on Autonomous Agents and Multiagent Systems (AAMAS 2023), A. Ricci, W. Yeoh, N. Agmon, B. An (eds.), May 29 – June 2, 2023,
+London, United Kingdom. © 2023 International Foundation for Autonomous Agents
+and Multiagent Systems (www.ifaamas.org). All rights reserved.
+
+Figure 1: Screenshot of Google Research Football. TiZero’s
+agents outperform previous systems by leveraging more coordinated strategies, such as passing more often and creating more assists.
+presents the first system that successfully deals with all of them,
+learning to play the full 11 vs. 11 game mode from scratch. Experimentally, our method outperforms previous systems by a large
+margin with over 30% higher winning rates.
+GFootball has attracted the attention of many DRL researchers as
+it provides a test-bed for complex multi-agent control [12, 19, 31, 60,
+63]. As in the popular real-world sport of football/soccer, to win at
+GFootball agents must combine short-term control techniques with
+coordinated, long-term global strategies. Challenges in GFootball
+include multi-agent cooperation, multi-agent competition, sparse
+rewards, large action space, large observation space and stochastic
+environments – a combination not present in other RL research environments. In GFootball, each agent needs both to cooperate with
+teammates, and compete against diverse and unknown opponents.
+Agents without the ball are hard to optimize as they do not obtain
+dense rewards, thus resulting in challenging multi-agent credit assignment problem [10, 11, 55, 70]. Moreover, GFootball transitions
+are stochastic, e.g. performing the same shooting action from the
+same state may sometimes result in a goal and sometimes a miss.
+Table 1 contrasts GFootball with other popoular RL environments,
+illustrating its complexity.
+Prior work on GFootball has mostly focused on ‘Academy’ scenarios [12, 31, 60, 63], which are drastically simplified versions of
+the full 11 vs. 11 game, for instance requiring agents to score in an
+empty goal or beat the goalkeeper in a 1-on-1. Any opponents are
+
+Table 1: Comparison of the complexity of current popular DRL benchmarks. GFootball 11 vs. 11 presents an increased level
+of complexity – it combines competitive elements, stochasticisity, a large number of agents, a long game horizon and sparse
+rewards.
+Citation
+
+Game
+
+Competitive?
+
+Agent number
+
+[23, 38]
+[49]
+[7]
+[13, 65]
+[12, 31, 60, 63]
+
+Atari Games
+Go
+Procgen
+Honor of Kings
+GFootball Academy
+
+1
+1
+1
+5
+< 10
+
+Our work
+
+GFootball 11 vs. 11
+
+10
+
+rules-based bots. In contrast, our work introduces an AI system that
+plays on the full 11 vs. 11 game mode. This mode requires simultaneous control of ten players. (The goalkeeper is excluded since
+they have a unique action space and different purpose which would
+require training of a separate policy. Instead they are controlled
+via a simple rule-based strategy.) Each player performs 3, 000 steps
+per match, meaning long-term planning is required. Due to these
+challenges, previous work tackling the 11 vs. 11 game mode relied
+on an offline demonstration dataset [19]. The disadvantage of such
+methods is that the performance of trained agents is bounded by
+the skill-level of the demonstrators. In this paper, we do not use any
+demonstration dataset nor any pre-trained model, instead training
+tabula-rasa via curriculum-learning and self-play.
+This paper proposes a multi-agent, curriculum, self-play framework for GFootball, which we name TiZero, that is trained at massscale. At its core, it is an actor-critic algorithm [28]. To facilitate
+multi-agent learning, a single centralized value network guides
+learning of all agent policies in a joint optimization step, while
+allowing for decentralised execution at test time. To tackle the
+challenge of long-term planning in a sparse-reward setting, we
+borrow ideas from curriculum learning [48, 64, 69]. Here, the
+agent initially learns basic behaviors in simpler tasks, strengthens these in increasingly difficult scenarios, eventually enabling
+high-quality long-term planning. To address the challenge of nontransitivity (that is, player A>player B, player B>player C =⇒
+̸
+player A>player C) [3, 8], we develop a self-play learning strategy to manage the opponent pool, which ensures training is against
+a set of diverse and strong opponents. TiZero applies these algorithmic ideas in a large-scale distributed training infrastructure,
+training across hundreds of processors for about 40 days.
+In addition to these core algorithmic ingredients, TiZero adopts
+a variety of modern DRL advances, including recurrent experience
+replay [24], action masking, reward shaping [39], agent-conditioned
+policy [12] and staggered resetting.
+To evaluate the performance of TiZero, we compare against previous state-of-the-art methods [1, 19, 58, 71] on GFootball, outperforming them by a large margin. On a public evaluation platform of
+GFootball, TiZero also ranks first1 . To understand the generality of
+TiZero, we assess our system on several public benchmarks not related to football, such as [61], Multi-agent Particle-world (MPE) [36],
+1 JiDi AI Competition Platform: http://www.jidiai.cn/ranking_list?tab=34.
+The evaluation result was collected on October 28th, 2022.
+
+Stochastic?
+
+Sparse reward?
+
+Game length magnitude
+
+Sometimes
+
+Typically 102
+102
+102
+103
+102
+103
+
+Tic-Tac-Toe and Connect-Four, finding that it also shows promise
+in these new domains.
+
+2
+
+RELATED WORK
+
+In this section, we briefly review relevant work in the areas of multiagent reinforcement learning, competitive self-play and football
+game AI.
+
+2.1
+
+Multi-agent Reinforcement Learning
+
+Multi-agent reinforcement learning (MARL) has received much
+research attention [44, 52, 55, 59, 66]. Recent algorithms usually focus on the centralized training with decentralized execution (CTDE)
+setup. In CTDE, the learning algorithm has access to the actionobservation histories of all agents during training. But at execution,
+each agent only has access to its local action-observation history.
+There are two main kinds of MARL algorithms: 1) value-based algorithms, such as QMIX [44], VDN [55], QPLEX [59]; 2) policy-based
+algorithms, such as MADDPG [36], MAPPO [66], MAT [63]. As
+an example of a value-based MARL algorithm, QMIX uses a centralized Q-value network over the joint action-value function. It
+is designed in a way that constrains the joint Q-value to be monotonic with respect to each individual agent’s Q-value (these are
+mixed in a additive but possibly non-linear function). This allows
+decentralized execution as each agent can independently perform
+an argmax operation over their individual Q-values. TiZero builds
+upon MAPPO [66], which adapts the standard single-agent PPO
+algorithm [47] to the multi-agent setting by learning individual
+policies conditioned on local observations, and a centralized value
+function based on a global state. Several tricks have proven important to stabilize training, including Generalized Advantage Estimation (GAE) [46], observation normalization, value clipping, and
+orthogonal initialization. MAPPO is competitive with many MARL
+algorithms such as MADDPG [36], RODE [62], and QMIX, both in
+terms of sample efficiency and wall-clock time. In this paper, we
+propose a new variant of MAPPO, which can improve multi-agent
+coordination and reduce the video memory usage via multi-agent
+joint-policy optimization.
+
+2.2
+
+Competitive Self-play
+
+Self-play has emerged as a powerful technique to obtain superhuman policies in competitive environments [4, 16, 30, 50, 57]. By
+
+Figure 2: TiZero’s network architecture. Six types of information are required as input: the controlled player information,
+player ID, ball information, teammate information, opponent information and current match information. We use six separate
+MLPs with two (one for the "player ID") fully-connected layers to encode each part of the observation. An LSTM layer is used
+to incorporate historic observations. The policy outputs a softmax distribution over the 19 discrete actions.
+playing against recent copies of itself, an agent can continuously improve its performance, avoiding any limitation that might otherwise
+be imposed by the skill-level of a demonstration dataset. PolicySpace Response Oracle (PSRO) is a population learning framework
+for learning best-response agents to a mixture of previous agents
+with a meta-strategy solver [30]. Under this framework, Vinalys et
+al. [57] proposed a league training framework to train robust agents
+for StarCraft (‘prioritized fictitious self-play’). Meanwhile, OpenAI
+Five [4] achieved super-human performance on Dota 2 via a simpler
+self-play strategy – the current set of agents plays against the most
+recent set of agents with 80% probability, and plays against past
+agents with 20% probability. However, such empirical successes
+require huge computing resources, and the training process may
+become stuck due to the non-transitivity dilemma when strategic
+cycles exist [3, 8]. Recent work solves this problem by increasing
+the diversity in the pool of opponent policies [6, 34, 35]. This paper
+also introduces a novel self-play training strategy that improves
+the diversity and performance of opponent policies. We design
+a two-step self-play improvement scheme, with the first step to
+challenge the prior agent and second step to generalise against the
+entire opponent pool.
+
+2.3
+
+Football Games and AI
+
+Football environments are valuable for AI research, as they blend
+several challenges together; control, strategy, cooperation, and competition. Aside from GFootball, several popular simulators have
+been proposed. rSoccer [37] and JiDi Olympics Football [21] are
+simple environments – players are represented as rigid bodies with
+a limited action space, either moving or pushing the ball. In contrast, GFootball provides a rich action space, adding mechanics
+such as slide-tackling and sprinting. The RoboCup Soccer Simulator [22, 27, 53] and DeepMind MuJoCo Multi-Agent Soccer Environment [32, 33] environments emphasis low-level robotic control,
+requiring manipulation of the joints of a player. Meanwhile, GFootball abstracts this away, allowing agents to focus on the challenge
+
+of developing high-level behaviors and strategies. A competition
+in the GFootball environment was hosted on Kaggle [14] in 2020
+that attracted over 1,000 teams. This required building an agent to
+control a single ‘in-focus’ player at any one time, while teammates
+were controlled by an in-built rules-based AI. The champion of the
+competition, named WeKick [71], utilized imitation learning and
+distributed league training. In contrast to this setup, our system
+tackles the far more challenging task of controlling all 10 outfield
+players on a team simultaneously, in a decentralized fashion. The
+only prior work directly tackling this objective first collected a
+demonstration dataset by rolling out WeKick, and then utilized
+offline RL techniques to train agents. This was named TiKick, [19].
+By contrast, our work trains agents via self-play without requiring
+demonstration data. Through this methodology, TiZero exceeds
+the performance of all previous systems in GFootball, including the
+best entry among 1,000 (WeKick), TiKick, and others.
+
+3
+
+PRELIMINARIES
+
+Multi-agent Reinforcement Learning: We formalize the multiagent reinforcement learning as a decentralized partially observable Markov decision process (Dec-POMDP) [5]. An 𝑛-agent DecPOMDP can be represented as a tuple (N, S, A, T , 𝑟, O, 𝐺, 𝛾), where
+S is the state space, A is the action space, O is the observation
+space and 𝛾 ∈ [0, 1) is a reward discount factor. N ≡ {1, ..., 𝑛} is
+a set of 𝑛 = |N | agents. At time step 𝑡, each agent 𝑖 ∈ N takes an
+action 𝑎𝑖 ∈ A, forming a joint action a ∈ A ≡ A𝑛 . Agents receive
+an immediate reward 𝑟 (𝑠, a) after taking action a in state 𝑠. The
+reward is shared by all agents. T (𝑠, a, 𝑠 ′ ) : S × A × S ↦→ [0, 1] is
+the dynamics function denoting the transition probability. In a DecPOMDP, an agent will receive its partially observable observation
+𝑜𝑡 ∈ O according to the observation function 𝐺 (𝑠, 𝑖) : S × A → O.
+Each agent has a policy 𝜋 𝑖 (𝑎𝑖𝑡 |𝑜 𝑖1:𝑡 ) to produce action 𝑎𝑖𝑡 from local
+historical observations 𝑜 𝑖1:𝑡 . We use 𝑎𝑡−𝑖 as the action of all complementary agents of agent 𝑖 and use a similar convention for policies
+
+𝜋 −𝑖 . The agents’ objective is tolearn a joint policy
+𝜋 that maximizes
+
+Í 𝑡
+their expected return E (𝑠𝑡 ,a𝑡 )
+𝑡 𝛾 𝑟 (𝑠𝑡 , a𝑡 ) .
+
+4
+
+METHODOLOGY
+
+This section introduces TiZero in detail. Firstly, we describe the
+agent’s architecture and observation space. We then introduce a
+new multi-agent learning algorithm and self-play strategy. We
+further describe several important implementation details found to
+be helpful. Finally, we introduce the distributed training framework
+used to scale up our training.
+
+4.1
+
+Agent Design
+
+Observation space. GFootball provides the observations in several
+formats, such as an RGB image of the game or a rendered mini-map.
+Our agents learn from only state vectors – by default this is provided as a 115-dimensional vector, containing information such as
+player and ball coordinates. We follow previous work [19] which
+showed benefit in extending this vector with more auxiliary features (such as offside flags to mark potential offside teammates and
+relative positions among agents) to create a 268-dimensional vector.
+Instead of using this full vector directly as input, we split the agent
+observation into six parts, including the controlled player information, player ID, ball information, teammate information, opponent
+information and current match information. The value-network
+needs to approximate the value function for the whole team, thus
+we design a global state vector for the value-network with five parts,
+including ball information, information of ball holder, teammate
+information, opponent information and current match information. More details about our observation space can be found in the
+Appendix M.
+Network architecture. Six separate MLPs with two (one for
+the "player ID") fully-connected layers separately encode each part
+of the observation. These extracted hidden features are then concatenated together and processed by an LSTM layer [18], which
+provides the agent with memory. All hidden layers have layer normalization and ReLU non-linearities. We use the orthogonal matrix [45] for parameter initialization and the Adam optimizer [26].
+To accelerate learning, we mask out any illegal actions by setting
+their probability of selection to zero. Figure 2 shows the overall
+policy network architecture. We also construct a similar architecture for the value network, which is trained with Mean Square
+Error (MSE) loss. Further hyperparameter details and also the value
+network structure are provided in the Appendix D.
+
+4.2
+
+Multi-agent Algorithm
+
+We now introduce the Joint-ratio Policy Optimization (JRPO), a
+modified version of MAPPO [66]. MAPPO is a direct extension
+of PPO [47] to the multi-agent setting, with the value-network
+𝑉𝑡𝑜𝑡𝑎𝑙 (𝑠𝑡 ) centralized across all agents, learning from the global
+state. GAE can then be used to compute the global advantage function 𝐴total (𝑠𝑡 , a𝑡 ) (abbreviated as 𝐴ˆ𝑡 ). In MAPPO, this advantage
+function guides the improvement of each agent’s policy independently 𝜋𝜃𝑖 (𝑢𝑡𝑖 |𝑜 𝑖1:𝑡 ), 𝑖 ∈ N , where 𝜃 are the parameters of the policy
+
+network. Instead of this, we optimize the joint-policy using a decentralized factorization:
+𝑛
+Ö
+𝜋𝜃 (a𝑡 |o1:𝑡 ) ≈
+𝜋𝜃𝑖 (𝑎𝑖𝑡 |𝑜 𝑖1:𝑡 ).
+(1)
+𝑖=1
+
+This allows us to write the joint-policy objective as:
+h
+
+i
+𝐿𝐶𝐿𝐼 𝑃 (𝜃 ) = Ê𝑡 min 𝑟𝑡 (𝜃 )𝐴ˆ𝑡 , clip(𝑟𝑡 (𝜃 ), 1 − 𝜖, 1 + 𝜖)𝐴ˆ𝑡 ,
+𝜋 (a |o )
+
+where 𝑟𝑡 (𝜃 ) = 𝜋 𝜃 (a𝑡 |o1:𝑡 ) =
+𝜃 old
+
+𝑡
+
+(2)
+
+𝜋𝜃𝑖 (𝑎𝑖𝑡 |𝑜 𝑖1:𝑡 )
+𝑖=1 𝜋 𝑖 (𝑎𝑖𝑡 |𝑜 𝑖 ) , and Ê𝑡 [· · · ] is the
+
+Î𝑛
+
+1:𝑡
+
+𝜃 old
+
+1:𝑡
+
+expectation using empirical samples. And clip(· · · ) is a clipping
+function with clipping hyperparameter 𝜖. This is in contrast to
+vanilla MAPPO, where 𝑟𝑡 (𝜃 ) is computed on each agent’s policy
+𝜋 𝑖 (𝑎𝑖 |𝑜 𝑖 )
+
+individually, 𝑟𝑡 (𝜃, 𝑖) = 𝜋 𝑖 𝜃 (𝑎𝑡 𝑖 |𝑜1:𝑡𝑖 ) . By using our factorization, all
+𝜃 old
+
+𝑡
+
+1:𝑡
+
+agent policies are optimized jointly. Previous work has identified
+that this objective enjoys monotonic guarantees similar to PPO [54].
+Our later experiments evidence the empirical advantage of this
+joint-policy objective, compared to vanilla MAPPO. We believe that
+framing the objective jointly may encourage the agents to achieve
+better coordination. Additionally, we found it reduces memory
+usage and improves training speed.
+
+4.3
+
+Curriculum & Self-play Training Strategy
+
+TiZero’s training strategy can be divided into two stages. In the first
+stage (‘Curriculum Self-play’), the difficulty of the scenarios the
+agents are trained in gradually increases, guiding them to learn basic
+behaviors in an efficient manner. The opponents in this stage are
+versions of the agent trained in easier scenarios. In the second stage
+(‘Challenge & Generalise Self-play’), the difficulty-level is fixed at
+maximum. Agents play against a diverse pool of increasingly strong
+opponents (previous copies of the agent), providing a route towards
+superhuman performance.
+Curriculum Self-play: The rewards provided in the GFootball
+11 vs. 11 game mode are very sparse. This causes vanilla MARL algorithms to struggle. To address this issue, we design a curriculum
+self-play mechanism, in which agents are trained on a sequence
+of progressively more difficult scenarios, where the opponent is a
+copy of the agent from the previous difficulty-level scenario. We
+design ten difficulty levels by configuring the GFootball environment settings. The difficulty level is determined by two aspects; 1)
+The strength of opponent players, which can be varied from 0 to
+1, with values closer to 1 meaning players are quicker and have
+better stamina. 2) The initial positions of players and the ball. For
+example, players can be set in positions closer to the opponent’s
+goal and the ball is also set in position closer to the opponent’s
+goal. At the beginning of training, agents are initialized with random weights, and learn on the lowest difficulty scenario (lowest
+opponent strength and positioned closest to the goal). This allows
+agents to receive denser rewards that encourage basic shooting and
+passing behaviors. When agent performance meets some threshold
+in the current scenario, the difficulty level automatically increases.
+Finally in the highest difficulty level, agents must compete with the
+whole opponent team that encourages more advanced tactics and
+team cooperations. The Appendix B provides further detail about
+the curriculum design.
+
+Figure 3: Overview of our distributed training framework. There are two types of modules in the framework; Actors and
+Learners. Actor roll out models in environments, while storing observations, rewards, actions and LSTM hidden states. The
+data collected by the Actors is sent to the Learners via a data server. Learners train the value and policy networks, and the
+gradients are averaged through NCCL reduction. The trained network parameters from the Learners are synchronized to the
+Actors through the data server. A dynamic opponent pool is maintained during training. A new opponent will be added to the
+pool when the training model meets certain performance criteria. A configurable self-play strategy module is used to sample
+opponents for self-play.
+Challenge & Generalise Self-play: Through curriculum selfplay our agents achieve a basic performance level against a single
+opponent. To improve performance against a range of opponents,
+we design an algorithm that produces a monotonically-improving
+sequence of policies. This consists of two steps. 1) Challenge Selfplay. Current agents play against the most recently saved agents
+with probability of 80%, and play against older versions with probability of 20%. The main purpose of this step is ensure the current
+system can defeat the strongest agents seen so far. 2) Generalise
+Self-play. Current agents play against the whole opponent pool,
+sampling opponents according to their strength as follows. Denote
+the opponent pool M. Let 𝑖 ∉ M be the current training agent,
+𝑗 ∈ M all other agents in pool, and 𝑝 (𝑖, 𝑗) be the probability that
+agent 𝑖 defeats agent 𝑗. We sample model 𝑗 to play against with
+probability:
+𝑓hard (𝑝 (𝑖, 𝑗))
+,
+𝑚 ∈M 𝑓hard (𝑝 (𝑖, 𝑚))
+
+𝑝 sample ( 𝑗) = Í
+
+(3)
+
+where 𝑓hard (𝑥) = (1−𝑥) 2 . This sampling strategy focuses our agents
+training on opponents it is less likely to win against. Therefore, the
+training agent will maximize its performance over all existing opponents. Prioritized fictitious self-play addresses the non-transitivity
+dilemma and improves the robustness of agents [57]. Once agents
+perform well on this step, they are themselves added to the opponent pool for future versions to train against. The whole self-play
+algorithm and details of the our self-play strategy can be found in
+Appendix C & F.
+
+4.4
+
+Implementation Details
+
+This section summarizes several details that were found to be important to achieving good performance.
+
+Recurrent Experience Replay: Allowing agents to learn from
+earlier observations in an episode helps agents with long-term
+planning and inferring an opponent’s strategy. Hence, we utilize an
+LSTM [18]. Rather than initializing hidden states with zeros during
+training on each sequence, we reset to the hidden state that was
+actually generated by the agent at that timestep – these are stored
+in the replay buffer during roll outs. When collecting the training
+data, models are rolled out for sequences of 500 timesteps. During
+optimization, the LSTM backpropagates through timesteps with
+length of 25.
+Action Masking: Action masking reduces the effective action
+space by preventing selection of inappropriate actions. In GFootball,
+we mask out actions that are unavailable or nonsensical during
+certain situations, for instance slide-tackling is disabled when a
+teammate holds the ball.
+Reward Shaping: The basic rewards provided by GFootball are
+1 for scoring a goal, and −1 for conceding a goal. This is sparse
+and hard to optimize. To improve training efficiency, we design
+several more dense reward signals. Note all agents on a team receive
+rewards equally.
+- Holding-Ball reward: When the ball is controlled by an
+agents’ team, a reward of 0.0001 per timestep is received.
+- Passing-Ball reward: When agents execute successful pass
+before a goal, they receive a reward of 0.05. This encourages
+agents to learn coordinated passing strategies.
+- Grouping penalty: If agents on the same team gather too
+closely together, a reward of −0.001 is received. This encourages agents to spread out across the pitch.
+- Out-of-bounds penalty: A reward of −0.001 is received
+when an agent is outside of the playing area.
+
+The reward across the two teams is balanced to be zero-sum, which
+is a basic requirement for self-play to succeed. Hence, if one team receives a positive reward, the other team receives a negative reward
+of the same magnitude.
+Player-ID Conditioning: Instead of training a separate policy
+network per agent, we use a single shared policy network which
+receives the player ID as input. Hence, one set of parameters is used
+by all the agents on a team, while still allowing for decentralized
+execution. This makes the multi-agent training more sample efficient, since experience from one agent helps improve the network
+of other agents. It also improves inference speed – only one forward
+pass of the observation encoder and LSTM is required for the whole
+team. This produces the embedding that is used by all agents after
+appending their player-ID embedding to the output of the LSTM
+unit (Figure 2).
+Staggered Resetting: To encourage episodes to be initialized in
+interesting situations, we use the ‘staggered resetting’ trick when
+collecting the training data. After the first time resetting the environment, we apply random actions for all players for a variable
+number of timesteps. This avoids each episode beginning from the
+same state, which could introduce undesirable correlations in our
+data.
+
+4.5
+
+Distributed Training Framework
+
+Training a deep neural network at the scale demanded by GFootball
+requires a large amount of computation. In this work, we built a
+scalable and loosely-decoupled distributed infrastructure for multiagent self-play training . There are two types of modules in our
+framework; Actors and Learners. These modules are decoupled,
+enabling researchers to develop their algorithm on a single local machine and then easily launch a large-scale training with zero-code
+change. The main function of the Actor is rolling out models in
+environments (or simulators), while storing observations, rewards,
+actions and LSTM hidden states. All the data collected by the Actors is sent to the Learners via a data server. Learners will train
+the value and policy networks using GPUs and the gradients are averaged through NCCL reduction [40]. The trained network parameters from the Learners are synchronized to the Actors through
+the data server. Last but not least, we maintain a dynamic opponent
+pool and continuously add new opponent to the pool when the
+training model meets certain performance indexes. Researchers can
+utilize the stored opponent information (such as winning rates and
+historical play information) and are flexible to design their own selfplay strategies to sample opponents for the self-play. Besides, our
+model definition and training is done using Pytorch [42]. Figure 3
+summarises our distributed training framework.
+
+5
+
+EXPERIMENTS
+
+This section empirically evaluates the performance of TiZero. We
+first test the full system on our target domain, GFootball. We then
+explore the generality of several components of the system on
+environments unrelated to football. Specifically we show that JRPO
+improves over MAPPO, and that our Challenge & Generalise SelfPlay framework produces stronger and more diverse strategies than
+alternatives.
+
+Figure 4: Evolution of TiZero strength over 45 days of training. Dashed green line denotes transition from Curriculum
+Self-Play to Challenge & Generalize Self-Play. We can observe that the Curriculum Self-play stage allows TiZero to
+rapidly improve early in training to a level just below the
+‘Built-in Hard’ agent. Through Challenge & Generalize selfplay, TiZero continues to gradually improve performance
+beyond the level of previous systems, eventually plateauing
+at a rating around 45.
+
+5.1
+
+GFootball Evaluation
+
+Experimental Settings: We train and evaluate TiZero on the full
+11 vs. 11 game mode in GFootball. Each match lasts for five minutes,
+or 3, 000 timesteps (no injury time). The team with highest number
+of goals wins. Standard football rules are applied by the game, such
+as offside, penalty kicks and yellow/red cards. TiZero was trained
+over 45 days on a cluster with 800 CPUs and two NVIDIA A100
+GPUs. The batch size for each GPU is set to 2, 150, 000, the hidden
+size of the LSTM layer is 256, and the discount factor 𝛾 is 0.999.
+We used the Adam optimizer with learning rate of 0.0001. Further
+hyperparameters can be found in the Appendix H.
+We compare TiZero to several strong baselines:
+- WeKick [71]: An RL-based agent that placed first from over
+1,000 entries in the 2020 Kaggle Football Competition [14]
+(see Section 2).
+- TiKick [19]: The current strongest agent for the GFootball
+full game, controls all players in the game (see Section 2).
+- JiDi_3rd: An agent initialized with a pre-trained model and
+improved via self-play. This was the second runner-up of
+the 2022 JiDi Football Competition2 .
+- Built-in Hard: Agent provided by the GFootball environment, which directly controls the underlying game engine.
+- Rule-based: Two strong rules-based agents from the Kaggle
+Football Competition, which were hand designed. We use
+Rule-Based-1 [58] and Rule-Based-2 [1].
+We use the TrueSkill rating system [17] to evaluate all systems.
+Ratings are computed by running a large amount of matches over
+2 http://www.jidiai.cn/compete_detail?compete=16
+
+Table 2: Comparison of TiZero with baseline systems on GFootball. Higher is better except for all metrics except ’Draw Rate’
+and ’Lose Rate’. As well as a better win rate and goal difference, TiZero agents demonstrate a higher level of teamwork, passing
+the ball more and creating more assists.
+TiZero (Ours)
+
+TiKick
+
+WeKick
+
+JiDi_3rd
+
+Built-in Hard
+
+Rule-Based-1
+
+Rule-Based-2
+
+1.30(1.02)
+19.2(3.44)
+0.73(0.07)
+3.42(1.69)
+2.27(1.93)
+8.50
+6.50
+85.0
+45.2
+
+0.61(0.79)
+6.99(2.71)
+0.65(0.17)
+1.79(1.41)
+0.71(2.08)
+22.2
+23.5
+54.3
+37.2
+
+0.20(0.47)
+5.33(2.44)
+0.53(0.18)
+0.88(0.88)
+-0.47(1.68)
+29.0
+44.2
+26.8
+30.9
+
+0.35(0.62)
+3.96(2.33)
+0.44(0.19)
+1.43(1.34)
+-0.02(2.14)
+23.2
+33.8
+43.0
+35.0
+
+0.20(0.55)
+11.5(4.63)
+0.66(0.12)
+0.52(0.91)
+-1.06(1.93)
+24.8
+59.6
+15.6
+24.9
+
+0.28(0.59)
+7.28(2.77)
+0.64(0.17)
+0.73(0.69)
+-0.60(1.03)
+28.7
+48.2
+23.1
+28.2
+
+0.22(0.53)
+7.50(3.12)
+0.63(0.19)
+0.64(0.82)
+-0.71(1.45)
+27.8
+49.5
+22.7
+27.1
+
+Overcooked-Unident
+
+Episode Rewards
+
+Episode Rewards
+1
+
+2
+
+3
+
+T (mil)
+
+4
+
+5
+
+6
+
+50
+0
+
+1
+
+2
+
+3
+
+T (mil)
+
+4
+
+5
+
+6
+
+Overcooked-Simple
+
+MPE-3-agent
+
+200
+150
+100
+
+50
+0
+
+QMIX
+250
+
+100
+
+100
+
+0
+
+MAT
+
+150
+
+150
+
+0
+
+MAPPO
+
+Overcooked-Random1
+
+200
+
+200
+
+Episode Rewards
+
+300
+250
+200
+150
+100
+50
+0
+
+JRPO
+
+Overcooked-Random0
+
+Episode Rewards
+
+Assist
+Pass
+Pass Rate
+Goal
+Goal Difference
+Draw Rate (%)
+Lose Rate (%)
+Win Rate (%)
+TrueSkill
+
+Episode Rewards
+
+Metric
+
+0
+
+1
+
+2
+
+3
+
+T (mil)
+
+4
+
+5
+
+6
+
+50
+0
+
+0
+
+1
+
+2
+
+3
+
+T (mil)
+
+4
+
+5
+
+120
+140
+160
+180
+200
+220
+
+6
+
+0
+
+1
+
+2
+
+3
+
+T (mil)
+
+4
+
+5
+
+(a)
+
+10
+
+15
+
+20
+
+25
+
+Wall Time (Minutes)
+
+30
+
+0
+
+5
+
+10
+
+15
+
+20
+
+25
+
+Wall Time (Minutes)
+
+30
+
+MPE-3-agent
+
+200
+150
+100
+
+50
+0
+
+Overcooked-Simple
+
+Episode Rewards
+
+Episode Rewards
+
+Episode Rewards
+5
+
+50
+
+QMIX
+250
+
+100
+
+100
+
+0
+
+MAT
+
+150
+
+150
+
+0
+
+MAPPO
+
+Overcooked-Random1
+
+200
+
+200
+
+Episode Rewards
+
+300
+250
+200
+150
+100
+50
+0
+
+JRPO
+
+Overcooked-Random0
+
+Episode Rewards
+
+Overcooked-Unident
+
+0
+
+5
+
+10
+
+15
+
+20
+
+25
+
+Wall Time (Minutes)
+
+30
+
+50
+0
+
+0
+
+5
+
+10
+
+15
+
+20
+
+25
+
+Wall Time (Minutes)
+
+30
+
+120
+140
+160
+180
+200
+220
+0
+
+10
+
+20
+
+30
+
+40
+
+Wall Time (Minutes)
+
+50
+
+(b)
+
+Figure 5: Comparison of multi-agent algorithms. (a) Training curves over environment steps. JRPO’s performance is equal or
+better than MAPPO, MAT and QMIX across all tasks. (b) Training curves over wall-clock time. JRPO trains faster, leading to
+improvements in terms of wall-clock training time.
+a fixed pool of all systems – this pool comprises all the models
+checkpointed during TiZero’s training process, as well as baseline
+systems. Figure 4 shows the evolution of the TrueSkill rating over
+45 days of training. We also mark the TrueSkill rating of the baseline systems, all of which TiZero exceeds by a wide margin. One
+can observe that the curriculum self-play stage allows TiZero to
+rapidly improve early in training to a level just below the ‘Builtin Hard’ agent. Through challenge & generalize self-play, TiZero
+continues to gradually improve performance beyond the level of
+previous systems, eventually plateauing at a rating around 45. Table 2 presents TrueSkill ratings and win rates for all systems. To
+verify our system independently, we also submitted our best TiZero
+system to a public evaluation platform, which maintains a public
+leaderboard of GFootball systems. At present, TiZero ranks first
+with a score of 9.7 and win rate of 95.8%.
+
+We conducted an analysis to understand how cooperative TiZero’s
+decentralized agents are. It’s possible that superior performance
+could be achieved through expert control of a single player, rather
+than through coordinated teamwork leveraging strategies such as
+‘tiki-taka’, crosses and long balls. Table 2 reports statistics that reveal TiZero’s agents indeed leverage cooperation more than other
+systems. TiZero has a higher number of passes or long balls that
+directly lead to scoring (‘Assists’), more passes between teammates
+(‘Pass’), and a higher chance of passes being successfully received
+by teammates (‘Pass Rate’). The Appendix A provides detailed visualizations of TiZero’s coordination behaviors.
+
+5.2
+
+Policy Optimization Ablation
+
+This section compares the joint-policy version of PPO (JRPO) we introduced in Section 4.2, with established state-of-the-art MARL algorithms MAPPO [66], MAT [63] and QMIX [44]. We test across the environments Overcooked [61] and Multi-agent Particle-Environment
+(MPE) [36]. Overcooked is a grid-world game in which agents cooperate to complete a series of tasks, such as finding vegetables,
+making soup and delivering food. MPE is a continuous 2D world
+with multiple movable particles. More information about these environments can be found in Appendix G. To be comparable, all
+three MARL algorithms use the same desktop machine, neural network architecture and hyperparameters. Each method is run over 6
+random seeds. More details about the setup of each environment
+can found in the Appendix I.
+Table 3: GPU memory consumption of each method. Lower
+is better. Results show that JRPO consumes less GPU memory than MAPPO, especially when there are more agents
+(such as MPE with 20 agents and GFootball with 10 agents).
+Task
+
+JRPO
+
+MAPPO
+
+MPE-3-agent
+MPE-20-agent
+Overcooked
+GFootball
+
+1.21GB
+1.63GB
+5.27GB
+121GB
+
+1.24GB
+2.14GB
+6.65GB
+196GB
+
+Table 4: Diversity Index of policies in the opponent pool of
+each method, measured on Tic-Tac-Toe. Larger values indicate a higher variance of strategies in the opponent pool.
+
+Figure 5 shows the training curves of each methods w.r.t. environment steps and wall-clock time. JRPO’s performance is equal
+or better than MAPPO, MAT and QMIX across all tasks. JRPO also
+achieves better results with faster wall-clock training time. Table 3
+shows the GPU memory consumption of JRPO and MAPPO. Results show that JRPO consumes less GPU memory than MAPPO,
+especially when there are more agents (such as MPE with 20 agents
+and GFootball with 10 agents). More experimental results can be
+found in the Appendix K.
+
+5.3
+
+Self-Play Strategy Ablation
+Challenge & Generalize Self-Play
+Generalise Self-play
+Tic-Tac-Toe
+
+Winning Rate
+
+Winning Rate
+
+0.55
+0.50
+0.45
+0.40
+
+0.0
+
+0.5
+
+1.0
+
+T (mil)
+
+1.5
+
+2.0
+
+0.35
+
+0
+
+1
+
+2
+
+T (mil)
+
+3
+
+4
+
+Figure 6: Self-play strategy evaluation. Results show that
+our method outperforms other baselines in both training efficiency and final performance. It also appears more stable.
+
+Self-Play Sampling Strategy
+
+Diversity Index
+
+Newest
+Challenge Self-Play
+Generalize Self-Play
+Challenge & Generalize Self-Play
+
+6.65
+7.19
+7.15
+8.11
+
+Figure 6 shows the training curves of different self-play strategies
+over three random seeds. Results show that our method outperforms other baselines in both training efficiency and final performance. For Tic-Tac-Toe, we quantitatively evaluate the Diversity
+Index[41] of policies in the opponent pool of each method, as shown
+in Table 4. We see that ’Challenge & Generalize Self-Play’ achieves a
+larger Diversity Index than baselines, which indicates our self-play
+strategy can produce more diverse policies. Further experimental
+details and visualizations are given in Appendix J & L.
+
+6
+
+Challenge Self-play
+Newest
+Connect-Four
+
+0.60
+
+0.65
+0.60
+0.55
+0.50
+0.45
+0.40
+0.35
+
+This section evaluates our ‘Challenge & Generalize Self-Play’
+strategy on two classical 2-player board games, Tic-Tac-Toe and
+Connect-Four. In the Tic-Tac-Toe game, two players take turns
+placing marks on a three-by-three grid. Players win by placing
+three of their marks in a line. Our agent is a deep neural network
+with a 27-dimension state vector as input (O’s, X’s and blanks
+are one-hot encoded for the 9 cells). Connect-Four is an extended
+version of Tic-Tac-Toe with a four-by-four board and with placing
+four marks in a row to win. Our self-play strategy was described in
+Section 4.3. This ablation omits the curriculum self-play stage since
+the rewards are non-sparse. Thus, we focus our test on the challenge
+& generalize self-play stage. We construct several baselines as a
+comparison: (1) Challenge Self-Play: The training agent uses the
+Challenge Self-Play as described in Section 4.3; (2) Generalize SelfPlay: The training agent uses the Generalize Self-Play as described
+in Section 4.3; (3) Newest: The training agent only combats with
+itself. All methods share the same network architecture and learning
+paradigm. The only difference is how they sample opponents from
+the pool for self-play.
+
+CONCLUSION
+
+This paper presented a distributed multi-agent reinforcement learning system for the complex Google Research Football environment.
+This environment encapsulates several challenges; multi-agent coordination, sparse rewards, and non-transitivity. Our work is the
+first to train strong agents for the GFootball 11 vs. 11 game mode
+from scratch, controlling all 10 outfield players in a decentralized
+fashion. Achieving this required combining existing techniques,
+with several innovations – a joint-policy optimization objective,
+curriculum self-play and a challenge & generalize self-play strategy. Our experiments in GFootball showed that TiZero outperforms
+previous systems by a wide margin in terms of win rate and goal difference. TiZero also utilizes complex coordination behaviors more
+often than prior systems. Experiments on other MARL and self-play
+benchmarks further evidence the effectiveness and generality of
+our algorithmic innovations.
+
+REFERENCES
+[1] Sarvar Anvarov. 2020. Solution ranked 35th in Kaggle Football Competition.
+https://github.com/Sarvar-Anvarov/Google-Research-Football.
+[2] Adrià Puigdomènech Badia, Bilal Piot, Steven Kapturowski, Pablo Sprechmann,
+Alex Vitvitskyi, Zhaohan Daniel Guo, and Charles Blundell. 2020. Agent57: Outperforming the atari human benchmark. In International Conference on Machine
+Learning. PMLR, 507–517.
+[3] David Balduzzi, Marta Garnelo, Yoram Bachrach, Wojciech Czarnecki, Julien
+Perolat, Max Jaderberg, and Thore Graepel. 2019. Open-ended learning in symmetric zero-sum games. In International Conference on Machine Learning. PMLR,
+434–443.
+[4] Christopher Berner, Greg Brockman, Brooke Chan, Vicki Cheung, Przemyslaw
+Debiak, Christy Dennison, David Farhi, Quirin Fischer, Shariq Hashme, Chris
+Hesse, et al. 2019. Dota 2 with large scale deep reinforcement learning. arXiv
+preprint arXiv:1912.06680 (2019).
+[5] Daniel S Bernstein, Robert Givan, Neil Immerman, and Shlomo Zilberstein. 2002.
+The complexity of decentralized control of Markov decision processes. Mathematics of operations research 27, 4 (2002), 819–840.
+[6] Wenze Chen, Shiyu Huang, Yuan Chiang, Ting Chen, and Jun Zhu. 2022. DGPO:
+Discovering Multiple Strategies with Diversity-Guided Policy Optimization. arXiv
+preprint arXiv:2207.05631 (2022).
+[7] Karl Cobbe, Chris Hesse, Jacob Hilton, and John Schulman. 2020. Leveraging
+procedural generation to benchmark reinforcement learning. In International
+conference on machine learning. PMLR, 2048–2056.
+[8] Wojciech M Czarnecki, Gauthier Gidel, Brendan Tracey, Karl Tuyls, Shayegan
+Omidshafiei, David Balduzzi, and Max Jaderberg. 2020. Real world games look
+like spinning tops. Advances in Neural Information Processing Systems 33 (2020),
+17443–17454.
+[9] Adrien Ecoffet, Joost Huizinga, Joel Lehman, Kenneth O Stanley, and Jeff Clune.
+2021. First return, then explore. Nature 590, 7847 (2021), 580–586.
+[10] Lei Feng, Yuxuan Xie, Bing Liu, and Shuyan Wang. 2022. Multi-Level Credit Assignment for Cooperative Multi-Agent Reinforcement Learning. Applied Sciences
+12, 14 (2022), 6938.
+[11] Jakob Foerster, Gregory Farquhar, Triantafyllos Afouras, Nantas Nardelli, and Shimon Whiteson. 2018. Counterfactual multi-agent policy gradients. In Proceedings
+of the AAAI conference on artificial intelligence, Vol. 32.
+[12] Wei Fu, Chao Yu, Zelai Xu, Jiaqi Yang, and Yi Wu. 2022. Revisiting some common
+practices in cooperative multi-agent reinforcement learning. arXiv preprint
+arXiv:2206.07505 (2022).
+[13] Yiming Gao, Bei Shi, Xueying Du, Liang Wang, Guangwei Chen, Zhenjie Lian,
+Fuhao Qiu, Guoan Han, Weixuan Wang, Deheng Ye, et al. 2021. Learning Diverse
+Policies in MOBA Games via Macro-Goals. Advances in Neural Information
+Processing Systems 34 (2021), 16171–16182.
+[14] Google. 2020. Google Research Football Competition 2020. https://www.kaggle.
+com/c/google-football.
+[15] Yang Guan, Minghuan Liu, Weijun Hong, Weinan Zhang, Fei Fang, Guangjun
+Zeng, and Yue Lin. 2022. PerfectDou: Dominating DouDizhu with Perfect Information Distillation. arXiv preprint arXiv:2203.16406 (2022).
+[16] Johannes Heinrich, Marc Lanctot, and David Silver. 2015. Fictitious self-play in
+extensive-form games. In International conference on machine learning. PMLR,
+805–813.
+[17] Ralf Herbrich, Tom Minka, and Thore Graepel. 2006. Trueskill™: A Bayesian
+skill rating system. In Proceedings of the 19th international conference on neural
+information processing systems. 569–576.
+[18] Sepp Hochreiter and Jürgen Schmidhuber. 1997. Long short-term memory. Neural
+computation 9, 8 (1997), 1735–1780.
+[19] Shiyu Huang, Wenze Chen, Longfei Zhang, Ziyang Li, Fengming Zhu, Deheng
+Ye, Ting Chen, and Jun Zhu. 2021. TiKick: Towards Playing Multi-agent Football
+Full Games from Single-agent Demonstrations. arXiv preprint arXiv:2110.04507
+(2021).
+[20] Shiyu Huang, Hang Su, Jun Zhu, and Ting Chen. 2019. Combo-Action: Training
+Agent For FPS Game with Auxiliary Tasks. AAAI.
+[21] JiDi. 2022. JiDi Olympics Football. https://github.com/jidiai/ai_lib/blob/master/
+env/olympics_football.py.
+[22] Shivaram Kalyanakrishnan, Yaxin Liu, and Peter Stone. 2007. Half field offense
+in RoboCup soccer: A multiagent reinforcement learning case study. In RoboCup
+2006: Robot Soccer World Cup X 10. Springer, 72–85.
+[23] Steven Kapturowski, Víctor Campos, Ray Jiang, Nemanja Rakićević, Hado van
+Hasselt, Charles Blundell, and Adrià Puigdomènech Badia. 2022. Human-level
+Atari 200x faster. arXiv preprint arXiv:2209.07550 (2022).
+[24] Steven Kapturowski, Georg Ostrovski, John Quan, Remi Munos, and Will Dabney.
+2018. Recurrent experience replay in distributed reinforcement learning. In
+International conference on learning representations.
+[25] Michał Kempka, Marek Wydmuch, Grzegorz Runc, Jakub Toczek, and Wojciech
+Jaśkowski. 2016. Vizdoom: A doom-based ai research platform for visual reinforcement learning. In 2016 IEEE Conference on Computational Intelligence and
+Games (CIG). IEEE, 1–8.
+
+[26] Diederik P Kingma and Jimmy Ba. 2014. Adam: A method for stochastic optimization. arXiv preprint arXiv:1412.6980 (2014).
+[27] Hiroaki Kitano, Minoru Asada, Yasuo Kuniyoshi, Itsuki Noda, and Eiichi Osawa. 1997. Robocup: The robot world cup initiative. In Proceedings of the first
+international conference on Autonomous agents. 340–347.
+[28] Vijay Konda and John Tsitsiklis. 1999. Actor-critic algorithms. Advances in neural
+information processing systems 12 (1999).
+[29] Karol Kurach, Anton Raichuk, Piotr Stanczyk, Michal Zajkac, Olivier Bachem,
+Lasse Espeholt, Carlos Riquelme, Damien Vincent, Marcin Michalski, Olivier
+Bousquet, et al. 2019. Google research football: A novel reinforcement learning
+environment. arXiv preprint arXiv:1907.11180 (2019).
+[30] Marc Lanctot, Vinicius Zambaldi, Audrunas Gruslys, Angeliki Lazaridou, Karl
+Tuyls, Julien Pérolat, David Silver, and Thore Graepel. 2017. A unified gametheoretic approach to multiagent reinforcement learning. Advances in neural
+information processing systems 30 (2017).
+[31] Chenghao Li, Chengjie Wu, Tonghan Wang, Jun Yang, Qianchuan Zhao, and
+Chongjie Zhang. 2021. Celebrating Diversity in Shared Multi-Agent Reinforcement Learning. arXiv preprint arXiv:2106.02195 (2021).
+[32] Siqi Liu, Guy Lever, Josh Merel, Saran Tunyasuvunakool, Nicolas Heess, and
+Thore Graepel. 2019. Emergent coordination through competition. arXiv preprint
+arXiv:1902.07151 (2019).
+[33] Siqi Liu, Guy Lever, Zhe Wang, Josh Merel, SM Eslami, Daniel Hennes, Wojciech M
+Czarnecki, Yuval Tassa, Shayegan Omidshafiei, Abbas Abdolmaleki, et al. 2021.
+From Motor Control to Team Play in Simulated Humanoid Football. arXiv preprint
+arXiv:2105.12196 (2021).
+[34] Siqi Liu, Luke Marris, Daniel Hennes, Josh Merel, Nicolas Heess, and Thore Graepel. 2022. NeuPL: Neural Population Learning. arXiv preprint arXiv:2202.07415
+(2022).
+[35] Xiangyu Liu, Hangtian Jia, Ying Wen, Yaodong Yang, Yujing Hu, Yingfeng Chen,
+Changjie Fan, and Zhipeng Hu. 2021. Unifying behavioral and response diversity
+for open-ended learning in zero-sum games. arXiv preprint arXiv:2106.04958
+(2021).
+[36] Ryan Lowe, Yi I Wu, Aviv Tamar, Jean Harb, OpenAI Pieter Abbeel, and Igor
+Mordatch. 2017. Multi-agent actor-critic for mixed cooperative-competitive
+environments. Advances in neural information processing systems 30 (2017).
+[37] Felipe B. Martins, Mateus G. Machado, Hansenclever F. Bassani, Pedro
+H. M. Braga, and Edna S. Barros. 2021. rSoccer: A Framework for Studying Reinforcement Learning in Small and Very Small Size Robot Soccer.
+arXiv:2106.12895 [cs.LG]
+[38] Volodymyr Mnih, Koray Kavukcuoglu, David Silver, Andrei A Rusu, Joel Veness,
+Marc G Bellemare, Alex Graves, Martin Riedmiller, Andreas K Fidjeland, Georg
+Ostrovski, et al. 2015. Human-level control through deep reinforcement learning.
+Nature 518, 7540 (2015), 529.
+[39] Andrew Y Ng, Daishi Harada, and Stuart Russell. 1999. Policy invariance under
+reward transformations: Theory and application to reward shaping. In Icml,
+Vol. 99. 278–287.
+[40] NVIDIA. 2016. NCCL. https://github.com/NVIDIA/nccl.
+[41] Jack Parker-Holder, Aldo Pacchiano, Krzysztof M Choromanski, and Stephen J
+Roberts. 2020. Effective diversity in population based reinforcement learning.
+Advances in Neural Information Processing Systems 33 (2020), 18050–18062.
+[42] Adam Paszke, Sam Gross, Francisco Massa, Adam Lerer, James Bradbury, Gregory
+Chanan, Trevor Killeen, Zeming Lin, Natalia Gimelshein, Luca Antiga, et al. 2019.
+Pytorch: An imperative style, high-performance deep learning library. Advances
+in neural information processing systems 32 (2019), 8026–8037.
+[43] Tim Pearce and Jun Zhu. 2022. Counter-Strike Deathmatch with Large-Scale
+Behavioural Cloning. 2022 IEEE Conference on Games (CoG) (2022), 104–111.
+https://doi.org/10.1109/CoG51982.2022.9893617
+[44] Tabish Rashid, Mikayel Samvelyan, Christian Schroeder, Gregory Farquhar, Jakob
+Foerster, and Shimon Whiteson. 2018. Qmix: Monotonic value function factorisation for deep multi-agent reinforcement learning. In International Conference
+on Machine Learning. PMLR, 4295–4304.
+[45] Andrew M Saxe, James L McClelland, and Surya Ganguli. 2013. Exact solutions
+to the nonlinear dynamics of learning in deep linear neural networks. arXiv
+preprint arXiv:1312.6120 (2013).
+[46] John Schulman, Philipp Moritz, Sergey Levine, Michael Jordan, and Pieter Abbeel.
+2015. High-dimensional continuous control using generalized advantage estimation. arXiv preprint arXiv:1506.02438 (2015).
+[47] John Schulman, Filip Wolski, Prafulla Dhariwal, Alec Radford, and Oleg Klimov.
+2017. Proximal policy optimization algorithms. arXiv preprint arXiv:1707.06347
+(2017).
+[48] Ruggiero Seccia, Francesco Foglino, Matteo Leonetti, and Simone Sagratella. 2022.
+A novel optimization perspective to the problem of designing sequences of tasks
+in a reinforcement learning framework. Optimization and Engineering (2022),
+1–16.
+[49] David Silver, Aja Huang, Chris J Maddison, Arthur Guez, Laurent Sifre, George
+Van Den Driessche, Julian Schrittwieser, Ioannis Antonoglou, Veda Panneershelvam, Marc Lanctot, et al. 2016. Mastering the game of Go with deep neural
+networks and tree search. Nature 529, 7587 (2016), 484–489.
+
+[50] David Silver, Thomas Hubert, Julian Schrittwieser, Ioannis Antonoglou, Matthew
+Lai, Arthur Guez, Marc Lanctot, Laurent Sifre, Dharshan Kumaran, Thore Graepel,
+et al. 2017. Mastering chess and shogi by self-play with a general reinforcement
+learning algorithm. arXiv preprint arXiv:1712.01815 (2017).
+[51] David Silver, Thomas Hubert, Julian Schrittwieser, Ioannis Antonoglou, Matthew
+Lai, Arthur Guez, Marc Lanctot, Laurent Sifre, Dharshan Kumaran, Thore Graepel,
+et al. 2018. A general reinforcement learning algorithm that masters chess, shogi,
+and Go through self-play. Science 362, 6419 (2018), 1140–1144.
+[52] Kyunghwan Son, Daewoo Kim, Wan Ju Kang, David Earl Hostallero, and Yung
+Yi. 2019. Qtran: Learning to factorize with transformation for cooperative multiagent reinforcement learning. In International Conference on Machine Learning.
+PMLR, 5887–5896.
+[53] Peter Stone, Richard S Sutton, and Gregory Kuhlmann. 2005. Reinforcement
+learning for robocup soccer keepaway. Adaptive Behavior 13, 3 (2005), 165–188.
+[54] Mingfei Sun, Sam Devlin, Jacob Beck, Katja Hofmann, and Shimon Whiteson. 2022.
+Monotonic Improvement Guarantees under Non-stationarity for Decentralized
+PPO. arXiv preprint arXiv:2202.00082 (2022).
+[55] Peter Sunehag, Guy Lever, Audrunas Gruslys, Wojciech Marian Czarnecki, Vinicius Zambaldi, Max Jaderberg, Marc Lanctot, Nicolas Sonnerat, Joel Z Leibo, Karl
+Tuyls, et al. 2017. Value-decomposition networks for cooperative multi-agent
+learning. arXiv preprint arXiv:1706.05296 (2017).
+[56] Adrien Ali Taiga, William Fedus, Marlos C Machado, Aaron Courville, and Marc G
+Bellemare. 2019. On bonus based exploration methods in the arcade learning
+environment. In International Conference on Learning Representations.
+[57] Oriol Vinyals, Igor Babuschkin, Wojciech M Czarnecki, Michaël Mathieu, Andrew Dudzik, Junyoung Chung, David H Choi, Richard Powell, Timo Ewalds,
+Petko Georgiev, et al. 2019. Grandmaster level in StarCraft II using multi-agent
+reinforcement learning. Nature 575, 7782 (2019), 350–354.
+[58] w9PcJLyb. 2020. Solution ranked 15th in Kaggle Football Competition. https:
+//github.com/w9PcJLyb/GFootball.
+[59] Jianhao Wang, Zhizhou Ren, Terry Liu, Yang Yu, and Chongjie Zhang. 2020.
+Qplex: Duplex dueling multi-agent q-learning. arXiv preprint arXiv:2008.01062
+(2020).
+[60] Li Wang, Yupeng Zhang, Yujing Hu, Weixun Wang, Chongjie Zhang, Yang Gao,
+Jianye Hao, Tangjie Lv, and Changjie Fan. 2022. Individual Reward Assisted
+Multi-Agent Reinforcement Learning. In International Conference on Machine
+Learning. PMLR, 23417–23432.
+[61] Rose E Wang, Sarah A Wu, James A Evans, Joshua B Tenenbaum, David C Parkes,
+and Max Kleiman-Weiner. 2020. Too many cooks: Coordinating multi-agent
+collaboration through inverse planning. (2020).
+[62] Tonghan Wang, Tarun Gupta, Anuj Mahajan, Bei Peng, Shimon Whiteson, and
+Chongjie Zhang. 2020. RODE: Learning Roles to Decompose Multi-Agent Tasks.
+arXiv preprint arXiv:2010.01523 (2020).
+[63] Muning Wen, Jakub Grudzien Kuba, Runji Lin, Weinan Zhang, Ying Wen, Jun
+Wang, and Yaodong Yang. 2022. Multi-Agent Reinforcement Learning is a Sequence Modeling Problem. arXiv preprint arXiv:2205.14953 (2022).
+[64] Yuxin Wu and Yuandong Tian. 2016. Training agent for first-person shooter
+game with actor-critic curriculum learning. (2016).
+[65] Deheng Ye, Guibin Chen, Wen Zhang, Sheng Chen, Bo Yuan, Bo Liu, Jia Chen,
+Zhao Liu, Fuhao Qiu, Hongsheng Yu, et al. 2020. Towards playing full moba games
+with deep reinforcement learning. Advances in Neural Information Processing
+Systems 33 (2020), 621–632.
+[66] Chao Yu, Akash Velu, Eugene Vinitsky, Yu Wang, Alexandre Bayen, and Yi Wu.
+2021. The Surprising Effectiveness of MAPPO in Cooperative, Multi-Agent Games.
+arXiv preprint arXiv:2103.01955 (2021).
+[67] Daochen Zha, Jingru Xie, Wenye Ma, Sheng Zhang, Xiangru Lian, Xia Hu, and
+Ji Liu. 2021. Douzero: Mastering doudizhu with self-play deep reinforcement
+learning. In International Conference on Machine Learning. PMLR, 12333–12344.
+[68] Tianjun Zhang, Huazhe Xu, Xiaolong Wang, Yi Wu, Kurt Keutzer, Joseph E
+Gonzalez, and Yuandong Tian. 2020. BeBold: Exploration Beyond the Boundary
+of Explored Regions. arXiv preprint arXiv:2012.08621 (2020).
+[69] Nianzhao Zheng, Jialong Li, Zhenyu Mao, and Kenji Tei. 2022. From Local to
+Global: A Curriculum Learning Approach for Reinforcement Learning-based
+Traffic Signal Control. In 2022 IEEE 2nd International Conference on Software
+Engineering and Artificial Intelligence (SEAI). IEEE, 253–258.
+[70] Meng Zhou, Ziyu Liu, Pengwei Sui, Yixuan Li, and Yuk Ying Chung. 2020. Learning implicit credit assignment for cooperative multi-agent reinforcement learning.
+Advances in Neural Information Processing Systems 33 (2020), 11853–11864.
+[71] Fengming Zhu Ziyang Li, Kaiwen Zhu. 2020. WeKick. https://www.kaggle.com/
+c/google-football/discussion/202232.
+
+TiZero Appendix
+
+1
+
+2
+3
+
+A
+
+TiZero Visualizations
+
+In this section, we visualize some tactics learned by TiZero. The video of below screen shots can be
+found at: https://www.youtube.com/watch?v=U9REh0otmVU.
+
+Figure 1: Quick Counter-attack. The yellow players under TiZero’s control move the ball quickly
+forward with two successful passes. This sets up the the yellow forward player to outrun the blue
+defenders and score a goal.
+
+Figure 2: Offside Trap. TiZero arranges all defenders in a line high up the pitch. When the opposing
+blue player passes the ball forward, they are ruled offside, and the yellow team is awarded the ball.
+
+Figure 3: Attacking Long-Ball. TiZero utilizes the long-pass action to clear the ball over the
+opposition’s heads for a fast attack. The forward player precisely times their run to avoid being called
+offside.
+
+2
+
+Figure 4: Defensive Clearance. TiZero clears the ball when in threatening positions (here under
+pressure from a blue attack), by making a long-pass up the pitch. Note also that TiZero leaves a
+single forward player high up the pitch, while committing the majority of the team to defense. This is
+a common strategy in real-world football.
+
+Figure 5: Pass-and-Move. TiZero can breakthrough the opponents’ midfield and defense through
+highly coordinated passing and timing of runs.
+
+3
+
+Figure 6: Crossing from Wings. TiZero agents take a throw-in followed by a long cross to create a
+chance for the striker running into the penalty box.
+
+4
+
+4
+
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+
+B
+
+Curriculum Design
+
+To relieve the problem of sparse reward when training GFootball agent, we design a curriculum
+self-play mechanism, in which agents are trained on a sequence of progressively more difficult
+scenarios, where the opponent is a copy of the agent from the previous difficulty-level scenario. We
+design ten difficulty levels by configuring the GFootball environment settings. The difficulty level is
+determined by two aspects; 1) The strength of opponent players, which can be varied from 0 to 1,
+with values closer to 1 meaning players are quicker and have better stamina. 2) The initial positions of
+players and the ball. For example, players can be set in positions closer to the opponent’s goal. At the
+beginning of training, agents are initialized with random weights, and learn on the lowest difficulty
+scenario (lowest opponent strength and positioned closest to the goal). This allows agents to receive
+denser rewards that encourage basic shooting and passing behaviors. When agent performance meets
+some threshold in the current scenario, the difficulty level automatically increases. We illustrate the
+scenarios of different difficulty levels below.
+
+Figure 7: Difficulty level 1. This is the initial and easiest difficulty level for the yellow team. The
+players of the yellow team are set in positions close to the opponent’s goal and the ball is also set in
+position closer to the opponent’s goal. It is straightforward for the yellow team to learn how to score
+a goal.
+
+5
+
+Figure 8: Difficulty level 5. When the agents can handle easy situations, the difficulty level is slightly
+increased. Players of yellow team are set in positions farther from the opponent’s goal, along with the
+ball. In this situation, agents must learn longer-term planning to beat the goal keeper and score a goal.
+
+Figure 9: Difficulty level 10. This is the most difficult level. Agents must compete with the whole
+opponent team. This encourages more advanced tactics and team cooperation to score.
+
+6
+
+17
+
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+
+C
+
+Challenge & Generalise Self-play
+
+To improve performance against a range of opponents, we design an algorithm that produces a
+monotonically-improving sequence of policies. This consists of two steps:
+1) Challenge Self-play. Current agents play against the most recently saved agents with probability
+of 80%, and play against older versions with probability of 20%. The main purpose of this step
+is to ensure the current system can defeat the strongest agents seen so far. When the winning rate
+of current training agent reaches 0.8, the training process will move to next step—the Generalise
+Self-play.
+2) Generalise Self-play. Current agents play against the whole opponent pool, sampling opponents
+according to their strength as follows. Denote the opponent pool M. Let i ̸∈ M be the current
+training agent, j ∈ M all other agents in pool, and p(i, j) be the probability that agent i defeats agent
+j. We sample model j to play train against with probability:
+psample (j) = P
+
+fhard (p(i, j))
+,
+m∈M fhard (p(i, m))
+
+(1)
+
+35
+
+where fhard (x) = (1 − x)2 . This sampling strategy focuses our agents training on opponents it is less
+likely to win against. Hence, it maximizes the performance over all existing opponents. Prioritized
+fictitious self-play addresses the non-transitivity dilemma and improves the robustness of agents [4].
+Once agents perform well on this step, they are themselves added to the opponent pool for future
+versions to train against. In the GFootball, when the average winning rate over the whole opponent
+pool exceeds 0.8, a new opponent will be saved. The whole process of the our self-play strategy can
+be found in Algorithm 1
+
+36
+
+D
+
+29
+30
+31
+32
+33
+34
+
+37
+38
+39
+40
+41
+42
+43
+
+Network Architecture of TiZero
+
+For the policy network, we use six separate MLPs with two (one for the "player ID") fully-connected
+layers to separately encode each part of the observation. The hidden size of these MLP layers are set
+to 64. These extracted hidden features are then concatenated together and processed by an LSTM
+layer [1], which provides the agent with memory. The hidden size of the LSTM layer is set to 256. All
+hidden layers have layer normalization and ReLU non-linearities. We use the orthogonal matrix [3]
+for parameter initialization and the Adam optimizer [2]. To accelerate learning, we mask out any
+illegal actions by setting their probability of selection to zero. The action output layer is a Softmax
+layer with a 19-dimension vector. Figure 10 shows the overall policy network architecture:
+
+Figure 10: TiZero’s policy network architecture. Six types of information are required as input:
+the controlled player information, player ID, ball information, teammate information, opponent
+information and current match information. We use six separate MLPs with two (one for the "player
+ID") fully-connected layers to encode each part of the observation. An LSTM layer is used to
+incorporate historic observations. The policy outputs a softmax distribution over the 19 discrete
+actions.
+44
+45
+46
+
+For the value network, we use five separate MLPs with two fully-connected layers to separately
+encode each part of the observation. The hidden size of these MLP layers are set to 64. These
+7
+
+47
+48
+49
+
+extracted hidden features are then concatenated together and processed by an LSTM layer, which
+provides the agent with memory. The hidden size of the LSTM layer is set to 256. All hidden layers
+have layer normalization and ReLU non-linearities. We use the orthogonal matrix for parameter
+initialization and the Adam optimizer. Figure 11 shows the overall value network architecture:
+
+Figure 11: TiZero’s value network architecture. Five types of information are required as input: ball
+information, information of ball holder, teammate information, opponent information and current
+match information. We use five separate MLPs with two fully-connected layers to encode each part
+of the observation. An LSTM layer is used to incorporate historic observations. The value network is
+trained with Mean Square Error (MSE) loss.
+50
+
+51
+
+52
+53
+54
+
+E
+
+Public Leaderboard of GFootball Systems
+
+To verify our system independently, we also submitted our best TiZero system to a public evaluation
+platform1 , which maintains a public leaderboard of GFootball systems. At present, TiZero ranks first
+with a score of 9.7 and win rate of 95.8%.
+
+Figure 12: Snapshot of public leaderboard of GFootball systems on JiDi platform.
+
+1
+
+JiDi AI Competition Platform: http://www.jidiai.cn/ranking_list?tab=34.
+The evaluation result was collected on October 28th, 2022.
+
+8
+
+55
+
+F
+
+Self-play Algorithm
+
+Algorithm 1: Self-play Strategy
+1 Initialize: Randomly initialized policy π0 , current policy index i ← 1, current policy πi ← π0 ,
+opponent pool M := {π0 }.
+2 Let: pwin (πi , P) be the winning rate of policy πi against an opponent set P.
+3 Stage 1: Curriculum Self-play:
+4
+Initialize: current difficulty level Ldiff ← 0, maximal difficulty level Lmax , winning rate
+threshold ηstage_1 .
+5
+Initialize: set environment difficulty to Ldiff .
+6
+while Ldiff < Lmax do
+7
+πi ← JRPO_Training(πi , πi−1 )
+8
+if pwin (πi , {πi−1 }) > ηstage_1 then
+9
+M ← M ∪ {πi }
+10
+i←i+1
+11
+Ldiff ← Ldiff + 1
+12
+Set environment difficulty to Ldiff .
+13
+end
+14
+end
+15 End Stage 1
+16 Stage 2: Challenge & Generalise Self-play:
+17
+Initialize: winning rate threshold ηstep_1 and ηstep_2 .
+18
+while Not Converged do
+19
+Step 1: Challenge Self-play:
+20
+for each episode do
+21
+Set opponent as most recent agent, πj = πi−1 , with 80% probability. Else sample
+πj ∼ {πk }k<(i−1) uniformly.
+22
+πi ← JRPO_Training(πi , πj )
+23
+if pwin (πi , {πi−1 }) > ηstep_1 then
+24
+Break
+25
+end
+26
+end
+27
+End Step 1
+28
+Step 2: Generalise Self-play:
+29
+for each episode do
+30
+Sample opponent policy πj from opponent pool M based on win rates, eq. 1.
+31
+πi ← JRPO_Training(πi , πj )
+32
+if pwin (πi , M) > ηstep_2 then
+33
+M ← M ∪ {πi }
+34
+i←i+1
+35
+Break
+36
+end
+37
+end
+38
+End Step 2
+39
+end
+40 End Stage 2
+
+9
+
+56
+
+G Environments
+
+57
+
+In this section, we will introduce each environment used in our experiments.
+
+58
+
+G.1 Overcooked
+
+59
+60
+
+Overcooked is a grid kitchen game in which agents cooperate to complete a series of tasks, such as
+finding vegetables, making soup and delivering food.
+
+Figure 13: Screen shots of Overcooked. From left to right: simple, unident, random1, random0.
+61
+62
+63
+64
+
+G.2 MPE
+MPE is a 2D world with multiple movable particles. Agents have to learn to cover all the landmarks
+while avoiding collisions. Agents are rewarded based on how far any agent is from each landmark.
+Agents are penalized if they collide with other agents.
+
+Figure 14: Screen shots of MPE. The blue particles are movable particles controlled by agents, and
+the black particles are the target landmarks which need to be covered by blue particles.
+
+10
+
+65
+
+G.3 Tic-Tac-Toe
+
+Figure 15: Screen shots of Tic-Tac-Toe. There are three ’X’s on the diagonal, thus the player who
+plays the ’X’ win the game.
+
+68
+
+In the Tic-Tac-Toe game, two players take turns placing marks on a three-by-three grid. Players win
+by placing three of their marks in a line. Our agent is a deep neural network with a 27-dimension
+state vector as input (O’s, X’s and blanks are one-hot encoded for the 9 cells)
+
+69
+
+G.4 Connect-Four
+
+66
+67
+
+Figure 16: Screen shots of Connect-Four. There are four ’O’s on the second column, thus the player
+who plays the ’O’ win the game.
+70
+71
+72
+
+In the Connect-Four game, two players take turns placing marks on a four-by-four grid. Players win
+by placing four of their marks in a line. Our agent is a deep neural network with a 48-dimension state
+vector as input (O’s, X’s and blanks are one-hot encoded for the 16 cells)
+
+11
+
+73
+
+74
+75
+76
+77
+78
+79
+80
+
+H Hyperparamters of GFootball and TiZero
+We train and evaluate TiZero on the full 11 vs. 11 game mode in GFootball. Each match lasts for five
+minutes, or 3, 000 timesteps (no extra time). The team with highest number of goals wins. Standard
+football rules are applied by the game, such as offside, penalty kicks and yellow/red cards. TiZero
+was trained over 45 days on a cluster with 800 CPUs and two NVIDIA A100 GPUs. The batch size
+for each GPU is set to 2, 150, 000, the hidden size of the LSTM layer is 256, and the discount factor
+γ is 0.999. We used the Adam optimizer with learning rate of 0.0001. More hyper-parameters are
+summarized as bellow:
+Hyper-Parameters
+recurrent data chunk length
+episode length
+game length
+max clipped value loss
+gradient clip norm
+GAE λ
+discount factor γ
+value loss
+huber δ
+number of LSTM layers
+RNN hidden state dim
+fc layer dim
+learning rate
+gain
+number of parallels for each actor rollout
+entropy coefficient
+ppo update number
+pass ball reward
+gather penalty
+out of boundary penalty
+hold ball reward
+
+Value
+25
+500
+3000
+0.2
+10.0
+0.995
+0.999
+huber loss
+10.0
+1
+256
+64
+1e-4
+0.01
+10
+0.01
+2
+0.05
+0.001
+0.001
+1e-4
+
+Table 1: Hyper-parameters used in TiZero.
+
+12
+
+81
+
+82
+83
+84
+
+I
+
+Hyperparameters of Multi-agent Reinforcement Learning
+
+In this section, we list the hyperparameters used in Overcooked and MPE. To evaluate MARL
+algorithms, we used a platform involves a 256-core CPU, 2TB RAM, and an NVIDIA A100 with
+80GB VRAM.
+Hyper-Parameters
+recurrent data chunk length
+episode length
+max clipped value loss
+gradient clip norm
+GAE λ
+discount factor γ
+value loss
+huber δ
+number of GRU layers
+RNN hidden state dim
+fc layer dim
+learning rate
+gain
+number of parallels for each actor rollout
+entropy coefficient
+ppo update number
+
+Value
+10
+400
+0.2
+10.0
+0.95
+0.99
+huber loss
+10.0
+1
+64
+64
+7e-4
+0.01
+128
+0.01
+10
+
+Table 2: Hyper-parameters used in Overcooked.
+
+Hyper-Parameters
+recurrent data chunk length
+episode length
+max clipped value loss
+gradient clip norm
+GAE λ
+discount factor γ
+value loss
+huber δ
+number of GRU layers
+RNN hidden state dim
+fc layer dim
+learning rate
+gain
+number of parallels for each actor rollout
+entropy coefficient
+ppo update number
+
+Value
+10
+25
+0.2
+10.0
+0.95
+0.99
+huber loss
+10.0
+1
+64
+64
+7e-4
+0.01
+100
+0.01
+10
+
+Table 3: Hyper-parameters used in MPE.
+
+13
+
+85
+
+86
+87
+88
+
+J
+
+Hyperparameters of Self-play Strategies
+
+In this section, we list the hyperparameters used in Tic-Tac-Toe and Connect-Four. To evaluate
+self-play strategies, we used a platform involves a 256-core CPU, 2TB RAM, and an NVIDIA A100
+with 80GB VRAM.
+Hyper-Parameters
+recurrent data chunk length
+episode length
+max clipped value loss
+gradient clip norm
+GAE λ
+discount factor γ
+value loss
+huber δ
+number of GRU layers
+RNN hidden state dim
+fc layer dim
+learning rate
+gain
+number of parallels for each actor rollout
+entropy coefficient
+ppo update number
+
+Value
+1
+20
+0.2
+10.0
+0.995
+0.999
+huber loss
+10.0
+1
+32
+32
+7e-4
+0.01
+200
+0.05
+5
+
+Table 4: Hyper-parameters used in Tic-Tac-Toe.
+
+Hyper-Parameters
+recurrent data chunk length
+episode length
+max clipped value loss
+gradient clip norm
+GAE λ
+discount factor γ
+value loss
+huber δ
+number of GRU layers
+RNN hidden state dim
+fc layer dim
+learning rate
+gain
+number of parallels for each actor rollout
+entropy coefficient
+ppo update number
+
+Value
+1
+20
+0.2
+10.0
+0.995
+0.999
+huber loss
+10.0
+1
+32
+32
+7e-4
+0.01
+200
+0.05
+5
+
+Table 5: Hyper-parameters used in Connect-Four.
+
+14
+
+89
+
+K Experiments on Multi-agent Reinforcement Learning
+
+90
+
+In this section, we add more experimental results of multi-agent algorithms on Overcooked and MPE.
+
+6
+
+6.65
+
+JRPO
+MAPPO
+
+5.27
+
+5
+4
+
+3.25
+
+3
+2
+1
+
+200
+GPU Consumption (GB)
+
+GPU Consumption (GB)
+
+7
+
+2.14
+1.80
+1.63
+1.55
+1.45
+1.211.24
+
+MPE-3
+
+195
+
+JRPO
+MAPPO
+
+150
+121
+
+100
+50
+0
+
+MPE-10 MPE-15 MPE-20 Overcooked
+
+GFootball
+
+(a)
+
+(b)
+
+Figure 17: (a) & (b) GPU memory consumption of different methods. The lower the better. Results
+show that JRPO consumes less GPU memory than MAPPO.
+
+4000
+FPS
+
+3000
+2000
+
+4704
+
+JRPO
+MAPPO
+MAT
+
+4274
+
+2921
+
+3250
+
+3616
+2690
+
+2420
+
+2664
+
+1930
+
+1000
+0
+
+MPE-3
+
+Overcooked
+
+GFootball
+
+Figure 18: Training speed (frames per second, FPS) of different methods. Results show that JRPO
+trains 1.2× quicker on MPE, 1.4× quicker on Overcooked, 1.6× quicker on GFootball.
+
+15
+
+91
+
+92
+93
+
+L
+
+Self-play Experiments
+
+We visualize state embeddings of policies produced by different self-play strategies in Figure 19, and
+points are colored according to different strategies.
+
+Challenge & Generalize Self-Play
+Generalise Self-play
+
+Challenge Self-play
+Newest
+
+Figure 19: State t-SNE embeddings of policies produced by different self-play strategies.
+
+16
+
+94
+
+95
+96
+97
+98
+99
+
+M
+
+Observation Design
+
+In this section , we will describe the detailed observation design for TiZero. We split the agent
+observation into six parts, including the controlled player information, player ID, ball information,
+teammate information, opponent information and current match information. We also design a global
+state vector for the value-network with five parts, including ball information, information of ball
+holder, teammate information, opponent information and current match information.
+Table 6: Controlled player information: 87 dimensions.
+sticky actions
+current position
+current direction
+tired factor
+yellow card
+red card
+offside
+relative ball position
+distance to ball
+relative teammate positions
+distance to teammates
+relative opponent positions
+distance to opponents
+Table 7: Player ID: 11 dimensions.
+player ID
+Table 8: Ball information: 57 dimensions.
+ball position
+ball direction
+ball owned team
+ball rotation
+ball owned player
+current player information
+ball owned player position
+ball owned player direction
+relative position of ball owner
+distance to ball owner
+ball owner information
+
+17
+
+Table 9: Teammate information: 88 dimensions (this is also for value network).
+teammate positions
+teammate directions
+teammate tired factors
+teammate yellow cards
+teammate red cards
+teammate offside
+
+Table 10: Opponent information: 88 dimensions (this is also for value network).
+opponent positions
+opponent directions
+opponent tired factors
+opponent yellow cards
+opponent red cards
+opponent offside
+
+Table 11: Current match information: 9 dimensions (this is also for value network).
+game mode
+goal differences
+remaining steps
+
+Table 12: Ball information for value network: 12 dimensions.
+ball position
+ball direction
+ball rotation
+ball owned team
+
+Table 13: Ball owned player information for value network: 23 dimensions.
+ball owned player ID
+
+18
+
+100
+101
+102
+103
+104
+105
+106
+107
+108
+109
+
+References
+[1] Sepp Hochreiter and Jürgen Schmidhuber. Long short-term memory. Neural computation,
+9(8):1735–1780, 1997.
+[2] Diederik P Kingma and Jimmy Ba. Adam: A method for stochastic optimization. arXiv preprint
+arXiv:1412.6980, 2014.
+[3] Andrew M Saxe, James L McClelland, and Surya Ganguli. Exact solutions to the nonlinear
+dynamics of learning in deep linear neural networks. arXiv preprint arXiv:1312.6120, 2013.
+[4] Oriol Vinyals, Igor Babuschkin, Wojciech M Czarnecki, Michaël Mathieu, Andrew Dudzik, Junyoung Chung, David H Choi, Richard Powell, Timo Ewalds, Petko Georgiev, et al. Grandmaster
+level in starcraft ii using multi-agent reinforcement learning. Nature, 575(7782):350–354, 2019.
+
+19
+
+

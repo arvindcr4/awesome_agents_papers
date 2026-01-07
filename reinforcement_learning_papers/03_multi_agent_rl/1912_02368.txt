@@ -1,0 +1,1782 @@
+arXiv:1912.02368v3 [cs.LG] 17 Nov 2021
+
+Inter-Level Cooperation in
+Hierarchical Reinforcement Learning
+Abdul Rahman Kreidieh
+Glen Berseth
+Brandon Trabucco
+Samyak Parajuli
+Sergey Levine
+Alexandre M. Bayen
+
+aboudy@berkeley.edu
+gberseth@berkeley.edu
+btrabucco@berkeley.edu
+samyak.parajuli@berkeley.edu
+svlevine@eecs.berkeley.edu
+bayen@berkeley.edu
+
+University of California, Berkeley
+
+Abstract
+Hierarchies of temporally decoupled policies present a promising approach for enabling
+structured exploration in complex long-term planning problems. To fully achieve this
+approach an end-to-end training paradigm is needed. However, training these multi-level
+policies has had limited success due to challenges arising from interactions between the goalassigning and goal-achieving levels within a hierarchy. In this article, we consider the policy
+optimization process as a multi-agent process. This allows us to draw on connections between
+communication and cooperation in multi-agent RL, and demonstrate the benefits of increased
+cooperation between sub-policies on the training performance of the overall policy. We
+introduce a simple yet effective technique for inducing inter-level cooperation by modifying
+the objective function and subsequent gradients of higher-level policies. Experimental
+results on a wide variety of simulated robotics and traffic control tasks demonstrate that
+inducing cooperation results in stronger performing policies and increased sample efficiency
+on a set of difficult long time horizon tasks. We also find that goal-conditioned policies
+trained using our method display better transfer to new tasks, highlighting the benefits of
+our method in learning task-agnostic lower-level behaviors. Videos and code are available
+at: https://sites.google.com/berkeley.edu/cooperative-hrl.
+Keywords: Reinforcement learning, deep reinforcement learning, hierarchical reinforcement learning
+
+1. Introduction
+To solve interesting problems in the real world agents must be adept at planning and
+reasoning over long time horizons. For instance, in robot navigation and interaction tasks,
+agents must learn to compose lengthy sequences of actions to achieve long-term goals. In
+other environments, such as mixed-autonomy traffic control settings (Wu et al., 2017b;
+Vinitsky et al., 2018), exploration is delicate, as individual actions may not influence the
+flow of traffic until multiple timesteps in the future. RL has had limited success in solving
+long-horizon planning problems such as these without relying on task-specific reward shaping
+strategies that limit the performance of resulting policies (Wu et al., 2017a) or additional
+1
+
+Apple (+1)
+
+Bomb (−1)
+
+training iteration
+
+High-level goal
+
+Agent trajectory
+
+training iteration
+
+(a) Standard HRL
+
+(b) Cooperative HRL
+
+Figure 1: Here the learned goal proposal distributions are shown for normal HRL and our method. Our
+agents develop more reasonable goal proposals that allow low-level policies to learn goal reaching skills quicker.
+The additional communication also allows the high level to better understand why proposed goals failed.
+
+task decomposition techniques that are not transferable to different tasks (Sutton et al., 1999;
+Kulkarni et al., 2016; Peng et al., 2017; Florensa et al., 2017).
+Concurrent learning methods in hierarchical RL can improve the quality of learned
+hierarchical policies by flexibly updating both goal-assignment and goal-reaching policies to
+be better adapted to a given task (Levy et al., 2017; Nachum et al., 2018; Li et al., 2019).
+The process of simultaneously learning diverse skills and exploiting these skills to achieve a
+high-level objective, however, is an unstable and non-stationary optimization procedure that
+can be difficult to solve in practice. In particular, at the early stages of training lower-level
+policies are unable to reach most goals assigned to them by a higher-level policy, and instead
+must learn to do so as training progresses. This inability of the lower-level to be able to
+reach assigned goals exacerbates the credit assignment problem from the perspective of the
+higher-level policy. It causes the higher-level policy to be unable to identify whether a specific
+goal under-performed as a result of the choice of goal or the lower-level policy’s inability to
+achieve it. In practice, this results in the highly varying or random goal assignment strategies
+in Figure 1a that require a large number of samples (Li et al., 2019) and some degree of
+feature engineering (Nachum et al., 2018) to optimize over.
+In this work, we show how adding cooperation between internal levels within a hierarchy1 ,
+and subsequently introduce mechanisms that promote variable degrees of cooperation in
+HRL. Our method named Cooperative HiErarchical RL, CHER, improves cooperation by
+encouraging higher-level policies to specify goals that lower-level policies can succeed at,
+thereby disambiguating under-performing goals from goals that were unachievable by the
+lower-level policy. In Figure 1(b) we show how CHER changes the high-level goal distributions
+to be within the capabilities of the agent. This approach results in more informative
+communication between the policies. The distribution of goals or tasks the high-level will
+command of the lower level expands over time as the lower-level policy’s capabilities increase.
+A key finding in this article is that regulating the degree of cooperation between HRL
+layers can significantly impact the learned behavior by the policy. Too little cooperation may
+introduce no change to the goal-assignment behaviors and subsequent learning, while excessive
+cooperation may disincentivize an agent from making forward progress. We accordingly
+introduce a constrained optimization that serves to regulate the degree of cooperation
+between layers and ground the notion of cooperation in HRL to quantitative metrics within
+1. The connection of this problem to cooperation in multiagent RL is discussed in Section 3.1.
+
+2
+
+the lower-level policy. This results in a general and stable method for optimizing hierarchical
+policies concurrently.
+We demonstrate the performance of CHER on a collection of standard HRL environments
+and two previously unexplored mixed autonomy traffic control tasks. For the former set
+of problems, we find that our method can achieve better performance compared to recent
+sample efficient off-policy and HRL algorithms. For the mixed autonomy traffic tasks, the
+previous HRL methods struggle while our approach subverts overestimation biases that
+emerge in the early stages of training, thereby allowing the controlled (autonomous) vehicles
+to regulate their speeds around the optimal driving of the task as opposed to continuously
+attempting to drive as fast as possible. When transferring lower-level policies between tasks,
+we find that policies learned via inter-level cooperation perform significantly better in new
+tasks without the need for additional training. This highlights the benefit of our method in
+learning generalizable policies.
+
+2. Background
+RL problems are generally studied as a Markov decision problem (MDP) (Bellman, 1957),
+defined by the tuple: (S, A, P, r, ρ0 , γ, T ), where S ⊆ Rn is an n-dimensional state space,
+A ⊆ Rm an m-dimensional action space, P : S × A × S → R+ a transition probability
+function, r : S → R a reward function, ρ0 : S → R+ an initial state distribution, γ ∈ (0, 1] a
+discount factor, and T a time horizon.
+In a MDP, an agent is in a state st ∈ S in the environment and interacts with this
+environment by performing actions at ∈ A. The agent’s actions are defined by a policy
+πθ : S × A → R+ parametrized by θ. The objective
+of ithe agent is to learn an optimal policy:
+hP
+T
+∗
+i
+θ := argmaxθ J(πθ ), where J(πθ ) = Ep∼πθ
+i=0 γ ri is the expected discounted return.
+2.1 Hierarchical reinforcement learning
+In HRL, the policy is decomposed into a high-level policy that optimizes the environment
+task reward, and a low-level policy that is conditioned on latent goals from the high-level
+and executes actions within the environment. The high-level controller is decoupled from
+the true MDP by operating at a lower temporal resolution and passing goals (Dayan and
+Hinton, 1993) or options (Sutton et al., 1999) to the lower-level. This can reduce the credit
+assignment problem from the perspective of the high-level controller, and allows the low-level
+policy to produce action primitives that support short time horizon tasks as well (Sutton
+et al., 1999).
+Several HRL frameworks have been proposed to facilitate and/or encourage the decomposition of decision-making and execution during training (Dayan and Hinton, 1993; Sutton
+et al., 1999; Parr and Russell, 1998; Dietterich, 2000). In this article, we consider a two-level
+goal-conditioned arrangement (Peng et al., 2017; Vezhnevets et al., 2017; Nachum et al.,
+2018; Nasiriany et al., 2019) (see Figure 2). This network consists of a high-level, or manager,
+policy πm that computes and outputs goals gt ∼ πm (st ) every k time steps, and a low-level,
+or worker, policy πw that takes as inputs the current state and the assigned goals and is
+encouraged to perform actions at ∼ πw (st , gt ) that satisfy these goals via an intrinsic reward
+function rw (st , gt , st+1 ) (see Appendix E.4).
+3
+
+πm
+
+gt
+πw
+
+st
+
+current speed
+
+···
+
+at
+
+πw
+
+···
+
+πw
+
+st+1
+
+at+1
+
+st+k
+
+goal
+at+k
+
+Environment
+Figure 2: An illustration of the studied hierarchical model. Left: A manager network πm issues commands
+(or goals) gt over k consecutive time steps to a worker πw . The worker then performs environment actions at
+to accomplish these goals. Top/right: The commands issued by the manager denote desired states for the
+worker to traverse. For the AV control tasks, we define the goal as the desired speeds for each AV. Moreover,
+for agent navigation tasks, the goals are defined as the desired position and joint angles of the agent.
+
+2.2 Hierarchical policy optimization
+We consider a concurrent training procedure for the manager and worker policies. In this
+setting, the manager receives a reward based on the original environmental reward function:
+rm (st ). The objective function from the perspective of the manager is then:
+hP
+i
+T /k  t
+Jm = Es∼pπ
+(1)
+γ
+r
+(s
+)
+m
+t
+t=0
+Conversely, the worker policy is motivated to follow the goals set by the manager via an
+intrinsic reward rw (st , gt , st+1 ) separate from the external reward. The objective function
+from the perspective of the worker is then:
+hP
+i
+k
+t r (s , g , π (s , g ))
+Jw = Es∼pπ
+γ
+(2)
+w
+t
+t
+w
+t
+t
+t=0
+Notably, no gradients are shared between the manager and worker policies. As discussed
+in Section 1 and depicted in Figure 1, the absence of such feedback often results in the
+formation of non-cooperative goal-assignment behaviors that strain the learning process.
+
+3. Cooperative hierarchical reinforcement learning
+CHER promotes cooperation by propagating losses that arise from random or unachievable
+goal-assignment strategies. As part of this algorithm, we also present a mechanism to
+optimize the level of cooperation and ground the notion of cooperation in HRL to measurable
+variables.
+3.1 Promoting cooperation via loss-sharing
+Tampuu et al. (2017) explored the effects of reward (or loss) sharing between agents on
+the emergence of cooperative and competitive in multiagent two-player games. Their
+study highlights two potential benefits of loss-sharing in multiagent systems: 1) emerged
+cooperative behaviors are less aggressive and more likely to emphasize improved interactions
+with neighboring agents, 2) these interactions reduce overestimation bias of the Q-function
+4
+
+from the perspective of each agent. We develop a method to gain similar benefits by using losssharing paradigms in goal-conditioned hierarchies. In particular, we focus on the emergence
+of collaborative behaviors from the perspective of goal-assignment and goal-achieving policies
+In line with prior work, we promote the emergence of cooperative behaviors by incorporating
+a weighted form of the worker’s expected return to the original manager objective Jm . The
+manager’s new expected return is:
+0
+Jm
+= Jm + λJw
+
+(3)
+
+where λ is a weighting term that controls the level of cooperation the manager has with the
+worker.
+In practice, we find that this addition to the objective serves to promote cooperation
+by aligning goal-assignment actions by the manager with achievable trajectories by the
+goal-achieving worker. This serves as a soft constraint to the manager policy: when presented
+with goals that perform similarly, the manager tends towards goals that more closely match
+the worker states. The degree to which the policy tends toward achievable states is dictated
+by the λ term. The choice of this parameter accordingly can have a significant effect on
+learned goals. For large or infinite values of λ, for instance, this cooperative term can
+eliminate exploration by assigning goals that match the worker’s current state and prevent
+forward movement (this is highlighted in Section 5.4). In Section 3.3 we detail how we
+mitigate this issue by dynamically controlling the level of cooperation online.
+3.2 Cooperative gradients via differentiable communication
+To compute the gradient of the additional weighted
+gt
+expected return through the parameters of the manπm
+···
+ager policy, we take inspiration from similar studies
+∇θm Jw
+in differentiable communication in MARL. The main
+· · · πw
+insight that enables the derivation of such a gradient
+at st+1 at+1 st+i at+i
+st
+is the notion that goal states gt from the perspecEnvironment
+tive of the worker policy are structurally similar to
+communication signals in multi-agent systems. As a Figure 3: An illustration of the policy gradient
+result, the gradients of the expected intrinsic returns procedure. To encourage cooperation, we incan be computed by replacing the goal term within troduce a gradient that propagates the losses
+of the worker policies through the manager.
+the reward function of the worker with the direct
+output from the manager’s policy. This is depicted
+in Figure 3. The updated gradient is defined in Theorem 1 below.
+Theorem 1 Define the goal gt provided to the input of the worker policy πw (st , gt ) as the
+direct output from the manager policy gt whose transition function is:
+(
+πm (st )
+if t mod k = 0
+gt (θm ) =
+(4)
+h(st−1 , gt−1 (θm ), st ) otherwise
+where h(·) is a fixed goal transition function between meta-periods (see Appendix E.4). Under
+this assumption, the solution to the deterministic policy gradient (Silver et al., 2014) of
+5
+
+Eq. (3) with respect to the manager’s parameters θm is:
+
+
+0
+∇θm Jm
+= Es∼pπ ∇a Qm (s, a)|a=πm (s) ∇θm πm (s)
+
+
++ λEs∼pπ ∇θm gt ∇g rw (st , g, πw (st , gt )) + πw (st , g)∇a Qw (st , gt , a)|a=πw (st ,gt )
+
+
+
+(5)
+
+g=gt
+
+where Qm (s, a) and Qw (s, g, a) are approximations for the expected environmental and intrinsic returns, respectively.
+Proof. See Appendix A.
+This new gradient consists of three terms. The first and third term computes the gradient
+of the critic policies Qm and Qw for the parameters θm , respectively. The second term
+computes the gradient of the worker-specific reward for the parameters θm . This reward is a
+design feature within the goal-conditioned RL formulation, however, any reward function
+for which the gradient can be explicitly computed can be used. We describe a practical
+algorithm for training a cooperative two-level hierarchy implementing this loss function in
+Algorithm 1.
+3.3 Cooperative HRL as constrained optimization
+In the previous sections, we introduced a framework for inducing and studying the effects
+of cooperation between internal agents within a hierarchy. The degree of cooperation is
+defined through a hyperparameter (λ), and if properly defined can greatly improve training
+performance in certain environments. The choice of λ, however, can be difficult to specify
+without a priori knowledge of the task it is assigned to. We accordingly wish to ground the
+choice of λ to measurable terms that can be reasoned and adjusted for. To that end, we
+observe that the cooperative λ term acts equivalently as a Lagrangian term in constrained
+optimization (Bertsekas, 2014) with the expected return for the lower-level policy serving as
+the constraint. Our formulation of the HRL problem can similarly be framed as a constrained
+optimization problem, denoted as:
+
+
+
+max Jm + min λδ − λ min Jw
+(6)
+πm
+
+πw
+
+λ≥0
+
+where δ is the desired expected discounted intrinsic returns. The derivation of this equation
+and practical implementations are provided in Appendix B.
+In practice, this updated form of the objective provides two meaningful benefits: 1) As
+discussed in Section 5.4, it introduces bounds for appropriate values of δ that can then be
+explored and tuned, and 2) for the more complex and previously unsolvable tasks, we find
+that this approach results in more stable learning and better performing policies.
+
+4. Related Work
+The topic explored in this article takes inspiration in part from studies of communication
+in multiagent reinforcement learning (MARL) (Thomas and Barto, 2011; Thomas, 2011;
+Sukhbaatar et al., 2016; Foerster et al., 2016). In MARL, communication channels are
+often shared among agents as a means of coordinating and influencing neighboring agents.
+Challenges emerge, however, as a result of the ambiguity of communication signals in the
+6
+
+early staging of training, with agents forced to coordinate between sending and interpreting
+messages (Mordatch and Abbeel, 2018; Eccles et al., 2019). Similar communication channels
+are present in the HRL domain, with higher-level policies communicating one-sided signals
+in the form of goals to lower-level policies. The difficulties associated with cooperation,
+accordingly, likely (and as we find here in fact do) persist under this setting. The work
+presented here serves to make connections between these two fields, and will hopefully
+motivate future work on unifying the challenges experienced in each.
+Our work is most motivated by the Differentiable Inter-Agent Learning (DIAL) method
+proposed by Foerster et al. (2016). Our work does not aim to learn an explicit communication
+channel; however, it is motivated by a similar principle - that letting gradients flow across
+agents results in richer feedback. Furthermore, we differ in the fact that we structure the
+problem as a hierarchical reinforcement learning problem in which agents are designed to
+solve dissimilar tasks. This disparity forces a more constrained and directed objective in
+which varying degrees of cooperation can be defined. This insight, we find, is important for
+ensuring that shared gradients can provide meaningful benefits to the hierarchical paradigm.
+Another prominent challenge in MARL is the notion of non-stationarity (Busoniu et al.,
+2006; Weinberg and Rosenschein, 2004; Foerster et al., 2017), whereby the continually changing
+nature of decision-making policies serve to destabilize training. This has been identified in
+previous studies on HRL, with techniques such as off-policy sample relabeling (Nachum et al.,
+2018) and hindsight (Levy et al., 2017) providing considerable improvements to training
+performance. Similarly, the method presented in this article focuses on non-stationary in
+HRL, with the manager constraining its search within the region of achievable goals by the
+worker. Unlike these methods, however, our approach additionally accounts for ambiguities
+in the credit assignment problem from the perspective of the manager. As we demonstrate
+in Section 5, this cooperation improves learning across a collection of complex and partially
+observable tasks with a high degree of stochasticity. These results suggest that multifaceted
+approaches to hierarchical learning, like the one proposed in this article, that account for
+features such as information-sharing and cooperation in addition to non-stationarity are
+necessary for stable and generalizable HRL algorithms.
+
+5. Experiments
+In this section, we detail the experimental setup and training procedure and present the
+performance of our method over various continuous control tasks. These experiments aim
+to analyze three aspects of HRL training: (1) How does cooperation in HRL improve the
+development of goal-assignment strategies and the learning performance? (2) What impact
+does automatically varying the degree of cooperation between learned higher and lower
+level behaviors have? (3) Does the use of communication results in a more structured goal
+condition lower-level policy that transfers better to other tasks?
+5.1 Environments
+We explore the use of hierarchical reinforcement learning on a variety of difficult long time
+horizon tasks, see Figure 4. These environments vary from agent navigation tasks (Figures 4c),
+in which a robotic agent tries to achieve certain long-term goals, to two mixed-autonomy
+traffic control tasks (Figures 4b to 4a), in which a subset of vehicles (seen in red) are treated as
+7
+
+(a) Highway
+
+(b) Ring Road
+
+(c) Ant Gather
+
+(d) Ant Four Rooms
+
+(e) Ant Maze
+
+Figure 4: Training environments explored within this article. We compare the performance of various HRL
+algorithms on two mixed-autonomy traffic control task (a,b) and three ant navigation tasks (c,d,e). A
+description of each of these environments is provided in Section D.1.
+
+automated vehicles and attempt to reduce oscillations in vehicle speeds known as stop-and-go
+traffic. Further details are available in Appendix D.1.
+The environments presented here pose a difficulty to standard RL methods for a variety
+of reasons. We broadly group the most significant of these challenges into two categories:
+temporal reasoning and delayed feedback.
+Temporal reasoning. In the agent navigation tasks, the agent must learn to perform
+multiple tasks at varying levels of granularity. At the level of individual timesteps, the agent
+must learn to navigate its surroundings, moving up, down, left, or right without falling or
+dying prematurely. More macroscopically, however, the agent must exploit these action
+primitives to achieve high-level goals that may be sparsely defined or require exploration
+across multiple timesteps. For even state-of-the-art RL algorithms, the absence of hierarchies
+in these settings result in poor performing policies in which the agent stands still or follows
+sub-optimal greedy behaviors.
+Delayed feedback. In the mixed autonomy traffic tasks, meaningful events occur over
+large periods of time, as oscillations in vehicle speeds propagate slowly through a network.
+As a result, actions often have a delayed effect on metrics of improvement or success, making
+reasoning on whether a certain action improved the state of traffic a particularly difficult
+task. The delayed nature of this feedback prevents standard RL techniques from generating
+meaningful policies without relying on reward shaping techniques which produce undesirable
+behaviors such as creating large gaps between vehicles (Wu et al., 2017a).
+5.2 Baseline algorithms
+We evaluate our proposed algorithm against the following baseline methods:
+8
+
+(d) Ant Four Rooms
+
+Reward
+
+(c) Ant Gather
+
+1.0
+0.8
+0.6
+0.4
+0.2
+0.0
+0.2 0.0 0.5 1.0 1.5 2.0 2.5
+1e6
+Steps
+
+1.0
+0.8
+0.6
+0.4
+0.2
+0.0
+0.2 0.0 0.5 1.0 1.5 2.0 2.5
+1e6
+Steps
+
+(e) Ant Maze [16,0]
+
+(f) Ant Maze [16,16]
+
+0.8
+0.6
+0.4
+0.2
+0.0
+
+Reward
+
+Reward
+
+Reward
+
+0.0 0.2 0.4 0.6 0.8 1.0
+1e6
+Steps
+
+TD3
+HRL
+HIRO
+HAC
+CHER (fixed)
+CHER (dynamic)
+
+0.0 0.2 0.4 0.6 0.8 1.0
+1e6
+Steps
+
+(b) Highway
+
+Reward
+
+0.0 0.5 1.0 1.5 2.0 2.5 3.0
+1e6
+Steps
+
+(a) Ring Road
+0.8
+0.6
+0.4
+0.2
+0.0
+
+4
+3
+2
+1
+0
+
+10000
+8000
+6000
+4000
+2000
+0 0.0 0.5 1.0 1.5 2.0 2.5 3.0
+1e6
+Steps
+
+Reward
+
+Reward
+
+2400
+2200
+2000
+1800
+1600
+1400
+
+0.0 0.5 1.0 1.5 2.0 2.5
+1e6
+Steps
+
+(g) Ant Maze [0,16]
+
+Figure 5: Training performance of the different algorithms on various environments. All results are reported
+over 10 random seeds. Details on the choice of hyperparameters are provided in Appendix E.1.
+
+• TD3 : To validate the need for goal-conditioned hierarchies to solve our tasks, we compare
+all results against a fully connected network with otherwise similar network and training
+configurations.
+• HRL: This baseline consists of the naive formulation of the hierarchical reinforcement
+learning optimization scheme (see Section 2.2). This algorithm is analogous to the CHER
+algorithm with λ set to 0.
+• HIRO: Presented by Nachum et al. (2018), this method addresses the non-stationarity
+effects between the manager and worker policies by relabeling the manager’s actions
+(or goals) to render the observed action sequence more likely to have occurred by the
+current instantiation of the worker policy. The details of this method are discussed in
+Appendix E.5.
+• HAC : The HAC algorithm (Levy et al., 2017) attempts to address non-stationarity in
+off-policy learning by relabeling sampled data via hindsight action and goal transitions
+as well as subgoal testing transitions to prevent learning from a restricted set of subgoal
+states. Implementation details are provided in Appendix E.6.
+5.3 Comparative analysis
+Figure 5 depicts the training performance of each of the above algorithms and CHER on the
+studied tasks. We find that CHER performs comparably or outperforms all other studied
+algorithms for the provided tasks. Interestingly, CHER particularly outperforms other
+algorithms in highly stochastic and partially observable tasks. For the Ant Gather and traffic
+control tasks, in particular, the objective (be it the positions of apples and bombs or the
+density and driving behaviors within a traffic network) varies significantly at the start of a
+new rollout and is not fully observable to the agent from its local observation. As such, the
+improved performance by CHER within these settings suggests that it is more robust than
+previous methods to learning policies in noisy and unstable environments.
+9
+
+High-level goal
+
+Agent trajectory
+
+Standard
+HRL
+
+.
+CHER
+(ours)
+
+.
+
+(a) Ring Road
+
+(b) Gather
+
+(c) Four Rooms
+
+(d) Maze
+
+Figure 6: Illustration of the agent and goal trajectories for some of the environments studied here. The
+high-level goals learned via CHER more closely match the agents’ trajectories as they traverse the various
+environments. This results in improved dynamical behaviors by the agent in a majority of the tasks.
+
+The improvements presented above emerge in part from more informative goal-assignment
+behaviors by CHER. Figure 6 depicts these behaviors for a large number of tasks. We describe
+some of these behaviors and the performance of the policy below.
+For the agent navigation tasks, the CHER algorithm produces goals that more closely
+match the agent’s trajectory, providing the agent with a more defined path to follow to
+achieve certain goals. This results in faster and more efficient learning for settings such as
+Ant Four Rooms, and in stronger overall policies for tasks such as Ant Gather. An interesting
+corollary that appears to emerge as a result of this cooperative approach is more stable
+movements and actuation commands by the worker policy. For settings in which the agent
+can fall prematurely, this appears in the form of fewer early terminations as a result of
+agents attempting to achieve difficult or highly random goals. The absence of frequent early
+terminations allows the policy to explore further into its environment during training; this is
+a benefit in settings where long-term reasoning is crucial.
+In the Ring Road environment, we find standard HRL techniques fail to learn goalassignment strategies that yield meaningful performative benefits. Instead, as seen in
+Figure 6a (top), the manager overestimates its worker’s ability to perform certain tasks
+and assign maximum desired speeds. This strategy prevents the policy from dissipating the
+continued propagation of vehicle oscillations in the traffic, as the worker policy is forced to
+assign large acceleration to match the desired speeds thereby contributing to the formation of
+stop-and-go traffic, seen as the red diagonal streaks in Figure 6a, top-left. For these tasks, we
+find that inducing inter-level cooperation serves to alleviate the challenge of overestimating
+certain goals. In the Ring Road environment, for instance, CHER succeeds in assigning
+meaningful desired speeds that encourage the worker policy to reduce the magnitude of
+accelerations assigned while near the free-flow, or optimal, speed of the network. This serves
+to eliminate the formation of stop-and-go traffic both from the perspective of the automated
+and human-driven vehicles, as seen in Figure 6a, bottom. We also note that when compared
+to previous studies of a similar task (Wu et al., 2017a), our approach succeeds in finding a
+10
+
+(a) Worker expected returns
+
+1021
+100
+10
+10 12
+10 3
+10 4
+10 5
+10 6
+10 0.0 0.2 0.4 0.6 0.8 1.0
+1e6
+Steps
+(b) Evolution of dynamic λ
+Apple (+1)
+
+(d) 0%
+
+(e) 50%
+
+Bomb (−1)
+
+(f) 66.7%
+
+(g) 75%
+
+4.0
+3.5
+3.0
+2.5
+2.0
+1.5
+1.0
+0.5
+0.0
+
+Max reward
+
+Worker Q-Mean
+
+0
+200
+400
+Standard HRL
+600 =-450
+=-300
+=-200
+800 =-150
+=-100
+=-50
+1000 0.0 0.2 0.4 0.6 0.8 1.0
+1e6
+Steps
+
+Standard HRL
+Optimal cooperation
+Exploration disincentivized
+
+0.0 0.2 0.4 0.6 0.8 1.0
+
+Cooperation ratio
+
+(c) Effects of cooperation
+High-level goal
+
+(h) 83.3%
+
+Agent trajectory
+
+(i) 91.7%
+
+Figure 7: Effect of varying degrees of cooperation for the Ant Gather environment. We plot the performance
+of the optimal policy and sample trajectories for various cooperation ratios as defined in Section 5.4 (see the
+subcaptions for d-i). Increasing degrees of cooperation improve the agent’s ability to assign desired goals
+that match the agent’s trajectory, which subsequently improves the performance of the policy. Large degrees
+of cooperation, however, begin to disincentivize the agent from moving.
+
+solution that does not rely on the generation of large or undesirable gaps between the AV
+and its leader. Similar results for the Highway environment are provided in Appendix F.1.
+5.4 Cooperation tradeoff
+In this section, we explore the effects of varying degrees of cooperation on the performance
+of the resulting policy. Figure 7 depicts the effect of increasing cooperative penalties on
+the resulting policy in the Ant Gather environment. In this task, we notice that expected
+intrinsic returns for the worker in the standard HRL approach converge to a value of about
+−600 (see Figure 7a). As a result, we promote cooperation by assigning values of δ that
+are progressively larger than −600 to determine what level of cooperation leads to the best
+performance.
+Figures 7c to 7i depict the effect of varying levels of cooperation on the performance of the
+policy2 . As expected, we see that as the level of cooperation increases, the goal-assignment
+behaviors increasing consolidate near the path of the agent. This produces optimal behaviors
+in this setting for cooperation levels in the vicinity of 75% (see Figures 7c and 7g). For levels
+of cooperation nearing 100%, however, this consolidation begins to disincentivize forward
+movement, and subsequently exploration, by assignment goals that align with the current
+position of the agent (Figure 7i), thereby deteriorating the overall performance of the policy.
+2. We define the cooperative ratio in these figures as the ratio of the assigned δ constraint between the
+standard hierarchical approach and the maximum expected return. The intrinsic rewards used here are
+non-positive meaning that the largest expected return is 0. For example, a δ value of −450 is equated to
+a cooperation ratio of (−600 + 450)/(−600 − 0) = 0.25, or 25%.
+
+11
+
+HRL worker
+
+CHER worker
+
+0
+
+1
+
+2
+
+3
+
+Steps
+
+4
+
+5
+
+1e6
+
+[20,0]
+
+0
+
+1
+
+2
+
+3
+
+Steps
+
+4
+
+5
+
+1e6
+
+[0,20]
+1.0
+0.8
+0.6
+0.4
+0.2
+0.0
+
+Success Rate
+
+Success Rate
+
+1.0
+0.8
+0.6
+0.4
+0.2
+0.0
+
+0.0 0.5 1.0 1.5 2.0 2.5 3.0
+1e6
+
+Steps
+
+1.0
+0.8
+0.6
+0.4
+0.2
+0.0
+
+0
+
+1
+
+2
+
+3
+
+Steps
+
+4
+
+5
+
+1e6
+
+[20,20]
+1.0
+0.8
+0.6
+0.4
+0.2
+0.0
+
+Success Rate
+
+Transfer πw
+Retrain πm
+
+[0,16]
+
+Success Rate
+
+Success Rate
+
+[16,16]
+1.0
+0.8
+0.6
+0.4
+0.2
+0.0
+
+Success Rate
+
+[16,0]
+1.0
+0.8
+0.6
+0.4
+0.2
+0.0
+
+HIRO worker
+
+0.0 0.5 1.0 1.5 2.0 2.5 3.0
+1e6
+
+Steps
+
+0.0 0.5 1.0 1.5 2.0 2.5 3.0
+1e6
+
+Steps
+
+Figure 8: An illustration of the transferability of policies learned via CHER. A policy is trained in the Ant
+Gather environment and the worker policy is frozen and transferred to the Ant Maze and Ant Four Rooms
+environments. The policies learned when utilizing the CHER worker policy significantly outperform the
+HIRO policy for a wide variety of evaluation points, highlighting the benefit of CHER in learning a more
+informative and generalizable policy representations.
+
+Figures 7a and 7b depict the agent’s ability to achieve the assigned δ constraint and the
+dynamic λ terms assigned to achieve these constraints, respectively. For most choices of δ,
+CHER succeeds in defining dynamic λ values that match the constraint, demonstrating the
+efficacy of the designed optimization procedure. For very large constraints, in this case for
+δ = −50, no choice of λ can be assigned to match the desired constraint, thereby causing
+the value of λ to grow exponentially. This explosion in the relevance of the constraint term
+likely obfuscates the relevance of the environment expected return to the manager gradients,
+resulting in the aforementioned disincentive for forward movement.
+5.5 Transferability of policies between tasks
+Finally, we explore the effects of promoting inter-level cooperation on the transferability of
+learned policies to different tasks. To study this, we look to the Ant environments in Figure 4
+and choose to learn a policy in one environment (Ant Gather) and transfer the learned worker
+policy to two separate environments (Ant Maze and Ant Four Rooms). The initial policy
+within the Ant Gather environment is trained for 1 million samples as in Figure 5c utilizing
+either the HRL, HIRO, or CHER algorithms. To highlight the transferability of the learned
+policy, we fix the weights of the worker policy, and instead attempt to learn a new manager
+policy for the given task; this allows us to identify whether the original policy generalizes
+better in the zero-shot setting. We still, however, must learn a new higher-level policy as the
+observations and objectives for the manager differ between problems.
+Figure 8 depicts the transfer setup and performance of the policy for a set number of
+evaluation points. We find that worker policies learned via CHER significantly improve the
+efficacy of the overall agent when exposed to new tasks. This suggests that the policies
+learned via more structured and informative goal-assignment procedures result in policies
+that are more robust to varying goal-assignment strategies, and as such allow the learned
+behaviors to be more task-agnostic.
+12
+
+6. Conclusions and future work
+In this work, we propose connections between multi-agent and hierarchical reinforcement
+learning that motivates our novel method of inducing cooperation in hierarchies. We provide
+a derivation of the gradient of a manager policy with respect to its workers for an actor-critic
+formulation as well as introducing a λ weighting term for this gradient which controls the
+level of cooperation. We find that using CHER results in consistently better-performing
+policies, that have lower empirical non-stationarity than prior work, particularly for more
+difficult tasks.
+Next, we find that policies learned with a fixed λ term are at times highly sensitive to
+the choice of value, and accordingly derive a dynamic variant of the cooperative gradients
+that automatically updates the value of λ, balancing goal exploration. We demonstrate that
+this dynamic variant further expands the scope of solvable tasks, in particular allowing us
+to generate highly effective mixed-autonomy driving behaviors in a very sample-efficient
+manner.
+For future work, we would like to apply this method to discrete action environments and
+additional hierarchical models such as the options framework. Potential future work also
+includes extending the cooperative HRL formulation to multi-level hierarchies, in which the
+multi-agent nature of hierarchical training is likely to be increasingly detrimental to training
+stability.
+
+References
+Richard Bellman. A markovian decision process. Journal of Mathematics and Mechanics,
+pages 679–684, 1957.
+Dimitri P Bertsekas. Constrained optimization and Lagrange multiplier methods. Academic
+press, 2014.
+Lucian Busoniu, Robert Babuska, and Bart De Schutter. Multi-agent reinforcement learning:
+A survey. In 2006 9th International Conference on Control, Automation, Robotics and
+Vision, pages 1–6. IEEE, 2006.
+Peter Dayan and Geoffrey E Hinton. Feudal reinforcement learning. In Advances in neural
+information processing systems, pages 271–278, 1993.
+Thomas G Dietterich. Hierarchical reinforcement learning with the maxq value function
+decomposition. Journal of Artificial Intelligence Research, 13:227–303, 2000.
+Tom Eccles, Yoram Bachrach, Guy Lever, Angeliki Lazaridou, and Thore Graepel. Biases
+for emergent communication in multi-agent reinforcement learning. In Advances in Neural
+Information Processing Systems, pages 13111–13121, 2019.
+Carlos Florensa, Yan Duan, and Pieter Abbeel. Stochastic neural networks for hierarchical
+reinforcement learning. arxiv preprint arxiv:1704.03012, 2017.
+Jakob Foerster, Nantas Nardelli, Gregory Farquhar, Triantafyllos Afouras, Philip HS Torr,
+Pushmeet Kohli, and Shimon Whiteson. Stabilising experience replay for deep multi-agent
+reinforcement learning. arXiv preprint arXiv:1702.08887, 2017.
+13
+
+Jakob N. Foerster, Yannis M. Assael, Nando de Freitas, and Shimon Whiteson. Learning to
+communicate with deep multi-agent reinforcement learning. CoRR, abs/1605.06676, 2016.
+URL http://arxiv.org/abs/1605.06676.
+Abdul Rahman Kreidieh, Cathy Wu, and Alexandre M Bayen. Dissipating stop-and-go waves
+in closed and open networks via deep reinforcement learning. In 2018 21st International
+Conference on Intelligent Transportation Systems (ITSC), pages 1475–1480. IEEE, 2018.
+Tejas D Kulkarni, Karthik Narasimhan, Ardavan Saeedi, and Josh Tenenbaum. Hierarchical
+deep reinforcement learning: Integrating temporal abstraction and intrinsic motivation. In
+Advances in neural information processing systems, pages 3675–3683, 2016.
+Andrew Levy, Robert Platt, and Kate Saenko. Hierarchical actor-critic. arXiv preprint
+arXiv:1712.00948, 2017.
+Alexander C Li, Carlos Florensa, Ignasi Clavera, and Pieter Abbeel. Sub-policy adaptation
+for hierarchical reinforcement learning. arXiv preprint arXiv:1906.05862, 2019.
+Igor Mordatch and Pieter Abbeel. Emergence of grounded compositional language in multiagent populations. In Thirty-Second AAAI Conference on Artificial Intelligence, 2018.
+Ofir Nachum, Shixiang Shane Gu, Honglak Lee, and Sergey Levine. Data-efficient hierarchical
+reinforcement learning. In Advances in Neural Information Processing Systems, pages
+3303–3313, 2018.
+Soroush Nasiriany, Vitchyr H Pong, Steven Lin, and Sergey Levine. Planning with goalconditioned policies. arXiv preprint arXiv:1911.08453, 2019.
+Ronald Parr and Stuart J Russell. Reinforcement learning with hierarchies of machines. In
+Advances in neural information processing systems, pages 1043–1049, 1998.
+Xue Bin Peng, Glen Berseth, KangKang Yin, and Michiel van de Panne. Deeploco: Dynamic
+locomotion skills using hierarchical deep reinforcement learning. ACM Transactions on
+Graphics (Proc. SIGGRAPH 2017), 36(4), 2017.
+David Silver, Guy Lever, Nicolas Heess, Thomas Degris, Daan Wierstra, and Martin Riedmiller. Deterministic policy gradient algorithms. In ICML, 2014.
+Yuki Sugiyama, Minoru Fukui, Macoto Kikuchi, Katsuya Hasebe, Akihiro Nakayama, Katsuhiro Nishinari, Shin-ichi Tadaki, and Satoshi Yukawa. Traffic jams without bottlenecks—experimental evidence for the physical mechanism of the formation of a jam. New
+journal of physics, 10(3):033001, 2008.
+Sainbayar Sukhbaatar, Arthur Szlam, and Rob Fergus. Learning multiagent communication
+with backpropagation. CoRR, abs/1605.07736, 2016. URL http://arxiv.org/abs/1605.
+07736.
+Richard S Sutton, Doina Precup, and Satinder Singh. Between mdps and semi-mdps: A
+framework for temporal abstraction in reinforcement learning. Artificial intelligence, 112
+(1-2):181–211, 1999.
+14
+
+Ardi Tampuu, Tambet Matiisen, Dorian Kodelja, Ilya Kuzovkin, Kristjan Korjus, Juhan
+Aru, Jaan Aru, and Raul Vicente. Multiagent cooperation and competition with deep
+reinforcement learning. PloS one, 12(4):e0172395, 2017.
+Philip S Thomas. Policy gradient coagent networks. In Advances in Neural Information
+Processing Systems, pages 1944–1952, 2011.
+Philip S Thomas and Andrew G Barto. Conjugate markov decision processes. In Proceedings
+of the 28th International Conference on International Conference on Machine Learning,
+pages 137–144, 2011.
+Emanuel Todorov, Tom Erez, and Yuval Tassa. Mujoco: A physics engine for model-based
+control. In 2012 IEEE/RSJ International Conference on Intelligent Robots and Systems,
+pages 5026–5033. IEEE, 2012.
+Alexander Sasha Vezhnevets, Simon Osindero, Tom Schaul, Nicolas Heess, Max Jaderberg,
+David Silver, and Koray Kavukcuoglu. Feudal networks for hierarchical reinforcement
+learning. arXiv preprint arXiv:1703.01161, 2017.
+Eugene Vinitsky, Aboudy Kreidieh, Luc Le Flem, Nishant Kheterpal, Kathy Jang, Fangyu
+Wu, Richard Liaw, Eric Liang, and Alexandre M Bayen. Benchmarks for reinforcement
+learning in mixed-autonomy traffic. In Conference on Robot Learning, pages 399–409, 2018.
+Michael Weinberg and Jeffrey S Rosenschein. Best-response multiagent learning in nonstationary environments. In Proceedings of the Third International Joint Conference on
+Autonomous Agents and Multiagent Systems-Volume 2, pages 506–513. IEEE Computer
+Society, 2004.
+Cathy Wu, Aboudy Kreidieh, Kanaad Parvate, Eugene Vinitsky, and Alexandre M Bayen.
+Flow: Architecture and benchmarking for reinforcement learning in traffic control. arXiv
+preprint arXiv:1710.05465, 2017a.
+Cathy Wu, Aboudy Kreidieh, Eugene Vinitsky, and Alexandre M Bayen. Emergent behaviors
+in mixed-autonomy traffic. In Conference on Robot Learning, pages 398–407, 2017b.
+
+15
+
+Appendix A. Derivation of cooperative manager gradients
+In this section, we derive an analytic expression of the gradient of the manager policy in a
+two-level goal-conditioned hierarchy with respect to both the losses associated with the high
+level and low level policies. In mathematical terms, we are trying to derive an expression for
+the weighted summation of the derivation of both losses, expressed as follows:
+0
+∇θm Jm
+= ∇θm (Jm + λJw ) = ∇θm Jm + λ∇θm Jw
+
+(7)
+
+where λ is a weighting term and Jm and Jw are the expected returns assigned to the manager
+and worker policies, respectively. More specifically, these two terms are:
+hP
+i R
+T /k t
+Jm = Es∼pπ
+γ
+r
+(s
+)
+= S ρ0 (st )Vm (st )dst
+(8)
+m
+kt
+t=0
+i R
+hP
+k
+t
+Jw = Es∼pπ
+(9)
+t=0 γ rw (st , gt , πw (st , gt )) = S ρ0 (st )Vw (st , gt )dst
+Here, under the actor-critic formulation we replace the expected return under a given starting
+state with the value functions Vm and Vw This is integrated over the distribution of initial
+states ρ0 (·).
+Following the results by Silver et al. (2014), we can express the first term in Eq. (5) as:
+
+
+∇θm Jm = Es∼pπ ∇a Qm (s, a)|a=πm (s) ∇θm πm (s)
+(10)
+We now expand the second term of the gradient into a function of the manager and
+worker actor (πm , πw ) and critic (Qm , Qw ) policies and their trainable parameters. In
+order to propagate the loss associated with the worker through the policy parameters of the
+manager, we assume that the goals assigned to the worker gt are not fixed variables, but
+rather temporally abstracted outputs from the manager policy πm , and may be updated
+in between decisions by the manager via a transition function h. Mathematically, the goal
+transition is defined as:
+(
+πm (st )
+if t mod k = 0
+gt (θm ) =
+(11)
+h(st−1 , gt−1 (θm ), st ) otherwise
+For the purposes of simplicity, we express the manager output term as gt from now on.
+We begin by computing the partial derivative of the worker value function with respect
+to the parameters of the manager:
+∇θm Vw (st , gt ) = ∇θm Qw (st , gt , πw (st , gt ))
+
+
+Z Z
+= ∇θm rw (st , gt , πw (st , gt )) +
+γpw (s0 , g 0 |st , gt , πw (st , gt ))Vw (s0 , g 0 )ds0 dg 0
+G S
+Z Z
+= ∇θm rw (st , gt , πw (st , gt )) + γ∇θm
+pw (s0 , g 0 |st , gt , πw (st , gt ))Vw (s0 , g 0 )ds0 dg 0
+G
+
+(12)
+
+S
+
+where G and S are the goal and environment state spaces, respectively, and pw (·, ·|·, ·, ·) is
+the probability distribution of the next state from the perspective of the worker given the
+current state and action.
+Expanding the latter term, we get:
+pw (s0 , g 0 |st , gt , πw (st , gt )) = pw,1 (g 0 |s0 , st , gt , πw (st , gt ))pw,2 (s0 |st , gt , πw (st , gt ))
+16
+
+(13)
+
+The first element, pw1 , is the probability distribution of the next goal, and is deterministic
+with respect to the conditional variables. Specifically:
+(
+1 if g 0 = gt+1
+0
+pw,1 (g |st , gt , πw (st , gt )) =
+(14)
+0 otherwise
+The second element, pw,2 , is the state transition probability from the MDP formulation
+of the task, i.e.
+pw,2 (s0 |st , gt , πw (st , gt )) = p(s0 |st , πw (st , gt ))
+(15)
+Combining Eq. (13)-(15) into Eq. (12), we get:
+∇θm Vw (st , gt ) = ∇θm rw (st , gt , πw (st , gt ))
+
+Z Z 
++ γ∇θm
+pw,1 (g 0 |s0 , st , gt , πw (st , gt ))pw,2 (s0 |st , gt , πw (st , gt ))Vw (s0 , g 0 )ds0 dg 0
+G
+
+S
+
+= ∇θm rw (st , gt , πw (st , gt ))
+Z
+Z
+1 · p(s0 |st , πw (st , gt ))Vw (s0 , g 0 )ds0 dg 0
++ γ∇θm
+G∩{gt+1 } S
+Z
+Z
++ γ∇θm
+0 · p(s0 |st , πw (st , gt ))Vw (s0 , g 0 )ds0 dg 0
+(G∩{gt+1 })c S
+Z
+p(s0 |st , πw (st , gt ))Vw (s0 , gt+1 )ds0
+= ∇θm rw (st , gt , πw (st , gt )) + γ∇θm
+
+(16)
+
+S
+
+Continuing the derivation of ∇θm Vw from Eq. (16), we get,
+Z
+p(s0 |st , πw (st , gt ))Vw (gt+1 , s0 )ds0
+∇θm Vw (st , gt ) = ∇θm rw (st , gt , πw (st , gt )) + γ∇θm
+S
+Z
+∇θm p(s0 |st , πw (st , gt ))Vw (gt+1 , s0 )ds0
+= ∇θm rw (st , gt , πw (st , gt )) + γ
+S
+
+= ∇θm gt ∇g rw (st , g, πw (st , gt ))|g=gt
++ ∇θm gt ∇g πw (st , g)|g=gt ∇a rw (st , gt , a)|a=πw (st ,gt )
+
+Z 
++γ
+Vw (s0 , gt+1 )∇θm gt ∇g πw (st , g)|g=gt ∇a p(s0 |st , a)|a=πw (st ,gt ) ds0
+ZS
++γ
+p(s0 |st , πw (st , gt ))∇θm Vw (s0 , gt+1 )ds0
+S
+
+= ∇θm gt ∇g rw (st , g, πw (st , gt ))
++ πw (st , g)∇a rw (st , gt , a)|a=πw (st ,gt )
+
+Z
++γ
+Vw (s0 , gt+1 )πw (st , g)∇a p(s0 |st , a)|a=πw (st ,gt ) ds0
+S
+
+Z
+
+0
+
+(17)
+g=gt
+
+0
+
+0
+
+p(s |st , πw (st , gt ))∇θm Vw (s , gt+1 )ds
+
+= ∇θm gt ∇g rw (st , g, πw (st , gt ))
+
+
+Z
++ πw (st , g)∇a rw (st , gt , a) + γ
+Vw (s0 , gt+1 )p(s0 |st , a)ds0
++γ
+
+S
+
+S
+
+Z
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+
+a=πw (st ,gt )
+
+p(s |st , πw (gt , st ))∇θm Vw (s , gt+1 )ds
+
+
+= ∇θm gt ∇g rw (st , g, πw (st , gt )) + πw (st , g)∇a Qw (st , gt , a)|a=πw (st ,gt )
++γ
+
+S
+
+g=gt
+
+Z
++γ
+S
+
+p(s |st , πw (st , gt ))∇θm Vw (s , gt+1 )ds
+
+17
+
+g=gt
+
+Iterating this formula, we have,
+
+
+∇θm Vw (st , gt ) = ∇θm gt ∇g rw (st , g, πw (st , gt )) + πw (st , g)∇a Qw (st , gt , a)|a=πw (st ,gt )
+g=gt
+
+Z
+p(st+1 |st , πw (st , gt ))∇θm Vw (st+1 , gt+1 )dst+1
+
+
+= ∇θm gt ∇g rw (st , g, πw (st , gt )) + πw (st , g)∇a Qw (st , gt , a)|a=πw (st ,gt )
++γ
+
+S
+
+g=gt
+
+
+p(st+1 |st , πw (st , gt ))∇θm gt+1 ∇g rw (st+1 , g, πw (st+1 , gt+1 ))
++γ
+S
+
+dst+1
++ πw (st+1 , g)∇a Qw (st+1 , gt+1 , a)|a=πw (st+1 ,gt+1 )
+Z
+
+g=gt+1
+
+Z Z 
+p(st+1 |st , πw (st , gt ))p(st+2 |st+1 , πw (gt+1 , st+1 ))
++ γ2
+S S
+
+∇θm Vw (st+2 , gt+2 )dst+2 dst+1
+
+(18)
+
+..
+.
+=
+
+∞
+X
+
+γ
+
+n
+
+n=0
+
+Z
+
+Z
+
+···
+| S {z S}
+
+n−1
+Y
+
+!
+p(st+k+1 |st+k , πw (st+k , gt+k ))
+
+k=0
+
+n times
+
+
+× ∇θm gt+n ∇g rw (st+n , g, πw (st+n , gt+n ))
+
+dst+n · · · dst+1
+
++ πw (st+n , g)∇a Qw (st+n , gt+n , a)|a=πw (st+n ,gt+n )
+g=gt+n
+
+Taking the gradient of the expected worker value function, we get,
+Z
+∇θm Jw = ∇θm
+ρ0 (s0 )Vw (s0 , g0 )ds0
+S
+Z
+=
+ρ0 (s0 )∇θm Vw (s0 , g0 )ds0
+S
+!
+Z
+Z
+Z " n−1
+∞
+Y
+X
+n
+p(sk+1 |sk , πw (sk , gk )) ∇θm gn
+=
+ρ0 (s0 )
+γ
+···
+S
+n=0
+k=0
+| S {z S}
+n times
+
+#
+
+
+× ∇g rw (sn , g, πw (sn , gn )) + πw (sn , g)∇a Qw (sn , gn , a)|a=πw (sn ,gn )
+
+dsn · · · ds0
+
+(19)
+
+g=gn
+
+=
+
+∞ Z
+X
+
+
+Z
+· · · γ n pθm ,θw ,n (τ )∇θm gn ∇g rw (sn , g, πw (sn , gn ))
+n=0 | S {z S}
+n+1 times
+
+
+dsn · · · ds0
+
++ πw (sn , g)∇a Qw (sn , gn , a)|a=πw (sn ,gn )
+g=gn
+
+
+
+
+= Eτ ∼pθm ,θw (τ ) ∇θm gt ∇g rw (st , g, πw (st , gt )) + πw (st , g)∇a Qw (st , gt , a)|a=πw (st ,gt )
+
+
+g=gt
+
+where τ = (s0 , a0 , s1 , a1 , . . . , sn ) is a trajectory and pθm ,θw ,n (τ ) is the (improper) discounted
+probability of witnessing a trajectory a set of policy parameters θm and θw .
+18
+
+The final representation of the connected gradient formulation is then:
+
+
+0
+∇θm Jm
+= Es∼pπ ∇a Qm (s, a)|a=πm (s) ∇θm πm (s)
+
+
+
++ Eτ ∼pθm ,θw (τ ) ∇θm gt ∇g rw (st , g, πw (st , gt )) + πw (st , g)∇a Qw (st , gt , a)|a=πw (st ,gt )
+
+
+
+(20)
+
+g=gt
+
+Appendix B. Cooperative HRL as goal-constrained optimization
+In this section we will derive a constrained optimization problem that motivates cooperation
+between a meta policy π and a worker policy ω. We will derive an update rule for the finite
+horizon reinforcement learning setting, and then approximate the derivation for stationary
+policies by dropping the time dependencies from the meta policy, worker policy, and the
+cooperative λ. Our goal is to find a hierarchy of policies π and ω with maximal expected
+return subject to a constraint on minimum expected distance from goals proposed by π. Put
+formally,
+max
+
+π0:T ,ω0:T
+
+T
+X
+
+E [r(st , at )] s.t.
+
+t=0
+
+T
+X
+
+h
+i
+E ksi+1 − gi kp ≤ δ ∀t
+
+(21)
+
+i=t
+
+where δ is the desired minimum expected distance from goals proposed by π. The optimal
+worker policy ω without the constraint need not be goal-reaching, and so we expect the
+constraint to be tight in practice—this seems to be true in our experiments in this article. The
+hierarchy of policies at iteration t may only affect the future, and so we can use approximate
+dynamic programming to solve for the optimal hierarchy at the last timestep, and proceed
+backwards in time. We write the optimization problem as iterated maximization,
+
+
+
+max E r(s0 , a0 ) + max E · · · + max E [r(sT , aT )]
+(22)
+π0 ,ω0
+
+π1 ,ω1
+
+πT ,ωT
+
+subject to a constraint on the minimum expected distance from goals proposed by π.
+Starting from the last time step, we convert the primal problem into a dual problem. Subject
+to the original constraint on minimum expected distance from goals proposed by πT at the
+last timestep,
+max E [r(sT , aT )] = min max E [r(sT , aT )] + λT δ − λT
+
+πT ,ωT
+
+λT ≥0 πT ,ωT
+
+T
+X
+
+h
+i
+E ksi+1 − gi kp
+
+(23)
+
+i=T
+
+where λT is a Lagrange multiplier for time step T , representing the extent of the
+cooperation bonus between the meta policy πT and the worker policy ωT at the last time
+step. In the last step we applied strong duality, because the objective and constraint are
+linear functions of πT and ωT . Solving the dual problem corresponds to CHER, which trains
+a meta policy πT with a cooperative goal-reaching bonus weighted by λT . The optimal
+cooperative bonus can be found by performing minimization over a simplified objective using
+the optimal meta and worker policies.
+min λT δ − λT
+
+λT ≥0
+
+T
+X
+
+h
+i
+Egi ∼πT∗ (gi |si ;λT ),ai ∼ωT∗ (ai |si ,gi ;λT ) ksi+1 − gi kp
+
+i=T
+
+19
+
+(24)
+
+By recognizing that in the finite horizon setting the expected sum of rewards is equal
+to the meta policy’s Q function and the expected sum of distances to goals is the worker
+policy’s Q function for deterministic policies, we can separate the dual problem into a bi-level
+optimization problem first over the policies.
+max Qm (sT , gT , aT ) − λT Qw (sT , gT , aT )
+
+(25)
+
+min λT δ + λT Qw (sT , gT , aT )
+
+(26)
+
+πT ,ωT
+
+λT ≥0
+
+By solving the iterated maximization backwards in time, solutions for t < i ≤ T are a
+constant ct:T with respect to meta policy πt , worker policy ωt and Lagrange multiplier λt .
+Dropping the time dependencies gives us an approximate solution to the dual problem for
+the stationary policies used in practice, which we parameterize using neural networks.
+max Qm (st , gt , at ) − λQw (st , gt , at ) + ct:T
+
+(27)
+
+min λδ + λQw (st , gt , at ) + ct:T
+
+(28)
+
+π,ω
+
+λ≥0
+
+The final approximation we make assumes that, for a worker policy that is maximizing a
+mixture of the meta policy reward, and the worker goal-reaching reward, the goal-reaching
+term tends to be optimized the most strongly of the two, leading to the following approximation.
+max Qm (st , gt ) + λ max Qw (st , gt , at ) + ct:T
+
+(29)
+
+min λδ + λQw (st , gt , at ) + ct:T
+
+(30)
+
+π
+
+ω
+
+λ≥0
+
+Appendix C. CHER Algorithm
+For completeness, we provide the CHER algorithm below.
+Algorithm 1 CHER
+1: Initialize policy parameters θw , θm , memory D, and cooperative term λ
+2: For dynamic updates of λ, initialize δ
+3: while True do
+4:
+for each t = 0, . . . , T do
+5:
+gt ∼ πθm (gt |st )
+. Sample manager action
+6:
+at ∼ πθw (at |st , gt )
+. Sample worker action
+m
+7:
+st+1 , rt ← env.step (at )
+8:
+rtw ← rw (st , gt , st+1 )
+. Worker reward
+9:
+end for each
+10:
+θw ← θw + α∇θw Jw
+. Train worker
+11:
+θm ← θm + α∇θm (Jm + λJw )
+. Train manager
+12:
+if δ initialized then
+13:
+λ ← λ + α∇λ (λδ − λQw )
+. Train λ
+14:
+end if
+15: end while
+20
+
+Appendix D. Environment details
+In this section, we highlight the environmental setup and simulation software used for each
+of the environments explored within this article.
+D.1 Environments
+Ant Gather In this task shown in Figure 4c, an agent is placed in a 20 × 20 space with 8
+apples and 8 bombs. The agent receives a reward of +1 or collecting an apple (denoted as a
+green disk) and −1 for collecting a bomb (denoted as a red disk); all other actions yield a
+reward of 0. Results are reported over the average return from the past 100 episodes.
+Ant Maze For this task, immovable blocks are placed to confine the agent to a U-shaped
+corridor, shown in Figure 4e. The agent is initialized at position (0, 0), and assigned an
+(x, y) goal position between the range (−4, −4) × (20, 20) at the start of every episode. The
+agent receives reward defined as the negative L2 distance from this (x, y) position. The
+performance of the agent is evaluated every 50, 000 steps at the positions (16, 0), (16, 16), and
+(0, 16) based on a “success” metric, defined as achieved if the agent is within an L2 distance
+of 5 from the target at the final step. This evaluation metric is averaged across 50 episodes.
+Ant Four Rooms An agent is placed on one corner of the classic four rooms environment (Sutton et al., 1999) and attempts to navigate to one of the other three corners. The
+agent is initialized at position (0, 0) and assigned an (x, y) goal position corresponding to one
+of the other three corner ((0, 20), (20, 0), or (20, 20)). The agent receives reward defined as
+the negative L2 distance from this (x, y) position. “Success” in this environment is achieved
+if the agent is within an L2 distance of 5 from the target at the final step. The success rate
+is reported over the past 100 episodes.
+Ring Road This environment, see Figure 4b, is a replication of the environment presented
+by (Wu et al., 2017a). A total of 22 vehicles are place in a ring road of variable length
+(220-270m). In the absence of autonomy, instabilities in human-driven dynamics result in the
+formation of stop-and-go traffic (Sugiyama et al., 2008). During training, a single vehicle is
+replaced by a learning agent whose accelerations are dictated by an RL policy. The vehicle
+perceives its speed, as well as the speed and gap between it immediate leader and follower
+from the five most recent time steps (resulting in a observation space of size 25). In order
+to maximize the throughput
+of the network, the agent is rewarded via a reward function
+P
+2
+defined as: renv = 0.1
+[
+n
+i=1 v vi ] , where nv is the total number of vehicles in the network,
+nv
+and vi is the current speed of vehicle i. Results are reported over the average return from
+the past 100 episodes.
+Highway This environment, see Figure 4a, is an open-network extension of the Ring Road
+environment. In this problem, downstream traffic instabilities resulting from a slower lane
+produce congestion in the form of stop-and-go waves, represented by the red diagonal lines
+in Figure 10b. The states and actions are designed to match those presented for the Ring
+Road environment, and is concatenated across all automated vehicles to produce a single
+centralized policy (Kreidieh et al., 2018). Results are reported over the average return from
+the past 100 episodes.
+21
+
+D.2 Simulation details
+The simulators and simulation horizons for each of the environments are as follows:
+• The Ant Maze, Ant Four Rooms, and Ant Gather environments are simulated using the
+MuJoCo physics engine for model-based control (Todorov et al., 2012). The time horizon
+in each of these tasks is set to 500 steps, with dt = 0.02 and frame skip = 5.
+• The Ring Road and Highway environments are simulated using the Flow (Wu et al.,
+2017a) computational framework for mixed autonomy traffic control. During resets, the
+simulation is warmed up for 1500 steps to allow for regular and persistent stop-and-go
+waves to form. The horizon of these environments are set to 1500 steps. Additional
+simulation parameters are for each environment are:
+– Ring Road: simulation step size of 0.2 seconds/step
+– Highway: simulation step size of 0.4 seconds/step
+Finally, the Ant Gather environment is terminated early if the agent falls/dies, defined as
+the z-coordinate of the agent being less than a certain threshold. If an agent dies, it receives
+a return of 0 for that time step.
+
+Appendix E. Algorithm details
+E.1 Choice of hyperparamters
+• Network shapes of (256, 256) for the actor and critic of both the manager and worker
+with ReLU nonlinearities at the hidden layers and tanh nonlinearity at the output layer
+of the actors. The output of the actors are scaled to match the desired action space.
+• Adam optimizer; learning rate: 3e-4 for actor and critic of both the manager and worker
+• Soft update targets τ = 5e-3 for both the manager and worker.
+• Discount γ = 0.99 for both the manager and worker.
+• Replay buffer size: 200,000 for both the manager and worker.
+• Lower-level critic updates 1 environment step and delay actor and target critic updates
+every 2 steps.
+• Higher-level critic updates 10 environment steps and delay actor and target critic updates
+every 20 steps.
+• Huber loss function for the critic of both the manager and worker.
+• No gradient clipping.
+• Exploration (for both the manager and worker):
+– Initial purely random exploration for the first 10,000 time steps
+– Gaussian noise of the form N (0, 0.1 × action range) for all other steps
+• Reward scale of 0.1 for Ant Maze and Ant Four Rooms, 10 for Ant Gather, and 1 for all
+other tasks.
+• Number of candidate goals = 103
+• Subgoal testing rate = 0.34
+3. This hyperparameter is only used by the HIRO algorithm.
+4. This hyperparameter is only used by the HAC algorithm.
+
+22
+
+• Cooperative gradient weights (λ):
+– fixed λ: We perform a hyperparameter search for λ values between [0.005, 0.01], and
+report the best performing policy. This corresponds to λ = 0.01 for the Ant Gather,
+Ring Road, and Highway environments, and λ = 0.005 for the Ant Maze and Ant
+Four Rooms environments.
+– dynamic λ: We explore varying degrees of cooperation by setting δ such then it
+corresponds to 25%, 50%, or 75% of the worker expected return when using standard
+HRL, and report the best performing policy. This corresponds to 25% for the Ant
+Gather environment, and 75% for all other environments.
+E.2 Manager goal assignment
+As mentioned in Section E.1, the output layers of both the manager and worker policies are
+squashed by a tanh function and then scaled by the action space of the specific policy. The
+scaling terms for the worker policies in all environments are provided by the action space of
+the environment.
+For the Ant Maze, Ant Four Rooms, and Ant Gather environments, we follow the scaling
+terms utilized by (Nachum et al., 2018). The scaling term are accordingly ±10 for the desired
+relative x,y; ±0.5 for the desired relative z; ±1 for the desired relative torso orientations;
+and the remaining limb angle ranges are available from the ant.xml file.
+Finally, for the Ring Road and Highway environments, assigned goals represent the
+desired speeds by controllable/automated vehicles. The range of desired speeds is set to 0-10
+m/s for the Ring Road environment and 0-20 m/s for the Highway environment.
+E.3 Egocentric and absolute goals
+Nachum et al. (2018) presents a mechanism for utilizing egocentric goals as a means of
+scaling hierarchical learning in robotics tasks. In this settings, managers assign goals in the
+form of desired changes in state. In order to maintain the same absolute position of the goal
+regardless of state change, a goal-transition function h(st , gt , st+1 ) = st + gt − st+1 is used
+between goal-updates by the manager policy. The goal transition function is accordingly
+defined as:
+(
+πm (st )
+if t mod k = 0
+gt+1 =
+(31)
+st + gt − st+1 otherwise
+For the mixed-autonomy control tasks explored in this article, we find that this approach
+produces undesirable goal-assignment behaviors in the form of negative desired speeds, which
+limit the applicability of this approach. Instead, for these tasks we utilize a more typical
+absolute goal assignment strategy, defined as:
+(
+πm (st ) if t mod k = 0
+gt+1 =
+gt
+otherwise
+In this case, the goal-transition function is simply h(st , gt , st+1 ) = gt .
+23
+
+(32)
+
+E.4 Worker intrinsic reward
+We utilize an intrinsic reward function used for the worker that serves to characterize the
+goals as desired relative changes in observations, similar to Nachum et al. (2018). When the
+manager assigns goals corresponding to absolute desired states, the intrinsic reward is:
+(33)
+
+rw (st , gt , st+1 ) = −||gt − st+1 ||2
+
+Moreover, when the manager assigns goals corresponding to egocentric desired states, the
+intrinsic reward is:
+rw (st , gt , st+1 ) = −||st + gt − st+1 ||2
+(34)
+E.5 Reproducibility of the HIRO algorithm
+Our implementation of HIRO, in particular the use of egocentric goals and off-policy corrections as highlighted in the original paper, are adapted largely from the original open-sourced
+implementation of the algorithm, as available in https://github.com/tensorflow/models/
+tree/master/research/efficient-hrl. Both our implementation and the original results
+from the paper exhibit similar improvement when utilizing the off-policy correction feature, as
+seen in Figure 9, thereby suggesting that the algorithm was successfully reproduced. We note,
+moreover, that our implementation vastly outperforms the original HIRO implementation on
+the Ant Gather environment. Possible reasons this may be occurring could include software
+versioning, choice of hyperparameters, or specific differences in the implementation outside
+of the underlying algorithmic modification. More analysis would need to be performed to
+pinpoint the cause of these discrepancies.
+
+(a) Ant Gather
+
+(b) Ant Maze
+
+Figure 9: Training performance of the original implementation of the HIRO algorithm with ours. The original
+performance of HIRO, denoted by the right figure within each subfigure, is adapted from the original article,
+see (Nachum et al., 2018). While the final results do not match exactly, the relative evolution of the curves
+exhibit similar improvements, as seen within the regions highlighted by the red ovals.
+
+E.6 Hierarchical Actor-Critic with egocentric goals
+To ensure that the hindsight updates proposed within the Hierarchical Actor-Critic (HAC)
+algorithm (Levy et al., 2017) are compared against other algorithms on a level playing field,
+we modify the non-primary features of this algorithm to result in otherwise similar training
+performance. For example, while the original HAC implementation utilizes DDPG as the
+underlying optimization procedure, we use TD3. Moreover, while HAC relies on binary
+intrinsic rewards that significantly sparsify the feedback provided to the worker policy, we on
+the other hand use distance from the goal.
+24
+
+We also extend the HAC algorithm to support the use of relative position, or egocentric,
+goal assignments as detailed in Appendix E.3. This is done by introducing the goal-transition
+function h(·) to the hindsight goal computations when utilizing hindsight goal and action
+transitions. More concretely, while the original HAC implementation defines the hindsight
+goal g̃t at time t as g̃t = g̃t+1 = · · · = g̃t+k = st+k , the hindsight goal under the relative
+position goal assignment formulation is g̃t+i = st+k − st+i , i = 0, . . . , k. This function results
+in the final goal g̃t+k before a new one is issued by the manager to equal zero, thereby
+denoting the worker’s success in achieving its allocated goal. These same goals are used when
+computing the intrinsic (worker) rewards in hindsight.
+
+Appendix F. Additional results
+F.1 Highway
+
+(a) Human baseline
+
+(b) CHER controller
+
+(c) Average speed for each
+method
+
+Figure 10: Traffic flow performance of vehicles within the Highway environment. a) In the absence of control,
+downstream traffic instabilities result in the propagation of congestion in the form of stop-and-go waves, seen
+as the red diagonal streaks. b) The control strategy generated via CHER results in vehicles forming gaps
+that prematurely dissipate these waves. c) This behavior provides significant improvements to traveling
+speed of vehicles; in contrast, other methods are unable to improve upon the human-driven baseline.
+
+F.2 Visual Ant Maze
+Shown by figure 11, CHER performs comparably to HIRO when trained on an image-based
+variant of our Ant Maze environment. In this particular environment, the XY position of the
+agent is removed from its observation. Instead, a top down egocentric image is provided to the
+agent, colored such that the agent can recover the hidden XY positions as a nonlinear function
+of image pixels. Perhaps more interesting, while CHER achieves competitive performance
+with HIRO, CHER trains moderately faster than HIRO, which is shown in Figure 12. This
+is likely due to not requiring goal off policy relabelling at every step of gradient descent for
+the manager policy.
+
+25
+
+Figure 11: This figure shows the success rates, measured when the agent’s center of mass enters within 5
+units to the goal position, and an average return, calculated as the sum of negative distances from the agent’s
+center of mass to the goal position. Total steps indicates the number of samples taken from the environment.
+
+Figure 12: This figure shows the success rates, measured when the agent’s center of mass enters within
+5 units to the goal position, and an average return, calculated as the sum of negative distances from the
+agent’s center of mass to the goal position. Unlike figure 11, the x-axis in these plots is the duration of the
+experiment, measured by the wall clock time in seconds from start to 2.5 million environment steps.
+
+26
+
+

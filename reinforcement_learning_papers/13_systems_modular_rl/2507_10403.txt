@@ -1,0 +1,2210 @@
+CLOSP: A Unified Semantic Space for SAR, MSI, and Text in
+Remote Sensing
+Daniele Rege Cambrina , Lorenzo Vaiania , Giuseppe Gallipolia , Luca Caglieroa and
+Paolo Garzaa
+
+arXiv:2507.10403v2 [cs.CV] 24 Sep 2025
+
+a Politecnico di Torino, Corso Duca Degli Abruzzi, Turin, Italy
+
+ARTICLE INFO
+
+ABSTRACT
+
+Keywords:
+Text-to-Image Retrieval
+Remote Sensing
+Geospatial Data
+Cross-Modal Retrieval
+Crisis Management
+Land Use and Land Cover
+
+Retrieving relevant imagery from vast satellite archives is crucial for applications like disaster
+response and long-term climate monitoring. However, most text-to-image retrieval systems are
+limited to RGB data, failing to exploit the unique physical information captured by other sensors,
+such as the all-weather structural sensitivity of Synthetic Aperture Radar (SAR) or the spectral
+signatures in optical multispectral data. To bridge this gap, we introduce CrisisLandMark, a new
+large-scale corpus of over 647,000 Sentinel-1 SAR and Sentinel-2 multispectral images paired
+with structured textual annotations for land cover, land use, and crisis events harmonized from
+authoritative land cover systems (CORINE and Dynamic World) and crisis-specific sources. We
+then present CLOSP (Contrastive Language Optical SAR Pretraining), a novel framework that
+uses text as a bridge to align unpaired optical and SAR images into a unified embedding space
+enabling effective text-based retrieval from heterogeneous sources. Our experiments show that
+CLOSP achieves a new state-of-the-art, improving retrieval nDGC@1000 by 54% over existing
+models. Additionally, we find that the unified training strategy overcomes the inherent difficulty
+of interpreting SAR imagery by transferring rich semantic knowledge from the optical domain
+with indirect interaction. Furthermore, GeoCLOSP, which integrates geographic coordinates
+into our framework, creates a powerful trade-off between generality and specificity: while the
+CLOSP excels at general semantic tasks, the GeoCLOSP becomes a specialized expert for retrieving location-dependent crisis events and rare geographic features. This work highlights that
+the integration of diverse sensor data and geographic context is essential for unlocking the full
+potential of remote sensing archives.
+
+CRediT authorship contribution statement
+Daniele Rege Cambrin: Conceptualization, Methodology, Software, Investigation, Data Curation, Visualization,
+Writing - Original Draft. Lorenzo Vaiani: Visualization, Software, Conceptualization, Writing - Original Draft.
+Giuseppe Gallipoli: Validation, Writing - Original Draft, Data Curation. Luca Cagliero: Supervision, Writing Review & Editing. Paolo Garza: Supervision, Writing - Review & Editing.
+
+1. Introduction
+Satellite remote sensing has become an indispensable tool for monitoring our planet, providing critical data for
+many applications, including climate science, environmental management, disaster response, urban planning, and
+precision agriculture (Wulder et al., 2022; Torres et al., 2012; Drusch et al., 2012; Goward et al., 2001; Roy et al., 2014).
+The large number of satellite missions provides a great volume and diversity of Earth observation data. However,
+this availability presents a significant challenge: effectively searching and retrieving relevant imagery from massive,
+heterogeneous, and multimodal archives, particularly when the search criteria are expressed in natural language. To
+address this challenge, the field of Text-to-Remote-Sensing-Image Retrieval (T2RSIR) has emerged, aiming to bridge
+ORCID (s): 0000-0002-5067-2118 (D. Rege Cambrin)
+
+D. Rege Cambrin et al.: Preprint submitted to Elsevier
+
+Page 1 of 31
+
+CLOSP: A Unified Semantic Space for SAR, MSI, and Text in Remote Sensing
+
+Indexing
+
+Querying
+CLOSP
+Visual
+Encoder
+(2 channels)
+
+trees, crops,
+water, grass,
+burned areas
+
+Ranking
+
+CLOSP Text
+Encoder
+
+radiometric
+query
+CLOSP
+Visual
+Encoder
+
+populate
+
+(12 channels)
+
+multispectral
+
+Figure 1: Retrieval process based on CLOSP, the multimodal text-image encoder proposed in the present study. Optical
+12-channel and SAR 2-channel images available in the newly released CrisisLandMark corpus are encoded using the CLOSP
+visual encoder and indexed in the database. A textual query related to land cover is embedded on the fly using the CLOSP
+text encoder. The retriever returns a ranked list of the most pertinent images to the input query, which may contain both
+optical and SAR images.
+
+the semantic gap between textual descriptions and the rich visual content of satellite imagery. The task involves
+indexing a vast database of images and retrieving a ranked list of the most pertinent examples that match a user’s
+natural language query.
+The advances in multimodal learning, particularly the adaptation of contrastive learning frameworks like CLIP
+(Radford et al., 2021), have driven the recent progress in T2RSIR. Models such as SkyCLIP (Wang et al., 2024), SenCLIP (Liu et al., 2024), and RemoteCLIP (Jain et al., 2024) have demonstrated success in aligning text with remote
+sensing imagery. However, these efforts have focused on high-resolution aerial or RGB satellite images. This reliance
+on the visible spectrum overlooks the information contained in other modalities and limits their applicability. For
+instance, missions like Sentinel-1 provide Synthetic Aperture Radar (SAR) provides all-weather, day-and-night acquisitions, making it highly effective for land cover mapping, change detection, and infrastructure monitoring (Clasen
+et al., 2024; Rege Cambrin and Garza, 2024; Li et al., 2020). Concurrently, multispectral imagery (MSI) from sensors
+like Sentinel-2 offers crucial spectral bands beyond RGB that are essential for analyzing vegetation health, water bodies, and soil properties (Thenkabail et al., 2004; Gao, 1996; Huete, 1988). While some models like SatCLIP (Klemmer
+et al., 2024) or Llama3-MS-CLIP (Marimo et al., 2025) have begun to leverage multispectral data, they both disregard
+the role of SAR data, and SatCLIP aligns it only with geographic coordinates. The full potential of combining these
+diverse sensor types into a unified retrieval framework remains largely underexplored.
+This points to two gaps in the current state-of-the-art. First, existing T2RSIR corpora are inadequate for developing
+and evaluating rich and robust multimodal systems. Many are limited by small scale (e.g., RSICD, RSITMD (Lu et al.,
+2018; Yuan et al., 2022)), a dependency on RGB-only aerial imagery, and a lack of rich sensor data like MSI and SAR.
+Furthermore, their annotations often consist of unstructured, free-form text from non-experts or language models
+(Wang et al., 2024; Liu et al., 2025), which can introduce ambiguity and limit verifiable quantitative analysis. While
+
+D. Rege Cambrin et al.: Preprint submitted to Elsevier
+
+Page 2 of 31
+
+CLOSP: A Unified Semantic Space for SAR, MSI, and Text in Remote Sensing
+
+datasets with structured Land Use/Land Cover (LULC) annotations exist (e.g., Sen2Lucas (Jain et al., 2024)), they
+lack crisis-related information and still rely on the optical domain. Second, a direct consequence of this data scarcity
+is the absence of retrieval models capable of jointly interpreting textual queries, multispectral optical data, and SAR
+imagery. No existing architecture creates a shared semantic space that unifies these three modalities, preventing the
+development of retrieval systems that can leverage the unique physical information captured by different sensors.
+To bridge this gap, we present CrisisLandMark, a new, large-scale T2RSIR corpus of over 647,000 image-text
+pairs from the Sentinel-1 (SAR) and Sentinel-2 (optical) missions. Our corpus is enriched with structured, machinereadable annotations for LULC and crisis events, derived from authoritative sources like CORINE Land Cover (Büttner
+et al., 2017) and Dynamic World (Brown et al., 2022). This provides an unambiguous foundation for training and
+evaluation. Its characteristics are summarized in Table 1. Additionally, to leverage this rich dataset, we propose
+CLOSP (Contrastive Language Optical SAR Pretraining), a novel multimodal architecture designed to align textual
+descriptions, optical MSI, and SAR data into a shared latent space. By using the structured text annotations as a
+common anchor, CLOSP effectively learns to associate the different visual modalities without requiring temporally
+aligned image pairs. Furthermore, we introduce GeoCLOSP, which integrates geographic coordinates into CLOSP to
+explore the trade-off between semantic generality and geographic specificity.
+Our experimental results on the new CrisisLandMark benchmark demonstrate that CLOSP substantially outperforms existing state-of-the-art T2RSIR models. We show that its unified training strategy enables powerful knowledge
+transfer, significantly improving the semantic retrieval of challenging SAR imagery. The findings underscore the value
+of integrating diverse sensor data to build more powerful, robust, and versatile retrieval systems for large-scale Earth
+observation.
+In summary, the main contributions of this paper are:
+• A new, large-scale T2RSIR corpus, CrisisLandMark, featuring over 647,000 paired examples of multispectral
+optical (Sentinel-2) and SAR (Sentinel-1) imagery with structured annotations for land use, land cover, and crisis
+events.
+• A novel multimodal learning architecture, CLOSP, that is the first to create a shared semantic space aligning
+textual descriptions, optical MSI, and SAR imagery, with an extension, GeoCLOSP, that incorporates geographic
+locations.
+• A comprehensive empirical validation demonstrating CLOSP’s superiority over state-of-the-art baselines and
+quantifying the trade-off between semantic retrieval and geographic specificity.
+The code and corpus are publicly available at https://github.com/DarthReca/closp. The remainder of this
+paper is organized as follows: Section 2 details the construction of the CrisisLandMark corpus. Section 3 presents the
+D. Rege Cambrin et al.: Preprint submitted to Elsevier
+
+Page 3 of 31
+
+CLOSP: A Unified Semantic Space for SAR, MSI, and Text in Remote Sensing
+Table 1
+Comparison with the existing T2RSIR datasets. LC, MSI/SAR, and Crisis respectively indicate if the dataset contains
+annotations about land cover, multispectral or radiometric data, and crisis-related information.
+Corpus
+
+LC
+
+MSI/SAR
+
+Crisis
+
+Samples (#)
+
+RSICD (Lu et al., 2018)
+RSITMD (Yuan et al., 2022)
+UCM-Captions (Qu et al., 2016)
+SkyScript-Retrieval (Wang et al., 2024)
+Sen2Lucas (Jain et al., 2024)
+CrisisLandMark (Ours)
+
+✗
+✗
+✗
+✗
+✓
+✓
+
+✗
+✗
+✗
+✗
+✗
+✓
+
+✗
+✗
+✗
+✗
+✗
+✓
+
+11k
+5k
+2k
+30k
+235k
+647k
+
+CLOSP and GeoCLOSP architectures. Section 4 describes the experimental setup and results, Section 5 discusses the
+findings, and Section 6 concludes the paper, presenting future works.
+
+2. Corpus
+We present CrisisLandMark, a new corpus composed of Sentinel-1 and Sentinel-2 data enriched with textual and
+geospatial annotations. Hereafter, we will describe the dataset composition and multimodal sources.
+
+2.1. Data sources
+We consider the following datasets as satellite image sources: CaBuAr (Cambrin et al., 2023), MMFlood (Montello
+et al., 2022), Sen12Flood (Rambour et al., 2020), QuakeSet (Rege Cambrin and Garza, 2024), and re-BEN (Clasen
+et al., 2024).
+We align the spatial resolution of these datasets to 10 meters using interpolation and split the images into 120 × 120
+patches to be consistent with the re-BEN dataset.
+We enrich the source images with a comprehensive set of textual and geospatial annotations. To support crisis
+management applications, we incorporated the four specialized datasets (CaBuAr, MMFlood, Sen12Flood, Quakeset),
+retaining their original event tags (wildfire, flood, earthquake). For these crisis images, we generated corresponding
+LULC annotations (trees, bare, built, crops, grass, water, snow and ice, shrub and scrub, flooded vegetation) by querying the Dynamic World collection. For general LULC coverage in re-BEN, we mapped the high-quality CORINE LC
+provided with the dataset as detailed in Section 2.3. Spatial coordinates also characterize all the image patches of every
+dataset.
+The resulting corpus is primarily composed of general land cover scenes from re-BEN, which constitute 88% of the
+images, providing a robust foundation for learning diverse visual semantics. The remaining 12% from the specialized
+datasets offer critical examples for crisis retrieval tasks. Table 2 provides a detailed breakdown of the data sources and
+their respective contributions of Sentinel-1 and Sentinel-2 imagery.
+
+D. Rege Cambrin et al.: Preprint submitted to Elsevier
+
+Page 4 of 31
+
+CLOSP: A Unified Semantic Space for SAR, MSI, and Text in Remote Sensing
+Table 2
+Corpus composition. We report the data source, the crisis event data, and the number of samples from each dataset,
+separately for Sentinel-1 (S1) and Sentinel-2 (S2) data.
+Dataset
+re-BEN
+CaBuAr
+QuakeSet
+MMFlood
+Sen12Flood
+
+Task
+
+S1 (#)
+
+S2 (#)
+
+Crisis event
+
+Classification
+Segmentation
+Classification
+Segmentation
+Classification
+
+286159
+✗
+21430
+27880
+2873
+
+286214
+3272
+✗
+✗
+18975
+
+✗
+wildfire
+earthquake
+flooding
+flooding
+
+338342
+
+308461
+
+2.2. Source Images
+The corpus is composed of Sentinel-1 GRD and Sentinel-2 L2A products. Three source datasets contain Sentinel-2
+data (re-BEN, CaBuAr, and Sen12Flood), whereas four of them include Sentinel-1 data (re-BEN, QuakeSet, MMFlood,
+Sen12Flood). Specifically, Sentinel-2 L2A (Level 2A Surface Reflectance) products cover 12 spectral bands in ultrablue, visible, near-infrared, and short-wave infrared. In contrast, Sentinel-1 GRD (Ground Range Detected) products
+have two different polarizations, namely Vertical transmit-Vertical receive (VV) and Vertical transmit-Horizontal
+receive (VH).
+Table 3
+Channels of Sentinel-2 L2A. UB is Ultra-Blue, VNIR is Visible and Near Infrared, SWIR is ShortWave Infrared.
+Band
+
+Central wavelength
+
+B1
+B2
+B3
+B4
+B5
+B6
+B7
+B8
+B8a
+B9
+B11
+B12
+
+443 nm
+490 nm
+560 nm
+665 nm
+705 nm
+740 nm
+783 nm
+842 nm
+865 nm
+940 nm
+1610 nm
+2190 nm
+
+Description
+
+Applications
+
+UB
+Blue
+Green
+Red
+VNIR
+VNIR
+VNIR
+VNIR
+VNIR
+SWIR
+SWIR
+SWIR
+
+Coastal, Aerosol
+Vegetation, Water
+Plant health
+Vegetation, Soil
+Vegetation, Biomass
+Vegetation Stress
+Chlorophyll, Canopy
+Vegetation Health
+Vegetation
+Water vapor
+Soil, Snow, Clouds
+Mineralogy
+
+Sentinel-1 GRD Sentinel-1 GRD products (European Space Agency, 2024a; Torres et al., 2012) are satellite images
+captured using radar technology that provides detailed, day-and-night observations of the Earth’s surface. Unlike
+regular cameras, radar can see through clouds and in darkness, making it ideal for consistent monitoring in all weather
+conditions. GRD products represent the Earth in two dimensions, with each pixel corresponding to a specific area on
+the ground. The dataset contains two channels: VV (Vertical transmit, Vertical receive) and VH (Vertical transmit,
+Horizontal receive), which refer to the orientation of the radar waves when they are sent out and received back. The VV
+
+D. Rege Cambrin et al.: Preprint submitted to Elsevier
+
+Page 5 of 31
+
+CLOSP: A Unified Semantic Space for SAR, MSI, and Text in Remote Sensing
+
+polarization is more sensitive to smooth surfaces, while VH is more adequate for detecting rough ones. An example
+of a single channel of one of these products can be seen in Figures 2a and 2b.
+
+Sentinel-2 L2A Sentinel-2 Level-2A (L2A) products (Drusch et al., 2012; European Space Agency, 2024b) are highresolution satellite images that provide detailed, true-color views of the Earth’s surface, optimized for environmental
+and land monitoring. These images are processed to correct atmospheric effects like haze or cloud cover, making
+them more accurate and ready for analysis. They include 13 spectral bands, ranging from visible light (what we see)
+to infrared, enabling insights into vegetation health, water quality, soil conditions, and urban development. After the
+atmospheric correction, one band was removed, resulting in 12 bands, as seen in Table 3. One example image of
+the RGB bands can be seen in Figure 2c paired with VV and VH channels (Figures 2a and 2b) of a Sentinel-1 GRD
+product of the same area. The different vision achieved with different spectral bands is shown in Figure 3 in the case
+of a wildfire.
+
+(a) Sentinel-1 VV
+
+(b) Sentinel-1 VH
+
+(c) Sentinel-2 RGB
+
+Figure 2: Sample images from Sentinel-1 VV, and Sentinel-1 VH, and Sentinel-2 RGB of the same area. The scale of
+Sentinel-1 image values for each channel is the same.
+
+2.3. Source text
+We design the dataset to support standard land use and land cover applications rather than relying on unstructured
+annotations. This is motivated by the fact that LULC applications are typically designed to address the need of institutions for planning regulations and to assess the evolution of certain specific areas regarding ecological aspects and
+human activities.
+The re-BEN dataset annotations are based on 43 classes, grouped into categories, provided by CORINE LC
+(CLC) (Büttner et al., 2017) at its finer level of detail. CLC is a European Environment Agency (EEA) program
+that provides consistent, detailed information on land use and land cover across Europe. It is updated periodically (i.e.,
+1990, 2000, 2006, 2012, 2018) and helps track land use changes over time, such as urban expansion, deforestation,
+
+D. Rege Cambrin et al.: Preprint submitted to Elsevier
+
+Page 6 of 31
+
+CLOSP: A Unified Semantic Space for SAR, MSI, and Text in Remote Sensing
+
+Figure 3: Sample image of a wildfire seen through RGB and all the bands of Sentinel-2. Some bands are at a lower
+resolution.
+
+or changes in agricultural practices. CLC uses a consistent hierarchical classification system across Europe, ensuring
+data comparability between countries with a minimum mapping unit of 25 hectares. Data are primarily gathered using
+satellite imagery but are cross-checked with ground observations and other sources to ensure accuracy. However, CLC
+is geographically limited to Europe and updated too infrequently for global crisis analysis.
+Since CORINE is limited to specific years and only available for Europe, we enrich the four crisis-event datasets
+(that cover different years and areas than CORINE) with the 9 LULC classes of Dynamic World (DW) (Brown et al.,
+2022) (i.e., Water, Trees, Grass, Flooded Vegetation, Crops, Shrub and Scrub, Built area, Bare Ground, Snow), which
+
+D. Rege Cambrin et al.: Preprint submitted to Elsevier
+
+Page 7 of 31
+
+CLOSP: A Unified Semantic Space for SAR, MSI, and Text in Remote Sensing
+
+are contained in CORINE categories. The crisis annotation is taken from the original dataset. Dynamic World is
+a high-resolution, near-real-time global land cover system developed by Google, leveraging deep learning models
+and Sentinel-2 satellite imagery. It provides 10-meter spatial resolution land cover classifications of the entire globe,
+making it applicable to diverse ecosystems and regions. Unlike traditional datasets, it offers frequent updates, enabling
+the detection of rapid and fine-scale land cover changes. The crisis datasets also contain special keywords to denote
+burned area, earthquake damaged, and flooded area. To create a unified and scalable label space, we harmonized all
+annotations using the 9-class system from DW. Thanks to its near-real-time global coverage, it is ideal for analyzing
+diverse ecosystems and detecting rapid land cover changes. With this solution, we map the higher quality of CLC
+annotation to the same classes of DW. The description and distribution of the classes can be found in Table 4. The
+mapping is detailed in Section C.
+Table 4
+The harmonized classes of the CrisisLandMark corpus, their descriptions, and the percentage of images in which each class
+appears.
+Label
+
+Description
+
+Images (%)
+
+Dynamic World Land Cover Classes
+Trees
+Crops
+Shrub and Scrub
+Water
+Grass
+Built
+Flooded Vegetation
+Bare
+Snow and Ice
+
+Any significant cover of trees.
+Land cultivated for agriculture.
+Areas dominated by shrubs or low, woody vegetation.
+Open and permanent water bodies.
+Land covered predominantly by grasses and other nonwoody vegetation.
+Artificial, man-made surfaces and structures.
+Areas where vegetation (e.g., forests, crops) is temporarily inundated with water.
+Land with little to no vegetation cover.
+Surfaces permanently or seasonally covered by snow or
+ice.
+
+69.00
+57.28
+35.80
+28.92
+27.18
+
+Land temporarily submerged by water due to a flood
+event.
+Visible structural damage to built areas or significant
+land deformation caused by seismic activity.
+Land showing evidence of recent fire, characterized by
+burn scars and the destruction of vegetation.
+
+7.69
+
+18.65
+7.62
+6.95
+2.38
+
+Crisis Event Classes
+Flooded Area
+Earthquake Damage
+Burned Area
+
+3.31
+0.54
+
+Data splits We divide the resulting dataset into a training set (20% of the total) for training our model and a corpus for
+retrieval (80% of the total). To ensure the same label distribution, we employ a stratified multi-label sampling (Sechidis
+et al., 2011). According to the 𝜒 2 test, the two distributions of labels are similar with 𝑝 ≈ 1.0. Therefore, the training
+split can effectively align models to the task of interest.
+
+D. Rege Cambrin et al.: Preprint submitted to Elsevier
+
+Page 8 of 31
+
+CLOSP: A Unified Semantic Space for SAR, MSI, and Text in Remote Sensing
+
+2.4. Queries
+We define the query set by taking every unique combination (with length from 1 to 12) of one or more labels that
+co-occur in at least one image within our corpus. This process resulted in a total of 2,047 distinct multi-label queries.
+We define a graded relevance 𝑟𝑒𝑙 based on the IoU between the query labels 𝐿𝑞 and the image labels 𝐿𝑖 to provide a
+more fine-grained evaluation:
+(
+𝑟𝑒𝑙 = 𝑟𝑜𝑢𝑛𝑑 10 ⋅
+
+|𝐿𝑞 ∩ 𝐿𝑖 |
+
+)
+
+(1)
+
+|𝐿𝑞 ∪ 𝐿𝑖 |
+
+For binary relevance operators (e.g., precision and recall), we consider a threshold of 5 for defining a relevant item.
+The distribution of relevance scores and relevant images per query is shown in Figure 4.
+
+30
+
+Number of images (%)
+
+Number of queries (%)
+
+30
+25
+20
+15
+10
+5
+0
+
+0
+
+10
+
+20
+
+30
+
+Relevant images out of total (%)
+
+25
+20
+15
+10
+5
+0
+
+1 2 3 4 5 6 7 8 9 10
+
+Relevance
+
+Figure 4: Distribution of relevant images for each query and distribution of relevance scores.
+
+3. Methodology
+We present a new contrastive learning architecture, Contrastive Language Optical SAR Pretraining (CLOSP), to
+address the T2RSIR task on the newly proposed corpus.
+The remainder of this section is organized as follows. Section 3.1 formulates the task, whereas Sections 3.2 and 3.3
+respectively describe CLOSP and its variant that also leverages geospatial data (GeoCLOSP).
+
+3.1. Task definition
+Let 𝐷 be a large-scale remote sensing corpus where each item 𝑖 ∈ 𝐷 consists of a satellite image and its associated
+metadata. A key characteristic of this task is the focus on imagery beyond the visible spectrum, where an image 𝑖
+can be a multispectral optical product (e.g., from Sentinel-2) or a Synthetic Aperture Radar (SAR) product (e.g., from
+Sentinel-1). Each image 𝑖 is described by a set of structured textual annotations, 𝐿𝑖 , representing its land cover, land
+
+D. Rege Cambrin et al.: Preprint submitted to Elsevier
+
+Page 9 of 31
+
+CLOSP: A Unified Semantic Space for SAR, MSI, and Text in Remote Sensing
+GEOCLOSP
+
+Text
+
+CLOSP
+
+trees, crops,
+water, grass,
+burned areas
+
+Text
+Encoder
+
+T1
+
+T1
+
+T2
+
+--
+
+TN
+
+V1
+
+T1.V1
+
+T2.V1
+
+TN.V1
+
+V2
+
+T1.V2
+
+T2.V2
+
+TN.V2
+
+VN
+
+T1.VN
+
+T2.VN
+
+TN.VN
+
+V1
+
+L1.V1
+
+L2.V1
+
+LN.V1
+
+V2
+
+L1.V2
+
+L2.V2
+
+LN.V2
+
+L1.VN
+
+L2.VN
+
+LN.VN
+
+L1
+
+L2
+
+T
+
+Sentinel-1
+
+TN
+
+Visual
+Encoder
+
+S1
+
+--
+
+S
+
+(2 channels)
+
+SN
+
+V1
+
+Coordinates
+
+Sentinel-2
+
+OR
+Visual
+Encoder
+
+O1
+
+VN
+
+O
+
+(12 channels)
+
+ON
+
+-L1
+Lat: 12.930977
+Lon: 47.778862
+
+Location
+Encoder
+
+L
+LN
+
+VN
+
+--
+
+LN
+
+Figure 5: The CLOSP model aligns textual descriptions with SAR and optical satellite images. For a batch of 𝑁
+elements (𝑀 SAR and 𝑀 MSI), one modality—either SAR or optical—is selected for each element of the batch, and the
+corresponding image embeddings are paired with their associated textual embeddings. The model is trained to maximize
+alignment for these positive pairs (represented by white cells in the matrix) while ensuring that negative pairs, formed by
+combining textual and image embeddings from different items within the batch (represented by grey cells in the matrix),
+are effectively separated. GeoCLOSP extends the CLOSP architecture by incorporating a location encoder, which aligns
+the geographical coordinates of an item with the corresponding satellite image, in parallel with the image-text alignment.
+
+use, and any relevant crisis events. Let 𝑄 be the query space, where a query 𝑞 ∈ 𝑄 is composed of a set of one or more
+labels, 𝐿𝑞 , from a predefined vocabulary (e.g., {“water”, “trees”, “burned area”}).
+The Text-to-Remote-Sensing-Image Retrieval (T2RSIR) task aims to learn a relevance scoring function, 𝑓 ∶ 𝑄 ×
+𝐷 → ℝ, that quantifies the semantic relevance of a candidate image 𝑖 to a given query 𝑞. The relevance is determined
+by the thematic alignment between the query labels 𝐿𝑞 and the image’s labels 𝐿𝑖 . The ultimate objective is to leverage
+this function, for any given query 𝑞, to retrieve and return a ranked list of the top-𝑘 images from the corpus 𝐷 that
+maximize the relevance score 𝑓 (𝑞, 𝑖).
+For instance, given a query constructed from the labels (e.g., “forest, burned area”), the retriever should return a
+ranked list of satellite images of Sentinel-1 and Sentinel-2 data that align with the textual description based on their
+relevance to the input query (see Figure 1).
+
+3.2. The CLOSP architecture
+The CLOSP architecture is a contrastive learning network whose training schema is depicted in Figure 5. It employs three different encoders, one for text, one for Sentinel-1 (SAR) data, and one for Sentinel-2 (optical) data. The
+encoders are trained to project their output representations into a shared latent space, aligning text with satellite imD. Rege Cambrin et al.: Preprint submitted to Elsevier
+
+Page 10 of 31
+
+CLOSP: A Unified Semantic Space for SAR, MSI, and Text in Remote Sensing
+
+agery associated with the same item. Due to differences in satellite configurations, aligned images for the two visual
+modalities (i.e., SAR and optical) are rarely available. For example, the mean revisit time for a given area is 12 days
+for Sentinel-1 and 10 days for Sentinel-2. Thus, finding paired images for both modalities of the same area with a close
+timestamp, e.g., within the same day, is often not possible.
+To overcome this limitation, we align textual information simultaneously with both visual modalities during training, but without enforcing any direct alignment between the Sentinel-1 and Sentinel-2 images themselves. In this way,
+the text also acts as an anchor, linking each image modality independently within a shared latent space.
+During a training iteration, the text encoder generates a textual embedding for each of the 𝑁 elements (𝑀 SAR and
+𝑀 MSI) in the current batch. Then, each image element (either SAR or MSI) is processed by the corresponding vision
+encoder to produce visual embeddings. Finally, following the CLIP pretraining strategy and employing symmetric
+cross-entropy loss (see Equations (2) and (3)), the textual and visual embeddings corresponding to the same item are
+simultaneously aligned (represented as white cells in the matrix in Figure 5) while being separated from all other
+elements (depicted as grey cells in Figure 5). The total loss 𝐿 is presented in Equation (4).
+
+exp(𝐢𝑖 ⋅ 𝐭𝑖 ∕𝜏)
+1 ∑
+log ∑𝑁
+𝑁 𝑖=1
+𝑗=1 exp(𝐢𝑖 ⋅ 𝐭𝑗 ∕𝜏)
+
+(2)
+
+exp(𝐭𝑖 ⋅ 𝐢𝑖 ∕𝜏)
+1 ∑
+𝐿txt = −
+log ∑𝑁
+𝑁 𝑖=1
+𝑗=1 exp(𝐭𝑖 ⋅ 𝐢𝑗 ∕𝜏)
+
+(3)
+
+𝑁
+
+𝐿img = −
+
+𝑁
+
+𝐿=
+
+𝐿img + 𝐿txt
+2
+
+(4)
+
+Where 𝑁 is the number of image-text pairs in a given batch. The vectors 𝐢𝑘 and 𝐭𝑘 represent the embeddings for the
+𝑘-th image and its corresponding text caption, respectively. The parameter 𝜏 is a learnable temperature hyperparameter
+that scales the logits before the softmax operation.
+
+3.3. The GeoCLOSP architecture
+Unlike natural images, geospatial imagery is inherently associated with geographic coordinates. Ideally, image embeddings within the same region should exhibit similarities. To also consider the geographical position of the satellite
+images, we propose GeoCLOSP, an extension of the CLOSP architecture tailored to align geographical coordinates
+with the visual modality. Inspired by SatCLIP (Klemmer et al., 2024), we utilize a Sinusoidal Representation Network
+(SIREN) (Sitzmann et al., 2020) and spherical harmonic (SH) positional encoding (Rußwurm et al., 2024) as a location encoder to embed the geographic coordinates associated with each image-text pair. The training schema, shown
+in Figure 5, builds upon the standard CLOSP alignment of text and visual modalities while introducing the alignment
+
+D. Rege Cambrin et al.: Preprint submitted to Elsevier
+
+Page 11 of 31
+
+CLOSP: A Unified Semantic Space for SAR, MSI, and Text in Remote Sensing
+
+of image and location embeddings (see Equations (5) and (6)). This dual alignment ensures that images with similar
+textual content share similar representations, and that images geographically close to each other also exhibit similarity.
+The loss 𝐿𝑔 follows the previous definition with two additional components as shown in Equation (7).
+
+exp(𝐥𝑖 ⋅ 𝐢𝑖 ∕𝜏)
+1 ∑
+𝐿loc = −
+log ∑𝑁
+𝑁 𝑖=1
+𝑗=1 exp(𝐥𝑖 ⋅ 𝐢𝑗 ∕𝜏)
+
+(5)
+
+exp(𝐢𝑖 ⋅ 𝐥𝑖 ∕𝜏)
+1 ∑
+log ∑𝑁
+𝑁 𝑖=1
+𝑗=1 exp(𝐢𝑗 ⋅ 𝐥𝑖 ∕𝜏)
+
+(6)
+
+𝑁
+
+𝑁
+
+𝐿iloc = −
+𝐿𝑔 = 0.5
+
+𝐿img + 𝐿txt
+2
+
++ 0.5
+
+𝐿loc + 𝐿iloc
+2
+
+(7)
+
+Where 𝐥𝑘 represents the embeddings for the 𝑘-th location associated with the corresponding image. An analysis on
+the impact of the weighting between the two components is reported in Section A.
+
+4. Experiments
+In this section, after introducing the baseline methods, empirical settings, and performance metrics, we discuss the
+main experimental results achieved by CLOSP, GeoCLOSP, and the state-of-the-art models on the newly proposed
+corpus.
+
+4.1. Baselines
+We compare the performance of CLOSP with that of CLIP (Ilharco et al., 2021; Radford et al., 2021), SkyCLIP
+(Wang et al., 2024), RemoteCLIP (Liu et al., 2024), SenCLIP (Jain et al., 2024), and Llama3-MS-CLIP (Marimo et al.,
+2025) (named Llama3-CLIP for simplicity) on the CrisisLandMark corpus. To the best of our knowledge, these models
+are the latest and best-performing T2RSIR models. We also fine-tune them on the training set of our dataset (hereafter
+we denote them as <ModelName>-T). This provides an overview of the contribution of other spectral and radiometric
+information compared to RGB only. We also trained two specialized models (Text-SAR and Text-MS) to highlight the
+benefits of the unified space: we refer to the evaluation of these models together as BiCLIP. We also trained a CLOPSRGB model using an RGB encoder for Sentinel-2 and a False Color encoder for Sentinel-1 to additionally highlight
+the limitations of the interactions between RGB and SAR. Additionally, we provide a dummy baseline for each set of
+experiments. We provide CLOSP with three different backbones: ResNet-50 (CLOSP-RN), ViT-Small (CLOSP-VS),
+and ViT-Large (CLOSP-VL). All the specific settings regarding the analyzed models’ composition and efficiency are
+reported in Table 5.
+
+D. Rege Cambrin et al.: Preprint submitted to Elsevier
+
+Page 12 of 31
+
+CLOSP: A Unified Semantic Space for SAR, MSI, and Text in Remote Sensing
+Table 5
+Models and respective textual and vision backbones. Each CLOSP suffix indicates the employed vision backbone. The
+GFLOPs are calculated for the worst case at indexing time (i.e., with 12-channel optical images).
+
+CLIP
+SkyCLIP
+RemoteCLIP
+SenCLIP
+Llama3-CLIP
+CLOSP-RN
+CLOSP-VS
+CLOSP-VL
+GeoCLOSP
+
+Vision Backbone
+
+Textual Backbone
+
+GFLOPs
+
+ResNet50
+ViT-L
+ResNet-50
+ResNet-50
+ViT-B
+ResNet-50
+ViT-S
+ViT-L
+ResNet-50
+
+CLIP-Transformer
+CLIP-Transformer
+CLIP-Transformer
+CLIP-Transformer
+CLIP-Transformer
+MiniLM
+MiniLM
+MiniLM
+MiniLM
+
+3
+103
+3
+3
+23
+3
+9
+120
+3
+
+4.2. Training Settings
+When testing existing approaches, since they can deal with RGB only (i.e., three channels), we extracted the RGB
+bands from Sentinel-2 (originally 12 channels), and we created a false-color composite (European Space Agency,
+2024a) from Sentinel-1 channels (originally two channels). We fine-tune all models for 30 epochs, with batch size 64,
+Adam optimizer, cosine annealing learning rate scheduler with warmup, and maximum learning rate 1e-4. We leverage
+pre-trained encoders: a vision encoder from SSL4EO (Wang et al., 2023), a text encoder from SentenceTransformers
+(Reimers and Gurevych, 2019), and a location encoder from SatCLIP (Klemmer et al., 2024). GeoCLOSP and specialized models (Text-SAR and Text-MS) are based on ResNet-50 for simplicity, faster training, and reduced risk of
+underfitting compared to ViT models.
+
+4.3. Text-to-Image Retrieval
+In this section, we present the metrics used for retrieval evaluation, the retrieval settings, and the empirical results.
+
+4.3.1. Evaluation Metrics
+We evaluate the retrieval performance in terms of Recall (R), Precision (P), and normalized Discounted Cumulative
+Gain (nDCG) Manning et al. (2008). We experiment with common cutoff levels 𝐾 ∈ {10, 50, 100, 1000} to balance
+retrieval efficiency and common user needs. nDGC provides the most comprehensive evaluation for graded relevance.
+For the evaluation of precision and recall, we use a standard relevance threshold of 5 (i.e., IoU of 0.5). The random
+baseline performance is based on analytical computation: for each query, 𝑅@𝐾 = 𝐾∕|𝐷|, 𝑃 @𝐾 = 𝑅𝑞 ∕|𝐷| and
+∑𝐾
+
+𝑛𝐷𝐶𝐺@𝐾 = 𝑅𝑚
+
+𝑖=1 1∕𝑙𝑜𝑔2 (𝑖+1)
+
+𝐼𝐷𝐶𝐺@𝐾
+
+, where 𝑅𝑚 is the average relevance score and 𝑅𝑞 is the number of relevant items.
+
+4.3.2. Retrieval Settings
+We employ ChromaDB as a vector database to store the normalized embeddings. We use the inner product as the
+distance function, which is computationally faster for normalized vectors and is equivalent to cosine similarity. The
+
+D. Rege Cambrin et al.: Preprint submitted to Elsevier
+
+Page 13 of 31
+
+CLOSP: A Unified Semantic Space for SAR, MSI, and Text in Remote Sensing
+
+stored embeddings have the following sizes: 384 for our CLOSP model, 768 for SkyCLIP, and 1024 for SenCLIP and
+RemoteCLIP, as in their original configurations. We retrieve 1000 images for each query to balance efficiency and
+completeness. In this case, the dummy retriever is the random uniform sampling. To obtain a unified ranking for the
+two specialized models, we independently retrieve the images, apply min-max normalization to the scores from each
+model, and merge them, keeping only the top 1000 for a fair comparison.
+
+4.3.3. Results
+The text-to-image retrieval performance of our proposed models against several baselines is detailed in Table 6.
+Note that due to the large number of relevant items for some queries, a perfect Recall@1000 score is not always reachable. However, the relative differences demonstrate, in any case, the model’s capabilities. To confirm the observations,
+we performed a Friedman test followed by a Conover post-hoc test for multiple tests for statistical significance (p <
+0.01) (Demšar, 2006; Conover, 1998).
+Among the original, non-finetuned models, only SenCLIP provides a competitive solution, outperforming the
+dummy baseline. However, after being fine-tuned on the CrisisLandMark training set, the baselines show divergent
+behavior. While SkyCLIP-T and RemoteCLIP-T improve significantly (according to the statistical test) upon their
+original counterparts, SenCLIP-T’s performance degrades significantly. This result may be due to overfitting. Consequently, SkyCLIP-T emerges as the strongest baseline competitor.
+Our CLOSP family of models significantly (according to the statistical test) outperforms all baselines (including BiCLIP and CLOSP-RGB) across every evaluated metric. The top-performing model, GeoCLOSP, achieves an
+nDCG@1000 of 57.76%, representing a nearly 20-point absolute improvement over the best baseline, SkyCLIP-T
+(37.88%).
+This demonstrates the significant advantage of our unified architecture. It is also important to note that while
+CLOSP-VL employs a much larger backbone than the other variants, it provides only marginal gains. CLOSP-RN and
+CLOSP-VS do not exhibit a statistically significant difference from each other in terms of recall and precision. Some
+visual examples are shown in Section B.
+To visualize the ranking quality at various cutoffs, Figure 6 shows the nDCG and Precision curves for our CLOSPRN and GeoCLOSP (which shares the same backbone) against the strongest baseline and the dummy predictor. The
+plots clearly illustrate that our models maintain a consistently higher performance across all values of k.
+
+4.4. Text-to-Image Retrieval by Modality
+To isolate and understand the contribution of each visual modality, we evaluated our models on the Sentinel-1
+(SAR) and Sentinel-2 (optical) portions of the corpus separately. For this analysis, each specialized model of BiCLIP
+was evaluated only on its corresponding data subset (e.g., Text-SAR on Sentinel-1 images). Our unified CLOSP models
+
+D. Rege Cambrin et al.: Preprint submitted to Elsevier
+
+Page 14 of 31
+
+CLOSP: A Unified Semantic Space for SAR, MSI, and Text in Remote Sensing
+Table 6
+Mean performance (%) for each model in terms of nDCG, Precision (P), and Recall (R) at given cutoffs. Bold values
+indicate the best result for each metric.
+Model
+
+nDCG@10
+
+nDCG@1000
+
+P@1000
+
+R@1000
+
+Dummy
+
+28.03
+
+33.64
+
+2.50
+
+0.15
+
+CLIP
+RemoteCLIP
+SkyCLIP
+SenCLIP
+Llama3-CLIP
+
+18.64
+19.27
+24.88
+34.01
+29.12
+
+20.70
+21.68
+28.21
+37.60
+31.32
+
+4.57
+4.08
+7.10
+18.15
+10.18
+
+0.13
+0.09
+0.21
+0.52
+0.32
+
+RemoteCLIP-T
+SkyCLIP-T
+SenCLIP-T
+Llama3-CLIP-T
+
+29.00
+33.46
+20.59
+33.40
+
+26.57
+37.88
+23.76
+37.75
+
+8.70
+17.57
+5.41
+16.87
+
+0.27
+0.58
+0.13
+0.50
+
+BiCLIP
+CLOSP-RGB
+
+38.33
+37.39
+
+44.90
+44.56
+
+27.20
+25.47
+
+1.31
+0.81
+
+CLOSP-RN
+CLOSP-VS
+CLOSP-VL
+GeoCLOSP
+
+50.50
+49.18
+47.82
+51.14
+
+56.23
+54.51
+55.91
+57.76
+
+40.66
+40.22
+42.14
+42.98
+
+2.05
+2.14
+2.32
+2.10
+
+Score (%)
+
+nDCG
+55
+50
+45
+40
+35
+30
+
+P
+
+50
+40
+
+Model
+BiCLIP
+CLOSP-RN
+GeoCLOSP
+Dummy
+SkyCLIP-T
+
+30
+20
+10
+0
+
+200 400 600 800 1000
+k
+
+0
+
+200 400 600 800 1000
+k
+
+Figure 6: Mean nDCG (left) and Precision (right) performance at different cutoff levels. The bands represent the 95%
+confidence intervals.
+
+were also evaluated on each subset individually to enable a direct, per-modality comparison.
+
+4.4.1. Results
+The retrieval performance of our unified models compared to specialized baselines for each modality is presented
+in Table 7. The findings highlight the significant advantages of our joint training approach, particularly for the more
+challenging Sentinel-1 data. CLOSP-RGB does not provide comparable results for either Sentinel-2 or Sentinel-1, so
+we focus our comparison on the best baseline, i.e., BiCLIP.
+
+D. Rege Cambrin et al.: Preprint submitted to Elsevier
+
+Page 15 of 31
+
+CLOSP: A Unified Semantic Space for SAR, MSI, and Text in Remote Sensing
+
+For Sentinel-1 retrieval, all CLOSP variants dramatically outperform the specialized BiCLIP baseline. Our best
+variant, CLOSP-VL, achieves an nDCG@1000 of 55.65%, which is +18 absolute improvement over BiCLIP’s 37.35%.
+This result provides strong evidence that the unified architecture facilitates a cross-modal knowledge transfer, where
+rich semantic concepts learned from the easier-to-interpret optical data are leveraged to disambiguate the complex
+backscatter signals in the more challenging SAR imagery, even without any direct interactions between the two visual
+encoders.
+Conversely, for Sentinel-2 retrieval, our models remain highly competitive with the specialized baseline. CLOSPRN, for instance, shows only a marginal performance decrease in nDCG@1000 compared to BiCLIP (54.80% vs
+55.72%). A paired t-test confirms that while the gains on Sentinel-1 are statistically significant (p < 0.01), the small
+performance decrease on Sentinel-2 is also significant, though minor in magnitude. This result demonstrates that our
+unified training strategy provides great gains for the SAR modality at a negligible cost of a minor drop in optical
+performance, confirming the value of the joint training paradigm.
+Table 7
+Mean performance (%) for each model by modality in terms of nDCG, Precision (P), and Recall (R) at given cutoffs. Bold
+values indicate the best result for each metric. S1 is Sentinel-1 SAR data and S2 is Sentinel-2 multispectral data.
+Model
+
+nDCG@10
+
+nDCG@1000
+
+P@1000
+
+R@1000
+
+S1
+
+S2
+
+S1
+
+S2
+
+S1
+
+S2
+
+S1
+
+S2
+
+BiCLIP
+CLOSP-RGB
+
+31.99
+20.55
+
+49.56
+38.71
+
+37.35
+20.16
+
+55.72
+46.85
+
+18.51
+7.18
+
+39.65
+27.55
+
+0.78
+0.18
+
+2.24
+0.90
+
+CLOSP-RN
+CLOSP-VS
+CLOSP-VL
+
+45.93
+45.96
+46.59
+
+49.33
+42.93
+45.97
+
+53.60
+51.79
+55.65
+
+54.80
+49.96
+53.85
+
+37.51
+37.43
+41.83
+
+38.46
+34.86
+38.04
+
+1.76
+1.75
+2.12
+
+1.92
+2.12
+2.26
+
+4.5. Zero-shot classification
+In this section, we analyze the performance of the CLOSP models in zero-shot multilabel classification over the
+whole corpus. Similarly to Radford et al. (2021) and Wang et al. (2024), we evaluate the “zero-shot” transfer capability
+of the model on an unseen dataset (corpus without the training set), instead of testing the model’s generalizability on
+unseen object categories. This tests the model’s generalization to new locations and scenes without any fine-tuning
+to assess how well the learned semantic representations can be used for direct classification. While some zero-shot
+evaluations focus on holding out entire classes, this approach is less suitable for foundational LULC classification. The
+selected classes form a comprehensive and interdependent set describing the terrestrial surface; training a model without knowledge of a fundamental class like “water” would inhibit its ability to learn related concepts such as “flooded
+vegetation”. Therefore, evaluating the transfer capability to unseen imagery is a more practical and meaningful test in
+this domain.
+
+D. Rege Cambrin et al.: Preprint submitted to Elsevier
+
+Page 16 of 31
+
+CLOSP: A Unified Semantic Space for SAR, MSI, and Text in Remote Sensing
+
+4.5.1. Settings
+The multilabel classification is performed in a zero-shot fashion, leveraging the embeddings of the model. Given
+the text encoder 𝐸𝑡 , the visual encoder 𝐸𝑣 , and the set of 12 class (e.g; water, trees, burned area) keywords 𝐶 =
+{𝑐1 , 𝑐2 , ..., 𝑐12 }, the task can be formalized in the following way. For each class keyword 𝑐𝑗 ∈ 𝐶, we generate the class
+vector 𝑣𝑗 = 𝐸𝑡 (𝑐𝑗 ). For each image 𝑖 in the corpus 𝐷, we generate the visual embeddings 𝑢𝑖 = 𝐸𝑣 (𝑖). We create a
+similarity matrix 𝑆 of shape |𝐷| × 12 computing the cosine similarity between each 𝑢𝑖 and 𝑣𝑗 . A class 𝑐𝑗 is predicted
+as present in an image 𝑖 if its similarity score exceeds a threshold 𝑡.
+To select a decision threshold 𝑡 for each model in a fair, zero-shot manner that accounts for their different score
+distributions, we adopted a global thresholding strategy. After the creation of 𝑆 for a specific model, the mean of this
+entire distribution of scores was then used as the single, model-specific classification threshold. While more complex
+methods exist, this simple, dynamic threshold was chosen to maintain a strict zero-shot setting without requiring a
+validation set.
+We compare baselines and all CLOSP proposed models with a dummy classifier that always predicts the two most
+frequent classes, i.e., “crops” and “trees”. Additionally, when evaluating the BiCLIP solution, since each specialized
+model makes predictions for its image type without item overlapping, we merge the predictions of all dataset elements
+before computing the final performances. Finally, given the strong class imbalance, we evaluate the performance using
+macro-averaged precision (P), recall (R), and F1-score (F) over the classes.
+
+4.5.2. Results
+The results of the zero-shot classification are presented in Table 8. Our proposed CLOSP models demonstrate a
+clear advantage over existing baselines. Specifically, CLOSP-VS and CLOSP-RN achieve the highest performance
+with macro F1-scores of 41.82% and 41.56%, respectively, outperforming the best baseline model, i.e., SkyCLIP-T
+with an F1-score of 32.81%.
+An important finding is the effect of the location encoder. The GeoCLOSP model, which incorporates geographical
+data, shows no improvement over its location-unaware counterpart CLOSP-RN (41.24% vs 41.56% F1-score). This
+suggests that for this semantic classification task, the additional geographic information does not provide a benefit and
+may indicate a trade-off between learning semantic and spatial features.
+Furthermore, we observe different model behaviors within our proposed family. For instance, CLOSP-VL exhibits
+very high precision (62.48%) at the cost of lower recall (37.40%), making it a more conservative classifier, while
+CLOSP-RN achieves a much higher recall (82.25%) with more modest precision (35.59%). All models substantially
+outperform the dummy classifier baseline, confirming the general effectiveness of the zero-shot approach.
+To determine if differences are significant, we performed a Bayesian signed-rank test (Benavoli et al., 2014), which
+
+D. Rege Cambrin et al.: Preprint submitted to Elsevier
+
+Page 17 of 31
+
+CLOSP: A Unified Semantic Space for SAR, MSI, and Text in Remote Sensing
+
+is more suitable than frequentist tests for comparisons with a small number of classes (12 labels) (Benavoli et al., 2017).
+CLOSP-VS, the best-performing model in terms of F1-score, is better than all baselines with high probability (> 0.9).
+CLOSP-RN achieves the highest recall, surpassing all models (probability larger than 0.9, except for SkyCLIP 0.88),
+proving its top-tier performance. CLOSP-VL, which achieves the best precision, also outperforms all baselines with
+high probability (> 0.9). Comparisons among the CLOSP variants were less conclusive, underscoring their similarities.
+Table 8
+Zero-shot classification performance (%) for each model in terms of F1-Score (F), Precision (P), and Recall (R). Bold
+values indicate the best result for each metric.
+Model
+
+F
+
+P
+
+R
+
+Dummy
+
+12.87
+
+10.52
+
+16.67
+
+CLIP
+RemoteCLIP
+SkyCLIP
+SenCLIP
+Llama3-CLIP
+
+25.12
+25.61
+29.10
+17.73
+22.30
+
+21.99
+21.15
+22.58
+20.33
+30.28
+
+52.02
+48.11
+58.96
+49.61
+49.82
+
+RemoteCLIP-T
+SkyCLIP-T
+SenCLIP-T
+Llama3-CLIP-T
+
+15.81
+32.81
+5.41
+36.45
+
+11.32
+26.30
+4.48
+30.89
+
+50.00
+68.18
+33.34
+75.29
+
+BiCLIP
+CLOSP-RGB
+
+34.98
+23.97
+
+30.89
+31.47
+
+69.83
+61.58
+
+CLOSP-RN
+CLOSP-VS
+CLOSP-VL
+GeoCLOSP
+
+41.56
+41.82
+37.31
+41.24
+
+35.59
+45.22
+62.48
+40.40
+
+82.25
+55.68
+37.40
+68.14
+
+4.6. Spatial Distance Correlation Analysis
+In this section, we analyze the correlation between the embedding distances and the corresponding image geographical distances to understand the effects of the location encoder.
+
+4.6.1. Settings
+To analyze the relationship, we first drew two disjoint sets of 10,000 images each via uniform random sampling
+from the entire corpus. We then created 10,000 pairs by matching the first image from set A with the first from set
+B, the second with the second, and so on. For each of these pairs, we computed two distance values: the geographic
+distance using the Haversine formula and the embedding distance using the cosine distance (computed as 1 − cosine
+similarity) between the embeddings. We analyze Pearson and Spearman correlations to understand both linear and
+monotonic relationships.
+
+D. Rege Cambrin et al.: Preprint submitted to Elsevier
+
+Page 18 of 31
+
+CLOSP: A Unified Semantic Space for SAR, MSI, and Text in Remote Sensing
+
+4.6.2. Results
+To directly assess the impact of the location encoder, we compare the results from GeoCLOSP against its locationunaware counterpart, CLOSP-RN. For the CLOSP-RN model, we observe a negligible linear correlation (Pearson’s
+𝑟 ≈ −0.06, 𝑝 < 0.01) and a weak monotonic correlation (Spearman’s 𝑟𝑠 ≈ 0.13, 𝑝 < 0.01). In contrast, while the
+GeoCLOSP model also shows no linear relationship (Pearson’s 𝑟 ≈ −0.04, 𝑝 < 0.01), it achieves a stronger monotonic
+correlation (Spearman’s 𝑟𝑠 ≈ 0.34, 𝑝 < 0.01). The relationship between geographical and embedding distances of the
+sampled sets of points is illustrated in Figure 7.
+This divergence demonstrates that our location encoder successfully introduces a moderate, monotonic structure
+into the latent space. The improvement in the Spearman coefficient confirms the effectiveness of our location-aware
+training approach. However, the modest absolute correlation value indicates that the embeddings remain primarily
+organized by semantic content rather than geographic proximity. This highlights a key challenge and a promising direction for future work: developing novel training strategies to achieve a more balanced representation of both semantic
+and geographic features.
+
+Figure 7: Relationship between geographic (Haversine) distance and embedding (cosine) distance for 10,000 image pairs.
+
+4.7. Single classes performance
+In this section, we report the performance by class in retrieval (nDCG) and classification (F1-score) for SkyCLIPT, CLOSP-RN, and GeoCLOSP, to better understand their fine-grained differences. In this case, since we do not
+report mean results among classes, to determine statistical significance, we performed a bootstrap analysis (Kuhn and
+Johnson, 2013; Efron, 1992) with 1000 iterations for each class, applying a Bonferroni correction (Bonferroni, 1936)
+for multiple comparisons.
+The per-class performance is detailed in Table 9, revealing a clear trade-off between general semantic performance
+and specialization on geographic and crisis-related events. While SkyCLIP-T serves as a strong baseline, our statistical
+
+D. Rege Cambrin et al.: Preprint submitted to Elsevier
+
+Page 19 of 31
+
+CLOSP: A Unified Semantic Space for SAR, MSI, and Text in Remote Sensing
+
+analysis confirms that both CLOSP-RN and GeoCLOSP significantly outperform it across the majority of classes for
+both metrics. The statistical analysis confirms that most observed performance differences are significant (𝑝 <
+0.01). The primary exceptions where no significant difference was found are:
+• For the F1-score, between CLOSP-RN and GeoCLOSP on the “water” and “burned area” classes.
+• For the nDCG metric, between CLOSP-RN and GeoCLOSP on “burned area”; between GeoCLOSP and SkyCLIPT on “trees”; and among all three models on the “water” class.
+Our primary finding is that, while absolute F1-scores for rare classes are expectedly modest, GeoCLOSP improves
+performance on classes where location is a key factor. For crisis events such as earthquake damage and rare geographic
+features like snow and ice, GeoCLOSP shows a remarkable improvement in retrieval. Its nDCG score for “earthquake
+damage” is 65.5%, whereas the baseline CLOSP-RN completely fails with a score of 0. For “snow and ice”, the nDCG
+score similarly improves from 18.47% to 60.9%. These results show that the location encoder introduces crucial
+contextual information that visual features alone cannot capture.
+Conversely, for common, geographically widespread semantic classes like crops and trees, the baseline CLOSPRN consistently achieves the highest scores in both classification and retrieval. For instance, CLOSP-RN scores an F1
+of 84.84% on “trees”, while GeoCLOSP scores 78.95%. This suggests that enforcing a geographic structure slightly
+dilutes the model’s performance on these very general semantic concepts.
+Interestingly, for some classes, the impact is more nuanced. For burned area and water, the performance between
+CLOSP-RN and GeoCLOSP is not statistically significantly different, suggesting that the strong visual and semantic
+signals of these classes dominate over the geographic information. The results clearly indicate that the choice between
+CLOSP-RN and GeoCLOSP presents a trade-off depending on the user’s application: CLOSP-RN excels at generalpurpose semantic tasks, while GeoCLOSP is a more powerful, specialized tool for location-specific and crisis-related
+analysis.
+
+5. Discussion
+Our study introduced CrisisLandMark, a novel large-scale corpus for Text-to-Remote-Sensing-Image Retrieval
+(T2RSIR), and CLOSP, a multimodal architecture designed to operate on satellite data beyond the visible spectrum.
+The experimental results demonstrate a significant improvement in performance over existing methods, and this section
+discusses the interpretation and implications of these findings.
+
+5.1. Principal Findings and Contributions
+The primary finding of this work is that by training a contrastive model on a diverse corpus of multispectral
+(Sentinel-2) and SAR (Sentinel-1) imagery, it is possible to substantially outperform state-of-the-art T2RSIR systems
+D. Rege Cambrin et al.: Preprint submitted to Elsevier
+
+Page 20 of 31
+
+CLOSP: A Unified Semantic Space for SAR, MSI, and Text in Remote Sensing
+Table 9
+Performance by class in terms of F1-score (F) for zero-shot classification and nDCG@1000 (nDCG) for retrieval.
+
+Class
+bare
+built
+burned area
+crops
+earthquake damage
+flooded area
+flooded vegetation
+grass
+shrub and scrub
+snow and ice
+trees
+water
+
+CLOSP-RN
+
+GeoCLOSP
+
+SkyCLIP-T
+
+F
+
+nDCG
+
+F
+
+nDCG
+
+F
+
+nDCG
+
+16.11
+46.15
+2.34
+76.76
+16.33
+38.87
+22.06
+52.61
+58.58
+9.46
+84.84
+74.61
+
+25.47
+72.08
+60.07
+90.53
+0.00
+32.09
+43.54
+74.40
+50.87
+18.47
+80.58
+99.77
+
+18.08
+42.92
+2.84
+68.82
+21.45
+45.94
+25.60
+52.51
+60.60
+11.15
+78.95
+65.96
+
+22.81
+58.39
+61.76
+67.84
+65.50
+15.91
+25.69
+42.13
+30.81
+60.90
+59.23
+99.30
+
+11.90
+30.93
+1.39
+67.00
+14.65
+20.39
+14.93
+40.75
+53.65
+6.40
+80.45
+51.30
+
+1.99
+27.59
+0.00
+79.21
+23.29
+32.40
+2.17
+63.25
+40.05
+0.15
+58.59
+99.67
+
+that are primarily designed for RGB data. Our proposed model, CLOSP, achieved a better retrieval and classification
+performance than the baselines, confirming that the rich information contained in non-RGB channels is not only useful
+but critical for accurately retrieving images based on land cover, land use, and crisis-event descriptions.
+A key methodological insight from our experiments is that continual pre-training of an existing vision-language
+model like CLIP (Radford et al., 2021) is not a prerequisite for high performance in this domain. Our results show that
+good performance can be achieved by aligning powerful, independently pre-trained unimodal encoders. By initializing
+CLOSP with a vision encoder from SSL4EO and a text encoder from Sentence Transformers, and then training them
+jointly with a contrastive objective, we demonstrate a flexible and effective alternative to extending pre-aligned models.
+Furthermore, GeoCLOSP highlights the nuanced but critical role of location. We demonstrated that explicitly
+encoding geographic coordinates provides a contextual signal for location-dependent phenomena, such as earthquakes
+or specific climatic zones (e.g., snow and ice), while also showing that a trade-off exists for more semantically-defined
+classes.
+
+5.2. The Synergy of a Unified Optical-SAR Latent Space
+One of the most significant results is the demonstrated benefit of jointly training on optical and SAR data within
+a unified embedding space. As shown in our modality-specific evaluation (Table 7), the proposed approach improved
+retrieval performance for Sentinel-1 (SAR) imagery, a data source notoriously difficult for semantic interpretation due
+to its different imaging physics compared to optical sensors. This suggests a powerful knowledge transfer mechanism:
+the model leverages the clear semantic signatures from Sentinel-2’s multispectral bands (e.g., identifying vegetation or
+water) to learn corresponding structural and textural patterns in the Sentinel-1 SAR data, without any direct alignment
+strategy (there is no loss between the two vision encoders’ embeddings).
+
+D. Rege Cambrin et al.: Preprint submitted to Elsevier
+
+Page 21 of 31
+
+CLOSP: A Unified Semantic Space for SAR, MSI, and Text in Remote Sensing
+
+This synergy is crucial for practical applications. It allows for the development of a single, robust retrieval system
+that can easily query across different sensor types. An end-user can submit a natural language query, such as “flooded
+vegetation”, and retrieve relevant satellite images regardless of whether they are from an optical or SAR satellite. Our
+model effectively bridges the gap between the two modalities with an indirect alignment.
+
+5.3. The Trade-off Between Semantic and Geographic Representations
+The comparison between CLOSP and GeoCLOSP uncovers a fundamental trade-off in designing foundation models for Earth observation: the balance between semantic content and geographic context. Our results (Table 9) clearly
+show that GeoCLOSP excels in retrieving images for classes where location is a key defining characteristic. For instance, its ability to retrieve images of “earthquake damage” (a geographically localized event) and “snow and ice” (a
+climatically constrained feature) was superior to the baseline CLOSP. In these cases, the location encoder provides an
+essential prior that visual features alone cannot capture.
+Conversely, for geographically widespread classes such as “crops” and “trees”, the purely semantic CLOSP-RN
+model performed better. This suggests that enforcing a geographic structure on the latent space can slightly “dilute”
+the model’s focus on fine-grained visual semantics when the location is not a primary discriminative factor. This
+finding implies that the optimal retrieval strategy may depend on the nature of the query. Future systems could potentially employ an adaptive approach, dynamically weighting the influence of the location encoder based on the query’s
+geographic specificity.
+
+5.4. Implications for Real-World Applications
+The advancements presented in this paper have direct implications for several domains. In crisis management,
+the ability to retrieve relevant imagery of events like floods or wildfires is a significant operational advantage. First
+responders and analysts can obtain a more complete and timely picture of the situation on the ground simply by knowing the possibly large area that is affected, leaving the search engine to find the exact points affected by the crisis (e.g.,
+you may know a wildfire is near San Jose, but leave the engine search for all areas near the city that are affected). Importantly, our integration of SAR data can significantly boost performance in such scenarios, where optical data may
+be limited (e.g., due to cloud cover or night-time conditions). For environmental monitoring and urban planning,
+CLOSP makes large-scale land cover analysis more accessible. Researchers and policymakers can query vast archives
+using simple textual descriptions to track deforestation, monitor urban expansion, or assess agricultural health without
+needing to write complex code or manually filter thousands of images. For example, they could retrieve Sentinel-2
+images to assess crop health via spectral indices and Sentinel-1 images to monitor changes in field structure or planting/harvesting activities, all through a single, unified system. This democratizes access to valuable Earth observation
+data.
+D. Rege Cambrin et al.: Preprint submitted to Elsevier
+
+Page 22 of 31
+
+CLOSP: A Unified Semantic Space for SAR, MSI, and Text in Remote Sensing
+
+5.5. Limitations
+Despite the promising results, this study has several limitations that open avenues for future research. First, while
+CrisisLandMark is large, its source datasets may introduce geographic biases (e.g., a focus on Europe from the reBEN dataset). Furthermore, our work focused on single-image retrieval. However, many remote sensing applications,
+such as change detection and trend analysis, rely on time-series data. A valuable and logical next step is to extend
+the CLOSP architecture to a temporal dimension. This would enable novel queries based on dynamic processes,
+for instance, allowing users to directly ask for “deforestation” between 2020 and 2024 or “urban growth” over the
+last decade. Additional new classes could benefit from a temporal perspective (e.g., deforestation, desertification).
+Additionally, our GeoCLOSP model uses a fixed weighting for its semantic and geographic loss components; future
+work could explore dynamic or adaptive weighting schemes to better balance these competing objectives based on the
+query type.
+
+6. Conclusions and future work
+In this paper, we addressed the limitations of existing text-to-image retrieval systems, which are often constrained
+to RGB data and cannot leverage the full richness of modern satellite sensors. We introduced CrisisLandMark, a
+new, large-scale corpus of over 647,000 Sentinel-1 (SAR) and Sentinel-2 (multispectral) images. The corpus’s key
+innovation is its structured textual annotations, which are harmonized from authoritative land cover systems (CORINE
+and Dynamic World) and enriched with crisis-event tags. To leverage this resource, we developed CLOSP, a novel
+contrastive architecture that aligns text with both optical and SAR data. It uses text as a common “bridge” to create a
+unified semantic space from unpaired multisensor imagery, solving a fundamental challenge in satellite data fusion.
+Our experiments led to three principal findings. First, by moving beyond the visible spectrum, the CLOSP framework significantly outperforms state-of-the-art baselines, proving that the rich information in SAR and multispectral
+data is crucial for retrieval. Second, we provide strong evidence for cross-modal knowledge transfer: the unified
+training strategy allows semantic concepts learned from optical data to improve the interpretation and retrieval of
+challenging SAR imagery. Finally, our work uncovers a fundamental and practical trade-off between semantic and
+geographic representation. While the baseline CLOSP model is a superior general-purpose semantic retriever, GeoCLOSP becomes a high-performing specialist for location-dependent queries, such as crisis events and rare geographic
+features.
+This research opens several promising avenues for future work. The most critical next step is the integration of
+the temporal dimension, extending our framework to support time-aware queries and the analysis of dynamic environmental processes. Other promising directions include: expanding the CrisisLandMark corpus with more globally distributed data to mitigate geographic bias; exploring adaptive methods to dynamically balance the semantic-geographic
+
+D. Rege Cambrin et al.: Preprint submitted to Elsevier
+
+Page 23 of 31
+
+CLOSP: A Unified Semantic Space for SAR, MSI, and Text in Remote Sensing
+
+trade-off within GeoCLOSP; and leveraging multimodal large language models to enable more descriptive annotations
+and queries.
+Ultimately, this work provides both a powerful framework and a valuable resource for building the next generation
+of sensor-agnostic retrieval systems, making the wealth of information in global Earth observation archives more
+accessible and actionable than ever before.
+
+D. Rege Cambrin et al.: Preprint submitted to Elsevier
+
+Page 24 of 31
+
+CLOSP: A Unified Semantic Space for SAR, MSI, and Text in Remote Sensing
+
+Code availability
+The source code is available for downloading under the Apache-2.0 license at the link: https://github.com/
+DarthReca/closp.
+
+Data availability
+The data are available at https://huggingface.co/datasets/DarthReca/crisislandmark.
+
+Declaration of competing interest
+The authors declare that they have no known competing financial interests or personal relationships that could have
+appeared to influence the work reported in this paper.
+
+A. Analysis of Loss Weighting for GeoCLOSP
+To analyze the balance between the semantic (𝐿𝑡𝑥𝑡−𝑖𝑚𝑔 ) and geographic (𝐿𝑖𝑚𝑔−𝑙𝑜𝑐 ) loss components, for simplicity,
+we can rewrite the loss shown in Equation (7) as 𝐿𝑔 = 𝛼𝐿𝑡𝑥𝑡−𝑖𝑚𝑔 + (1 − 𝛼)𝐿𝑖𝑚𝑔−𝑙𝑜𝑐 , where 𝛼 = 0.5 in this specific case.
+We tested 𝛼 values of 0.25 and 0.75, comparing them to the baseline CLOSP-RN, which corresponds to 𝛼 = 1, and
+GeoCLOSP (𝛼 = 0.5). The case where 𝛼 = 0 (equivalent to SatCLIP) is omitted from the performance comparison as
+it discards the text query entirely, making it unsuitable for text-to-image retrieval. The results, reported in Table 10,
+show that an equal weighting of 𝛼 = 0.5 achieves the highest nDCG@1000 score of 57.76. This result outperforms
+the semantics-only baseline (𝛼 = 1) and suggests that incorporating geographic context is beneficial. Performance
+degrades as 𝛼 shifts heavily towards either extreme, indicating that an even balance provides the optimal trade-off
+between semantic relevance and location-based alignment for this task.
+Table 10
+Impact of the loss weighting parameter 𝛼 on text-to-image retrieval performance, measured by nDCG@1000. The parameter
+𝛼 balances the semantic loss (𝐿𝑡𝑥𝑡−𝑖𝑚𝑔 ) and the geographic loss (𝐿𝑖𝑚𝑔−𝑙𝑜𝑐 ).
+Configuration
+
+𝛼 value
+
+nDCG@1000
+
+CLOSP-RN (Semantics-only)
+GeoCLOSP (High Semantics)
+GeoCLOSP (Balanced)
+GeoCLOSP (High Geography)
+SatCLIP (Geography-only)
+
+1.00
+0.75
+0.50
+0.25
+0.00
+
+56.23
+55.18
+57.76
+52.82
+N/A*
+
+*
+
+It discards the text alignment, making the model unable
+to perform the text-to-image retrieval task.
+
+D. Rege Cambrin et al.: Preprint submitted to Elsevier
+
+Page 25 of 31
+
+CLOSP: A Unified Semantic Space for SAR, MSI, and Text in Remote Sensing
+
+B. Visual Examples of Retrieval
+We reported some visual examples of retrieved images for increasingly complex queries in Figures 8 to 10. It is
+possible that nothing will be retrieved since vector databases (i.e., ChromaDB) use approximated KNN to navigate a
+large dataset. Similar images correspond to the same area collected at different timestamps.
+CLOSP-RN
+
+10
+
+5
+
+10
+
+3
+
+10
+
+5
+
+BiCLIP
+
+5
+
+5
+
+5
+
+2
+
+3
+
+7
+
+SkyCLIP-T
+
+3
+
+3
+
+3
+
+-
+
+-
+
+-
+
+Figure 8: Top-3 images by modality retrieved by the models for the provided query. We reported the RGB for Sentinel-2
+and the VV polarization for Sentinel-1. Each image is coupled with the corresponding real relevance. Images are missing
+due to the use of approximated KNN in vector databases. Query: Flooded vegetation. Shrub and scrub
+
+CLOSP-RN
+
+8
+
+8
+
+3
+
+8
+
+5
+
+6
+
+BiCLIP
+
+4
+
+8
+
+5
+
+4
+
+6
+
+8
+
+SkyCLIP-T
+
+6
+
+2
+
+4
+
+-
+
+-
+
+-
+
+Figure 9: Top-3 images by modality retrieved by the models for the provided query. We reported the RGB for Sentinel-2
+and the VV polarization for Sentinel-1. Each image is coupled with the corresponding real relevance. Images are missing
+due to the use of approximated KNN in vector databases. Query: Bare. Built. Crops. Trees
+
+D. Rege Cambrin et al.: Preprint submitted to Elsevier
+
+Page 26 of 31
+
+CLOSP: A Unified Semantic Space for SAR, MSI, and Text in Remote Sensing
+CLOSP-RN
+
+7
+
+5
+
+7
+
+4
+
+4
+
+3
+
+BiCLIP
+
+4
+
+5
+
+6
+
+3
+
+3
+
+3
+
+SkyCLIP-T
+
+-
+
+-
+
+-
+
+1
+
+2
+
+1
+
+Figure 10: Top-3 images by modality retrieved by the models for the provided query. We reported the RGB for Sentinel-2
+and the VV polarization for Sentinel-1. Each image is coupled with the corresponding real relevance. Images are missing
+due to the use of approximated KNN in vector databases. Query: Bare. Burned area. Crops. Shrub and scrub. Snow and
+ice. Trees
+
+C. Corine LC mapping
+In Table 11, we present the mapping used between CORINE Land Cover classes and the Dynamic World classes.
+Table 11: Mapping of CORINE Land Cover (CLC) classes to Dynamic World (DW) classes.
+CORINE Land Cover Class
+
+Dynamic World Class
+
+Continuous urban fabric
+
+Built
+
+Discontinuous urban fabric
+
+Built
+
+Industrial or commercial units
+
+Built
+
+Road and rail networks and associated land
+
+Built
+
+Port areas
+
+Built
+
+Airports
+
+Built
+
+Mineral extraction sites
+
+Bare
+
+Dump sites
+
+Bare
+
+Construction sites
+
+Bare
+
+Green urban areas
+
+Grass
+
+Sport and leisure facilities
+
+Grass
+
+Non-irrigated arable land
+
+Crops
+Continued on next page
+
+D. Rege Cambrin et al.: Preprint submitted to Elsevier
+
+Page 27 of 31
+
+CLOSP: A Unified Semantic Space for SAR, MSI, and Text in Remote Sensing
+
+Table 11 – continued from previous page
+CORINE Land Cover Class
+
+Dynamic World Class
+
+Permanently irrigated land
+
+Crops
+
+Rice fields
+
+Flooded vegetation
+
+Vineyards
+
+Crops
+
+Fruit trees and berry plantations
+
+Crops
+
+Olive groves
+
+Crops
+
+Pastures
+
+Grass
+
+Annual crops associated with permanent crops
+
+Crops
+
+Complex cultivation patterns
+
+Crops
+
+Land principally occupied by agriculture, with
+
+Crops
+
+significant areas of natural vegetation
+Agro-forestry areas
+
+Trees
+
+Broad-leaved forest
+
+Trees
+
+Coniferous forest
+
+Trees
+
+Mixed forest
+
+Trees
+
+Natural grassland
+
+Grass
+
+Moors and heathland
+
+Shrub and Scrub
+
+Sclerophyllous vegetation
+
+Shrub and Scrub
+
+Transitional woodland/shrub
+
+Shrub and Scrub
+
+Beaches, dunes, sands
+
+Bare
+
+Bare rock
+
+Bare
+
+Sparsely vegetated areas
+
+Bare
+
+Burnt areas
+
+Burned Area
+
+Glaciers and perpetual snow
+
+Snow and Ice
+
+Inland marshes
+
+Flooded vegetation
+
+Peatbogs
+
+Flooded vegetation
+
+Salt marshes
+
+Flooded vegetation
+
+Salines
+
+Bare
+
+Intertidal flats
+
+Bare
+Continued on next page
+
+D. Rege Cambrin et al.: Preprint submitted to Elsevier
+
+Page 28 of 31
+
+CLOSP: A Unified Semantic Space for SAR, MSI, and Text in Remote Sensing
+
+Table 11 – continued from previous page
+CORINE Land Cover Class
+
+Dynamic World Class
+
+Water courses
+
+Water
+
+Water bodies
+
+Water
+
+Coastal lagoons
+
+Water
+
+Estuaries
+
+Water
+
+Sea and ocean
+
+Water
+
+References
+Benavoli, A., Corani, G., Demšar, J., Zaffalon, M., 2017. Time for a change: a tutorial for comparing multiple classifiers through bayesian analysis.
+J. Mach. Learn. Res. 18, 2653–2688.
+Benavoli, A., Mangili, F., Corani, G., Zaffalon, M., Ruggeri, F., 2014. A bayesian wilcoxon signed-rank test based on the dirichlet process, in:
+Proceedings of the 31st International Conference on International Conference on Machine Learning - Volume 32, JMLR.org. p. II–1026–II–1034.
+Bonferroni, C.E., 1936. Teoria statistica delle classi e calcolo delle probabilità. Pubblicazioni del R. Istituto superiore di scienze economiche e
+commerciali di Firenze.
+Brown, C.F., Brumby, S.P., Guzder-Williams, B., Birch, T., Hyde, S.B., Mazzariello, J., Czerwinski, W., Pasquarella, V.J., Haertel, R., Ilyushchenko,
+S., et al., 2022. Dynamic world, near real-time global 10 m land use land cover mapping. Scientific Data 9, 251.
+Büttner, G., Kosztra, B., Soukup, T., Sousa, A., Langanke, T., 2017. Clc2018 technical guidelines. European Environment Agency: Copenhagen,
+Denmark 25.
+Cambrin, D.R., Colomba, L., Garza, P., 2023. Cabuar: California burned areas dataset for delineation [software and data sets]. IEEE Geoscience
+and Remote Sensing Magazine 11, 106–113. doi:10.1109/MGRS.2023.3292467.
+Clasen, K.N., Hackel, L., Burgert, T., Sumbul, G., Demir, B., Markl, V., 2024. reben: Refined bigearthnet dataset for remote sensing image analysis
+URL: https://arxiv.org/abs/2407.03653, arXiv:2407.03653.
+Conover, W.J., 1998. Practical Nonparametric Statistics. Wiley Series in Probability and Statistics. 3 ed., John Wiley & Sons, Nashville, TN.
+Demšar, J., 2006. Statistical comparisons of classifiers over multiple data sets. J. Mach. Learn. Res. 7, 1–30.
+Drusch, M., Del Bello, U., Carlier, S., Colin, O., Fernandez, V., Gascon, F., Hoersch, B., Isola, C., Laberinti, P., Martimort, P., et al., 2012.
+Sentinel-2: Esa’s optical high-resolution mission for gmes operational services. Remote sensing of Environment 120, 25–36.
+Efron, B., 1992. Bootstrap methods: another look at the jackknife, in: Breakthroughs in statistics: Methodology and distribution. Springer, pp.
+569–593.
+European Space Agency, 2024a. S1 Products. https://sentiwiki.copernicus.eu/web/s1-products. [Accessed 19-01-2025].
+European Space Agency, 2024b. S2 Products. https://sentiwiki.copernicus.eu/web/s2-products. [Accessed 19-01-2025].
+Gao, B.C., 1996. Ndwi—a normalized difference water index for remote sensing of vegetation liquid water from space. Remote sensing of
+environment 58, 257–266.
+Goward, S.N., Masek, J.G., Williams, D.L., Irons, J.R., Thompson, R., 2001. The landsat 7 mission: Terrestrial research and applications for the
+21st century. Remote Sensing of Environment 78, 3–12.
+
+D. Rege Cambrin et al.: Preprint submitted to Elsevier
+
+Page 29 of 31
+
+CLOSP: A Unified Semantic Space for SAR, MSI, and Text in Remote Sensing
+Huete, A.R., 1988. A soil-adjusted vegetation index (savi). Remote sensing of environment 25, 295–309.
+Ilharco, G., Wortsman, M., Wightman, R., Gordon, C., Carlini, N., Taori, R., Dave, A., Shankar, V., Namkoong, H., Miller, J., Hajishirzi, H.,
+Farhadi, A., Schmidt, L., 2021. Openclip. URL: https://doi.org/10.5281/zenodo.5143773, doi:10.5281/zenodo.5143773. if you
+use this software, please cite it as below.
+Jain, P., Ienco, D., Interdonato, R., Berchoux, T., Marcos, D., 2024. Senclip: Enhancing zero-shot land-use mapping for sentinel-2 with ground-level
+prompting. URL: https://arxiv.org/abs/2412.08536, arXiv:2412.08536.
+Klemmer, K., Rolf, E., Robinson, C., Mackey, L., Rußwurm, M., 2024. Satclip: Global, general-purpose location embeddings with satellite imagery.
+URL: https://arxiv.org/abs/2311.17179, arXiv:2311.17179.
+Kuhn, M., Johnson, K., 2013. Applied predictive modeling. 1 ed., Springer, New York, NY.
+Li, X., Zhou, Y., Gong, P., Seto, K.C., Clinton, N., 2020. Developing a method to estimate building height from sentinel-1 data. Remote Sensing
+of Environment 240, 111705.
+Liu, C., Chen, K., Zhao, R., Zou, Z., Shi, Z., 2025. Text2earth: Unlocking text-driven remote sensing image generation with a global-scale dataset
+and a foundation model. arXiv preprint arXiv:2501.00895 .
+Liu, F., Chen, D., Guan, Z., Zhou, X., Zhu, J., Ye, Q., Fu, L., Zhou, J., 2024. Remoteclip: A vision language foundation model for remote sensing.
+IEEE Transactions on Geoscience and Remote Sensing .
+Lu, X., Wang, B., Zheng, X., Li, X., 2018. Exploring models and data for remote sensing image caption generation. IEEE Transactions on
+Geoscience and Remote Sensing 56, 2183–2195. doi:10.1109/TGRS.2017.2776321.
+Manning, C.D., Raghavan, P., Schutze, H., 2008. Introduction to Information Retrieval. Cambridge University Press, Cambridge, England.
+Marimo, C.T., Blumenstiel, B., Nitsche, M., Jakubik, J., Brunschwiler, T., 2025. Beyond the visible: Multispectral vision-language learning for
+earth observation. URL: https://arxiv.org/abs/2503.15969, arXiv:2503.15969.
+Montello, F., Arnaudo, E., Rossi, C., 2022. Mmflood: A multimodal dataset for flood delineation from satellite imagery. IEEE Access 10, 96774–
+96787. doi:10.1109/ACCESS.2022.3205419.
+Qu, B., Li, X., Tao, D., Lu, X., 2016. Deep semantic understanding of high resolution remote sensing image, in: 2016 International Conference on
+Computer, Information and Telecommunication Systems (CITS), pp. 1–5. doi:10.1109/CITS.2016.7546397.
+Radford, A., Kim, J.W., Hallacy, C., Ramesh, A., Goh, G., Agarwal, S., Sastry, G., Askell, A., Mishkin, P., Clark, J., Krueger, G., Sutskever, I.,
+2021. Learning transferable visual models from natural language supervision, in: ICML.
+Rambour, C., Audebert, N., Koeniguer, E., Le Saux, B., Crucianu, M., Datcu, M., 2020. Flood detection in time series of optical and sar images.
+The International Archives of the Photogrammetry, Remote Sensing and Spatial Information Sciences 43, 1343–1346.
+Rege Cambrin, D., Garza, P., 2024. Quakeset: A dataset and low-resource models to monitor earthquakes through sentinel-1. Proceedings of the
+International ISCRAM Conference URL: http://dx.doi.org/10.59297/n89yc374, doi:10.59297/n89yc374.
+Reimers, N., Gurevych, I., 2019. Sentence-BERT: Sentence embeddings using Siamese BERT-networks, in: Inui, K., Jiang, J., Ng, V., Wan, X.
+(Eds.), Proceedings of the 2019 Conference on Empirical Methods in Natural Language Processing and the 9th International Joint Conference
+on Natural Language Processing (EMNLP-IJCNLP), Association for Computational Linguistics, Hong Kong, China. pp. 3982–3992. URL:
+https://aclanthology.org/D19-1410/, doi:10.18653/v1/D19-1410.
+Roy, D.P., Wulder, M.A., Loveland, T.R., Woodcock, C.E., Allen, R.G., Anderson, M.C., Helder, D., Irons, J.R., Johnson, D.M., Kennedy, R., et al.,
+2014. Landsat-8: Science and product vision for terrestrial global change research. Remote sensing of Environment 145, 154–172.
+Rußwurm, M., Klemmer, K., Rolf, E., Zbinden, R., Tuia, D., 2024. Geographic location encoding with spherical harmonics and sinusoidal representation networks, in: Proceedings of the International Conference on Learning Representations (ICLR). URL: https://iclr.cc/virtual/
+
+D. Rege Cambrin et al.: Preprint submitted to Elsevier
+
+Page 30 of 31
+
+CLOSP: A Unified Semantic Space for SAR, MSI, and Text in Remote Sensing
+2024/poster/18690.
+Sechidis, K., Tsoumakas, G., Vlahavas, I., 2011. On the stratification of multi-label data, in: Machine Learning and Knowledge Discovery in
+Databases: European Conference, ECML PKDD 2011, Athens, Greece, September 5-9, 2011, Proceedings, Part III 22, Springer. pp. 145–158.
+Sitzmann, V., Martel, J., Bergman, A., Lindell, D., Wetzstein, G., 2020. Implicit neural representations with periodic activation functions. Advances
+in neural information processing systems 33, 7462–7473.
+Thenkabail, P.S., Enclona, E.A., Ashton, M.S., Van Der Meer, B., 2004. Accuracy assessments of hyperspectral waveband performance for vegetation analysis applications. Remote sensing of environment 91, 354–376.
+Torres, R., Snoeij, P., Davidson, M., Bibby, D., Lokas, S., 2012. The sentinel-1 mission and its application capabilities, in: 2012 IEEE International
+Geoscience and Remote Sensing Symposium, IEEE. pp. 1703–1706.
+Wang, Y., Braham, N.A.A., Xiong, Z., Liu, C., Albrecht, C.M., Zhu, X.X., 2023. Ssl4eo-s12: A large-scale multimodal, multitemporal dataset for
+self-supervised learning in earth observation [software and data sets]. IEEE Geoscience and Remote Sensing Magazine 11, 98–106. doi:10.
+1109/MGRS.2023.3281651.
+Wang, Z., Prabha, R., Huang, T., Wu, J., Rajagopal, R., 2024. Skyscript: A large and semantically diverse vision-language dataset for remote
+sensing, in: Proceedings of the AAAI Conference on Artificial Intelligence, pp. 5805–5813.
+Wulder, M.A., Roy, D.P., Radeloff, V.C., Loveland, T.R., Anderson, M.C., Johnson, D.M., Healey, S., Zhu, Z., Scambos, T.A., Pahlevan, N., et al.,
+2022. Fifty years of landsat science and impacts. Remote Sensing of Environment 280, 113195.
+Yuan, Z., Zhang, W., Fu, K., Li, X., Deng, C., Wang, H., Sun, X., 2022. Exploring a fine-grained multiscale method for cross-modal remote sensing
+image retrieval. IEEE Transactions on Geoscience and Remote Sensing 60, 1–19. doi:10.1109/TGRS.2021.3078451.
+
+D. Rege Cambrin et al.: Preprint submitted to Elsevier
+
+Page 31 of 31
+
+

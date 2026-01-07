@@ -1,0 +1,1285 @@
+R EDISTRIBUTING R EWARDS ACROSS T IME AND
+AGENTS FOR M ULTI -AGENT R EINFORCEMENT
+L EARNING
+Aditya Kapoor∗1 , Kale-ab Tessera2 , Harshad Khadilkar3 , Mayank Baranwal3 , Jan Peters4 , Stefano
+Albrecht2 , and Mingfei Sun1
+1
+
+University of Manchester
+University of Edinburgh
+3
+IIT, Bombay
+4
+TU Darmstadt
+
+arXiv:2502.04864v2 [cs.MA] 29 Oct 2025
+
+2
+
+A BSTRACT
+Credit assignment—disentangling each agent’s contribution to a shared reward—is a critical challenge in cooperative multi-agent reinforcement learning
+(MARL). To be effective, credit assignment methods must preserve the environment’s optimal policy. Some recent approaches attempt this by enforcing return
+equivalence, where the sum of distributed rewards must equal the team reward.
+However, their guarantees are conditional on a learned model’s regression accuracy, making them unreliable in practice. We introduce Temporal-Agent Reward
+Redistribution (TAR²), an approach that decouples credit modeling from this constraint. A neural network learns unnormalized contribution scores, while a separate, deterministic normalization step enforces return equivalence by construction.
+We demonstrate that this method is equivalent to a valid Potential-Based Reward
+Shaping (PBRS), which guarantees the optimal policy is preserved regardless of
+model accuracy. Empirically, on challenging SMACLite and Google Research
+Football (GRF) benchmarks, TAR² accelerates learning and achieves higher final performance than strong baselines. These results establish our method as an
+effective solution for the agent-temporal credit assignment problem. Github Code
+
+1
+
+I NTRODUCTION
+
+MARL (Albrecht et al., 2024) is a powerful paradigm for solving complex cooperative tasks, with
+landmark successes in domains ranging from logistics and robotics to challenging games (Krnjaic
+et al., 2023; Sartoretti et al., 2019; Vinyals et al., 2019; Kurach et al., 2020). In these settings, teams
+of agents must learn to synchronize their actions to achieve a shared goal.
+Despite this progress, a key bottleneck is the multi-agent credit assignment problem: allocating a
+shared team reward to guide agent learning. The challenge is amplified in episodic MARL where a
+single feedback signal arrives only at a trajectory’s end. Here, agents struggle to resolve two coupled
+problems: when their critical contributions occurred (temporal credit assignment) and which agents
+were responsible (agent credit assignment).
+For credit assignment methods to be effective, they should not alter the environment’s optimal policy. Some recent approaches, like STAS and AREL, attempt this by enforcing a return equivalence
+constraint, where distributed rewards must sum to the team reward. However, this approach is
+theoretically fragile They train a single model to both predict credit and satisfy this constraint simultaneously. Consequently, their policy-invariance guarantee is conditional on the network being
+a perfect regressor—a condition practically unattainable. Any prediction error breaks the guarantee
+and risks leading to suboptimal policies.
+∗
+
+Email:
+
+aditya.kapoor@postgrad.manchester.ac.uk
+
+1
+
+To solve this fragility, we introduce Temporal-Agent Reward Redistribution (TAR²), a method designed for structural robustness, which we illustrate in Figure 1. The core idea is to decouple credit
+modeling from constraint satisfaction. A neural network performs a single, focused task: learning
+unnormalized scores representing the absolute importance of each agent’s actions. A separate, deterministic normalization step then makes this importance relative, converting the scores into a valid
+probability distribution used to construct the final rewards. This guarantees return equivalence by
+construction, irrespective of the network’s accuracy. We demonstrate that this two-step architecture
+is equivalent to a valid Potential-Based Reward Shaping (PBRS) (Ng, 1999), which provides the
+formal guarantee that the optimal policy is preserved.
+
+2
+
+BACKGROUND
+
+We formalize the cooperative MARL problem as a Decentralized Partially Observable Markov Decision Process (Dec-POMDP) (Oliehoek & Amato, 2016) and review Potential-Based Reward Shaping (PBRS) (Ng, 1999), the theoretical foundation for our approach.
+
+2.1
+
+P ROBLEM F ORMULATION
+
+A fully cooperative multi-agent task is a Dec-POMDP (Oliehoek & Amato, 2016; Amato, 2024),
+N
+defined by the tuple M = ⟨S, {Ai }N
+i=1 , P, {Ωi }i=1 , O, R, ρ0 , γ, N ⟩. The environment consists of
+N agents interacting in a global state space S with an initial state distribution ρ0 . At each timestep
+t, the team takes a joint action at = {a1,t , . . . , aN,t } from the joint action space A =×N
+i=1 Ai , which
+causes a transition to a new state st+1 according to P(st+1 |st , at ). Due to partial observability,
+agent i receives only a local observation oi,t ∈ Ωi from the observation function O.
+Because a single observation is often insufficient to disambiguate the true state, each agent must
+condition its policy on its local action-observation history, τi,t = (oi,0 , ai,0 , . . . , oi,t−1 , ai,t−1 , oi,t )
+(Amato, 2024). For notational convenience, we denote the histories of all other agents as τ−i,t =
+{τj,t }j̸=i , and the joint history of all agents as τt = (τ1,t , . . . , τN,t ). In a decentralized execution
+setting, each agent learns a policy πi (ai,t |τi,t ) that depends only on its own history. The agents’
+QN
+policies combine to form a joint policy π = i=1 πi . The team receives a shared reward rt =
+R(st , at ) and, with a discount factor γ,
+aims to learn
+hP
+i a joint policy π that maximizes the expected
+T
+t
+discounted return: J(π) = Eτ ∼π,ρ0
+t=0 γ rt , where τ denotes a full episode trajectory. To
+learn effective decentralized policies in large state-action spaces, we adopt the Centralized Training
+with Decentralized Execution (CTDE) paradigm (Foerster et al., 2018; Lowe et al., 2017). During
+centralized training, agents leverage global information to guide learning, while at test-time they
+execute policies using only local information.
+We focus on the challenging episodic setting, where reward is only dispensed at the end of an episode
+rt = 0 for t < T , and rt = R(sT ) is a terminal reward. This sparsity makes credit assignment
+exceptionally difficult, as agents must deduce which actions in a long trajectory led to the final
+outcome from an episodic signal. While policies are executed decentrally, we assume a centralized
+training paradigm where a shaping function can access the joint history τt to guide learning.
+
+2.2
+
+P OTENTIAL -BASED R EWARD S HAPING
+
+To create dense rewards without distorting the underlying problem, we leverage PBRS (Ng, 1999).
+In single-agent RL, PBRS augments the environment’s reward R(s, a) by an additional shaping
+reward, F (s, a, s′ ) = γΦ(s′ ) − Φ(s), using a potential function Φ : S → R to improve the speed of
+convergence. The key property of PBRS is that it guarantees policy invariance – any optimal policy
+in the shaped-reward MDP remains optimal in the original MDP. This guarantee extends to the fully
+cooperative multi-agent setting, preserving the set of optimal joint policies (Devlin et al., 2014) and
+forming a theoretically sound basis for credit assignment.
+2
+
+Figure 1: The TAR² architecture processes trajectory data through four main stages. (1) Input sequences are converted into embeddings with positional encoding. (2) A multi-layer transformer
+block with sequential Temporal and Agent Attention builds context-aware representations, regularized by an auxiliary Inverse Dynamics task to ensure causality. (3) The Score Network computes
+unnormalized scores by conditioning each timestep’s representation on a learned Final Outcome
+Embedding (Z). (4) A final Probabilistic Normalization step converts these scores and the global
+reward R(sT ) into dense, per-agent rewards {ri,t } that satisfy strict return equivalence.
+
+3
+
+T EMPORAL -AGENT R EWARD R EDISTRIBUTION
+
+As established, PBRS provides a sound theoretical basis for policy-preserving credit assignment.
+However, its practical application is not straightforward. The guarantee of policy invariance holds
+for any potential function, but an unconstrained or poorly learned one can introduce significant noise
+and high variance into the policy gradients, destabilizing and slowing down convergence.
+Our method, Temporal-Agent Reward Redistribution (TAR²), is designed to harness the guarantees
+of PBRS while mitigating these practical instabilities. The core idea is to decouple credit modeling
+from constraint satisfaction. As illustrated in Figure 1, a neural network performs a single, focused
+task: learning unnormalized contribution scores. A separate, deterministic normalization step then
+constructs the final rewards, guaranteeing return equivalence by construction. In this section, we
+formalize this design, prove its theoretical guarantees, analyze its learning dynamics, and detail the
+architecture that operationalizes these principles.
+3.1
+
+R EWARD R EDISTRIBUTION F ORMULATION
+
+We formalize our two-step process as follows. The reward model, parameterized by θ, learns unnormalized contribution scores, ci,t . We then use a deterministic shift-and-normalize scheme to convert
+these scores into weights.PThe weights convert the scores to final shaped rewards, ri,t , enforcing
+strict return equivalence ( t,i ri,t = R(sT )) by construction. This structural guarantee is critical
+for reducing the variance in the learning signal (Sec 3.4.1), distinguishing TAR² from prior work
+where policy invariance is a fragile and conditional property. First, we compute temporal weights,
+agg
+cagg
+t − mint′ ct′
+,
+(1)
+agg
+agg
+′
+t′′ (ct′′ − mint ct′ ) + ϵ
+P
+by normalizing aggregated scores (cagg
+= i ci,t ) across the trajectory. We then compute agentt
+specific weights,
+ci,t − minj cj,t
+agent
+,
+(2)
+wi,t
+=P
+(c
+k k,t − minj cj,t ) + ϵ
+
+wttemp = P
+
+by normalizing the individual scores within each timestep. The indices iterate over active agents and
+timesteps, and ϵ (e.g. 1e-8) is a small constant for numerical stability. The final redistributed reward
+is then constructed as
+agent
+si,t = wttemp wi,t
+R(sT ).
+(3)
+3
+
+3.2
+
+O PTIMAL P OLICY P RESERVATION
+
+orig
+be
+We prove TAR2 preserves the optimal policy by framing it within multi-agent PBRS. Let ri,t
+agent i’s ground-truth contribution to the team reward rtorig . Our model produces a dense, shaped
+agent
+orig
+′
+reward si,t = wttemp wi,t
+R(sT ). While the complete potential-based reward is ri,t
+= si,t + ri,t
+,
+orig
+is
+TAR2 uses only the shaped reward si,t for learning. This is a critical design choice: because ri,t
+zero for all t < T in the episodic setting, dropping it eliminates a sparse, high-variance signal. As
+we mathematically justify in Sec 3.4.1, this significantly reduces variance and stabilizes learning.
+Proposition 3.1 (Optimal Policy Preservation). Let Menv be a Dec-POMDP where agent i receives
+orig
+reward ri,t
+. Let MTAR2 be an identical environment where agent i receives the augmented reward
+orig
+′
+ri,t = ri,t + si,t . Any joint policy π ∗ optimal in MTAR2 is also optimal in Menv .
+
+Proof. The proof demonstrates that si,t is a valid per-agent potential-based shaping reward. As
+established by Devlin & Kudenko (2011), using such individual potential functions preserves the set
+of optimal joint policies. For each agent i, we define a history-based potential function Φi (τt ) =
+Pt−1
+k=0 si,k (assuming γ = 1 for the episodic setting). The corresponding shaping function is:
+Fi,t = γΦi (τt+1 ) − Φi (τt ) =
+
+t
+X
+k=0
+
+si,k −
+
+t−1
+X
+
+si,k = si,t
+
+(4)
+
+k=0
+
+Since si,t adheres to the PBRS condition, the transformation is policy-invariant. The expected total
+return in the shaped environment is:
+
+
+
+
+X orig
+X
+JPBRS (π) = Eπ  (ri,t + si,t ) = Jenv (π) + Eπ 
+si,t 
+(5)
+t,i
+
+t,i
+
+P
+
+By construction, the total shaping reward t,i si,t = R(sT ). Since Jenv (π) = Eπ [R(sT )], the new
+objective is JPBRS (π) = 2Jenv (π). As this is a constant scaling of the original objective, the set of
+optimal policies is preserved.
+3.3
+
+A NALYSIS OF G RADIENT DYNAMICS
+
+Beyond guaranteeing optimality, we now analyze how TAR² influences the learning dynamics. We
+prove that while TAR² introduces a beneficial bias to the joint policy gradient, it preserves the gradient direction for each individual agent.
+Proposition 3.2 (Stochastic Gradient Direction Preservation). For any agent k and any sampled
+trajectory τ , the stochastic policy gradient estimate under TAR²’s rewards,
+ĝk,TAR2 (τ ) = δk (τ )ĝk,Global (τ ),
+(6)
+is proportional to the gradient estimate under the original team reward, ĝk,Global (τ ). The scaling
+factor δk (τ ) ∈ [0, 1] is a trajectory-dependent scalar.
+Proof. The policy gradient estimate for agent k is the product of its score function and the total
+return it receives. Under the global episodic reward, R(sT ), the estimate is
+ĝk,Global (τ ) = Gk (τ )R(sT ),
+(7)
+PT −1
+with the score function Gk (τ ) = t=0 ∇θk log πθk (ak,t |τk,t ). Under TAR², the estimate uses the
+PT −1
+agent’s individual return, Rk (τ ) = t=0 rk,t , resulting in
+ĝk,TAR2 (τ ) = Gk (τ )Rk (τ ).
+(8)
+By substituting our definition of rk,t from Eq. 3, we find that Rk (τ ) is a scaled version of the global
+reward
+P
+
+T −1 agent temp
+Rk (τ ) =
+R(sT ).
+(9)
+t=0 wk,t wt
+P agent temp
+Letting δk (τ ) = t wk,t wt , the relationship becomes ĝk,TAR2 (τ ) = δk (τ )ĝk,Global (τ ). Since
+P
+P
+agent
+agent
+weights wk,t
+∈ [0, 1] and wttemp ∈ [0, 1] with t wttemp = 1, the scalar δk (τ ) = t wttemp wk,t
+≤
+P temp
+w
+=
+1.
+As
+all
+weights
+are
+non-negative,
+δ
+(τ
+)
+≥
+0.
+Thus,
+δ
+(τ
+)
+∈
+[0,
+1],
+and
+the
+stochastic
+k
+k
+t t
+gradient direction for agent k is preserved.
+4
+
+Implications for Joint Policy Convergence. Crucially, while TAR²Ppreserves the gradient direction for each agent individually, the
+P joint policy gradient, GTAR2 = k δk (τ )ĝk , is not parallel to
+the true joint gradient, GGlobal = k ĝk . This deviation introduces a beneficial bias – TAR² trades
+the unbiased but high-variance true gradient for a lower-variance, biased estimate that credits agents
+proportionally to their learned contribution. While this informed bias may lead the parameters to
+∗
+a different convergent point θTAR
+2 (Devlin et al., 2014), our PBRS guarantee ensures the resulting
+∗
+policy, π(; θTAR2 ), remains in the set of optimal policies. This provides a structural robustness that
+methods reliant on unconstrained regression targets lack.
+3.4
+
+VARIANCE R EDUCTION P ROPERTIES OF TAR²
+
+While our framework guarantees that the optimal policy is preserved (Sec 3.2), this alone does
+not guarantee efficient learning. The standard PBRS formulation allows for any potential function,
+which can introduce significant noise and high variance into the policy gradients, leading to slow
+and unstable convergence. TAR² is explicitly designed to mitigate this issue through two primary
+mechanisms, which we analyze below.
+3.5
+
+VARIANCE R EDUCTION FROM S TRUCTURAL C ONSTRAINTS
+
+The core design choice of TAR2 is to use only the shaped reward si,t for learning, rather than the
+orig
+′
+full potential-based reward ri,t
+= ri,t
++ si,t . This choice structurally reduces the variance of the
+joint policy gradient estimator.
+PT −1
+Let the score function for agent k be Gk (τ ) = t=0 ∇θk log πθk (ak,t |τk,t ). The joint policy graP
+dient estimator under a full PBRS formulation would be ĝPBRS (τ ) = k Gk (τ )(Rkorig (τ ) + Sk (τ )),
+where Rkorig and Sk are the returns for agent k from the original and shaped rewards, respectively. This estimator can be decomposed into two parts: a gradient component from the origP
+orig
+2
+inal rewards,Pĝorig (τ ) =
+k Gk (τ )Rk (τ ), and the TAR estimator from our shaped rewards,
+2
+ĝTAR (τ ) = k Gk (τ )Sk (τ ).
+Using the decomposition for the variance of a sum, the variance of the full PBRS estimator is
+V ar(ĝPBRS ) = V ar(ĝorig ) + V ar(ĝTAR2 ) + 2Cov(ĝorig , ĝTAR2 ). The term V ar(ĝorig ) is the primary
+source of instability. In the episodic setting, the per-agent return Rkorig (τ ) is a sparse, high-variance
+signal, making ĝorig a noisy estimator for the joint policy gradient. Since V ar(ĝorig ) is a non-negative
+term, it follows that V ar(ĝPBRS ) > V ar(ĝTAR2 ).
+By using only the shaped rewards si,t for learning, TAR2 structurally eliminates the noisy estimator
+component ĝorig . This provides a denser, lower-variance signal for more stable and efficient learning,
+while the policy-invariance
+P guarantee is retained because the total redistributed reward equals the
+original team reward ( t,i si,t = R(sT )).
+3.5.1
+
+VARIANCE R EDUCTION FROM F INAL -S TATE C ONDITIONING
+
+Second, our use of final-state conditioning provides a more causally-correct and lower-variance
+learning target. Our reward model predicts contribution scores, ci,t , conditioned on the final outcome
+of the trajectory, Z (e.g., the terminal state). By the Law of Total Variance, the variance of these
+scores can be decomposed as
+Var(ci,t |τt ) = E[Var(ci,t |τt , Z)]+Var(E[ci,t |τt , Z])
+| {z } |
+{z
+} |
+{z
+}
+Original Var.
+
+Remaining Var.
+
+(10)
+
+TAR² Target Var.
+
+Our model’s learning target is the final term, the expected contribution E[ci,t |τt , Z]. Since variance
+is non-negative, this proves that the variance of our learning target is less than or equal to the variance
+of the unconditioned signal
+Var(E[ci,t |τt , Z]) ≤ Var(ci,t |τt ).
+(11)
+By learning this less noisy, post-hoc signal, TAR² benefits from a sharper and more stable learning
+target.
+The introduction of the final outcome, Z, means our potential function is implicitly conditioned
+on information from the end of the trajectory, i.e., Φ(τt , Z). This does not invalidate the PBRS
+5
+
+guarantees. The policy invariance proof relies on the telescoping sum of potential differences, which
+holds even when the potential is conditioned on a variable, Z, that is constant for any given trajectory
+(Devlin et al., 2014; Arjona-Medina et al., 2019). Since this is a valid choice for the potential
+function’s state representation, all policy preservation guarantees remain intact.
+3.6
+
+M ODEL A RCHITECTURE AND T RAINING
+
+We now detail the architecture that operationalizes our TAR² method. As depicted in Figure 1, our
+model is a sequence-to-sequence network that processes the joint action-observation history, τ , to
+produce the unnormalized contribution scores, ci,t .
+3.6.1
+
+A RCHITECTURE D ETAILS
+
+Our reward model uses a dual-transformer design to capture both temporal and inter-agent dependencies. As shown in Figure 1, the architecture integrates three key components:
+Final-State Conditioning. To ground credit assignment in the trajectory’s outcome, the entire
+model is conditioned on an embedding of the final state, Z. As justified in our variance analysis
+(Sec 3.5.1), this provides a provably lower-variance learning target.
+Inverse Dynamics for Causal Representations. To ensure the embeddings are causally relevant,
+an auxiliary inverse dynamics model regularizes the shared representations and improve downstream
+task performance (Pathak et al., 2017; Brandfonbrener et al., 2023). A separate MLP prediction
+head takes the concatenated latent embeddings from two consecutive timesteps, embed(si,t ) and
+embed(si,t+1 ), and outputs a probability distribution, πID , over the action space. It is trained via an
+auxiliary loss to predict the agent’s action, ai,t . This forces the shared embeddings to encode controllable aspects of the state, preventing the credit assignment from relying on spurious correlations.
+Deterministic Reward Normalization. Finally, the raw scores ci,t from the transformer body are
+passed to the deterministic normalization function (Sec 3.1). This non-learned step is the structural
+property that guarantees the strict return equivalence required for effectively learning and preserving
+the environment’s optimal policy.
+3.6.2
+
+T RAINING O BJECTIVE
+
+The reward model, parameterized by θ, is trained by minimizing a composite loss function. The
+objective provides a strong learning signal for identifying the importance of each agent’s actions
+by regressing the sum of scores against the true episodic reward, while an inverse dynamics term
+regularizes the representations. The resulting objective
+
+
+2
+P
+P
+L(θ) = Eτ ∼B R(sT ) − t,i ci,t −λ t,i log πID (ai,t )
+(12)
+{z
+}
+|
+{z
+}|
+Reward Regression Loss
+
+Inverse Dynamics Regularizer
+
+combines this regression loss with the inverse dynamics regularizer, modulated by a hyperparameter
+λ. This objective trains the model to assign a higher total score to better trajectories. The separate
+normalization step (Sec 3.1) then takes these meaningfully-scaled scores and distributes their value
+as credit in a way that structurally guarantees policy invariance.
+
+4
+
+R ELATED W ORK
+
+Our work addresses the joint agent-temporal credit assignment problem. We position TAR² within
+the existing literature, highlighting how our design overcomes the key limitations of prior work,
+particularly their reliance on theoretically brittle learning schemes.
+4.1
+
+T EMPORAL C REDIT A SSIGNMENT
+
+Temporal credit assignment aims to transform a single, sparse episodic reward into a sequence of
+per-timestep signals. Prominent single-agent approaches include analyzing state-value differences
+6
+
+Figure 2: TAR²’s Average Return comparison against baselines on Google Research Football (AC) and SMACLite (D-F). On SMACLite, it demonstrates improved sample efficiency compared to
+STAS and converges to a higher average return than the unstable AREL variants. This trend is more
+pronounced on GRF, where TAR² consistently achieves the highest average return, particularly in
+‘Counter Attack Easy‘ and ‘Pass and Shoot‘ scenarios.
+
+Figure 3: Performance of TAR² relative to oracle rewards on SMACLite (D-F) and Google Research Football (A-C). TAR² enables learning a policy that is competitive with hand-crafted reward
+functions. TAR²’s performance rivals ‘Temporal-Agent‘ in SMACLite and ‘Temporal‘ in GRF. It
+outperforms all other heuristics, demonstrating that a learned credit assignment can be more effective than a manually engineered one.
+
+(RUDDER), using sequence models or retrospectively re-evaluating actions (Arjona-Medina et al.,
+2019; Liu et al., 2019; Harutyunyan et al., 2019), while others use intrinsic motivation to generate
+dense rewards for exploration (Schäfer et al., 2022). These methods, however, have two key limitations in our context. First, they are designed for single-agent problems and do not address the
+multi-agent nature of credit assignment. Second, approaches like intrinsic motivation intentionally
+alter the optimization objective to encourage exploration, whereas our goal is to preserve the original optimal policy. Even methods adapted for MARL, such as AREL (Xiao et al., 2022), address
+temporal credit for the team as a whole but fail to disentangle individual agent contributions.
+4.2
+
+AGENT C REDIT A SSIGNMENT
+
+Agent credit assignment allocates a shared team reward to individual agents, dominated by methods
+like value function factorization (VDN, QMIX) and counterfactuals (COMA) (Sunehag et al., 2017;
+7
+
+Figure 4: Ablation study of TAR²’s core components. Removing any component degrades performance. ‘No-Final-Outcome‘ increases variance, ‘No-Inverse-Dynamics‘ hinders performance, and
+‘No-Normalization‘ is the most detrimental as it violates the policy preservation guarantee.
+Rashid et al., 2020; Foerster et al., 2018). Other approaches use Shapley values or attention-based
+critics (Wang et al., 2020; Freed et al., 2022; Kapoor et al., 2024). A unifying limitation of these
+methods is their fundamental reliance on dense, per-timestep team rewards, an assumption that fails
+in the challenging episodic settings we address (Papoudakis et al., 2021). In contrast, TAR² is
+designed specifically for a single episodic signal.
+4.3
+
+J OINT AGENT-T EMPORAL C REDIT A SSIGNMENT
+
+Addressing both credit assignment dimensions is a key frontier in MARL. The most notable prior
+work, STAS (Chen et al., 2023), tackles this joint problem but its approach is theoretically brittle. It
+trains a model to directly predict the final shaped rewards, meaning its policy preservation guarantee
+is conditional on the network’s regression accuracy. This reliance on perfect function approximation
+is the key theoretical fragility that TAR² is designed to overcome, as we detail in Sec 3.
+
+5
+
+E XPERIMENTS
+
+We conduct experiments to answer three core questions: (1) How does TAR² compare to other
+reward redistribution baselines across diverse and challenging environments? (2) How does its performance compare against oracles with access to privileged reward information? (3) Which of our
+architectural components are most critical to its success?
+5.1
+
+E XPERIMENTAL S ETUP
+
+Environments. We evaluate on two challenging benchmarks, SMACLite (Michalski et al., 2023)
+and Google Research Football (GRF) (Kurach et al., 2020), modifying both to be strictly episodic
+with a single terminal team reward. Our chosen maps test distinct coordination challenges:
+SMACLite’s 5m vs 6m and 10m vs 11m test scalability, while 3s5z tests coordination between heterogeneous agents. For GRF, we use 3 vs 1 with keeper, counterattack easy, and pass and shoot to
+assess performance across diverse strategies. Further details are in the appendix.
+Baselines. For a fair comparison, all methods are built upon the same state-of-the-art MAPPO
+implementation (Yu et al., 2022). We compare against several credit assignment frameworks that
+operate on the same episodic team reward. These include a naive Uniform credit baseline; ARELTemporal (Xiao et al., 2022) for temporal-only assignment; and two strong joint agent-temporal
+methods, STAS (Chen et al., 2023), the current state-of-the-art, and our adapted AREL-AgentTemporal. We omit value decomposition methods like QMIX as they rely on Temporal-Difference
+(TD) updates, which are ill-suited for settings with only a single, delayed episodic reward (Gangwani
+et al., 2020).
+Oracle Baselines. To contextualize TAR²’s performance, we establish oracle baselines using privileged information from the original, dense-reward environments. The original environments provide
+a dense, per-timestep team reward, which we term Temporal. We then create a factorized version
+8
+
+of this reward that provides a per-timestep, per-agent signal, termed Temporal-Agent. For our main
+experiments, the standard input for TAR² and all baselines is the Episodic-Team reward, which is
+the sum of Temporal rewards over an episode. Similarly, Episodic-Agent reward is the sum of
+Temporal-Agent rewards. This allows us to compare against oracles trained with more information,
+thereby establishing heuristic performance bounds.
+5.2
+
+R ESULTS AND D ISCUSSION
+
+All learning curves show the mean episode return over 5 random seeds, with shaded areas representing 95% confidence intervals. We use average return as our primary metric to clearly analyze
+performance gains throughout the entire training process.
+Q1: Performance Against Baselines. As shown in Figure 2, TAR² consistently outperforms all
+baselines in both final average return and sample efficiency. The results empirically validate our
+core thesis: the structural robustness of TAR² provides a more reliable learning signal than the theoretically brittle designs of prior work. For instance, while STAS is competitive in some SMACLite
+scenarios, it exhibits higher variance and is unstable in GRF. This aligns with our analysis that its
+reliance on direct reward regression is fragile. The poor performance of the AREL variants further
+supports this conclusion. The performance of the Uniform baseline is particularly telling, it fails
+completely in SMACLite, yet is surprisingly effective in GRF, outperforming more complex methods. This highlights that without a robust theoretical grounding, even advanced models can struggle
+to beat simple heuristics. TAR²’s stable learning across all challenging environments demonstrates
+the practical benefit of decoupling credit modeling from constraint satisfaction.
+Q2: Contextualizing Performance with Oracle Bounds. Figure 3 contextualizes TAR²’s performance by comparing it against oracles with access to privileged reward signals. The results show
+that TAR² learns a highly effective credit assignment strategy using only the sparse Episodic-Team
+reward. In SMACLite, particularly on the homogeneous maps (5m vs 6m, 10m vs 11m), TAR²’s performance is indistinguishable from an oracle trained on perfect, per-agent dense rewards (TemporalAgent signal).Even on the heterogeneous map (3s5z), TAR² learns a near-optimal credit distribution,
+significantly outperforming weaker oracle signals. In GRF, TAR² is consistently the best-performing
+non-oracle method and is even superior to all the oracle heuristics in the Counter Attack Easy scenario. These results indicate that TAR² learns a credit distribution that is highly competitive with,
+and at times better than, what can be achieved with hand-crafted, privileged reward functions.
+Q3: Ablation Studies of Architectural Components. Our ablation studies (Figure 4) confirm
+that each component of our design is critical to its success. Removing Final Outcome Conditioning
+increases learning variance, which is consistent with our analysis in Sec 3.5.1. Ablating the Inverse Dynamics regularizer degrades performance, confirming that grounding the representations in
+causal actions is crucial (Pathak et al., 2017; Brandfonbrener et al., 2023). Learning less meaningful
+state representations leads to faulty credit assignment and instability, a known failure mode (Kapoor
+et al., 2024) due to imprecise credit assignment. The most significant performance collapse occurs
+when removing our Deterministic Normalization function. This ablation forces the model to suffer
+from the same fundamental flaw as AREL and STAS: optimizing an objective with no structural
+policy preservation guarantee. The resulting instability is a direct consequence of this brittle design. Collectively, these studies provide strong evidence that our components work synergistically
+to reduce variance, promote causal representations, and structurally guarantee policy preservation.
+
+6
+
+L IMITATIONS AND F UTURE W ORK
+
+While TAR² establishes a robust framework for episodic credit assignment, several exciting avenues
+for future work remain. First, the transformer-based architecture may face scalability challenges
+and could be enhanced by exploring methods like sparse attention or explicit group decomposition
+to better model agent interactions in massive-scale systems. Second, our framework is currently
+designed for a single terminal reward; a key next step is to extend TAR² to handle scenarios with
+multiple sparse rewards within an episode, which would require adapting our formulation. Furthermore, the residual performance variance observed in our results may stem from the implicit
+exploration encouraged by PBRS (Devlin et al., 2014). A formal exploration-exploitation analysis
+9
+
+could lead to adaptive shaping strategies. A more advanced approach would be to frame this as a
+bi-level optimization problem, where the reward model is meta-learned to produce shaping signals
+that directly maximize the downstream performance improvement of the agent policies. Finally,
+TAR²’s ability to learn from a single, outcome-based signal makes it a prime candidate for training
+teams of multi-agent Large Language Models (LLMs), a domain where feedback is often sparse.
+
+7
+
+C ONCLUSION
+
+We introduced TAR², a method for joint agent-temporal credit assignment designed for structural
+robustness. By decoupling credit modeling from constraint satisfaction, our approach overcomes
+the theoretical fragility of prior methods that rely on unreliable reward regression. The method’s deterministic normalization step guarantees strict return equivalence by construction, which we prove
+is equivalent to a valid Potential-Based Reward Shaping (PBRS), ensuring the optimal policy is preserved. Experiments on challenging SMACLite and GRF scenarios show that our approach learns
+faster and achieves better final performance than state-of-the-art baselines. These results validate
+our design principle and establish a robust and theoretically-grounded method for credit assignment
+in complex episodic MARL tasks.
+
+R EFERENCES
+Stefano V. Albrecht, Filippos Christianos, and Lukas Schäfer. Multi-Agent Reinforcement Learning:
+Foundations and Modern Approaches. MIT Press, 2024. URL https://www.marl-book.
+com.
+Christopher Amato. (a partial survey of) decentralized, cooperative multi-agent reinforcement learning. arXiv preprint arXiv:2405.06161, 2024.
+Jose A Arjona-Medina, Michael Gillhofer, Michael Widrich, Thomas Unterthiner, Johannes Brandstetter, and Sepp Hochreiter. Rudder: Return decomposition for delayed rewards. Advances in
+Neural Information Processing Systems, 32, 2019.
+David Brandfonbrener, Ofir Nachum, and Joan Bruna. Inverse dynamics pretraining learns good representations for multitask imitation, 2023. URL https://arxiv.org/abs/2305.16985.
+Sirui Chen, Zhaowei Zhang, Yali Du, and Yaodong Yang. Stas: Spatial-temporal return decomposition for multi-agent reinforcement learning. ArXiv, abs/2304.07520, 2023. URL https:
+//api.semanticscholar.org/CorpusID:258179477.
+Sam Devlin and Daniel Kudenko. Theoretical considerations of potential-based reward shaping
+for multi-agent systems. In Adaptive Agents and Multi-Agent Systems, 2011. URL https:
+//api.semanticscholar.org/CorpusID:1116773.
+Sam Devlin, Logan Yliniemi, Daniel Kudenko, and Kagan Tumer. Potential-based difference rewards for multiagent reinforcement learning. In Proceedings of the 2014 international conference
+on Autonomous agents and multi-agent systems, pp. 165–172, 2014.
+Jakob Foerster, Gregory Farquhar, Triantafyllos Afouras, Nantas Nardelli, and Shimon Whiteson.
+Counterfactual multi-agent policy gradients. In Proceedings of the AAAI conference on artificial
+intelligence, volume 32, 2018.
+Benjamin Freed, Aditya Kapoor, Ian Abraham, Jeff Schneider, and Howie Choset. Learning cooperative multi-agent policies with partial reward decoupling. IEEE Robotics and Automation
+Letters, 7(2):890–897, April 2022. ISSN 2377-3774. doi: 10.1109/lra.2021.3135930. URL
+http://dx.doi.org/10.1109/LRA.2021.3135930.
+Tanmay Gangwani, Yuan Zhou, and Jian Peng. Learning guidance rewards with trajectory-space
+smoothing. Advances in Neural Information Processing Systems, 33:822–832, 2020.
+Anna Harutyunyan, Will Dabney, Thomas Mesnard, Mohammad Gheshlaghi Azar, Bilal Piot, Nicolas Heess, Hado P van Hasselt, Gregory Wayne, Satinder Singh, Doina Precup, et al. Hindsight
+credit assignment. Advances in neural information processing systems, 32, 2019.
+10
+
+Aditya Kapoor, Benjamin Freed, Howie Choset, and Jeff Schneider. Assigning credit with partial
+reward decoupling in multi-agent proximal policy optimization. arXiv preprint arXiv:2408.04295,
+2024.
+Aleksandar Krnjaic, Raul D. Steleac, Jonathan D. Thomas, Georgios Papoudakis, Lukas Schäfer,
+Andrew Wing Keung To, Kuan-Ho Lao, Murat Cubuktepe, Matthew Haley, Peter Börsting, and
+Stefano V. Albrecht. Scalable multi-agent reinforcement learning for warehouse logistics with
+robotic and human co-workers. In IEEE/RSJ International Conference on Intelligent Robots and
+Systems, 2023.
+Karol Kurach, Anton Raichuk, Piotr Stańczyk, Michał Zajac, Olivier Bachem, Lasse Espeholt, Carlos Riquelme, Damien Vincent, Marcin Michalski, Olivier Bousquet, et al. Google research
+football: A novel reinforcement learning environment. In Proceedings of the AAAI conference on
+artificial intelligence, volume 34, pp. 4501–4510, 2020.
+Yang Liu, Yunan Luo, Yuanyi Zhong, Xi Chen, Qiang Liu, and Jian Peng. Sequence modeling of
+temporal credit assignment for episodic reinforcement learning. arXiv preprint arXiv:1905.13420,
+2019.
+Ryan Lowe, Aviv Tamar, Jean Harb, OpenAI Pieter Abbeel, and Igor Mordatch. Multi-agent actorcritic for mixed cooperative-competitive environments. Advances in neural information processing systems, 30, 2017.
+Adam Michalski, Filippos Christianos, and Stefano V. Albrecht. SMAClite: A lightweight environment for multi-agent reinforcement learning. In AAMAS Workshop on Multiagent Sequential
+Decision Making Under Uncertainty (MSDM), 2023.
+AY Ng. Policy invariance under reward transformations: Theory and application to reward shaping.
+In Proceedings of the 16th International Conference on Machine Learning, pp. 278, 1999.
+Frans A. Oliehoek and Chris Amato. A concise introduction to decentralized pomdps. In
+SpringerBriefs in Intelligent Systems, 2016. URL https://api.semanticscholar.
+org/CorpusID:3263887.
+Georgios Papoudakis, Filippos Christianos, Lukas Schäfer, and Stefano V. Albrecht. Benchmarking
+multi-agent deep reinforcement learning algorithms in cooperative tasks. In Proceedings of the
+Neural Information Processing Systems Track on Datasets and Benchmarks (NeurIPS), 2021.
+Deepak Pathak, Pulkit Agrawal, Alexei A. Efros, and Trevor Darrell. Curiosity-driven exploration
+by self-supervised prediction, 2017. URL https://arxiv.org/abs/1705.05363.
+Tabish Rashid, Mikayel Samvelyan, Christian Schroeder De Witt, Gregory Farquhar, Jakob Foerster,
+and Shimon Whiteson. Monotonic value function factorisation for deep multi-agent reinforcement
+learning. Journal of Machine Learning Research, 21(178):1–51, 2020.
+Mikayel Samvelyan, Tabish Rashid, Christian Schroeder De Witt, Gregory Farquhar, Nantas
+Nardelli, Tim GJ Rudner, Chia-Man Hung, Philip HS Torr, Jakob Foerster, and Shimon Whiteson.
+The starcraft multi-agent challenge. arXiv preprint arXiv:1902.04043, 2019.
+Guillaume Sartoretti, Justin Kerr, Yunfei Shi, Glenn Wagner, TK Satish Kumar, Sven Koenig, and
+Howie Choset. Primal: Pathfinding via reinforcement and imitation multi-agent learning. IEEE
+Robotics and Automation Letters, 4(3):2378–2385, 2019.
+Lukas Schäfer, Filippos Christianos, Josiah P. Hanna, and Stefano V. Albrecht. Decoupled reinforcement learning to stabilise intrinsically-motivated exploration. In International Conference
+on Autonomous Agents and Multiagent Systems (AAMAS), 2022.
+Peter Sunehag, Guy Lever, Audrunas Gruslys, Wojciech Marian Czarnecki, Vinicius Zambaldi, Max
+Jaderberg, Marc Lanctot, Nicolas Sonnerat, Joel Z Leibo, Karl Tuyls, et al. Value-decomposition
+networks for cooperative multi-agent learning. arXiv preprint arXiv:1706.05296, 2017.
+11
+
+Oriol Vinyals, Igor Babuschkin, Wojciech M. Czarnecki, Michaël Mathieu, Andrew Dudzik, Junyoung Chung, David Choi, Richard Powell, Timo Ewalds, Petko Georgiev, et al. Grandmaster
+level in starcraft ii using multi-agent reinforcement learning. Nature, 575:350 – 354, 2019. URL
+https://api.semanticscholar.org/CorpusID:204972004.
+Jianhong Wang, Yuan Zhang, Tae-Kyun Kim, and Yunjie Gu. Shapley q-value: A local reward
+approach to solve global reward games. In Proceedings of the AAAI Conference on Artificial
+Intelligence, volume 34, pp. 7285–7292, 2020.
+Baicen Xiao, Bhaskar Ramasubramanian, and Radha Poovendran. Agent-temporal attention
+for reward redistribution in episodic multi-agent reinforcement learning. arXiv preprint
+arXiv:2201.04612, 2022.
+Chao Yu, Akash Velu, Eugene Vinitsky, Jiaxuan Gao, Yu Wang, Alexandre Bayen, and Yi Wu. The
+surprising effectiveness of ppo in cooperative multi-agent games. Advances in Neural Information
+Processing Systems, 35:24611–24624, 2022.
+
+A
+
+D ETAILED TASK D ESCRIPTIONS
+
+SMACLite (Michalski et al., 2023) A computationally efficient variant of StarCraft II
+(Samvelyan et al., 2019). We experiment on three battle scenarios with varying complexity:
+5m vs 6m & 10m vs 11m Homogeneous scenarios testing scalability.
+3s5z A heterogeneous scenario with 3 Stalkers and 5 Zealots, testing coordination between different
+unit types.
+Each agent’s local observation includes the relative positions, unit types, health, and shield strength
+of allies and enemies within its field of view, as well as its own status. Agents can move, stop, or
+attack any visible enemy. The environment provides action masks for valid actions. Each combat
+scenario lasts for 100 timesteps. The environment’s reward function combines partial rewards for
+damaging or eliminating enemies, with a maximum possible team return normalized to 20. The
+repository is available at: https://github.com/uoe-agents/smaclite (MIT License).
+Google Research Football (GRF) (Kurach et al., 2020)
+cer) simulation. We evaluate on three scenarios:
+
+A high-fidelity multi-agent football (soc-
+
+academy 3 vs 1 with keeper A basic offensive scenario.
+academy counterattack easy Tests rapid transitions from defense to offense.
+academy pass and shoot with keeper Requires precise passing and coordination to score.
+The observation space (‘simple115v2‘) includes player positions, ball coordinates, velocity vectors,
+and stamina. The action space includes passing, shooting, dribbling, and tackling. Episodes end
+after a goal or 200 timesteps. Reward signals are sparse, tied to events like scoring goals or advancing the ball. The repository is available at: https://github.com/google-research/
+football (Apache License 2.0).
+
+B
+
+I MPLEMENTATION D ETAILS AND H YPERPARAMETERS
+
+The code was run on Lambda Labs deep learning workstation with 2-4 Nvidia RTX 2080 Ti graphics
+cards. Each training run was run on one single GPU, and required approximately 10 hours.
+Hyperparameters used for TAR2 , STAS, AREL-Temporal, AREL-Agent-Temporal, Uniform and
+various environment reward configurations that are common to all tasks are shown in Tables 1. The
+task-specific hyperparameters considered in our grid search for TAR2 , STAS, AREL-variants in
+Tables 2, 3 and 4 respectively. Bold values indicate the optimal hyperparameters.
+12
+
+Table 1: Common Hyperparameters for MAPPO algorithms.
+common
+hyperparameters
+ppo epochs
+ppo batch size
+gamma
+max episodes
+max time steps
+rnn num layers v
+rnn hidden v
+v value lr
+v weight decay
+v hidden shape
+grad clip critic v
+value clip
+data chunk length
+rnn num layers actor
+rnn hidden actor
+policy lr
+policy weight decay
+policy hidden shape
+grad clip actor
+policy clip
+entropy pen
+gae lambda
+
+value
+15
+30
+0.99
+30000
+100
+1
+64
+5e-4
+0.0
+64
+0.5
+0.2
+10
+1
+64
+5e-4
+0.0
+64
+0.5
+0.2
+1e-2
+0.95
+
+Table 2: TAR2 hyperparameters.
+Env. num depth dropoutcomp. batch
+Name heads
+dim
+size
+
+lr
+
+Google [3,
+Foot- 4]
+ball
+
+[3,
+4]
+
+[0.0,
+0.1,
+0.2]
+
+[16,
+64,
+128]
+
+[32,
+64,
+128]
+
+SMACLite
+[3,
+4]
+
+[3,
+4]
+
+[0.0,
+0.1,
+0.2]
+
+[16,
+64,
+128]
+
+[32,
+64,
+128]
+
+[1e4,
+5e4,
+1e3]
+[1e4,
+5e4,
+1e3]
+
+weight inv.
+dedyn.
+cay
+loss
+coef.
+[0.0, [1e1e3,
+5,
+1e1e2,
+4]
+5e2]
+[0.0, [1e1e3,
+5,
+1e1e2,
+4]
+5e2]
+
+grad
+clip
+val.
+
+model model policy entropy
+upd. upd.
+lr
+coef
+freq. epochs
+
+[0.5,
+5.0,
+10.0]
+
+[50,
+100,
+200]
+
+[100,
+200,
+400]
+
+[5e4,
+1e3]
+
+[0.5,
+5.0,
+10.0]
+
+[50,
+100,
+200]
+
+[100,
+200,
+400]
+
+[5e4,
+1e3]
+
+[5e3,
+8e3,
+1e2]
+[5e3,
+8e3,
+1e2]
+
+Table 3: STAS hyperparameters.
+Env.
+Name
+
+num
+heads
+
+depth
+
+dropout comp.
+dim
+
+batch
+size
+
+lr
+
+weight
+decay
+
+Google [3, 4]
+Football
+SMACLite[3, 4]
+
+[3, 4]
+
+[0.0,
+0.1,
+0.2]
+[0.0,
+0.1,
+0.2]
+
+[32,
+64,
+128]
+[32,
+64,
+128]
+
+[1e-4,
+5e-4,
+1e-3]
+[1e-4,
+5e-4,
+1e-3]
+
+[0.0,
+1e-5,
+1e-4]
+[0.0,
+1e-5,
+1e-4]
+
+[3, 4]
+
+[16,
+64,
+128]
+[16,
+64,
+128]
+
+13
+
+grad
+clip
+val.
+[0.5,
+5.0,
+10.0]
+[0.5,
+5.0,
+10.0]
+
+model
+upd.
+freq.
+[50,
+100,
+200]
+[50,
+100,
+200]
+
+model
+upd.
+epochs
+[100,
+200,
+400]
+[100,
+200,
+400]
+
+Table 4: AREL hyperparameters.
+Env.
+Name
+
+num
+heads
+
+depth
+
+dropout comp.
+dim
+
+batch
+size
+
+lr
+
+weight
+decay
+
+Google [3, 4]
+Football
+SMACLite[3, 4]
+
+[3, 4]
+
+[0.0,
+0.1,
+0.2]
+[0.0,
+0.1,
+0.2]
+
+[32,
+64,
+128]
+[32,
+64,
+128]
+
+[1e-4,
+5e-4,
+1e-3]
+[1e-4,
+5e-4,
+1e-3]
+
+[0.0,
+1e-5,
+1e-4]
+[0.0,
+1e-5,
+1e-4]
+
+C
+
+[3, 4]
+
+[16,
+64,
+128]
+[16,
+64,
+128]
+
+grad
+clip
+val.
+[0.5,
+5.0,
+10.0]
+[0.5,
+5.0,
+10.0]
+
+model
+upd.
+freq.
+[50,
+100,
+200]
+[50,
+100,
+200]
+
+model
+upd.
+epochs
+[100,
+200,
+400]
+[100,
+200,
+400]
+
+P SEUDOCODE
+
+Our training process is detailed in the following algorithms. Algorithm 1 describes the main onpolicy training loop which collects data and updates the MAPPO actor and critic policies. Algorithm 2 describes the periodic, off-policy training of the TAR² reward model.
+C.0.1
+
+I NVERSE DYNAMICS FOR C AUSAL R EPRESENTATION L EARNING
+
+To ensure that the learned representations are grounded in agent behavior, we integrate an auxiliary inverse dynamics task into our framework. The goal of this task is to regularize the shared
+embeddings by forcing them to encode information about the actions that cause transitions. Our
+implementation is designed to leverage the rich, contextualized embeddings produced by our main
+architecture.
+Our credit assignment model uses a dual temporal-agent attention network to produce global stateaction embeddings for each timestep. These embeddings capture not only the state of the environment but also the interactions between agents over time. To form the input for our inverse dynamics
+prediction, for each agent i at each timestep t, we create a concatenated vector, zi,t , from three
+distinct sources:
+1. The global state embedding at the current timestep, embed(st ).
+2. The global state embedding at the next timestep, embed(st+1 ).
+3. The agent-specific state-action embedding from the previous timestep,
+embed(si,t−1 , ai,t−1 ), which is the output of the dual attention block for that agent.
+This concatenated vector zi,t is then passed through a multi-layer perceptron (MLP), which we refer
+to as the inverse dynamics head.
+Crucially, the network is not trained to predict the action that was actually executed, but rather the
+action that the agent’s policy, πi , predicted at that timestep. The objective is to minimize the crossentropy between the output of the inverse dynamics head and the action probabilities from the policy
+network. This encourages consistency between the representations used for credit assignment and
+the representations used for action selection, ensuring the credit is assigned based on features that
+are directly relevant to the agent’s decision-making process.
+
+D
+
+I NTERPRETABILITY AND I NSIGHTS
+
+Although our primary focus is on performance and theoretical properties, TAR2 ’s per-timestep, peragent reward predictions lend themselves to partial interpretability:
+agent
+• Agents’ importance at specific timesteps can be visualized by examining wttemporal wi,t
+.
+• Comparing predicted reward distributions across different episodes can hint at consistent
+agent roles or strategic pivot points in the trajectory.
+
+However, direct interpretability is challenging in high-dimensional multi-agent environments like
+SMACLite and Google Football, where the intricate interactions and vast state-action spaces complicate simple visualizations. Additionally, developing a systematic interpretability study would
+14
+
+Algorithm 1 Main Training Loop: MAPPO with TAR² Rewards
+1: Initialize: Policy nets πωi , critic nets Vµi for each agent i = 1..N .
+2: Initialize: TAR² reward model Rθ , experience buffer B ← ∅.
+3: Initialize: PopArt parameters for value normalization.
+4: while not converged do
+5:
+Initialize temporary data buffer D ← ∅.
+6:
+for k = 1 to num rollout threads do
+7:
+Initialize actor RNN hidden states h0,π and critic RNN hidden states h0,V .
+8:
+Initialize empty trajectory storage τstorage ← [].
+9:
+for t = 0 to T − 1 do
+10:
+Get joint observation ot .
+11:
+for each agent i = 1..N do
+(i)
+
+12:
+
+Sample action ai,t and get next hidden state ht+1,π from policy:
+
+13:
+
+ai,t , ht+1,π ← πωi (oi,t , ht,π ).
+
+14:
+
+Get state value vi,t and next hidden state ht+1,V from critic:
+
+(i)
+
+(i)
+
+(i)
+
+(i)
+
+(i)
+
+vi,t , ht+1,V ← Vµi (st , ht,V ), where st is the centralized state representation.
+end for
+Execute joint action at , observe next joint observation ot+1 .
+Store transition (ot , at , ht+1,π , ht+1,V , {vi,t }N
+i=1 ) in τstorage .
+end for
+Receive the true episodic team reward R(sT ).
+Store the completed trajectory (τstorage , R(sT )) in the long-term experience buffer B.
+// — On-Policy Return and Advantage Calculation —
+Compute shaped rewards {ri,t } for the trajectory using the TAR² model Rθ and R(sT ).
+Compute shaped returns {Gi,t } for each agent using the shaped rewards {ri,t }.
+Update PopArt statistics with the shaped returns {Gi,t }.
+Normalize returns with PopArt.
+De-normalize value estimates {vi,t } using PopArt.
+Compute advantage estimates {Âi,t } for each agent using GAE.
+Split trajectory τ into chunks of length L
+for l = 0, 1, . . . , T //L do
+D = D ∪ (τ [l : l + T ], Â[l : l + L], G[l : l + L], Ḡ[l : l + L])
+end for
+Add processed chunks to the data buffer D.
+end for
+// — On-Policy Policy and Critic Updates —
+for e = 1 to ppo epochs do
+for mini-batch b sampled from D do
+Update policy parameters ω using the MAPPO policy loss on advantage estimates from
+batch b.
+39:
+Update critic parameters µ by regressing on the PopArt-normalized shaped returns from
+batch b.
+40:
+end for
+41:
+end for
+42:
+// — Off-Policy Reward Model Update —
+43:
+if training condition met then
+44:
+Update TAR² reward model parameters θ using Algorithm 2.
+45:
+end if
+46: end while
+
+15:
+16:
+17:
+18:
+19:
+20:
+21:
+22:
+23:
+24:
+25:
+26:
+27:
+28:
+29:
+30:
+31:
+32:
+33:
+34:
+35:
+36:
+37:
+38:
+
+require significant additional methodologies and resources, extending beyond the scope of the current work. While we recognize the importance of interpretability and plan to explore it in future
+research, our current focus remains on establishing robust performance improvements and theoretical guarantees for reward redistribution.
+
+15
+
+Algorithm 2 Training the TAR² Reward Model (Off-Policy)
+1: Input: Reward model parameters θ, experience buffer B, batch size Br , learning rate αR .
+2: for u = 1 to num reward updates do
+r
+3:
+Sample a batch of trajectories {(τj , R(sT )j )}B
+j=1 from the long-term buffer B.
+4:
+Initialize loss L(θ) ← 0.
+5:
+for each trajectory (τ, R(sT )) in the batch do
+6:
+Compute unnormalized scores {ci,t } and predicted actions {âi,t } from the reward model
+
+Rθ (τ ).
+
+2
+P
+Lreg = log R(sT ) − t,i ci,t .
+P
+8:
+LID = − t,i log πID (ai,t |âi,t ).
+9:
+L(θ) += Lreg + λLID .
+10:
+end for
+11:
+Update θ using Adam optimizer: θ ← θ − αR ∇θ L(θ).
+12: end for
+7:
+
+16
+
+

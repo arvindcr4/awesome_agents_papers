@@ -1,0 +1,913 @@
+Safe Deep Reinforcement Learning for Multi-Agent Systems with Continuous
+Action Spaces
+
+arXiv:2108.03952v2 [cs.LG] 11 Aug 2021
+
+Ziyad Sheebaelhamd * 1 Konstantinos Zisis * 1 Athina Nisioti * 1 Dimitris Gkouletsos * 1
+Dario Pavllo 2 Jonas Kohler 2
+
+Abstract
+Multi-agent control problems constitute an interesting area of application for deep reinforcement
+learning models with continuous action spaces.
+Such real-world applications, however, typically
+come with critical safety constraints that must
+not be violated. In order to ensure safety, we enhance the well-known multi-agent deep deterministic policy gradient (MADDPG) framework by
+adding a safety layer to the deep policy network.
+In particular, we extend the idea of linearizing the
+single-step transition dynamics, as was done for
+single-agent systems in Safe DDPG (Dalal et al.,
+2018), to multi-agent settings. We additionally
+propose to circumvent infeasibility problems in
+the action correction step using soft constraints
+(Kerrigan & Maciejowski, 2000). Results from
+the theory of exact penalty functions can be used
+to guarantee constraint satisfaction of the soft constraints under mild assumptions. We empirically
+find that the soft formulation achieves a dramatic
+decrease in constraint violations, making safety
+available even during the learning procedure.
+
+1. Introduction and Related Work
+In recent years, deep reinforcement learning (Deep RL) with
+continuous action spaces has received increasing attention in
+the context of real-world applications such as autonomous
+driving (Sallab et al., 2017), single- (Gu et al., 2017) and
+multi robot systems (Hu et al., 2020), as well as data center
+cooling (Lazic et al., 2018). Contrary to more mature applications of RL such as video games (Mnih et al., 2015), these
+real-world cases naturally require a set of safety constraints
+to be fulfilled (e.g. in the case of robot arms, avoiding ob*
+
+Equal contribution 1 ETH Zürich, Switzerland 2 Department of
+Computer Science, ETH Zürich, Switzerland. Correspondence to:
+Athina Nisioti <anisioti@ethz.ch>.
+Reinforcement Learning for Real Life (RL4RealLife) Workshop in
+the 38 th International Conference on Machine Learning, 2021.
+Copyright 2021 by the author(s).
+
+stacles and self-collisions, or limiting angles). The main
+caveat of safety in reinforcement learning is that the dynamics of the system are a-priori unknown and hence one does
+not know which actions are safe ahead of time. Whenever
+accurate offline simulations or a model of the environment
+are available, safety can be introduced ex-post by correcting
+a learned policy for example via shielding (Alshiekh et al.,
+2018) or via a pre-determined backup controller (Wabersich & Zeilinger, 2018). Yet, many real-world applications
+require safety to be enforced during both learning and deployment, and a model of the environment is not always
+available.
+A growing line of research addresses the problem of safety
+of the learning process in model-free settings. A traditional
+approach is reward shaping, where one attempts to encode
+information on undesirable actions state pairs in the reward
+function. Unfortunately, this approach comes with the downside that unsafe behavior is discouraged only as long as the
+relevant trajectories remain stored in the experience replay
+buffer. In (Lipton et al., 2018), the authors propose Intrinsic
+Fear, a framework that mitigates this issue by training a
+neural network to identify unsafe states, which is then used
+in shaping the reward function. Although this approach alleviates the problem of periodically revisiting unsafe states, it
+is still required to visit those states to gather enough information to avoid them.
+Another family of approaches focuses on safety for discrete
+state/action spaces and thus studies the problem through
+the lens of finite Constrained Markov Decision Processes
+(CMDPs) (Altman, 1998). Along those lines, multiple approaches have been proposed. For example in (Efroni et al.,
+2020) the authors propose a framework which focuses on
+learning the underlying CMDP based purely on logged historical data. A common limitation to such approaches is that
+it is hard to generalize to continuous action spaces, although
+there exists some work on that direction, as in (Chow et al.,
+2019) where the authors leverage Lyapunov functions to
+handle constraints in continuous settings.
+For safe control in physical systems, where actions have
+relatively short-term consequences, (Dalal et al., 2018) propose an off-policy Deep RL method that efficiently ex-
+
+Safe Deep Reinforcement Learning for Multi-Agent Systems with Continuous Action Spaces
+
+ploits single-step transition data to estimate the safety of
+state-action pairs, thereby successfully eliminating the need
+of behavior-policy knowledge of traditional off-policy approaches to safe exploration. In particular, the authors
+directly add a safety layer to a single agent’s policy that
+projects unsafe actions onto the safe domain using a linear
+approximation of the constraint function, which allows the
+safety layer to be casted as a quadratic program. This approximation arises from a first-order Taylor approximation
+of the constraints in the action space, whose sensitivity is
+parameterized by a neural network, which was pre-trained
+on logged historical data.
+In this work, we propose a multi-agent extension of the approach presented in (Dalal et al., 2018). We base our method
+on the MADDPG framework (Lowe et al., 2017b) and aim
+at preserving safety for all agents during the whole training
+procedure. Thereby, we drop the conservative assumptions
+made in (Dalal et al., 2018), that the optimization problem
+that corrects unsafe actions only has one constraint active at
+a time and is thus always feasible. In real world problems,
+the optimization formulation proposed has no guarantees
+to be recursively feasible1 and in multi-agent coordination
+problems where agents impose constraints on one another,
+one always has more than one constraint active due to the
+natural symmetry. Instead, we propose to use a specific
+soft constrained formulation of the problem that addresses
+the lack of recursive feasibility guarantees in the hard constrained formulation. This enhances safety significantly in
+practical situations and is general enough to capture the complicated dynamics of multi-agent problems. This approach
+supersedes the need for a backup policy (as in e.g. (Zhang
+et al., 2019) and (Khan et al., 2019)) because the optimizer
+is allowed to loosen the constraints by a penalized margin
+as proposed in (Kerrigan & Maciejowski, 2000). Thus, our
+approach does not guarantee zero constraint violations in
+all situations examined, but by tightening the constraints by
+a tolerance, one could achieve almost safe behavior during
+training and in fact, we observe only very rare violations in
+an extensive set of simulations (Section 3).
+In summary, our contribution lies in extending the approach
+proposed in (Dalal et al., 2018) (Safe DDPG) to a multiagent setting, while efficiently circumventing infeasibility
+problems by reformulating the quadratic safety program in
+a soft-constrained manner.
+
+2. Models and Methods
+2.1. Problem Formulation
+We consider a discrete-time, finite dimensional, decentralized, non-cooperative multi-agent system with N agents,
+1
+Even when following valid actions, agents can end up in states
+from which safety is no longer recoverable.
+
+continuous state spaces Xi such that the state xi ∈ Xi ⊆
+Rd , continuous action spaces Ai such that the action
+ai ∈ Ai ⊆ Rm and a reward function for each agent
+Ri , ∀i ∈ {1, ..., N }. For clarity, we compactly denote x = (x1 , . . . , xN ), a = (a1 , . . . , aN ) and R =
+(R1 , . . . , RN ). The superscript t is used to denote the time
+index. In addition, we define a set of K constraints as mappings of the form cj (x) ∀j ∈ {1, ..., K}, meaning that
+each constraint may depend on the state of more than one
+agent. Finally, we define a policy πi to be a function mapping the state of agent i to its local action. In the scope of
+this work, we consider deterministic policies parameterized
+by θ = (θ1 , ..., θN ), and thus use the notation πθi . In this
+context, we examine the problem of safe exploration in a
+constrained Markov Game (CMG) and therefore we aim to
+solve the following optimization problem for each agent:
+ P∞ t
+
+t
+t
+max E
+t=0 γ Ri (xi , πθi (xi )) ,
+θi
+
+s.t.
+
+cj (xt ) ≤ Cj ,
+
+∀i
+
+∀j
+
+(1)
+
+where γ ∈ (0, 1) denotes the discount factor. The above
+expectation is taken with respect to all agents future action/state pairs - quantities that depend on the policy of
+each agent - which gives rise to a well-known problem in
+multi-agent settings, namely the non-stationarity of the environment from the point of view of an individual agent
+(Lowe et al., 2017b). Alongside the constraint dependence
+on multiple agents, this is what constitutes the prime difficulty in guaranteeing safety in decentralized multi-agent
+environments.
+It is worth stating that our goal is not only to enhance safety
+in the solution of the RL algorithm, but also do so during
+the training procedure. This is relevant for applications such
+as self-driving cars and self-flying drones, which require
+safety in their whole operating period but are too complex
+to be simulated off-line with high accuracy.
+2.2. Safety Signal Model
+Following (Dalal et al., 2018), we make a first order approximation of the constraint function in (1) with respect to
+action a
+>
+
+cj (x0 ) = ĉj (x, a) ≈ cj (x) + g (x; wj ) a,
+
+(2)
+
+where x0 denotes the state that followed x after applying
+action a and the function g represents a neural network
+with input x, output of the same dimension as the action
+a and weights wj . This network efficiently learns the constraints’ sensitivity to the applied actions given features of
+the current
+state based
+
+ on a set of single-step transition data
+D = xk , ak , xk0 .
+In our experiments, we generate D by initializing agents
+with a random state and choosing actions according to a suf-
+
+Safe Deep Reinforcement Learning for Multi-Agent Systems with Continuous Action Spaces
+
+ficiently exploratory (random) policy for multiple episodes.
+With the generated data, the sensitivity network can be
+trained by specifying the loss function for each constraint as
+
+
+2
+X
+>
+L(wj ) =
+cj (x0 ) − cj (x) + g (x; wj ) a
+(x,a,x0 )∈D
+
+(3)
+where each constraints’ sensitivity will be trained separately.
+2.3. Safety Layer Optimization
+Given the one-step safety signals introduced in (2), we augment the policy networks by introducing an additional centralized safety layer, which enhances safety by solving
+2
+
+arg min ka − Π(x)k2
+a
+
+>
+
+s.t. cj (x) + g (x; wj ) a ≤ Cj
+
+∀j = {1, . . . , K},
+
+(4)
+where Π(x) denotes the concatenation of all local agents’
+policies, i.e. Π(x) = (πθ1 (x1 ), ..., πθN (xN )). This constitutes a quadratic program which computes the (minimum
+distance) projection of the actions proposed by each of the
+policy networks πθi (xi ) onto the linearized safety set. Figure 1 illustrates the whole pipeline for computing an action
+from a given state.
+Due to the strong convexity of the resulting optimization
+problem, there exists a global unique minimizer to the problem whenever the feasible set is non-empty. In contrast to
+(Dalal et al., 2018), where recursive feasibility was assumed
+and therefore a closed form solution using the Lagrangian
+multipliers was derived, we used a numerical QP-solver to
+defer from making this rather strong assumption on the existence of the solution, which is not guaranteed for dynamical
+systems.
+Due to the generality of the formulation, it is possible that
+there exists no recoverable action that can guarantee the
+agents to be taken to a safe state although the previous iteration of the optimization was indeed feasible. The reason
+for that is that we assume a limited control authority, which
+further must respect the dynamics of the underlying system.
+To take this into account without running into infeasibility
+problems where the agents would require a backup policy
+to exit unrecoverable states, we propose a soft constrained
+formulation, whose solution is equivalent to the original formulation whenever (4) is feasible. Otherwise, the optimizer
+is allowed to loosen the constraints by a penalized margin
+as proposed in (Kerrigan & Maciejowski, 2000). We thus
+reformulate (4) as follows
+2
+
+(a∗ , ∗ ) = arg min ka − Π(x)k2 + ρ kk1
+a,
+
+>
+
+s.t. g (x; wj ) a ≤ Cj − cj (x) + i
+j ≥ 0 .
+
+where  = (1 , . . . , K ) are the slack variables and ρ is the
+constraint violation penalty weight. We pick ρ > kλ∗ k∞
+where λ∗ is the optimal Lagrange multiplier for the original problem formulation in (4), which guarantees that the
+soft-constrained problem yields equivalent solutions whenever (4) is feasible (see (Kerrigan & Maciejowski, 2000)).
+Since exactly quantifying the optimal Lagrange multiplier
+is time-consuming, we assign a large value of ρ by inspection. It is important to mention that the reformulation in
+(5) still constitutes a quadratic program when extending
+the optimization vector into (a, ) and using an epigraph
+formulation (Rockafellar, 2015). Notably, this formulation
+does not necessarily guarantee zero constraint violations.
+However, we observe empirically that violations remain
+very small, when setting a rather high penalty value ρ (see
+Figure 5).
+
+∀j = {1, . . . , K}
+
+(5)
+
+2.4. Multi-Agent Deep Deterministic Policy Gradient
+Algorithm (MADDPG)
+For training Deep RL agents in continuous action spaces,
+the use of policy gradient algorithms, in which the agent’s
+policy is directly parameterized by a neural network, is
+particularly well suited as it avoids explicit maximization
+over continuous actions which is intractable. We thus opt
+for the Multi-Agent Deep Deterministic Policy Gradient
+(MADDPG) algorithm (Lowe et al., 2017a) which is a multiagent generalization of the well-known DDPG methods,
+originally proposed in (Lillicrap et al., 2015).
+The MADDPG algorithm is in essence a multi-agent variation of the Actor-Critic architecture, where the problem of
+the environment’s non-stationarity is addressed by utilizing
+a series of centralized Q-networks which approximate the
+agents’ respective optimal Q-value functions using full state
+and action information. This unavoidably enforces information exchange during training time, which is sometimes
+referenced as “centralized training”. On the other hand, the
+actors employ a policy gradient scheme, where each policy network has access to agent specific information only.
+Once the policy networks converge, only local observations
+are required to compute each agent’s actions, thus allowing
+decentralized execution.
+For stability purposes, MADDPG incorporates ideas from
+Deep Q Networks, originally introduced in (Mnih et al.,
+2013). Specifically, a replay buffer R stores historical tuples
+(x, a, R, x0 ), which can be used for off-policy learning and
+also for breaking the temporal correlation between samples.
+Furthermore, for each actor and critic network, additional
+target networks are used to enhance stability of the learning
+process. We denote as Qπi (x, a; βi ) the critic network, parameterized by βi , and as πi (xi ; θi ) the actor network for
+agent i, parameterized by θi . As for the target networks
+we denote them as Q̂πi (x, a; β̂i ) and π̂i (xi ; θ̂i ) respectively.
+
+Safe Deep Reinforcement Learning for Multi-Agent Systems with Continuous Action Spaces
+
+Safety
+Filter
+
+Figure 1. An illustration of the safety layer used in combination with the MADDPG networks in order to apply the safe projection
+of the optimal action. The individual states of all agents xi are fed into their corresponding policy networks, outputting the evaluation of
+their current policies at those states which are then concatenated into a single vector. Finally, a convex quadratic optimization problem is
+solved in order to produce the optimal safe action a∗ .
+
+𝑇𝑎𝑟𝑔𝑒𝑡 2
+𝑇𝑎𝑟𝑔𝑒𝑡 1
+
+𝐴𝑔𝑒𝑛𝑡 2
+𝐴𝑔𝑒𝑛𝑡 3
+𝑇𝑎𝑟𝑔𝑒𝑡 3
+𝐴𝑔𝑒𝑛𝑡 1
+
+Figure 2. A snapshot of the multi-agent particle environment
+used in the described simulations. Blue color is used to capture
+the agents, whereas green color refers to the target positions. In our
+experiments we have 3 agents trying to move to a specific target
+without colliding with each other.
+
+Finally, we use τ to denote the convex combination factor
+for updating the target networks.
+2.5. Implementation Details
+In order to assess the performance of our proposed method
+we conducted experiments using the multi-agent particle
+environment, which was previously studied in (Lowe et al.,
+2017a) and (Mordatch & Abbeel, 2018). In this environment, a fixed number of agents are moving collaboratively
+in a 2-D grid trying to reach specific target positions. In
+our experiments, we used three agents that are constrained
+to avoid collisions among them. Each agent’s state xi is
+composed of a vector in R10 , containing its position and
+velocity, the relative distances to the other agents and the
+target landmark location. Moreover, the actions ai are defined as vectors in R2 containing the acceleration on the two
+axes.
+
+The reward assigned to each agent is proportional to the
+negative l1 distance of the agent from its corresponding
+target and furthermore, collisions are being penalized. The
+agents receive individual rewards based on their respective
+performance. For the safety layer pre-training, we train a
+simple fully connected ReLU network g(x, wi ) with a 10neuron hidden layer for each of the six existing constraints
+(two possible collisions for each agent), on the randomly
+produced dataset D. Note that, due to the pairwise symmetry of the constraints used in the experiment (A colliding
+with B implies B colliding with A), we could in principle
+simplify the network design, but for generality we decided
+to consider them as independent constraints. Based on our
+empirical results (Section 3), we found it unnecessary to
+increase the complexity of the network. We train the model
+using the popular Adam optimizer (Kingma & Ba, 2015)
+with a batch size of 256 samples. For solving the QP Problem, we adopted the qpsolvers library, which employs a
+dual active set algorithm originally proposed in (Goldfarb
+& Idnani, 1983). We further used a value of ρ = 1000 in
+the cost function of the soft formulation. For the MADDPG
+algorithm implementation, we used three pairs of fully connected actor-critic networks. These networks are composed
+of two hidden layers with 100 and 500 neurons respectively.
+The choice for all activation functions is ReLU except for
+the output layer of the actor networks, where tanh was
+used to compress the actions in the [-1,1] range and represent the agents’ limited control authority. The convex
+combination rate τ , used when updating the target networks,
+was set to 0.01.
+To evaluate the algorithm’s robustness and its capability of
+coming up with an implicit recovery policy, we conduct two
+case studies:
+
+Safe Deep Reinforcement Learning for Multi-Agent Systems with Continuous Action Spaces
+
+17:
+
+Update actor policy of each actor: ∇θi Ji ≈
+P
+k
+π
+k
+k
+k ∇ai Qi (x ,a ;βi )|a =π xk ∇θi πi (xi ;θi )|xk
+)
+i
+i
+i(
+i
+
+λ
+
+18:
+
+Update target networks for each agent
+β̂i ← τ βi + (1 − τ )β̂i
+θ̂i ← τ θi + (1 − τ )θ̂i
+
+19:
+end for
+20: end for
+
+(ED) Inject an Exogenous uniform Disturbance after each
+step of the environment, which resembles a very common scenario in real life deployment where environment mismatch could lead to such a behaviour.
+(UI) Allow the environment to be Unsafely Initialized,
+which can also occur in practice.
+
+3. Results
+We assess the performance of the proposed algorithm on
+three metrics: average reward, number of collisions during
+training, and number of collisions during testing (i.e. after
+training has converged). An infeasible occurrence appears
+in case the hard-constrained QP in (4) fails to determine a
+solution that satisfies the imposed constraints.
+We benchmark a total of three different Deep RL strategies:
+• unconstrained MADDPG,
+• hard-constrained MADDPG (hard MADDPG),
+• soft-constrained MADDPG (soft MADDPG).
+
+ 0 $ ' ' 3 *
+ K D U G  0 $ ' ' 3 *
+ V R I W  0 $ ' ' 3 *
+
+   
+
+ $ Y H U D J H  5 H Z D U G
+
+   
+   
+   
+   
+   
+ 
+
+    
+
+    
+
+    
+
+         
+ ( S L V R G H
+
+    
+
+    
+
+    
+
+Figure 3. An illustration of the rewards achieved during training. ((ED) case) We observe that all three different procedures
+have similar reward convergence behaviour, which is not affected
+by constraints.
+  
+ 2 E V H U Y H G  & R O O L V L R Q V  S H U  ( S L V R G H
+
+Algorithm 1 Safe MADDPG Algorithm
+1: Initialize random weights βi and θi of critic network
+Qπi (x, a; βi ) and actor network πi (xi ; θi )
+2: Initialize weights β̂i ← βi and θ̂i ← θi of target networks Q̂πi and π̂i
+3: Initialize a replay buffer R = {}
+4: for episode = 1 to m do
+5:
+Randomly initialize the state x1
+6:
+for t = 1 to T do
+7:
+Pick action ati = πi (xti ; θi ) for each agent
+8:
+Concatenate actions into at = (at1 , ..., atN )
+9:
+Project at to the safety set by solving (5)
+10:
+Inject exploratory noise n
+0
+11:
+Apply at , obtainreward Rt andnext state xt
+0
+12:
+Store transition xt , at , Rt , xt in R
+13:
+Sample mini-batch of λ transitions from R,
+indexed by k
+
+
+14:
+Compute ã = π̂1 (x01 ; θ̂1 ), ..., π̂N (x0N ; θ̂N )
+
+
+0
+15:
+Set zik = Rik + γ Q̂πi xk , ã; β̂i
+16:
+Update each critic network by minimizing
+2
+P
+Li = λ1 k zik − Qπi (xk , ã; βi )
+
+ ( [ S H U L P H Q W
+  8 , 
+  ( ' 
+
+  
+  
+  
+ 
+ 
+
+ 0 $ ' ' 3 *
+
+ K D U G  0 $ ' ' 3 *
+ 7 \ S H
+
+ V R I W  0 $ ' ' 3 *
+
+Figure 4. An illustration of the average collisions per episode
+achieved during training for each of the 3 type of agents for
+both experiments.
+
+The first approach prioritizes exploration and learning over
+safety since constraints are not directly imposed, whereas
+hard MADDPG takes into account safe operation by imposing hard state constraints. Finally, soft MADDPG, as
+presented in Algorithm 1, imposes a relaxed version of the
+state constraints while penalizing the amount of slack, following our formulation in (5).
+The duration of each experiment is 8000 episodes and, in
+order to assess uncertainty, we repeat each experiment 10
+times using different initial random seeds.
+Under normal operating conditions (safe initialization without disturbances), both the hard and the soft-constrained
+MADDPG strategies achieve 0 constraint violations in our
+experiments during the training and the testing phase. How-
+
+Safe Deep Reinforcement Learning for Multi-Agent Systems with Continuous Action Spaces
+
+      
+
+ 0 $ ' ' 3 *
+ K D U G  0 $ ' ' 3 *
+ V R I W  0 $ ' ' 3 *
+
+      
+
+ 0 $ ' ' 3 *
+ K D U G  0 $ ' ' 3 *
+ V R I W  0 $ ' ' 3 *
+
+      
+      
+
+      
+
+ 7 R W D O  & R O O L V L R Q V
+
+ 7 R W D O  & R O O L V L R Q V
+
+      
+      
+      
+     
+
+      
+     
+     
+
+     
+
+     
+
+     
+
+ 
+
+ 
+ 
+
+    
+
+    
+
+    
+
+    
+ ( S L V R G H
+
+    
+
+    
+
+    
+
+    
+
+ 
+
+(a) Exogenous Disturbances
+
+    
+
+    
+
+    
+
+    
+ ( S L V R G H
+
+    
+
+    
+
+    
+
+    
+
+(b) Unsafe Initialization
+
+Figure 5. An illustration of the cumulative number of collisions achieved during training for the two experiments. As expected,
+during the unconstrained MADDPG training, a massive number of collisions is observed, whereas using hard MADDPG, collisions
+decreased, however, not as significant of a decrease compared to the soft-formulated agent.
+
+    
+
+ 0 $ ' ' 3 *
+ K D U G  0 $ ' ' 3 *
+ V R I W  0 $ ' ' 3 *
+
+    
+
+    
+    
+ 7 R W D O  & R O O L V L R Q V
+
+    
+ 7 R W D O  & R O O L V L R Q V
+
+ 0 $ ' ' 3 *
+ K D U G  0 $ ' ' 3 *
+ V R I W  0 $ ' ' 3 *
+
+    
+
+    
+   
+   
+
+    
+    
+   
+   
+
+   
+
+   
+
+ 
+
+ 
+ 
+
+  
+
+  
+
+  
+
+  
+
+   
+
+ 
+
+  
+
+  
+
+  
+
+ ( S L V R G H
+
+ ( S L V R G H
+
+(a) Exogenous Disturbances
+
+(b) Unsafe Initialization
+
+  
+
+   
+
+Figure 6. An illustration of the cumulative number of collisions during the test simulations performed. It is crucial to observe that
+the soft variation shows- also during testing- the smallest number of collisions.
+
+ever, in order to examine the robustness properties of the
+aforementioned methods, we evaluate our models under the
+case studies mentioned in the end of Section 2.5. The outcome of the experiments along with the 95% confidence
+intervals are summarized in Table 1.
+In Figure 3, the evolution over episodes of the average reward is depicted for the (ED) case. The average reward is
+computed as the mean over the 3 agents in a single episode.
+Interestingly, we observe that all three presented algorithms
+have a similar trend, suggesting that introducing the safety
+
+framework (in both hard- and soft- variants) does not negatively affect the ability of the agents to reach their targets. A
+similar result holds for the case of unsafe initialization (UI),
+so the respective plot is omitted for brevity.
+Figure 4 shows for each setting, the average number of collisions per episode during training, while Figure 5 presents
+the evolution of the cumulative number of collisions over
+the training episodes. In particular, soft MADDPG exhibits
+97.71% (UI), 97.99% (ED) fewer collisions compared to
+the unconstrained MADDPG. On the other hand, hard MAD-
+
+Safe Deep Reinforcement Learning for Multi-Agent Systems with Continuous Action Spaces
+Table 1. Table illustrating the results of the experiments with the proposed algorithms. For each setting, we report the mean and
+corresponding 95% confidence intervals across multiple runs. The higher reward is observed in the hard MADDPG, which due to
+infeasibility problems shows a larger number of collisions during training compared to soft MADDPG, which has the lowest number of
+collisions. Finally, it is worth observing that the same pattern holds during testing.
+Experiment
+
+(UI)
+
+(ED)
+
+Agent Type
+
+Total Reward
+(training)
+
+Cumulative number of collisions
+(training)
+
+Cumulative number of collisions
+(testing)
+
+MADDPG
+
+-94.47
+95%ci: (-108.09, -80.84)
+
+174267.44 (baseline = 100%)
+95%ci: (172141.24, 176393.64)
+
+1386.54
+95%ci: (1263.98, 1509.10)
+
+hard MADDPG
+
+-84.13
+95%ci: (-95.04, -73.22)
+
+27210.44 (15.6% of baseline)
+95%ci: (26579.12, 27841.76)
+
+137.44
+95%ci: (113.02, 161.86)
+
+soft MADDPG
+
+-136.39
+95%ci: (-146.79, -125.99)
+
+3977.0 (2.28% of baseline)
+95%ci: (3901.99, 4052.00)
+
+52.77
+95%ci: (52.26, 53.29)
+
+MADDPG
+
+-91.97
+95%ci: (-103.55, -80.39)
+
+194844.0 (baseline = 100%)
+95%ci: (192523.44, 197164.55)
+
+1499.77
+95%ci: (1227.0, 1772.55)
+
+hard MADDPG
+
+-89.74
+95%ci: (-94.53, -84.94)
+
+112189.66 (59.57% of baseline)
+95%ci: (110405.22, 113974.10)
+
+678.11
+95%ci: (502.87, 853.34)
+
+soft MADDPG
+
+-86.54
+95%ci: (-94.22, -78.86)
+
+3899.11 (2.0% of baseline)
+95%ci: (3817.34, 3980.88)
+
+40.77
+95%ci: (30.82, 50.73)
+
+DPG only achieves a 84.38% (UI), 42.42% (ED) reduction in collisions compared to the unconstrained MADDPG,
+since the infeasibility of the optimization problem does at
+times not allow the safety filter to intervene and correct the
+proposed actions.
+To evaluate the impact of the hard-constrained MADDPG,
+it is essential to investigate the infeasible occurrences, since
+they represent the critical times when constraints can no
+longer be satisfied. In our experiments, 20.9% (UI), 56.7 %
+(ED) of the episodes are directly related to infeasible conditions. This motivates the necessity for a soft-constrained
+safety layer that maintains feasibility and preserves safety in
+cases where the hard constrained formulation fails to return
+a solution.
+Finally, in order to gain a better understanding of the behaviour of our algorithm after convergence, we ran test
+simulations of 100 episodes for each agent for 10 different
+initial random seeds. The cumulative number of the collisions for the 2 different settings is illustrated in Figure
+6. It is evident that in both settings, the soft constrained
+formulation achieves the minimum number of collisions.
+For visualization purposes, we provide the videos of the test
+simulation at the following Video Repository.
+
+4. Conclusion
+We proposed an extension of Safe DDPG (Dalal et al., 2018)
+to multi-agent settings. From a technical perspective, we
+relaxed some of the conservative assumptions made in the
+original single-agent work by introducing soft constraints
+in the optimization objective. This allows us to generalize
+
+the approach to settings where more than one constraint
+is active, which is typically the case for multi-agent environments. Our empirical results suggest that our soft
+constrained formulation achieves as dramatic decrease in
+constraint violations during training when exogenous disturbances and unsafe initialization are encountered, while
+maintaining the ability to explore and hence solve the desired task successfully. Although this observation does not
+necessarily generalize to more complex environments, it
+motivates the practicality of our algorithm in safety-critical
+deployment under more conservative constraint tightenings.
+Finally, while our preliminary results are encouraging, we
+believe there is ample room for improvement and further
+experimentation. As part of future work, we would like to
+introduce a reward based on the intervention of the safety
+filter during training, such that we can indirectly propagate
+the safe behavior to the learnt policies of the agents, which
+could ultimately eliminate the requirement for using a centralized safety filter during test time. Additionally, we would
+like to deploy our approach in more complex environments
+to explore the true potential of our work.
+Code can be accessed in the following link.
+
+Safe Deep Reinforcement Learning for Multi-Agent Systems with Continuous Action Spaces
+
+References
+Alshiekh, M., Bloem, R., Ehlers, R., Könighofer, B.,
+Niekum, S., and Topcu, U. Safe reinforcement learning via shielding. In Proceedings of the AAAI Conference
+on Artificial Intelligence, volume 32, 2018.
+Altman, E. Constrained markov decision processes with
+total cost criteria: Lagrangian approach and dual linear
+program. Mathematical methods of operations research,
+48(3):387–417, 1998.
+Chow, Y., Nachum, O., Faust, A., Duenez-Guzman, E., and
+Ghavamzadeh, M. Lyapunov-based safe policy optimization for continuous control, 2019.
+Dalal, G., Dvijotham, K., Vecerik, M., Hester, T., Paduraru,
+C., and Tassa, Y. Safe exploration in continuous action
+spaces. arXiv preprint arXiv:1801.08757, 2018.
+Efroni, Y., Mannor, S., and Pirotta, M.
+exploitation in constrained mdps, 2020.
+
+Exploration-
+
+Goldfarb, D. and Idnani, A. A numerically stable dual
+method for solving strictly convex quadratic programs.
+Mathematical programming, 27(1):1–33, 1983.
+Gu, S., Holly, E., Lillicrap, T., and Levine, S. Deep reinforcement learning for robotic manipulation with asynchronous off-policy updates. In 2017 IEEE international
+conference on robotics and automation (ICRA), pp. 3389–
+3396. IEEE, 2017.
+Hu, J., Niu, H., Carrasco, J., Lennox, B., and Arvin, F.
+Voronoi-based multi-robot autonomous exploration in
+unknown environments via deep reinforcement learning. IEEE Transactions on Vehicular Technology, 69
+(12):14413–14423, 2020.
+Kerrigan, E. C. and Maciejowski, J. M. Soft constraints and
+exact penalty functions in model predictive control. In
+Proc. UKACC International Conference (Control, 2000.
+Khan, A., Zhang, C., Li, S., Wu, J., Schlotfeldt, B., Tang,
+S. Y., Ribeiro, A., Bastani, O., and Kumar, V. Learning
+safe unlabeled multi-robot planning with motion constraints. arXiv preprint arXiv:1907.05300, 2019.
+Kingma, D. P. and Ba, J. Adam: A method for stochastic
+optimization. In ICLR, 2015.
+Lazic, N., Boutilier, C., Lu, T., Wong, E., Roy, B., Ryu,
+M., and Imwalle, G. Data center cooling using modelpredictive control. In Advances in Neural Information
+Processing Systems, pp. 3814–3823, 2018.
+Lillicrap, T. P., Hunt, J. J., Pritzel, A., Heess, N., Erez,
+T., Tassa, Y., Silver, D., and Wierstra, D. Continuous
+control with deep reinforcement learning. arXiv preprint
+arXiv:1509.02971, 2015.
+
+Lipton, Z. C., Azizzadenesheli, K., Kumar, A., Li, L., Gao,
+J., and Deng, L. Combating reinforcement learning’s
+sisyphean curse with intrinsic fear, 2018.
+Lowe, R., Wu, Y., Tamar, A., Harb, J., Abbeel, P., and Mordatch, I. Multi-agent actor-critic for mixed cooperativecompetitive environments. Neural Information Processing Systems (NIPS), 2017a.
+Lowe, R., Wu, Y., Tamar, A., Harb, J., Abbeel, P.,
+and Mordatch, I. Multi-agent actor-critic for mixed
+cooperative-competitive environments. arXiv preprint
+arXiv:1706.02275, 2017b.
+Mnih, V., Kavukcuoglu, K., Silver, D., Graves, A.,
+Antonoglou, I., Wierstra, D., and Riedmiller, M. Playing
+atari with deep reinforcement learning, 2013.
+Mnih, V., Kavukcuoglu, K., Silver, D., Rusu, A. A., Veness,
+J., Bellemare, M. G., Graves, A., Riedmiller, M., Fidjeland, A. K., Ostrovski, G., et al. Human-level control
+through deep reinforcement learning. nature, 518(7540):
+529–533, 2015.
+Mordatch, I. and Abbeel, P. Emergence of grounded compositional language in multi-agent populations. In Proceedings of the AAAI Conference on Artificial Intelligence,
+volume 32, 2018.
+Rockafellar, R. T. Convex analysis. Princeton university
+press, 2015.
+Sallab, A. E., Abdou, M., Perot, E., and Yogamani, S. Deep
+reinforcement learning framework for autonomous driving. Electronic Imaging, 2017(19):70–76, 2017.
+Wabersich, K. P. and Zeilinger, M. N. Linear model predictive safety certification for learning-based control. In
+2018 IEEE Conference on Decision and Control (CDC),
+pp. 7130–7135. IEEE, 2018.
+Zhang, W., Bastani, O., and Kumar, V. Mamps: Safe multiagent reinforcement learning via model predictive shielding. arXiv preprint arXiv:1910.12639, 2019.
+
+

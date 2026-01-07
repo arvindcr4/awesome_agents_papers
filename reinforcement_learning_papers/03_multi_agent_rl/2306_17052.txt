@@ -1,0 +1,2411 @@
+arXiv:2306.17052v2 [cs.LG] 28 Dec 2023
+
+Safe Model-Based Multi-Agent
+Mean-Field Reinforcement Learning
+Matej Jusup
+
+Barna Pásztor
+
+Tadeusz Janik
+
+ETH Zurich
+Zurich, Switzerland
+mjusup@ethz.ch
+
+ETH Zurich
+Zurich, Switzerland
+barna.pasztor@ai.ethz.ch
+
+ETH Zurich
+Zurich, Switzerland
+tjanik@student.ethz.ch
+
+Kenan Zhang
+
+Francesco Corman
+
+Andreas Krause
+
+EPFL Lausanne
+Lausanne, Switzerland
+kenan.zhang@epfl.ch
+
+ETH Zurich
+Zurich, Switzerland
+corman@ethz.ch
+
+ETH Zurich
+Zurich, Switzerland
+krausea@ethz.ch
+
+Ilija Bogunovic
+University College London
+London, United Kingdom
+i.bogunovic@ucl.ac.uk
+
+ABSTRACT
+Many applications, e.g., in shared mobility, require coordinating
+a large number of agents. Mean-field reinforcement learning addresses the resulting scalability challenge by optimizing the policy
+of a representative agent interacting with the infinite population of
+identical agents instead of considering individual pairwise interactions. In this paper, we address an important generalization where
+there exist global constraints on the distribution of agents (e.g., requiring capacity constraints or minimum coverage requirements to
+be met). We propose Safe-M3 -UCRL, the first model-based meanfield reinforcement learning algorithm that attains safe policies
+even in the case of unknown transitions. As a key ingredient, it uses
+epistemic uncertainty in the transition model within a log-barrier
+approach to ensure pessimistic constraints satisfaction with high
+probability. Beyond the synthetic swarm motion benchmark, we
+showcase Safe-M3 -UCRL on the vehicle repositioning problem
+faced by many shared mobility operators and evaluate its performance through simulations built on vehicle trajectory data from
+a service provider in Shenzhen. Our algorithm effectively meets
+the demand in critical areas while ensuring service accessibility in
+regions with low demand.
+
+Figure 1: An illustration of vehicles’ spatial distribution
+(light-blue scatters), repositioning trips (blue arrows), and a
+trajectory of passenger trips (red arrows).
+
+KEYWORDS
+Multi-agent reinforcement learning; Mean-field control; Global
+safety; Epistemic uncertainty; Probabilistic neural network ensemble; Shared mobility; Vehicle repositioning
+ACM Reference Format:
+Matej Jusup, Barna Pásztor, Tadeusz Janik, Kenan Zhang, Francesco Corman,
+Andreas Krause, and Ilija Bogunovic. 2024. Safe Model-Based Multi-Agent
+Mean-Field Reinforcement Learning. In Proc. of the 23rd International Conference on Autonomous Agents and Multiagent Systems (AAMAS 2024), Auckland,
+New Zealand, May 6 – 10, 2024, IFAAMAS, 23 pages.
+Proc. of the 23rd International Conference on Autonomous Agents and Multiagent Systems
+(AAMAS 2024), N. Alechina, V. Dignum, M. Dastani, J.S. Sichman (eds.), May 6 – 10, 2024,
+Auckland, New Zealand. © 2024 International Foundation for Autonomous Agents
+and Multiagent Systems (www.ifaamas.org). This work is licenced under the Creative
+Commons Attribution 4.0 International (CC-BY 4.0) licence.
+
+1
+
+Introduction
+
+Multi-Agent Reinforcement Learning (MARL) is a rapidly growing field that seeks to understand and optimize the behavior of
+multiple agents interacting in a shared environment. MARL has a
+wide range of potential applications, including vehicle repositioning
+in shared mobility services (e.g., moving idle vehicles from lowdemand to high-demand areas [47]), swarm robotics (e.g., operating
+a swarm of drones [3]), and smart grids (e.g., operating a network
+of sensors in electric system [62]). The interactions between agents
+in these complex systems introduce several challenges, including
+non-stationarity, scalability, competing learning goals, and varying information structure. Mean-Field Control (MFC) addresses
+the scalability and non-stationarity hurdles associated with MARL
+
+by exploiting the insight that many relevant MARL problems involve a large number of very similar agents working towards the
+same goal. Instead of focusing on the individual agents and their
+interactions, MFC considers an asymptotically large population of
+identical cooperative agents and models them as a distribution on
+the state space. This approach circumvents the problem’s dependency on the population size, enabling the consideration of large
+populations. The solutions obtained by MFC are often sufficient
+for the finite-agent equivalent problem [14, 41, 55, 71] in spite of
+the introduced approximations. An example of such a system is a
+ride-hailing platform that serves on-demand trips with a fleet of
+vehicles. The platform needs to proactively reposition idle vehicles
+based on their current locations, the locations of the other vehicles
+in the fleet, and future demand patterns (see Figure 1) to maximize
+the number of fulfilled trips and minimize customer waiting times.
+Additionally, the platform may be obligated by external regulators
+to guarantee service accessibility across the entire service region.
+The problem quickly becomes intractable as the number of vehicles
+increases. A further difficulty lies in modeling the traffic flows. Due
+to numerous infrastructure, external, and driver behavioral factors,
+which are often region-specific, it is laborious and often difficult to
+determine transitions precisely [9, 20, 70].
+In this paper, we focus on learning the safe optimal policies for
+a large multi-agent system when the underlying transitions are unknown. In most real-world systems, the transitions must be learned
+from the data obtained from repeated interactions with the environment. We assume that the cost of obtaining data from the
+environment is high and seek to design a model-based solution that
+efficiently uses the collected data. Existing works consider solving
+the MFC problem via model-free or model-based methods without
+safety guarantees. However, the proposed Safe Model-Based MultiAgent Mean-Field Upper-Confidence Reinforcement Learning (SafeM3 -UCRL) algorithm focuses on learning underlying transitions
+and deriving optimal policies for the mean-field setting while avoiding undesired or dangerous distributions of agents’ population.
+Contributions. Section 3 extends the MFC setting with safety
+constraints and defines a novel comprehensive notion of global
+population-based safety. To address safety-constrained environments featuring a large population of agents, in Section 4, we propose a model-based mean-field reinforcement learning algorithm
+called Safe-M3 -UCRL. Our algorithm leverages epistemic uncertainty in the transition model, employing a log-barrier approach to
+guarantee pessimistic satisfaction of safety constraints and enables
+the derivation of safe policies. In Section 5, we conduct empirical
+testing on the synthetic swarm motion benchmark and real-world
+vehicle repositioning problem, a challenge commonly faced by
+shared mobility operators. Our results demonstrate that the policies derived using Safe-M3 -UCRL successfully fulfill demand in
+critical demand hotspots while ensuring service accessibility in
+areas with lower demand.
+
+2
+
+Related Work
+
+Our notion of safety for the mean-field problem extends the frameworks of Mean-Field Games (MFG) and Mean-Field Control (MFC) [35,
+36, 43, 44]. For a summary of the progress focusing on MFGs,
+see [45] and references therein. We focus on MFCs in this work,
+
+which assume cooperative agents in contrast to MFGs, which assume competition. [7, 27, 30, 31, 56] address the problem of solving MFCs under known transitions, i.e., planning, while [5, 6, 11–
+13, 68, 71, 72] consider model-free Q-learning and Policy Gradient methods in various settings. Closest to our approach, [58] introduces M3 -UCRL, a model-based, on-policy algorithm, which
+is more sample efficient than other proposed approaches. Similarly to [16, 19, 39] for model-based single-agent RL and [63] for
+model-based MARL, M3 -UCRL uses the epistemic uncertainty in
+the transition model to design optimistic policies that efficiently balance exploration and exploitation in the environment and maximize
+sample efficiency. This is also the setting of our interest. However,
+safety is not considered in any of these methods.
+In terms of safety, there are two main ways of handling it in RL;
+assigning significantly lower rewards to unsafe states [53] and providing additional knowledge to the agents [66] or using the notion
+of controllability to avoid unsafe policies explicitly [28]. Furthermore, the following approaches combine the two methods; [8] uses
+Lyapunov functions to restrict the safe policy space, [15] projects
+unsafe policies to a safe set via a control barrier function, and [4]
+introduces shielding, i.e., correcting actions only if they lead to
+unsafe states. For comprehensive overviews on safe RL, we refer
+the reader to [26, 33]. As an alternative, [69] demonstrates that
+the general-purpose stochastic optimization methods can be used
+for constrained MDPs, i.e., safe RL formulations. Similar to our
+work, they use the log-barrier approach to turn constrained into unconstrained optimization. Nevertheless, the aforementioned works
+focus mainly on individual agents, while in large-scale multi-agent
+environments, maintaining individual safety becomes intractable,
+and the focus shifts towards global safety measures. For multiagent problems, previous works focus on satisfying the individual
+constraints of the agents while learning in a multi-agent environment. For the cooperative problem, [32] proposes two model-free
+algorithms, MACPO and MAPPO-Lagrangian. MACPO is computationally expensive, while MAPPO-Lagrangian does not guarantee hard constraints for safety. Dec-PG solves the decentralized
+learning problem using a consensus network that shares weights
+between neighboring agents [50]. For the non-cooperative decentralized MARL problem with individual constraints, [65] adds a
+safety layer to multi-agent DDPG [49] similar to single-agent Safe
+DDPG [21] for continuous state-action spaces. Aggregated and
+population-based constraints have been addressed in the following
+works. CMIX [48] extends QMIX [61], which considers average and
+peak constraints defined over the whole population of agents in
+a centralized-learning decentralized-execution framework. Their
+formulation relies on the joint state and action spaces, making it
+infeasible for a large population of agents. [25] introduces an additional shielding layer that corrects unsafe actions. Their centralized
+approach suffers from scalability issues, while the factorized shielding method monitors only a subset of the state or action space.
+For mixed cooperative-competitive settings, [76] uses the notion
+of returnability to define a safe, decentralized, multi-agent version
+of Q-learning that ensures individual and joint constraints. However, their approach requires an estimation of other agents’ policies,
+which does not scale well for large systems. Works considering constraints on the whole population fail to overcome the exponential
+
+nature of multi-agent problems or require domain knowledge to
+factorize the problems into subsets.
+Closest to our setting, [55] introduces constraints to the MFC by
+defining a cost function and a threshold that the discounted sum
+of costs can not exceed. We propose a different formulation that
+restricts the set of feasible mean-field distributions at every step,
+therefore, addressing the scalability issue and allowing for more
+specific control over constraints and safe population distributions.
+
+3
+
+Problem Statement
+
+Formally, we consider the episodic setting, where episodes 𝑛 =
+1, . . . , 𝑁 each have 𝑡 = 0, . . . ,𝑇 − 1 discrete steps and the terminal
+step 𝑡 = 𝑇 . The state space S ⊆ R𝑝 and action space A ⊆ R𝑞 are
+(𝑖)
+(𝑖)
+the same for every agent. We use 𝑠𝑛,𝑡 ∈ S and 𝑎𝑛,𝑡 ∈ A, to denote
+the state and action of agent 𝑖 ∈ {1, . . . , 𝑚} in episode 𝑛 at step 𝑡.
+For every 𝑛 and 𝑡, the mean-field distribution 𝜇𝑛,𝑡 ∈ P(S) describes
+the global state with 𝑚 identical agents when 𝑚 → + ∞, i.e.,
+𝑚
+1 ∑︁
+(𝑖)
+𝜇𝑛,𝑡 (𝑑𝑠) = lim
+I(𝑠 ∈ 𝑑𝑠),
+𝑚→
+− ∞ 𝑚 𝑖=1 𝑛,𝑡
+
+where I(·) is the indicator function, and P(S) is the set of probability
+measures over the state space S.
+We consider the MFC model to capture a collective behavior of a
+large number of collaborative agents operating in the shared stochastic environment. This model assumes the limiting regime of infinitely
+many agents and homogeneity. Namely, all agents are identical and
+indistinguishable, therefore, solving MFC amounts to finding an
+optimal policy for a single, so-called, representative agent. The representative agent interacts with the mean-field distribution of agents
+instead of focusing on individual interactions and optimizes a collective reward. Due to the homogeneity assumption, the representative
+agent’s policy is used to control all the agents in the environment.
+We posit that the reward 𝑟 : S × P(S) × A → R of the representative agent is known and that it depends on the states of the other
+agents through the mean-field distribution.1 Before every episode
+𝑛, the representative agent selects a non-stationary policy profile
+𝝅𝑛 = (𝜋𝑛,0, . . . , 𝜋𝑛,𝑇 −1 ) ∈ Π where individual policies are of the
+form 𝜋𝑛,𝑡 : S × P(S) → A and Π is the set of admissible policy
+profiles. The policy profile is then shared with all the agents that
+choose their actions according to 𝝅𝑛 during episode 𝑛.
+We consider a general family of deterministic transitions 𝑓 :
+S × P(S) × A → S. Given the current mean-field distribution 𝜇𝑛,𝑡 ,
+the representative agent’s state 𝑠𝑛,𝑡 and its action 𝑎𝑛,𝑡 , the next
+representative agent’s state 𝑠𝑛,𝑡 +1 is given by
+𝑠𝑛,𝑡 +1 = 𝑓 (𝑠𝑛,𝑡 , 𝜇𝑛,𝑡 , 𝑎𝑛,𝑡 ) + 𝜀𝑛,𝑡 ,
+
+(1)
+
+where 𝑠𝑛,𝑡 +1 is the next representative agent state and 𝜇𝑛,𝑡 (𝑑𝑠) =
+P[𝑠𝑛,𝑡 ∈ 𝑑𝑠] under 𝝅𝑛 for all 𝑡. To simplify the notation, we use 𝑈 (·)
+to denote the mean-field transition function from Equation (2), i.e.,
+we have 𝜇𝑛,𝑡 +1 = 𝑈 (𝜇𝑛,𝑡 , 𝜋𝑛,𝑡 , 𝑓 ). We further introduce the notation
+𝑧𝑛,𝑡 ∈ Z = S × P(S) × A to denote the tuple (𝑠𝑛,𝑡 , 𝜇𝑛,𝑡 , 𝑎𝑛,𝑡 ).
+For a given policy profile 𝝅𝑛 and mean-field distribution 𝜇, the
+performance of the representative agent at step 𝑡 is measured via
+its expected future reward for the rest of the episode, i.e.,
+"
+#
+𝑇∑︁
+−1
+E
+𝑟 (𝑧𝑛,𝑗 )|𝜇𝑛,𝑡 = 𝜇 .
+𝑗=𝑡
+
+Here, the expectation is over the randomness in the transitions and
+over the sampling of the initial state, i.e., 𝑠𝑛,𝑡 ∼ 𝜇.
+
+3.1
+
+Safe Mean-Field Reinforcement Learning
+
+We extend the MFC with global safety constraints,2 i.e., the constraints imposed on the mean-field distributions. We consider safety
+functions ℎ : P(S) → R over probability distributions. Given some
+hard safety threshold 𝐶 ∈ R, we consider a mean-field distribution
+𝜇 as safe if it satisfies ℎ(𝜇) ≥ 𝐶, or, equivalently
+ℎ𝐶 (𝜇) := ℎ(𝜇) − 𝐶 ≥ 0.
+
+(3)
+
+We denote the set of safe mean-field distributions for a safety constraint ℎ𝐶 (·) as 𝜁 = {𝜇 ∈ P(S) : ℎ𝐶 (𝜇) ≥ 0}. Hence, our focus is
+on the safety of the system as a whole rather than the safety of
+individual agents, as it becomes intractable to handle individual
+agents’ states and interactions in the case of a large population.
+For a given initial distribution 𝜇 0 , we formally define the SafeMFC 3 problem as follows
+"
+#
+𝑇∑︁
+−1
+𝝅 ∗ = arg max E
+𝑟 (𝑧𝑡 ) 𝜇 0
+(4a)
+𝝅 ∈Π
+
+𝑡 =0
+
+subject to 𝑎𝑡 = 𝜋𝑡 (𝑠𝑡 , 𝜇𝑡 )
+
+(4b)
+
+𝑠𝑡 +1 = 𝑓 (𝑧𝑡 ) + 𝜀𝑡
+
+(4c)
+
+𝜇𝑡 +1 = 𝑈 (𝜇𝑡 , 𝜋𝑡 , 𝑓 )
+
+(4d)
+
+ℎ𝐶 (𝜇𝑡 +1 ) ≥ 0,
+
+(4e)
+
+where we explicitly require induced mean-field distributions {𝜇𝑡 }𝑇𝑡=1
+to reside in the safe set 𝜁 by restricting the set of admissible policy
+profiles Π to policy profiles that induce safe distributions. To ensure
+complete safety, we note that the initial mean-field distribution 𝜇 0
+must be in the safe set 𝜁 as our learning protocol does not induce it
+(see Algorithm 1).
+We make the following assumptions about the environment
+using Wasserstein 1-distance defined by
+
+where 𝜀𝑛,𝑡 is a Gaussian noise with known variance. We assume that
+the transitions are unknown and are to be inferred from collected
+trajectories across episodes.
+Mean-field transitions. State-to-state transition map in Equation (1) naturally extends to the mean-field transitions induced by a
+policy profile 𝝅𝑛 and transitions 𝑓 in episode 𝑛 (see [58, Lemma 1])
+Z
+𝜇𝑛,𝑡 +1 (𝑑𝑠 ′ ) =
+P[𝑠𝑛,𝑡 +1 ∈ 𝑑𝑠 ′ ]𝜇𝑛,𝑡 (𝑑𝑠),
+(2)
+
+where Γ(𝜇, 𝜇 ′ ) is the set of all couplings of 𝜇 and 𝜇 ′ (i.e., a joint
+probability distributions with marginals 𝜇 and 𝜇 ′ ). We further define
+the distance between 𝑧 = (𝑠, 𝜇, 𝑎) and 𝑧 ′ = (𝑠 ′, 𝜇 ′, 𝑎 ′ ) as
+
+1 Our framework easily extends to unknown reward by estimating its epistemic uncer-
+
+extendable to multiple constraints.
+3We refer to formulations under known transitions as control problems, while we
+reserve the term reinforcement learning for formulations under unknown transitions.
+
+S
+
+tainty and learning it similarly to learning unknown transitions (see [16]).
+
+𝑊1 (𝜇, 𝜇 ′ ) :=
+
+inf
+
+𝛾 ∈Γ(𝜇,𝜇 ′ )
+
+E(𝑥,𝑦)∼𝛾 ∥𝑥 − 𝑦 ∥ 1,
+
+𝑑(𝑧, 𝑧 ′ ) := ∥𝑠 − 𝑠 ′ ∥ 2 + ∥𝑎 − 𝑎 ′ ∥ 2 + 𝑊1 (𝜇, 𝜇 ′ ).
+2 For the exposition, we use a single constraint, however, our approach is directly
+
+Assumption 1 (Transitions Lipschitz continuity). The transition function 𝑓 (·) is 𝐿 𝑓 -Lipschitz-continuous, i.e.,
+∥𝑓 (𝑧) − 𝑓 (𝑧 ′ )∥ 2 ≤ 𝐿 𝑓 𝑑(𝑧, 𝑧 ′ ).
+Assumption 2 (Mean-field policies Lipschitz continuity).
+The individual policies 𝜋 present in any admissible policy profile 𝝅
+in Π are 𝐿𝜋 -Lipschitz-continuous, i.e.,
+∥𝜋(𝑠, 𝜇) − 𝜋(𝑠 ′, 𝜇 ′ )∥ 2 ≤ 𝐿𝜋 (∥𝑠 − 𝑠 ′ ∥ 2 + 𝑊1 (𝜇, 𝜇 ′ ))
+for all 𝜋 ∈ 𝝅 ∈ Π.
+Assumption 3 (Reward Lipschitz continuity). The reward
+function 𝑟 (·) is 𝐿𝑟 -Lipschitz-continuous, i.e.,
+∥𝑟 (𝑧) − 𝑟 (𝑧 ′ )∥ 2 ≤ 𝐿𝑟 𝑑(𝑧, 𝑧 ′ ).
+These assumptions are considered standard in model-based learning [16, 39, 58, 63] and mild, as individual policies and rewards
+are typically designed such that they meet these smoothness requirements. For example, we use neural networks with Lipschitzcontinuous activations to represent our policies (see Appendix D.3).
+
+3.2
+
+Examples of Safety Constraints
+
+We can model multiple classes of safety constraints ℎ𝐶 (·) ≥ 0
+that naturally appear in real-world applications such as vehicle
+repositioning, traffic flow, congestion control, and others.
+Entropic safety. Entropic constraints can be used in multi-agent
+systems to prevent overcrowding by promoting spatial diversity and
+avoiding excessive clustering. Incorporating an entropic term in the
+decision-making process encourages the controller to distribute the
+agents evenly within the state space. This might be particularly useful in applications that include crowd behavior, such as operating a
+swarm of drones or a fleet of vehicles. In such scenarios, we define
+safety by imposing a threshold 𝐶 ≥ 0 on the differential entropy
+Z
+𝐻 (𝜇) := −
+log 𝜇(𝑠)𝜇(𝑑𝑠)
+(5)
+S
+
+of the mean-field distribution 𝜇, i.e.,
+ℎ𝐶 (𝜇) := 𝐻 (𝜇) − 𝐶.
+Distribution similarity. Another way to define safety is by
+preventing 𝜇 from diverging from a prior distribution 𝜈 0 . The prior
+can be based on previous studies, expert opinions or regulatory
+requirements. We can use a penalty function that quantifies the
+allowed dissimilarity between the two distributions
+ℎ𝐶 (𝜇; 𝜈 0 ) := 𝐶 − 𝐷(𝜇, 𝜈 0 ),
+with 𝐶 ≥ 0 and where the distance function between probability
+measures 𝐷 : P(S) × P(S) → R ≥0 depends on the problem at hand.
+We provide further examples of safety functions in Appendix B
+together with proofs that they satisfy Assumption 6.
+
+3.3
+
+Statistical Model and Safety Implications
+
+The representative agent learns about unknown transitions by interacting with the environment. We take a model-based approach
+to achieve sample efficiency by sequentially updating and improving the transition model estimates based on the previously observed transitions. At the beginning of each episode 𝑛, the representative agent updates its model based on ∪𝑛−1
+𝑖=1 D𝑖 where D𝑖 =
+
+−1 and 𝑧 = (𝑠 , 𝜇 , 𝑎 ) is the set of observations
+{(𝑧𝑖,𝑡 , 𝑠𝑖,𝑡 +1 )}𝑇𝑡 =0
+𝑖,𝑡
+𝑖,𝑡 𝑖,𝑡 𝑖,𝑡
+in episode 𝑖 for 𝑖 = 1, ..., 𝑛 − 1, i.e., up until the beginning of episode
+𝑛. We estimate the mean 𝒎𝑛−1 : Z → S and covariance Σ𝑛−1 :
+Z → R𝑝 ×𝑝 functions from the set of collected trajectories ∪𝑛−1
+𝑖=1 D𝑖 ,
+2 (𝑧) = diag(Σ
+and denote model’s confidence with 𝝈𝑛−1
+𝑛−1 (𝑧)). We
+assume that the statistical model is calibrated, meaning that at the
+beginning of every episode, the agent has high probability confidence
+bounds around unknown transitions. The following assumptions
+are consistent with [16, 19, 58, 63, 67] and other literature which
+aims to exclude extreme functionals from consideration.
+
+Assumption 4 (Calibrated model). Let 𝒎𝑛−1 (·) and Σ𝑛−1 (·) be
+the mean and covariance functions of the statistical model of 𝑓 conditioned on 𝑛 − 1 observed episodes. For the confidence function 𝝈𝑛−1 (·),
+there exists a non-decreasing, strictly positive sequence {𝛽𝑛 }𝑛≥0 such
+that for 𝛿 > 0 with probability at least 1 − 𝛿, we have jointly for all
+𝑛 ≥ 1 and 𝑧 ∈ Z that |𝑓 (𝑧) − 𝒎𝑛−1 (𝑧)| ≤ 𝛽𝑛−1 𝝈𝑛−1 (𝑧) elementwise.
+Assumption 5 (Estimated confidence Lipschitz continuity).
+The confidence function 𝝈𝑛 (·) is 𝐿𝜎 -Lipschitz-continuous for all 𝑛 ≥ 0,
+i.e., ∥𝝈𝑛 (𝑧) − 𝝈𝑛 (𝑧 ′ )∥ 2 ≤ 𝐿𝜎 𝑑(𝑧, 𝑧 ′ ).
+Since the true transition model is unknown in Equation (4c) and
+Equation (4d), at the beginning of every episode 𝑛, the representative agent can only construct the confidence set of transitions F𝑛−1
+with 𝒎𝑛−1 (·) and 𝝈𝑛−1 (·) estimated based on the observations up
+until the end of the previous episode 𝑛 − 1, i.e.,
+n
+o
+F𝑛−1 = 𝑓˜ : 𝑓˜ is calibrated w.r.t. 𝒎𝑛−1 (·) and 𝝈𝑛−1 (·)
+(6)
+The crucial challenge in Safe Mean-Field Reinforcement Learning is
+that the representative agent can only select transitions 𝑓˜ ∈ F𝑛−1 at
+the beginning of the episode 𝑛 and use it instead of true transitions
+𝑓 when solving Equation (4) to find an optimal policy profile 𝝅𝑛∗ .
+The resulting mean-field distributions { 𝜇˜𝑡 }𝑇𝑡=1 are then different
+from {𝜇𝑡 }𝑇𝑡=1 (i.e., the ones that correspond to the true transition
+model), and hence the constraint Equation (3) guarantees only the
+safety under the estimated transitions 𝑓˜, i.e., ℎ𝐶 (𝜇˜𝑡 ) ≥ 0. In contrast,
+the original environment constraint ℎ𝐶 (𝜇𝑡 ) ≥ 0 might be violated,
+resulting in unsafe mean-field distributions under true transitions 𝑓 .
+Next, we demonstrate how to modify the constraint Equation (4e)
+for the optimization problem Equation (4) when an estimated transition function 𝑓˜ is used from the confidence set F𝑛−1 such that the
+mean-field distributions 𝜇𝑛,𝑡 induced by the resulting policy profile
+𝝅𝑛∗ do not violate the original constraint under true transitions 𝑓 .
+First, we require the following property for any safety function ℎ(·).
+Assumption 6 (Safety Lipschitz continuity). The safety function ℎ(·) is 𝐿ℎ -Lipschitz-continuous, i.e., |ℎ(𝜇) − ℎ(𝜇 ′ )| ≤ 𝐿ℎ𝑊1 (𝜇, 𝜇 ′ ).
+The following lemma shows that we can ensure safety under
+true transitions 𝑓 by having tighter constraints under any estimated
+transitions 𝑓˜ selected from F𝑛−1 .
+Lemma 1. Given a fixed policy profile 𝝅𝑛 , a safety function ℎ(·)
+satisfying Assumption 6 and a safety threshold 𝐶 ∈ R, we have in
+episode 𝑛 for all steps 𝑡
+|ℎ𝐶 (𝜇˜𝑛,𝑡 ) − ℎ𝐶 (𝜇𝑛,𝑡 )| ≤ 𝐿ℎ𝐶𝑛,𝑡 ,
+where 𝐶𝑛,𝑡 is an arbitrary constant that satisfies 𝐶𝑛,𝑡 ≥ 𝑊1 (𝜇˜𝑛,𝑡 , 𝜇𝑛,𝑡 ).
+
+Proof. For arbitrary 𝜇˜𝑛,𝑡 , 𝜇𝑛,𝑡 ∈ P(S) we have
+|ℎ𝐶 (𝜇˜𝑛,𝑡 )−ℎ𝐶 (𝜇𝑛,𝑡 )| = |ℎ(𝜇˜𝑛,𝑡 )−ℎ(𝜇𝑛,𝑡 )| ≤ 𝐿ℎ𝑊1 (𝜇˜𝑛,𝑡 , 𝜇𝑛,𝑡 ) ≤ 𝐿ℎ𝐶𝑛,𝑡 ,
+where the first equality follows from the definition of ℎ𝐶 (·), the first
+inequality follows from Assumption 6 and the second inequality
+comes from 𝐶𝑛,𝑡 ≥ 𝑊1 (𝜇˜𝑛,𝑡 , 𝜇𝑛,𝑡 ).
+□
+Crucially, using Lemma 1 we can formulate a safety constraint for
+the optimization under estimated transitions 𝑓˜ that ensures that the
+constraint under true transitions 𝑓 is satisfied with high probability.
+Corollary 1. For every episode 𝑛 and step 𝑡, ℎ𝐶 (𝜇˜𝑛,𝑡 ) ≥ 𝐿ℎ𝐶𝑛,𝑡
+implies ℎ𝐶 (𝜇𝑛,𝑡 ) ≥ 0 guaranteeing the safety of the original system.
+Proof. The corollary follows directly from Lemma 1 and the
+triangle inequality, which are used in the third and the second
+inequality, respectively
+𝐿ℎ𝐶𝑛,𝑡 ≤ ℎ𝐶 (𝜇˜𝑛,𝑡 )
+
+with 𝑧˜𝑛,𝑡 = (˜𝑠𝑛,𝑡 , 𝜇˜𝑛,𝑡 , 𝑎˜𝑛,𝑡 ). Equation (7) optimizes over the function space F𝑛−1 which is usually intractable even in bandit settings [22]. Additionally, it must comply with the safety constraint
+Equation (7e), further complicating the optimization. We utilize the
+hallucinated control reparametrization and the log-barrier method
+to alleviate these issues. After the reformulation of the problem,
+model-free or model-based mean-field optimization algorithms can
+be applied to find policy profile 𝝅𝑛∗ at the beginning of episode 𝑛.
+We use an established approach known as Hallucinated Upper
+Confidence Reinforcement Learning (H-UCRL) [19, 54, 58] and introduce an auxiliary function 𝜂 : Z → [−1, 1]𝑝 , where 𝑝 is the dimensionality of the state space S, to define hallucinated transitions
+𝑓˜𝑛−1 (𝑧) = 𝒎𝑛−1 (𝑧) + 𝛽𝑛−1 Σ𝑛−1 (𝑧)𝜂(𝑧).
+
+Notice that 𝑓˜𝑛−1 is calibrated for any 𝜂(·) under Assumption 4, i.e.,
+𝑓˜𝑛−1 ∈ F𝑛−1 . Assumption 4 further guarantees that every function
+𝑓˜𝑛−1 can be expressed in the auxiliary form Equation (8)
+
+≤ |ℎ𝐶 (𝜇˜𝑛,𝑡 ) − ℎ𝐶 (𝜇𝑛,𝑡 )| + ℎ𝐶 (𝜇𝑛,𝑡 )
+
+∀ 𝑓˜𝑛−1 ∈ F𝑛−1 ∃𝜂 : Z → [−1, 1]𝑝 such that
+
+≤ 𝐿ℎ𝐶𝑛,𝑡 + ℎ𝐶 (𝜇𝑛,𝑡 ).
+The claim is obtained by subtracting the positive constant 𝐿ℎ𝐶𝑛,𝑡
+from both sides.
+□
+Then, 𝐶𝑛,𝑡 for 𝑡 = 1, . . . ,𝑇 become parameters of the optimization problem (as defined in Section 4) that the representative agent
+faces at the beginning of episode 𝑛. However, choosing the appropriate values that comply with the condition 𝐶𝑛,𝑡 ≥ 𝑊1 (𝜇˜𝑛,𝑡 , 𝜇𝑛,𝑡 )
+is not trivial since 𝜇𝑛,𝑡 depends on unknown true transitions of
+the system. Note that computing 𝐶𝑛,0 at the initial step 𝑡 = 0 is
+not necessary because the inequality is always guaranteed due to
+the initialization 𝜇˜𝑛,0 = 𝜇𝑛,0 for every episode 𝑛. In Appendix A,
+we demonstrate how to efficiently upper bound 𝑊1 (𝜇˜𝑛,𝑡 , 𝜇𝑛,𝑡 ) and
+obtain 𝐶𝑛,𝑡 using the Lipschitz constants of the system and the statistical model’s epistemic uncertainty. In particular, 𝐶𝑛,𝑡 approaches
+zero, and ℎ𝐶 (𝜇˜𝑛,𝑡 ) ≥ 𝐿ℎ𝐶𝑛,𝑡 reduces to the constraint Equation (4e)
+as the estimated confidence 𝝈𝑛−1 (·) shrinks due to the increasing
+number of observations available to estimate true transitions.
+
+4
+
+𝑓˜𝑛−1 (𝑧) = 𝒎𝑛−1 (𝑧) + 𝛽𝑛−1 Σ𝑛−1 (𝑧)𝜂(𝑧), ∀𝑧 ∈ Z.
+Thus, the intractable optimization over the function space F𝑛−1 in
+Equation (7) can be expressed as an optimization over the set of
+admissible policy profiles Π and auxiliary function 𝜂(·) (see Appendix C.2 for further details). Note that 𝜂(𝑧) = 𝜂(𝑠, 𝜇, 𝜋(𝑠, 𝜇)) = 𝜂(𝑠, 𝜇)
+for a fixed individual policy 𝜋. This turns 𝜂(·) into a policy that
+exerts hallucinated control over the epistemic uncertainty of the
+confidence set of transitions F𝑛−1 [19]. Furthermore, Equation (8)
+allows us to optimize over parametrizable functions (e.g., neural
+networks) 𝝅 and 𝜂(·) using gradient ascent.
+We introduce the safety constraint to the objective using the
+log-barrier method [74]. This restricts the domain on which the objective function is defined only to values that satisfy the constraint
+Equation (7e), hence, turning Equation (7) to an unconstrained
+optimization problem. Combining these two methods yields the
+following optimization problem
+𝝅𝑛∗ = arg max
+"
+
+In this section, we introduce a model-based approach for the Safe
+Mean-Field Reinforcement Learning problem that combines the safety
+guarantees in Corollary 1 with upper-bound confidence interval
+optimization. At the beginning of each episode 𝑛, the representative agent constructs the confidence set of transitions F𝑛−1 (see
+Equation (6)) given the calibrated statistical model and previously
+observed data and selects a safe optimistic policy profile 𝝅𝑛∗ to obtain
+the highest value function within F𝑛−1 while satisfying the safety
+constraint derived in Corollary 1. In particular, the optimal policy
+profile 𝝅 ∗ from Equation (4) is approximated at the episode 𝑛 by
+"
+#
+𝑇∑︁
+−1
+∗
+𝝅𝑛 = arg max max E
+𝑟 (𝑧˜𝑛,𝑡 ) 𝜇˜𝑛,0 = 𝜇 0
+(7a)
+𝑓˜𝑛−1 ∈ F𝑛−1
+
+𝑡 =0
+
+subject to 𝑎˜𝑛,𝑡 = 𝜋𝑛,𝑡 (˜𝑠𝑛,𝑡 , 𝜇˜𝑛,𝑡 )
+
+(7b)
+
+𝑠˜𝑛,𝑡 +1 = 𝑓˜𝑛−1 (𝑧˜𝑛,𝑡 ) + 𝜀𝑛,𝑡
+
+(7c)
+
+𝜇˜𝑛,𝑡 +1 = 𝑈 (𝜇˜𝑛,𝑡 , 𝜋𝑛,𝑡 , 𝑓˜𝑛−1 )
+
+(7d)
+
+ℎ𝐶 (𝜇˜𝑛,𝑡 +1 ) ≥ 𝐿ℎ𝐶𝑛,𝑡 +1,
+
+max
+
+𝑝
+𝝅𝑛 ∈Π 𝜂(·)∈[−1,1]
+
+Safe-M3 -UCRL
+
+𝝅𝑛 ∈Π
+
+(8)
+
+(7e)
+
+E
+
+𝑇∑︁
+−1
+
+#
+
+(9a)
+
+
+
+𝑟 (𝑧˜𝑛,𝑡 ) + 𝜆 log ℎ𝐶 (𝜇˜𝑛,𝑡 +1 ) − 𝐿ℎ𝐶𝑛,𝑡 +1 𝜇˜𝑛,0 = 𝜇0
+
+𝑡 =0
+
+subject to 𝑎˜𝑛,𝑡 = 𝜋𝑛,𝑡 (˜𝑠𝑛,𝑡 , 𝜇˜𝑛,𝑡 )
+𝑓˜𝑛−1 (𝑧˜𝑛,𝑡 ) = 𝒎𝑛−1 (𝑧˜𝑛,𝑡 ) + 𝛽𝑛−1 Σ𝑛−1 (𝑧˜𝑛,𝑡 )𝜂(𝑧˜𝑛,𝑡 )
+
+(9b)
+(9c)
+
+𝑠˜𝑛,𝑡 +1 = 𝑓˜𝑛−1 (𝑧˜𝑛,𝑡 ) + 𝜀𝑛,𝑡
+
+(9d)
+
+𝜇˜𝑛,𝑡 +1 = 𝑈 (𝜇˜𝑛,𝑡 , 𝜋𝑛,𝑡 , 𝑓˜𝑛−1 ),
+
+(9e)
+
+with 𝑧˜𝑛,𝑡 = (˜𝑠𝑛,𝑡 , 𝜇˜𝑛,𝑡 , 𝑎˜𝑛,𝑡 ) and 𝜆 > 0 being a tuneable hyperparameter used to balance between the reward and the safety constraint.
+Provided that the set of safe mean-field distributions (assuming the
+safe initial distribution 𝜇0 is given) is not empty, 𝝅𝑛∗ is guaranteed to
+satisfy the safety constraint during the policy rollout in episode 𝑛.
+Remark 1. Note that Equation (9) can also be used under known
+transitions by setting 𝒎𝑛−1 (·) = 𝑓 (·), Σ𝑛−1 (·) = 0 and 𝐿ℎ𝐶𝑛,𝑡 = 0,
+hence, recovering the original constraint ℎ𝐶 (𝜇˜𝑛,𝑡 ) ≥ 0 from Equation (3). In Section 5, we utilize this useful property to construct the
+upper bound for the reward obtained under unknown transitions.
+
+Algorithm 1 Model-Based Learning Protocol in Safe-M3 -UCRL
+Input: Set of admissible policy profiles Π, safety constraint ℎ𝐶 (·), calibrated statistical model represented by 𝒎𝑛−1 (·) and Σ𝑛−1 (·), initial
+mean-field distribution 𝜇 0 , known reward 𝑟 (·), safety Lipschitz constant 𝐿ℎ , hyperparameter 𝜆, number of episodes 𝑁 , number of steps 𝑇
+1: for 𝑛 = 1, . . . 𝑁 do
+2:
+Compute 𝐶𝑛,𝑡 for 𝑡 = 1, . . . ,𝑇 as described in Appendix A
+3:
+Optimize the objective in Equation (9) over the admissible policy profiles Π and hallucinated transitions Equation (8)
+−1 from the representative agent
+4:
+Execute the obtained policy profile 𝝅𝑛∗ and collect the trajectories D𝑛 = {(𝑧𝑛,𝑡 , 𝑠𝑛,𝑡 +1 )}𝑇𝑡 =0
+5:
+Update the confidence set of transitions F𝑛−1 with the collected data to obtain F𝑛 for the next episode
+6: end for
+∗ = (𝜋 ∗ , . . . , 𝜋 ∗
+Return 𝝅𝑁
+𝑁 ,0
+𝑁 ,𝑇 −1 )
+
+We summarize the model-based learning protocol used by SafeM3 -UCRL in Algorithm 1. The first step computes constants 𝐶
+
+𝑛,𝑡
+
+(see Appendix A) introduced in Lemma 1. The second step optimizes
+the objective in Equation (9). The third and fourth steps collect trajectories from the representative agent and update the calibrated
+model. While the learning protocol is model-based, the subroutine in Line 3 can use either model-based or model-free algorithms
+proposed for the MFC due to our reformulation in Equation (9).
+In Appendix C.3, we introduce modifications of well-known algorithms for optimizing the mean-field setting.
+
+5
+
+Experiments
+
+In this section, we demonstrate the performance of Safe-M3 -UCRL
+on the swarm motion benchmark and showcase that it can tackle
+the real-world large-scale vehicle repositioning problem faced by
+ride-hailing platforms.
+
+5.1
+
+Swarm Motion
+
+Due to the infancy of Mean-Field RL as a research topic, one of the
+rare benchmarks used by multiple authors is the swarm motion.
+[13, 58] view it as Mean-Field RL problem, while [24] uses it in the
+context of MFGs. In this setting, an infinite population of agents
+is moving around toroidal state space with the aim of maximizing
+a location-dependent reward function while avoiding congested
+areas [2].
+Modeling. We model the state space S as the unit torus on the
+interval [0, 1], and the action space is the interval A = [−7, 7]. We
+approximate the continuous-time swarm motion by partitioning
+unit time into 𝑇 = 100 equal steps of length ∆𝑡 = 1/𝑇 . The next state
+𝑠𝑛,𝑡 +1 = 𝑓 (𝑧𝑛,𝑡 )+𝜀𝑛,𝑡 is induced by the unknown transitions 𝑓 (𝑧𝑛,𝑡 ) =
+𝑠𝑛,𝑡 + 𝑎𝑛,𝑡 ∆𝑡 with 𝜀𝑛,𝑡 ∼ N(0, ∆𝑡) for all episodes 𝑛 and steps 𝑡. The
+2 − log(𝜇 ),
+reward function is defined by 𝑟 (𝑧𝑛,𝑡 ) = 𝜙(𝑠𝑛,𝑡 ) − 21 𝑎𝑛,𝑡
+𝑛,𝑡
+2
+2
+where the first term 𝜙(𝑠) = 2𝜋 (sin(2𝜋𝑠) − cos (2𝜋𝑠)) + 2 sin(2𝜋𝑠)
+determines the positional reward received at the state 𝑠 (see Appendix E.3), the second term defines the kinetic energy penalizing
+large actions, and the last term penalizes overcrowding. Note that
+the optimal solution for continuous time setting, ∆𝑡 → 0 can be obtained analytically [2] (see Appendix E.1) and used as a benchmark.
+[13, 58] show that Mean-Field RL discrete-time, ∆𝑡 > 0, methods can
+learn good approximations of the optimal solution. The disadvantage of these methods is that they can influence the skewness of the
+mean-field distribution only via overcrowding penalty. Therefore,
+to control skewness, their only option is to introduce a hyperparameter to the reward that regulates the level of overcrowding
+
+penalization. On the other hand, Safe-M3 -UCRL controls skewness
+without trial-and-error reward shaping by imposing the entropic
+safety constraint ℎ𝐶 (𝜇𝑛,𝑡 ) = 𝐻 (𝜇) − 𝐶 ≥ 0, with 𝐻 (·) defined in
+Equation (5), instead of having the overcrowding penalty term
+log(𝜇𝑛,𝑡 ). Since higher entropy translates into less overcrowding,
+we can upfront determine and upper-bound the acceptable level of
+overcrowding by setting a desirable threshold 𝐶.
+We use a neural network to parametrize the policy profile 𝝅𝑛 =
+(𝜋𝑛,0, . . . , 𝜋𝑛,𝑇 −1 ), for every episode 𝑛, during the optimization
+of Equation (9). The optimization is done by Mean-Field BackPropagation Through Time (MF-BPTT) (see Appendix C.3.1). In
+our experiments, a single neural network shows enough predictive
+power to represent the whole policy profile, but using 𝑇 networks,
+one for each individual policy 𝜋𝑛,𝑡 , 𝑡 = 0, . . . ,𝑇 − 1, is a natural
+extension. We use a Probabilistic Neural Network Ensemble [17, 42]
+to represent a statistical model of transitions, which we elaborate in
+Appendix C.1. We represent the mean-field distribution by discretizing the state space uniformly and assigning the probability of the
+representative agent residing within each interval. We set the safety
+threshold 𝐶 as a proportion 𝑝 ∈ [0, 1] of the maximum entropy,
+i.e., 𝐶 = 𝑝 max P(S) 𝐻 (𝜇). Note that Safe-M3 -UCRL guarantees safe
+mean-field distributions only if the initial mean-field distributions
+𝜇𝑛,0 at time 𝑡 = 0 are safe for every episode 𝑛 for given threshold 𝐶.
+A generic way for safe initialization is setting 𝜇𝑛,0 as the maximum
+entropy distribution among all safe distributions 𝜁
+𝜇𝑛,0 = arg max 𝐻 (𝜇).
+
+(10)
+
+𝜇 ∈𝜁
+
+Note that, in general, the safe initial distribution might not exist.
+We provide the implementation details in Appendix D.2.
+Results. In Figure 2a, we observe the learning curve of Safe-M3 UCRL for 𝑝 = 0.95 for 10 randomly initialized runs. The learning
+process is volatile in the initial phase due to the high epistemic
+uncertainty, but after 50 episodes, all policies converge toward the
+solution as if the transitions were known. In Figure 2b, we use various thresholds 𝐶 to show that the entropic constraint effectively
+influences the degree of agents’ greediness to collect the highest
+positional reward. By increasing 𝑝 towards 1, we force agents to
+put increasingly more emphasis on global welfare rather than on
+individual rewards. We see that for 𝑝 = 0.5 we obtain a distribution that matches the distribution obtained by the unconstrained
+M3 -UCRL [58] that relies on the overcrowding penalty, while for
+𝑝 = 0.95 we significantly surpass the effect that the penalty has on
+
+(a) Swarm motion learning curve
+
+(b) Swarm motion mean-field distributions
+
+(c) Swarm motion safety for 𝑝 = 0.95
+
+(d) Vehicle repositioning learning curve
+
+(e) Swarm motion policies
+
+(f) Vehicle repositioning safety for 𝑝 = 0.85
+
+Figure 2: Performance analysis of Safe-M3 -UCRL for swarm motion and vehicle repositioning. The policy and statistical model
+were trained on 10 randomly initialized neural networks for each hyperparameter 𝑝.
+the distribution’s skewness. We also show that the discrete-time solutions with low 𝑝 serve as a good approximation of the continuoustime optimal distribution 𝜇 ∗ . Furthermore, we observe that the policies under unknown transitions overlap with the solutions learned
+under known transitions. In Figure 2e, we observe that unconstrained policies and policies with low 𝑝 push agents towards high
+individual rewards. Note that for states close to 1, the algorithms
+learn it requires less kinetic energy to push agents over the border
+due to the toroidal shape of the state space. For high 𝑝’s learned
+policies push agents always in the same direction to maintain uniformity of the system. Importantly, Figure 2c shows that Safe-M3 UCRL for 𝑝 = 0.95 keeps the mean-field distribution safe throughout
+the entire execution, unlike the solutions that rely on the overcrowding penalty term. For further details, see Appendix E.3.
+
+5.2
+
+Vehicle Repositioning Problem
+
+Since ride-hailing services, such as Uber, Lyft, and Bolt, gained
+popularity and market share, vehicle repositioning has been a longstanding challenge for these platforms, i.e., moving idle vehicles to
+areas with high-demand potential. A similar challenge is present
+in bike-sharing services accessible in many cities and, as of more
+recently, dockless electric scooter-sharing services such as Bird and
+Lime. In the competitive environment, the operator significantly
+increases profit by successfully repositioning idle vehicles to highdemand areas. Nevertheless, there might exist regulations imposed
+by the countries or cities that enforce service providers to either
+guarantee fair service accessibility or restrict the number of vehicles in districts with high traffic density. Such restrictions prevent
+operators from greedily maximizing the profit and can be encapsulated by some dispersion metric such as entropy. Solving this
+problem helps prevent prolonged vehicle cruising and extensive
+
+passenger waiting times in the demand hotspots, increasing the service provider’s efficiency and reducing its carbon footprint. Existing
+approaches to vehicle repositioning range from static optimization
+over a queuing network [10, 75], model predictive control [37], to
+RL [47, 52, 73]. The main advantage of Safe-M3 -UCRL is the capability of controlling a large fleet of homogeneous vehicles and
+enforcing efficient coordination to match the spatiotemporal demand distribution. Additionally, the safety constraint introduced
+into the model guarantees service accessibility by ensuring idle
+vehicles are spreading over the study region. Although accessibility
+has not been widely discussed in the literature on vehicle repositioning, it is expected to be an important fairness constraint when
+shared mobility services become a prevailing travel mode [64].
+Modeling. Ride-hailing operations can be modeled as sequential decision-making, which consists of passenger trips followed by
+repositioning trips operated by a central controller as illustrated in
+Figure 1. We assume that the controller has access to the locations
+of vehicles in its fleet and communicates the real-time repositioning
+actions to the drivers via electronic devices. Nevertheless, since
+the fleet is operating in a noisy traffic environment, repositioning
+usually cannot be executed perfectly. We assume that vehicles can
+move freely within the area of our interest, which is represented
+by a two-dimensional unit square, i.e., the state-space S = [0, 1]2 ,
+and repositioning actions are taken from A = [−1, 1]2 . The objective of our model is to satisfy the demand in the central district of
+Shenzhen while providing service accessibility in the wider city
+center. We restrict our modeling horizon to three evening peak
+hours, which are discretized in fifteen-minute operational intervals,
+i.e., 𝑇 = 12, and each episode 𝑛 represents one day (for more details,
+see Appendix D). We model service providers goal of maximizing
+the coverage of the demand by the negative of the Kullback-Leibler
+divergence between the vehicles’ distribution 𝜇𝑛,𝑡 and demand for
+
+(a)
+Observed demand 𝜌 0 used as a
+target distribution
+
+(b)
+Unconstrained M3 -UCRL under
+known transitions
+
+(c)
+(d)
+Safe-M3 -UCRL under known Safe-M3 -UCRL under unknown
+transitions for 𝑝 = 0.85
+transitions for 𝑝 = 0.85
+
+Figure 3: Safe-M3 -UCRL guided vehicle distribution in Shenzhen in the evening peak hours.
+service denoted as 𝜌 0 , i.e., 𝑟 (𝑧𝑛,𝑡 ) = − 𝐷𝐾𝐿 (𝜌 0 ||𝜇𝑛,𝑡 ). In particular, the demand distribution 𝜌 0 ∈ P(S) represents a probability
+of a trip originating in the infinitesimal neighborhood of state
+𝑠 ∈ S during peak hours (see Figure 3a). We estimate a stationary demand distribution 𝜌 0 from the vehicle trajectories collected
+in Shenzhen, China, in 2016. If the passenger’s trip originates at
+𝑠 ∈ S the likelihood of its destinations is defined by the mapping
+Φ : S → P(S), which we fit from the trip trajectories (see Appendix D.1). We use Φ(·) to define sequential transitions by first
+executing passenger trips followed by vehicle repositioning. Formally, the next state 𝑠𝑛,𝑡 +1 = 𝑓 (𝑧𝑛,𝑡 )+𝜀𝑛,𝑡 is induced by the unknown
+Φ + 𝑎 , 0, 1), where 𝑠 Φ ∼ Φ(𝑠 ) and
+transitions 𝑓 (𝑧𝑛,𝑡 ) = clip(𝑠𝑛,𝑡
+𝑛,𝑡
+𝑛,𝑡
+𝑛,𝑡
+2
+𝜀𝑛,𝑡 ∼ TN(0, 𝜎 𝐼 2 ) is a Gaussian with a known variance 𝜎 2 truncated at the borders of S and 𝐼 2 is the 2 × 2 unit matrix. Notice
+that the controller determines repositioning actions given interΦ obtained after executing passenger trips. We
+mediate states 𝑠𝑛,𝑡
+use entropic safety constraint ℎ𝐶 (𝜇𝑛,𝑡 ) = 𝐻 (𝜇) − 𝐶 ≥ 0 to enforce
+the service accessibility across all residential areas (see Figures 3c
+to 3d). Therefore, the optimization objective in Equation (9) trades
+off between greedily satisfying the demand 𝜌 0 and adhering to
+accessibility constraint imposed by ℎ𝐶 (·). Identically to the swarm
+motion experiment, we use a neural network to parametrize the
+policy profile 𝝅𝑛 , which we optimize by MF-BPTT. A statistical
+model of the transitions is represented by a Probabilistic Neural
+Network Ensemble, while 𝜇𝑛,0 is initialized using Equation (10). We
+represent the mean-field distribution by discretizing the state space
+into the uniform grid as elaborated in Appendix D.1.
+Results. The entropy of the target distribution, 𝜌 0 in Figure 3a,
+already achieves 𝑝 = 0.67 of the maximum due to a wide horizontal spread. To achieve vertical spread, we require an additional 18
+percentage points of entropy as a safety constraint. Concretely, we
+use 𝑝 = 0.85 to set the threshold as the proportion of maximum entropy and proceed by optimizing the policy profile in Equation (9).
+Due to the lack of an analytical solution for Equation (9), we use a
+policy profile trained under known transitions as a benchmark. We
+observe that the learned policy profile 𝝅𝑛∗ converges to the policy
+profile under known transitions in 𝑛 = 80 episodes. Figure 2d shows
+two phases of the learning process. During the first 60 episodes, the
+
+performance is volatile, but once the epistemic uncertainty around
+true transitions is tight, the model exploits it rapidly by episode 80.
+In Figure 2f, we empirically show that Safe-M3 -UCRL satisfies
+safety constraints during the entire execution. In Figure 3, we use
+a city map of Shenzhen to show that Safe-M3 -UCRL improves
+service accessibility in low-demand areas. Figure 3b shows that M3 UCRL under known transitions learns how to satisfy the demand 𝜌 0
+effectively at the cost of violating safety constraint (see Figure 2f).
+Figure 3c shows that Safe-M3 -UCRL under known transitions improves safety by distributing vehicles to residential areas in the
+northwest and northeast. Finally, Figure 3d emphasizes the capability of Safe-M3 -UCRL to learn complex transitions while the policy
+profile 𝝅𝑛∗ simultaneously converges towards the results achieved
+under known transitions with the number of episodes 𝑛 passed.
+In Appendix D.3, we provide the details on the parameters used
+during the training and exhaustive performance analysis. The results in this section are generated assuming the infinite regime.
+At the same time, in Appendix D.5, we showcase that in the finite
+regime the policy profile 𝝅𝑛∗ can be successfully applied to millions
+of individual agents in real-time, which might be of particular importance to real-world practitioners. The code we use to train and
+evaluate Safe-M3 -UCRL is available in our GitHub repository [40].
+
+6
+
+Conclusion
+
+We present a novel formulation of the mean-field model-based
+reinforcement learning problem incorporating safety constraints.
+Safe-M3 -UCRL addresses this problem by leveraging epistemic
+uncertainty under an unknown transition model and employing
+a log-barrier approach to ensure conservative satisfaction of the
+constraints. Beyond the synthetic swarm motion experiment, we
+showcase the potential of our algorithm for real-world applications by effectively matching the demand distribution in a shared
+mobility service while consistently upholding service accessibility. In the future, we believe that integrating safety considerations
+in intelligent multi-agent systems will have a crucial impact on
+various applications, such as autonomous ride-hailing, firefighting
+robots and drone/robot search-and-rescue operations in complex
+and confined spaces.
+
+ACKNOWLEDGMENTS
+The authors would like to thank Mojmír Mutný for the fruitful
+discussions during the course of this work. Matej Jusup acknowledges support from the Swiss National Science Foundation under
+the research project DADA/181210. This publication was made possible by an ETH AI Center doctoral fellowship to Barna Pasztor.
+Francesco Corman acknowledges Grant 2023-FS-331 for Research in
+the area of Public Transport. Andreas Krause acknowledges that this
+research was supported by the European Research Council (ERC)
+under the European Union’s Horizon 2020 research and innovation
+program grant agreement no. 815943 and the Swiss National Science
+Foundation under NCCR Automation, grant agreement 51NF40
+180545. Ilija Bogunovic acknowledges that the work was supported
+in part by the EPSRC New Investigator Award EP/X03917X/1. The
+authors would also like to thank the Shenzhen Urban Transport
+Planning Center for collecting and sharing the data used in this
+work.
+
+REFERENCES
+[1] Yasin Abbasi-Yadkori and Csaba Szepesvaŕi. 2011. Regret bounds for the adaptive
+control of Linear Quadratic systems. Journal of Machine Learning Research 19
+(2011), 1–26.
+[2] Noha Almulla, Rita Ferreira, and Diogo Gomes. 2017. Two numerical approaches
+to stationary mean-field games. Dynamic Games and Applications 7 (2017), 657–
+682.
+[3] Yoav Alon and Huiyu Zhou. 2020. Multi-agent reinforcement learning for unmanned aerial vehicle coordination by multi-critic policy gradient optimization.
+arXiv preprint arXiv:2012.15472 (2020).
+[4] Mohammed Alshiekh, Roderick Bloem, Rüdiger Ehlers, Bettina Könighofer, Scott
+Niekum, and Ufuk Topcu. 2018. Safe reinforcement learning via shielding. In
+Proceedings of the AAAI Conference on Artificial Intelligence, Vol. 32.
+[5] Andrea Angiuli, Jean-Pierre Fouque, and Mathieu Laurière. 2021. Reinforcement
+Learning for Mean Field Games, with Applications to Economics. arXiv preprint
+arXiv:2106.13755 (2021).
+[6] Andrea Angiuli, Jean-Pierre Fouque, and Mathieu Laurière. 2022. Unified reinforcement Q-learning for mean field game and control problems. Mathematics of
+Control, Signals, and Systems (2022), 1–55.
+[7] Nicole Bäuerle. 2021. Mean Field Markov Decision Processes. arXiv preprint
+arXiv:2106.08755 (2021).
+[8] Felix Berkenkamp, Matteo Turchetta, Angela Schoellig, and Andreas Krause. 2017.
+Safe model-based reinforcement learning with stability guarantees. Advances in
+neural information processing systems 30 (2017).
+[9] Michiel CJ Bliemer and Mark PH Raadsen. 2020. Static traffic assignment with
+residual queues and spillback. Transportation Research Part B: Methodological 132
+(2020), 303–319.
+[10] Anton Braverman, Jim G Dai, Xin Liu, and Lei Ying. 2019. Empty-car routing in
+ridesharing systems. Operations Research 67, 5 (2019), 1437–1452.
+[11] René Carmona, Kenza Hamidouche, Mathieu Laurière, and Zongjun Tan. 2021.
+Linear-quadratic zero-sum mean-field type games: Optimality conditions and
+policy optimization. Journal of Dynamics and Games. 2021, Volume 8, Pages
+403-443 8, 4 (2021), 403.
+[12] René Carmona, Mathieu Laurière, and Zongjun Tan. 2019. Linear-quadratic meanfield reinforcement learning: convergence of policy gradient methods. arXiv
+preprint arXiv:1910.04295 (2019).
+[13] René Carmona, Mathieu Laurière, and Zongjun Tan. 2019. Model-free meanfield reinforcement learning: mean-field MDP and mean-field Q-learning. arXiv
+preprint arXiv:1910.12802 (2019).
+[14] Minshuo Chen, Yan Li, Ethan Wang, Zhuoran Yang, Zhaoran Wang, and Tuo
+Zhao. 2021. Pessimism meets invariance: Provably efficient offline mean-field
+multi-agent RL. Advances in Neural Information Processing Systems 34 (2021),
+17913–17926.
+[15] Richard Cheng, Gábor Orosz, Richard M Murray, and Joel W Burdick. 2019. Endto-end safe reinforcement learning through barrier functions for safety-critical
+continuous control tasks. In Proceedings of the AAAI Conference on Artificial
+Intelligence, Vol. 33. 3387–3395.
+[16] Sayak Ray Chowdhury and Aditya Gopalan. 2019. Online learning in kernelized
+markov decision processes. In The 22nd International Conference on Artificial
+Intelligence and Statistics. PMLR, 3197–3205.
+[17] Kurtland Chua, Roberto Calandra, Rowan McAllister, and Sergey Levine. 2018.
+Deep reinforcement learning in a handful of trials using probabilistic dynamics
+models. Advances in neural information processing systems 31 (2018).
+
+[18] Philippe Clement and Wolfgang Desch. 2008. An elementary proof of the triangle
+inequality for the Wasserstein metric. Proc. Amer. Math. Soc. 136, 1 (2008), 333–
+339.
+[19] Sebastian Curi, Felix Berkenkamp, and Andreas Krause. 2020. Efficient modelbased reinforcement learning through optimistic policy search and planning.
+Advances in Neural Information Processing Systems 33 (2020), 14156–14170.
+[20] Carlos F Daganzo. 1994. The cell transmission model: A dynamic representation
+of highway traffic consistent with the hydrodynamic theory. Transportation
+research part B: methodological 28, 4 (1994), 269–287.
+[21] Gal Dalal, Krishnamurthy Dvijotham, Matej Vecerik, Todd Hester, Cosmin Paduraru, and Yuval Tassa. 2018. Safe exploration in continuous action spaces. arXiv
+preprint arXiv:1801.08757 (2018).
+[22] Varsha Dani, Thomas P Hayes, and Sham M Kakade. 2008. Stochastic linear
+optimization under bandit feedback. (2008).
+[23] Richard M Dudley. 2018. Real analysis and probability. CRC Press.
+[24] Romuald Elie, Julien Perolat, Mathieu Laurière, Matthieu Geist, and Olivier
+Pietquin. 2020. On the convergence of model free learning in mean field games. In
+Proceedings of the AAAI Conference on Artificial Intelligence, Vol. 34. 7143–7150.
+[25] Ingy ElSayed-Aly, Suda Bharadwaj, Christopher Amato, Rüdiger Ehlers, Ufuk
+Topcu, and Lu Feng. 2021. Safe Multi-Agent Reinforcement Learning via Shielding.
+In Proceedings of the 20th International Conference on Autonomous Agents and
+MultiAgent Systems. 483–491.
+[26] Javier Garcıa and Fernando Fernández. 2015. A comprehensive survey on safe
+reinforcement learning. Journal of Machine Learning Research 16, 1 (2015), 1437–
+1480.
+[27] Nicolas Gast, Bruno Gaujal, and Jean-Yves Le Boudec. 2012. Mean field for
+Markov decision processes: from discrete to continuous optimization. IEEE Trans.
+Automat. Control (2012), 2266–2280.
+[28] Clement Gehring and Doina Precup. 2013. Smart exploration in reinforcement
+learning using absolute temporal difference errors. In Proceedings of the 2013
+international conference on Autonomous agents and multi-agent systems. 1037–
+1044.
+[29] Xavier Glorot and Yoshua Bengio. 2010. Understanding the difficulty of training
+deep feedforward neural networks. In Proceedings of the thirteenth international
+conference on artificial intelligence and statistics. JMLR Workshop and Conference
+Proceedings, 249–256.
+[30] Haotian Gu, Xin Guo, Xiaoli Wei, and Renyuan Xu. 2020. Dynamic Programming
+Principles for Mean-Field Controls with Learning. arXiv preprint arXiv:1911.07314
+(2020).
+[31] Haotian Gu, Xin Guo, Xiaoli Wei, and Renyuan Xu. 2021. Mean-Field Controls
+with Q-Learning for Cooperative MARL: Convergence and Complexity Analysis.
+SIAM Journal on Mathematics of Data Science 3, 4 (2021), 1168–1196.
+[32] Shangding Gu, Jakub Grudzien Kuba, Munning Wen, Ruiqing Chen, Ziyan Wang,
+Zheng Tian, Jun Wang, Alois Knoll, and Yaodong Yang. 2021. Multi-agent constrained policy optimisation. arXiv preprint arXiv:2110.02793 (2021).
+[33] Shangding Gu, Long Yang, Yali Du, Guang Chen, Florian Walter, Jun Wang,
+Yaodong Yang, and Alois Knoll. 2022. A review of safe reinforcement learning:
+Methods, theory and applications. arXiv preprint arXiv:2205.10330 (2022).
+[34] Charles R Harris, K Jarrod Millman, Stéfan J Van Der Walt, Ralf Gommers,
+Pauli Virtanen, David Cournapeau, Eric Wieser, Julian Taylor, Sebastian Berg,
+Nathaniel J Smith, et al. 2020. Array programming with NumPy. Nature 585,
+7825 (2020), 357–362.
+[35] Minyi Huang, Peter E Caines, and Roland P Malhamé. 2007. Large-population
+cost-coupled LQG problems with nonuniform agents: individual-mass behavior
+and decentralized 𝜀 -equilibria. IEEE Trans. Automat. Control 52, 9 (2007), 1560–
+1571.
+[36] Minyi Huang, Roland P Malhamé, Peter E Caines, et al. 2006. Large population
+stochastic dynamic games: closed-loop McKean-Vlasov systems and the Nash
+certainty equivalence principle. Communications in Information & Systems 6, 3
+(2006), 221–252.
+[37] Ramon Iglesias, Federico Rossi, Kevin Wang, David Hallac, Jure Leskovec, and
+Marco Pavone. 2018. Data-driven model predictive control of autonomous
+mobility-on-demand systems. In 2018 IEEE international conference on robotics
+and automation (ICRA). IEEE, 6019–6025.
+[38] Sergey Ioffe and Christian Szegedy. 2015. Batch normalization: Accelerating deep
+network training by reducing internal covariate shift. In International conference
+on machine learning. pmlr, 448–456.
+[39] Thomas Jaksch, Ronald Ortner, and Peter Auer. 2010. Near-optimal Regret Bounds
+for Reinforcement Learning. Journal of Machine Learning Research (2010).
+[40] Matej Jusup and Tadeusz Janik. 2023. Safe Model-Based Multi-Agent Mean-Field
+Reinforcement Learning. https://doi.org/10.5281/zenodo.10431636
+[41] Daniel Lacker. 2017. Limit theory for controlled McKean–Vlasov dynamics. SIAM
+Journal on Control and Optimization 55, 3 (2017), 1641–1672.
+[42] Balaji Lakshminarayanan, Alexander Pritzel, and Charles Blundell. 2017. Simple
+and scalable predictive uncertainty estimation using deep ensembles. Advances
+in neural information processing systems 30 (2017).
+[43] Jean-Michel Lasry and Pierre-Louis Lions. 2006. Jeux à champ moyen. i–le cas
+stationnaire. Comptes Rendus Mathématique 343, 9 (2006), 619–625.
+
+[44] Jean-Michel Lasry and Pierre-Louis Lions. 2006. Jeux à champ moyen. ii–horizon
+fini et contrôle optimal. Comptes Rendus Mathématique 343, 10 (2006), 679–684.
+[45] Mathieu Laurière, Sarah Perrin, Matthieu Geist, and Olivier Pietquin. 2022. Learning Mean Field Games: A Survey. arXiv preprint arXiv:2205.12944v2 (2022).
+[46] Timothy P Lillicrap, Jonathan J Hunt, Alexander Pritzel, Nicolas Heess, Tom Erez,
+Yuval Tassa, David Silver, and Daan Wierstra. 2015. Continuous control with
+deep reinforcement learning. arXiv preprint arXiv:1509.02971 (2015).
+[47] Kaixiang Lin, Renyu Zhao, Zhe Xu, and Jiayu Zhou. 2018. Efficient large-scale
+fleet management via multi-agent deep reinforcement learning. In Proceedings of
+the 24th ACM SIGKDD international conference on knowledge discovery & data
+mining. 1774–1783.
+[48] Chenyi Liu, Nan Geng, Vaneet Aggarwal, Tian Lan, Yuan Yang, and Mingwei Xu.
+2021. Cmix: Deep multi-agent reinforcement learning with peak and average
+constraints. In Machine Learning and Knowledge Discovery in Databases. Research
+Track: European Conference, ECML PKDD 2021, Bilbao, Spain, September 13–17,
+2021, Proceedings, Part I 21. Springer, 157–173.
+[49] Ryan Lowe, Yi I Wu, Aviv Tamar, Jean Harb, OpenAI Pieter Abbeel, and Igor
+Mordatch. 2017. Multi-agent actor-critic for mixed cooperative-competitive
+environments. Advances in neural information processing systems 30 (2017).
+[50] Songtao Lu, Kaiqing Zhang, Tianyi Chen, Tamer Başar, and Lior Horesh. 2021.
+Decentralized policy gradient descent ascent for safe multi-agent reinforcement
+learning. In Proceedings of the AAAI Conference on Artificial Intelligence, Vol. 35.
+8767–8775.
+[51] Ali Malik, Volodymyr Kuleshov, Jiaming Song, Danny Nemer, Harlan Seymour,
+and Stefano Ermon. 2019. Calibrated model-based deep reinforcement learning.
+In International Conference on Machine Learning. PMLR, 4314–4323.
+[52] Chao Mao, Yulin Liu, and Zuo-Jun Max Shen. 2020. Dispatch of autonomous
+vehicles for taxi services: A deep reinforcement learning approach. Transportation
+Research Part C: Emerging Technologies 115 (2020), 102626.
+[53] Teodor Mihai Moldovan and Pieter Abbeel. 2012. Safe exploration in markov
+decision processes. arXiv preprint arXiv:1205.4810 (2012).
+[54] Teodor Mihai Moldovan, Sergey Levine, Michael I Jordan, and Pieter Abbeel. 2015.
+Optimism-driven exploration for nonlinear systems. In 2015 IEEE International
+Conference on Robotics and Automation (ICRA). IEEE, 3239–3246.
+[55] Washim Uddin Mondal, Vaneet Aggarwal, and Satish V Ukkusuri. 2022. MeanField Approximation of Cooperative Constrained Multi-Agent Reinforcement
+Learning (CMARL). arXiv preprint arXiv:2209.07437 (2022).
+[56] Médéric Motte and Huyên Pham. 2019. Mean-field Markov decision processes
+with common noise and open-loop controls. arXiv preprint arXiv:1912.07883
+(2019).
+[57] Adam Paszke, Sam Gross, Soumith Chintala, Gregory Chanan, Edward Yang,
+Zachary DeVito, Zeming Lin, Alban Desmaison, Luca Antiga, and Adam Lerer.
+2017. Automatic differentiation in pytorch. (2017).
+[58] Barna Pásztor, Andreas Krause, and Ilija Bogunovic. 2023. Efficient ModelBased Multi-Agent Mean-Field Reinforcement Learning. Transactions on Machine
+Learning Research (2023).
+[59] Matthias Plappert, Rein Houthooft, Prafulla Dhariwal, Szymon Sidor, Richard Y
+Chen, Xi Chen, Tamim Asfour, Pieter Abbeel, and Marcin Andrychowicz. 2017.
+Parameter space noise for exploration. arXiv preprint arXiv:1706.01905 (2017).
+[60] Yury Polyanskiy and Yihong Wu. 2016. Wasserstein continuity of entropy and
+outer bounds for interference channels. IEEE Transactions on Information Theory
+
+62, 7 (2016), 3992–4002.
+[61] Tabish Rashid, Mikayel Samvelyan, Christian Schroeder De Witt, Gregory Farquhar, Jakob Foerster, and Shimon Whiteson. 2020. Monotonic value function
+factorisation for deep multi-agent reinforcement learning. The Journal of Machine
+Learning Research 21, 1 (2020), 7234–7284.
+[62] Martin Roesch, Christian Linder, Roland Zimmermann, Andreas Rudolf, Andrea
+Hohmann, and Gunther Reinhart. 2020. Smart Grid for Industry Using MultiAgent Reinforcement Learning. Applied Sciences 10, 19 (2020). https://doi.org/
+10.3390/app10196900
+[63] Pier Giuseppe Sessa, Maryam Kamgarpour, and Andreas Krause. 2022. Efficient
+Model-based Multi-agent Reinforcement Learning via Optimistic Equilibrium
+Computation. , 19580–19597 pages.
+[64] Susan Shaheen, Corwin Bell, Adam Cohen, Balaji Yelchuru, Booz Allen Hamilton,
+et al. 2017. Travel behavior: Shared mobility and transportation equity. Technical
+Report. United States. Federal Highway Administration. Office of Policy . . . .
+[65] Ziyad Sheebaelhamd, Konstantinos Zisis, Athina Nisioti, Dimitris Gkouletsos,
+Dario Pavllo, and Jonas Kohler. 2021. Safe Deep Reinforcement Learning for MultiAgent Systems with Continuous Action Spaces. arXiv preprint arXiv:2108.03952
+(2021).
+[66] Yong Song, Yi-bin Li, Cai-hong Li, and Gui-fang Zhang. 2012. An efficient
+initialization approach of Q-learning for mobile robots. International Journal of
+Control, Automation and Systems 10, 1 (2012), 166–172.
+[67] Niranjan Srinivas, Andreas Krause, Sham Kakade, and Matthias Seeger. 2010.
+Gaussian Process Optimization in the Bandit Setting: No Regret and Experimental
+Design. In International Conference on Machine Learning. 1015–1022.
+[68] Jayakumar Subramanian and Aditya Mahajan. 2019. Reinforcement Learning in
+Stationary Mean-Field Games. In International Conference on Autonomous Agents
+and MultiAgent Systems. 251–259.
+[69] Ilnura Usmanova, Yarden As, Maryam Kamgarpour, and Andreas Krause. 2022.
+Log barriers for safe black-box optimization with application to safe reinforcement learning. arXiv preprint arXiv:2207.10415 (2022).
+[70] Jeroen PT van der Gun, Adam J Pel, and Bart Van Arem. 2018. The link transmission model with variable fundamental diagrams and initial conditions. Transportmetrica B: Transport Dynamics (2018).
+[71] Lingxiao Wang, Zhuoran Yang, and Zhaoran Wang. 2020. Breaking the Curse of
+Many Agents: Provable Mean Embedding Q-Iteration for Mean-Field Reinforcement Learning. In International Conference on Machine Learning. 10092–10103.
+[72] Weichen Wang, Jiequn Han, Zhuoran Yang, and Zhaoran Wang. 2021. Global
+Convergence of Policy Gradient for Linear-Quadratic Mean-Field Control/Game
+in Continuous Time. , 10772–10782 pages.
+[73] Jian Wen, Jinhua Zhao, and Patrick Jaillet. 2017. Rebalancing shared mobility-ondemand systems: A reinforcement learning approach. In 2017 IEEE 20th international conference on intelligent transportation systems (ITSC). Ieee, 220–225.
+[74] Margaret H Wright. 1992. Interior methods for constrained optimization. Acta
+numerica 1 (1992), 341–407.
+[75] Rick Zhang and Marco Pavone. 2016. Control of robotic mobility-on-demand
+systems: a queueing-theoretical perspective. The International Journal of Robotics
+Research 35, 1-3 (2016), 186–203.
+[76] Zheqing Zhu, Erdem Bıyık, and Dorsa Sadigh. 2020. Multi-agent safe planning
+with gaussian processes. In 2020 IEEE/RSJ International Conference on Intelligent
+Robots and Systems (IROS). IEEE, 6260–6267.
+
+Appendix
+Safe Model-Based Multi-Agent
+Mean-Field Reinforcement Learning
+A
+
+Relationship Between Mean-Field
+Distributions under True and Estimated
+Transitions
+
+In this section, we describe the procedure for computing constant
+𝐶𝑛,𝑡 (defined in Section 4) at every episode 𝑛 = 1, . . . , 𝑁 and step
+𝑡 = 1, . . . ,𝑇 . This is necessary for establishing the connection between the mean-field distribution 𝜇𝑛,𝑡 in the original system under
+known transitions 𝑓 (see Equation (4)) and the mean-field distribution 𝜇˜𝑛,𝑡 in the system induced by a calibrated statistical model
+𝑓˜𝑛−1 (see Equation (7), Section 3.3 and Assumption 4). In particular,
+Corollary 1 shows that the safety in the original system ℎ𝐶 (𝜇𝑛,𝑡 ) is
+guaranteed with high probability if ℎ𝐶 (𝜇˜𝑛,𝑡 ) ≥ 𝐿ℎ𝐶𝑛,𝑡 for a safety
+constant 𝐶𝑛,𝑡 ≥ 𝑊1 (𝜇˜𝑛,𝑡 , 𝜇𝑛,𝑡 ) and Lipschitz constant 𝐿ℎ introduced
+in Assumption 6. We use the following result from [58, Lemma 5]
+to make a connection between the mean-field distributions under
+true and estimated transitions.
+Lemma 2. Under Assumptions 1 to 5 and assuming that the event in
+Assumption 4 holds true, for episodes 𝑛 = 1, . . . , 𝑁 , steps 𝑡 = 1, . . . ,𝑇
+and fixed policy profile 𝝅𝑛 = (𝜋𝑛,0, . . . , 𝜋𝑛,𝑇 −1 ), we have:
+𝑡 −1
+𝑡 −1 ∑︁
+
+𝑊1 (𝜇˜𝑛,𝑡 , 𝜇𝑛,𝑡 ) ≤ 2𝛽𝑛−1 𝐿𝑛−1
+
+𝐼𝑛,𝑡 ,
+
+𝑖=0
+
+R
+
+where 𝐼𝑛,𝑡 = S ∥𝝈𝑛−1 (𝑠, 𝜇𝑛,𝑖 , 𝜋𝑛,𝑡 (𝑠, 𝜇𝑛,𝑖 ))∥ 2 𝜇𝑛,𝑖 (𝑑𝑠) and 𝐿𝑛−1 = 1 +
+2(1 + 𝐿𝜋 )(𝐿 𝑓 + 2𝛽𝑛−1 𝐿𝜎 ).
+𝑡 −1
+
+Let 𝐾𝑛,𝑡 := 2𝛽𝑛−1 𝐿𝑛−1 and 𝑧 = (𝑠, 𝜇, 𝜋𝑛,𝑡 (𝑠, 𝜇)). Then we have:
+𝑡∑︁
+−1 Z
+𝑊1 (𝜇˜𝑛,𝑡 , 𝜇𝑛,𝑡 ) ≤ 𝐾𝑛,𝑡
+∥𝝈𝑛−1 (𝑠, 𝜇𝑛,𝑖 , 𝜋𝑛,𝑡 (𝑠, 𝜇𝑛,𝑖 ))∥ 2 𝜇𝑛,𝑖 (𝑑𝑠)
+𝑖=0
+
+S
+
+≤ 𝑡𝐾𝑛,𝑡 max ∥𝝈𝑛−1 (𝑧)∥ 2,
+𝑧∈Z
+
+for 𝑡 = 1, . . . ,𝑇 , where the first inequality is due to Lemma 2 while
+the second one follows since maximum upper bounds expectation.
+Hence, we can set 𝐶𝑛,𝑡 as 𝑡𝐾𝑛,𝑡 max𝑧 ∈ Z ∥𝝈𝑛−1 (𝑧)∥ 2 , and calculate
+max𝑧 ∈ Z ∥𝝈𝑛−1 (𝑧)∥ 2 once at the beginning of each episode 𝑛. Notice
+that our learning protocol (see Algorithm 1) does not require computing 𝐶𝑛,0 at the initial step 𝑡 = 0 since the mean-field distributions
+share the initial state, i.e., 𝜇˜𝑛,0 = 𝜇𝑛,0 . It is worth noting that in
+certain models, such as Gaussian Processes, this upper bound provides a meaningful interpretation. Specifically, 𝝈𝑛−1 (𝑧) represents
+the epistemic uncertainty of the model, which tends to decrease
+monotonically as more data is observed.
+
+B
+
+Examples of Safety Constraints
+
+In this section, we show some important classes of safety constraints
+ℎ𝐶 (·) ≥ 0 satisfying Assumption 6.
+
+B.1
+
+Entropic Safety
+
+Entropic safety serves the purpose of controlling the dispersion
+of the mean-field distribution, which is useful in many applications, such as vehicle repositioning (see Section 5). A natural way
+of defining entropic safety is via differential entropy, but in general,
+the differential entropy is not Lipschitz continuous due to the unboundedness of the natural logarithm. Nevertheless, the issue can be
+easily circumvented by considering 𝜀-smoothed differential entropy
+𝐻 𝜀 : P(S) → R ≥0 . For 𝜀 > 0 and 𝐶 ≥ 0 we define 𝜀-smoothed differential entropy and associated entropic safety constraint 𝐻𝐶𝜀 (·) as
+Z
+𝐻 𝜀 (𝜇) := −
+log(𝜇(𝑠) + 𝜀)𝜇(𝑑𝑠)
+S
+
+𝐻𝐶𝜀 (𝜇) := 𝐻 𝜀 (𝜇) − 𝐶
+To show that 𝐻𝐶𝜀 (·) satisfies Assumption 6 let ℎ𝐶 (·) := 𝐻𝐶𝜀 (·) and assume that S ⊂ R𝑝 is a compact set. First, note that 𝑓 (𝑥) = log(𝑥 + 𝜀)
+is 𝜀1 -Lipschitz continuous for 𝜀 > 0, i.e., 𝜀 𝑓 (𝑥) is 1-Lipschitz. Second,
+for every
+R 𝑆 ⊆ S and 𝐿-Lipschitz function 𝑓 : S → R, a function
+𝑔(𝑆) = S 𝑓 (𝑠)𝜇(𝑑𝑠) is 𝐿-Lipschitz due to the boundedness of 𝑓 . The
+following derivation shows that 𝐻𝐶𝜀 (·) is 𝜀1 -Lipschitz continuous.
+|ℎ𝐶 (𝜇) − ℎ𝐶 (𝜇 ′ )| = 𝐻𝐶𝜀 (𝜇) − 𝐻𝐶𝜀 (𝜇 ′ )
+Z
+Z
+=
+log(𝜇 ′ (𝑠) + 𝜀)𝜇 ′ (𝑑𝑠) −
+log(𝜇(𝑠) + 𝜀)𝜇(𝑑𝑠)
+S
+S
+Z
+Z
+log(𝜇 ′ (𝑠) + 𝜀)(𝜇 ′ − 𝜇)(𝑑𝑠) −
+log(𝜇(𝑠) + 𝜀)𝜇(𝑑𝑠)
+=
+S
+S
+Z
++
+log(𝜇 ′ (𝑠) + 𝜀)𝜇(𝑑𝑠)
+S
+Z
+≤
+log(𝜇 ′ (𝑠) + 𝜀)(𝜇 ′ − 𝜇)(𝑑𝑠)
+S
+Z
+Z
+log(𝜇 ′ (𝑠) + 𝜀)𝜇(𝑑𝑠)
++
+log(𝜇(𝑠) + 𝜀)𝜇(𝑑𝑠) −
+S
+S
+Z
+1
+≤
+log(𝜇 ′ (𝑠) + 𝜀)(𝜇 ′ − 𝜇)(𝑑𝑠) + 𝑊1 (𝜇, 𝜇 ′ )
+𝜀
+S
+Z
+1
+′
+′
+≤𝑀
+(𝜇 − 𝜇)(𝑑𝑠) + 𝑊1 (𝜇, 𝜇 )
+𝜀
+S
+1
+′
+= 𝑀(𝜇 − 𝜇)(S) + 𝑊1 (𝜇, 𝜇 ′ )
+| {z } 𝜀
+𝑀
+
+1
+= 𝑀 + 𝑊1 (𝜇, 𝜇 ′ ),
+𝜀
+
+where the first inequality comes from the triangle inequality, the
+second inequality comes from the Lipschitz continuity of the 𝜀smoothed logarithm and integral, the third comes from the upperboundedness of logarithm on a compact set, and the last equality
+comes from the fact that the measure of a compact set is finite.
+Remark 2. In Section 5, Appendix D and Appendix E, we use
+the discrete equivalent of entropic safety, i.e., Shannon entropy, for
+our experiments because of the discrete representation of the meanfield distribution. [60, Proposition 8] shows that Shannon entropy is
+Lipschitz continuous with respect to the scaled Wasserstein 1-distance,
+i.e., with respect to 𝑛1 𝑊1 (·) known as Ornstein’s distance.
+
+B.2
+
+Distribution Similarity
+
+We can define safety by preventing the mean-field distribution
+𝜇 from diverging from a prior distribution 𝜈 0 by quantifying the
+allowed dissimilarity between the two distributions
+ℎ𝐶 (𝜇; 𝜈 0 ) := 𝐶 − 𝐷(𝜇, 𝜈 0 ),
+where 𝐶 ≥ 0 and 𝐷 : P(S) × P(S) → R ≥0 is the distance function between probability measures. Commonly used distances are
+Wasserstein p-distance for 𝑝 ≥ 1 and 𝑓 -divergences such as KLdivergence, Hellinger distance, and total variation distance.
+A concrete example of a distance function 𝐷(·) that satisfies
+Assumption 6 is Wasserstein 1-distance
+𝑊1𝐶 (𝜇, 𝜈 0 ) := 𝐶 − 𝑊1 (𝜇, 𝜈 0 )
+ℎ𝐶 (𝜇) := 𝑊1𝐶 (𝜇, 𝜈 0 ).
+[18] shows the triangle inequality of Wasserstein p-distance
+for probability measures on separable metric spaces. [23] shows
+that Wasserstein 1-distance induces a metric space (P(S),𝑊1 ) over
+probability measures. The result now trivially follows from the
+reverse triangle inequality
+
+where 𝑓 : S → R is a continuous function and Lip(𝑓 ) denotes the
+minimal Lipschitz constant for 𝑓 .
+
+C
+
+Implementation Details
+
+In this section, we provide additional details on the practical implementation of Safe-M3 -UCRL. In particular, we discuss Probabilistic
+Neural Network Ensemble model [17, 42] to implement the statistical
+model from Section 3.3 in Appendix C.1, the hallucinated control
+reparametrization from Section 4 in more detail in Appendix C.2,
+and optimization methods to solve Equation (9) in Appendix C.3
+
+C.1
+
+Probabilistic Neural Network Ensemble
+Model of Transitions
+
+As discussed in Section 3.3, we take a model-based approach to
+handling unknown transitions 𝑓 . The representative agent learns
+the Statistical Model (see Section 3.3) of the transitions from the
+observed transitions ∪𝑛−1
+𝑖=1 D𝑖 at the beginning of each episode 𝑛,
+−1 with 𝑧
+where D𝑖 = {(𝑧𝑖,𝑡 , 𝑠𝑖,𝑡 +1 )}𝑇𝑡 =0
+𝑖,𝑡 = (𝑠𝑖,𝑡 , 𝜇𝑖,𝑡 , 𝑎𝑖,𝑡 ). We use
+Probabilistic Neural Network Ensemble [17, 42] that consists of 𝐾
+neural networks parametrized by 𝜃𝑘 for 𝑘 ∈ {1, . . . , 𝐾 } (the episode
+index should be clear from the context so we omit it for the notation simplicity). Each neural network 𝑓𝜃𝑘 returns a mean vector,
+𝒎𝜃𝑘 (𝑧) ∈ S ⊆ R𝑝 , and a covariance function Σ𝜃𝑘 (𝑧) ∈ R𝑝 ×𝑝 , that
+represents the aleatoric uncertainty. We further assume diagonal covariance functions. These outputs then form Gaussian distributions
+from which new states are sampled, i.e., 𝑠𝑡 +1 ∼ N (𝒎𝜃𝑘 (𝑧𝑡 ), Σ𝜃𝑘 (𝑧𝑡 ))
+for 𝑡 = 0, . . . ,𝑇 − 1. The models are trained with the negative
+P
+log-likelihood loss function (NLL), 𝐿(𝜃 ) = − D1:𝑛−1 log P(𝑠𝑡 +1 |𝑧𝑡 )
+as described in [42]. The ensemble means, and the aleatoric and
+epistemic uncertainties are then estimated as follows
+𝒎𝑛−1 (·) =
+
+𝐾
+1 ∑︁
+𝒎 (·)
+𝐾 𝑘=1 𝜃𝑘
+
+𝑒
+(·) =
+Σ𝑛−1
+
+𝐾
+1 ∑︁
+(𝒎 (·) − 𝒎𝑛−1 (·))(𝒎𝜃𝑘 (·) − 𝒎𝑛−1 (·))⊤
+𝐾 − 1 𝑘=1 𝜃𝑘
+
+𝑎
+Σ𝑛−1
+(·) =
+
+𝐾
+1 ∑︁
+Σ (·),
+𝐾 𝑘=1 𝜃𝑘
+
+|ℎ𝐶 (𝜇) − ℎ𝐶 (𝜇 ′ )| = |𝑊1𝐶 (𝜇, 𝜈 0 ) − 𝑊1𝐶 (𝜇 ′, 𝜈 0 )|
+= |𝑊1 (𝜇, 𝜈 0 ) − 𝑊1 (𝜇 ′, 𝜈 0 )|
+≤ 𝑊1 (𝜇, 𝜇 ′ ).
+Remark 3. Avoiding risky distributions can be modeled by setting
+𝑊1𝐶 (𝜇, 𝜈 0 ) = 𝑊1 (𝜇, 𝜈 0 ) − 𝐶 with the proof of Assumption 6 being
+equivalent to the above.
+Weighted safety constraints. In applications that require emphasis on certain regions of the state space, we can generalize
+the above safety constraints by introducing the weight function
+𝑤 : S → R ≥0 . We extend Appendix B.1 to weighted-differential
+entropy by defining
+Z
+𝐻 𝑤,𝜀 (𝜇) := −
+𝑤(𝑠) log(𝜇(𝑠) + 𝜀)𝜇(𝑑𝑠)
+S
+
+and Appendix B.2 by considering weighted Wasserstein 1-distance
+Z
+𝑊1𝑤 (𝜇, 𝜈 0 ) :=
+sup
+𝑤(𝑠)𝑓 (𝑠)(𝜇 − 𝜈 0 )(𝑑𝑠).
+𝑓 :Lip(𝑓 )≤1
+
+S
+
+Here, we use Kantorovic-Rubinstein dual definition of Wasserstein
+1-distance
+Z
+𝑊1 (𝜇, 𝜈 0 ) :=
+sup
+𝑓 (𝑠)(𝜇 − 𝜈 0 )(𝑑𝑠),
+𝑓 :Lip(𝑓 )≤1
+
+S
+
+where 𝒎𝑛−1 (·) is the ensemble prediction for the mean, while
+𝑎 (·) and Σ𝑒 (·) denote the aleatoric and epistemic uncertainty
+Σ𝑛−1
+𝑛−1
+estimates, respectively. Note that the epistemic uncertainty estimate
+𝑒 (·) is used to construct the calibrated model (see Section 3.3
+Σ𝑛−1
+and Assumption 4).
+Even though Gaussian Processes (GPs) are proven to be calibrated under certain regularity assumptions [1, 67], we chose probabilistic neural network ensemble model due to their better practical performance, i.e., scalability to higher dimensions and larger
+datasets. The disadvantage of the probabilistic neural network ensemble is that, unlike GPs, it does not guarantee the calibrated
+model (see Assumption 4). Nevertheless, it can be recalibrated using one-step ahead predictions and temperature scaling as shown
+in [51]. We note that in our experiment (see Section 5), such recalibration was not needed, and the above-defined mean and epistemic
+uncertainty outputs were sufficiently accurate for training SafeM3 -UCRL (see Appendix E.3).
+
+Algorithm 2 Mean-Field Back-Propagation-Through-Time
+Input: Safety constraint ℎ𝐶 (·), calibrated transitions 𝑓˜𝑛−1 represented by 𝒎𝑛−1 (·) and Σ𝑛−1 (·), initial mean-field distribution
+𝜇0 , known reward 𝑟 (·), constants 𝐶𝑛,𝑡 , safety Lipschitz constant
+𝐿ℎ ; hyperparameter 𝜆, number of epochs 𝐾, number of rollout
+steps 𝑇
+𝜓
+𝜓
+1: Initialize 𝝅 𝜓 = (𝜋 0 , . . . , 𝜋
+𝑇 −1 )
+2: for 𝑘 = 1, . . . , 𝐾 do
+3:
+Initialize 𝜇˜ 0 ← 𝜇 0 , 𝑠˜0 ∼ 𝜇 0
+4:
+Initialize 𝑟 ← 0
+5:
+for 𝑡 = 0, . . . ,𝑇 − 1 do
+𝜓
+6:
+𝑎˜𝑡 ← 𝜋𝑡 (˜𝑠𝑡 , 𝜇˜𝑡 )
+7:
+𝑠˜𝑡 +1 ← 𝑓˜𝑛−1 (˜𝑠𝑡 , 𝜇˜𝑡 , 𝑎˜𝑡 ) + 𝜀𝑡
+𝜓
+8:
+𝜇˜𝑡 +1 ← 𝑈 (𝜇˜𝑡 , 𝜋𝑡 , 𝑓˜𝑛−1 )
+9:
+end for
+10:
+Update 𝜓 with gradient ascent
+P −1
+11:
+∇𝜓 𝑇𝑡 =0
+𝑟 (˜𝑠𝑡 , 𝜇˜𝑡 , 𝑎˜𝑡 ) + 𝜆 log(ℎ𝐶 (𝜇˜𝑡 +1 ) − 𝐿ℎ𝐶𝑛,𝑡 +1 )
+12: end for
+𝜓
+Return 𝝅𝑛 ← 𝝅 𝜓
+
+C.2 Hallucinated Control Implementation Trick
+In Section 4, we introduced Safe-M3 -UCRL, a model that optimizes
+over the confidence set of transitions F𝑛−1 and admissible policy
+profiles Π (see Equation (7)). Unfortunately, optimizing directly over
+the function space is usually intractable since F𝑛−1 is not convex, in
+general, [22]. Thus, to make the optimization tractable, we describe
+a hallucinated control trick, which leads to a practical reformulation
+(see Equation (9)). The structure in F𝑛−1 allows us to parametrize
+the problem and use gradient-based optimization to find a policy
+profile 𝝅𝑛∗ at every episode 𝑛. Namely, we use the mean-field variant
+of an established approach known as Hallucinated Upper Confidence
+Reinforcement Learning (H-UCRL) [19, 54, 58]. We introduce an
+auxiliary function 𝜂 : Z → [−1, 1]𝑝 , where 𝑝 is the dimensionality
+of the state space S, to define hallucinated transitions
+𝑓˜𝑛−1 (𝑧) = 𝒎𝑛−1 (𝑧) + 𝛽𝑛−1 Σ𝑛−1 (𝑧)𝜂(𝑧),
+(11)
+where 𝒎𝑛−1 (·) and Σ𝑛−1 (·) are estimated from the past observations
+collected until the end of the previous episode 𝑛 − 1. Notice that
+𝑓˜𝑛−1 is calibrated for any 𝜂(·) under Assumption 4, i.e., 𝑓˜𝑛−1 ∈ F𝑛−1 .
+Assumption 4 further guarantees that every function 𝑓˜𝑛−1 can be
+expressed in the auxiliary form in Equation (11)
+∀ 𝑓˜𝑛−1 ∈ F𝑛−1 ∃𝜂 : Z → [−1, 1]𝑝 such that
+𝑓˜𝑛−1 (𝑧) = 𝒎𝑛−1 (𝑧) + 𝛽𝑛−1 Σ𝑛−1 (𝑧)𝜂(𝑧), ∀𝑧 ∈ Z.
+Furthermore, note that, for a fixed individual policy 𝜋, the auxiliary
+function 𝜂(𝑧) = 𝜂(𝑠, 𝜇, 𝜋(𝑠, 𝜇)) = 𝜂(𝑠, 𝜇) has the same functional form
+as the policy 𝜋. This turns 𝜂(·) into a policy that exerts hallucinated
+control over the epistemic uncertainty of the confidence set of transitions F𝑛−1 [19]. The reformulation of the optimization problem
+in Equation (9) allows us to optimize over parametrizable functions
+(e.g., neural networks) 𝝅 and 𝜂(·) using gradient-based methods on
+the functions’ parameters. Notice that the shared functional form
+of 𝝅 and 𝜂(·) allows us to conveniently represent them by a single
+neural network. Further, note that the parametrization of 𝜂(·) must
+
+be sufficiently flexible not to restrict the space of 𝑓˜𝑛−1 . In Appendix C.3, we provide several algorithms that can be used to solve
+this optimization problem.
+
+C.3
+
+Optimization Methods – MF-BPTT and
+MF-DDPG
+
+In this section, we describe two algorithms to solve the optimization
+problem in Equation (9). Namely, in Appendix C.3.1, we outline the
+key steps to apply the mean-field variant of the Back-PropagationThrough-Time (BPTT) when a differentiable simulator is available
+and, in Appendix C.3.2, we describe the mean-field variant of the
+Deep Deterministic Policy Gradient (DDPG) [46] algorithm appropriate for non-differentiable simulators.
+C.3.1 Mean-Field Back-Propagation-Through-Time (MF-BPTT)
+Mean-Field Back-Propagation-Through-Time (MF-BPTT) assumes
+access to a differentiable simulator that returns a policy rollout
+given transition and policy functions. In each episode 𝑛, the representative agent initializes the policy profile 𝝅𝑛 , the auxiliary function 𝜂(·), and the estimated transitions 𝑓˜𝑛−1 using the mean 𝒎𝑛−1 (·)
+and covariance Σ𝑛−1 (·) functions according to Equation (8). Then,
+the representative agent repeatedly calls the simulator with inputs
+𝝅𝑛 and 𝑓˜𝑛−1 that returns the episode reward defined in Equation (9a)
+as a differentiable object. After each policy rollout, a gradient ascent
+step is carried out on the parameters of 𝝅𝑛 and 𝜂(·) before calling the
+simulator again. To simplify the notation, we overload the notation
+𝜓
+𝝅𝑛 with the combination of the two policy functions 𝝅𝑛 and 𝜂(·), i.e.,
+𝜓
+𝜓
+𝝅𝑛 = (𝝅𝑛 , 𝜂𝜓 ) where the superscript 𝜓 represent the parameters of
+both functions. We outline the described steps in Algorithm 2. During the optimization phase (Line 3 in Algorithm 1), we optimize both
+functions, 𝝅𝑛 and 𝜂(·), jointly. However, during the execution (Line 4
+in Algorithm 1), we only use the outputs corresponding to the policy
+profile 𝝅𝑛 . The main distinction in Algorithm 2 compared to traditional BPTT lies inside the simulator that has to simulate the meanfield distribution 𝜇˜𝑛,𝑡 for 𝑡 = 1, . . . ,𝑇 for each parameter update and
+calculate gradients with respect to this time dependency as well.
+More details on the implementation used for our experiments reported in Section 5 are provided in Appendix D.3 and Appendix E.2.
+C.3.2 Mean-Field Deep Deterministic Policy Gradient (MF-DDPG)
+In this section, we adopt the Deep Deterministic Policy Gradient
+(DDPG) algorithm [46] to the MFC. DDPG is a model-free actorcritic algorithm, hence, it can optimize Equation (9) without the
+assumption of a differentiable simulator. However, it can not be
+applied directly to the problem because the Q-value for 𝑧˜𝑛,𝑡 =
+(˜𝑠𝑛,𝑡 , 𝜇˜𝑛,𝑡 , 𝑎˜𝑛,𝑡 ) is ambiguous. The important insight here is that
+the value of a certain state 𝑠˜𝑛,𝑡 of the environment reflects the
+whole population, i.e., the expected reward over the remainder of
+an episode for a given 𝜇˜𝑛,𝑡 if every agent in every state 𝑠˜𝑛,𝑡 chooses
+actions following 𝜋𝑛,𝑡 . In essence, the Q-value is a function of 𝜇˜𝑛,𝑡
+and 𝜋𝑛,𝑡 and not 𝑧˜𝑛,𝑡 .
+To overcome this issue, we introduce the lifted mean-field Markov
+decision process (MF-MDP) similarly to [13, 30, 31, 56, 58]. First,
+we rewrite the reward function as a function of the mean-field
+distribution and the policy, i.e.,
+Z
+𝑟˜(𝜇˜𝑛,𝑡 , 𝜋𝑛,𝑡 ) =
+𝑟 (𝑠, 𝜇˜𝑛,𝑡 , 𝜋𝑛,𝑡 (𝑠, 𝜇˜𝑛,𝑡 ))𝜇˜𝑛,𝑡 (𝑑𝑠).
+S
+
+Algorithm 3 Mean-Field Deep Deterministic Policy Gradient
+Input: Safety constraint ℎ𝐶 (·), calibrated transitions 𝑓˜𝑛−1 represented by 𝒎𝑛−1 (·) and Σ𝑛−1 (·), initial mean-field distribution
+𝜇0 , known expected reward 𝑟ˆ(·), constants 𝐶𝑛,𝑡 ; safety Lipschitz
+constant 𝐿ℎ , hyperparameter 𝜆, number of epochs 𝐾, number
+of rollout steps 𝑇 , mini-batch size 𝐵, learning rate 𝛼
+𝜓
+𝜓
+1: Initialize 𝝅 𝜓 = (𝜋 0 , . . . , 𝜋
+𝑇 −1 )
+𝜃
+2: Initialize 𝑄 𝜃 = (𝑄 𝜃
+0 , . . . , 𝑄𝑇 −1 )
+3: Initialize 𝜃 ′ ← 𝜃 , 𝜓 ′ ← 𝜓
+4: Initialize replay buffer 𝑅 ← ∅
+5: for 𝑘 = 1, . . . , 𝐾 do
+6:
+Initialize 𝜇˜ 0 ← 𝜇 0
+7:
+for 𝑡 = 0, . . . ,𝑇 − 1 do
+𝜓
+8:
+𝜇˜𝑡 +1 ← 𝑈 (𝜇˜𝑡 , 𝜋𝑡 , 𝑓˜𝑛−1 )
+𝜓
+
+𝑐𝑡 ← 𝑟ˆ(𝜇˜𝑡 , 𝜋𝑡 ) + 𝜆 log(ℎ𝐶 (𝜇˜𝑡 +1 ) − 𝐿ℎ𝐶𝑛,𝑡 +1 )
+𝑅 ← 𝑅 ∪ {(𝜇˜𝑡 , 𝑐𝑡 , 𝜇˜𝑡 +1 )}
+Sample a mini-batch of 𝐵 random transitions
+11:
+𝐵 from 𝑅
+{(𝜇˜𝑖 , 𝑐𝑖 , 𝜇˜𝑖+1 )}𝑖=1
+12:
+for 𝑖 = 1, . . . , 𝐵 do
+′
+′
+13:
+𝑞𝑖 ← 𝑐𝑖 + 𝛾𝑄𝑡𝜃 (𝜇˜𝑖+1, 𝝅 𝜓 (·, 𝜇˜𝑖+1 ))
+14:
+end for
+P
+Update 𝜃 with gradient descent ∇𝜃 𝐵1 𝑖 (𝑞𝑖 −
+15:
+𝑄𝑡𝜃 (𝜇˜𝑖 , 𝝅 𝜓 (·, 𝜇˜𝑖 ))2
+P
+Update 𝜓 with gradient ascent ∇𝜓 𝐵1 𝑖 𝑄𝑡𝜃 (𝜇˜𝑖 , 𝝅 𝜓 (·, 𝜇˜𝑖 ))
+16:
+′
+′
+17:
+𝜃 ← 𝛼𝜃 + (1 − 𝛼)𝜃
+18:
+𝜓 ′ ← 𝛼𝜓 + (1 − 𝛼)𝜓 ′
+19:
+end for
+20: end for
+′
+𝜓
+Return 𝝅𝑛 ← 𝝅 𝜓
+9:
+
+10:
+
+𝜓
+
+𝜓
+
+To simplify the notation, we overload the notation 𝝅𝑛 = (𝝅𝑛 , 𝜂𝜓 )
+as described in Appendix C.3.1. Then, we restate Equation (9) as
+𝜓 ∗ = arg max
+𝜓
+
+𝑇∑︁
+−1
+
+𝜓
+
+𝑟˜(𝜇˜𝑛,𝑡 , 𝜋𝑛,𝑡 ) + 𝜆 log(ℎ𝐶 (𝜇˜𝑛,𝑡 +1 ) − 𝐿ℎ𝐶𝑛,𝑡 +1 )
+
+𝑡 =0
+
+(12a)
+subject to
+
+˜ = 𝒎𝑛−1 (𝑧)
+˜ + 𝛽𝑛−1 Σ𝑛−1 (𝑧)𝜂
+˜ 𝜓 (𝑧)
+˜
+𝑓˜𝑛−1 (𝑧)
+
+(12b)
+
+𝜓
+𝜇˜𝑛,𝑡 +1 = 𝑈 (𝜇˜𝑛,𝑡 , 𝜋𝑛,𝑡 , 𝑓˜𝑛−1 ),
+
+(12c)
+
+where 𝜇˜𝑛,0 = 𝜇 0 for every 𝑛. The MF-MDP formulation in Equation (12) turns the MFC in Equation (9) into a Markov Decision
+Process on the state space of P(S) and action space {𝜋 : S×P(S) →
+A} with deterministic transition function 𝑈 (·). We define the Qvalue as follows
+𝑇∑︁
+−1
+𝜓
+𝜓
+𝑄𝑛,𝑡 (𝜇˜𝑛,𝑡 , 𝝅𝑛 ) =
+𝑟˜(𝜇˜𝑛,𝑡 , 𝜋𝑛,𝑡 ).
+𝑗=𝑡
+𝜃 for
+The Q-function above is parameterized by 𝜃 and denoted as 𝑄𝑛,𝑡
+episode 𝑛. The DDPG algorithm can now be stated for the lifted MFMDP problem as outlined in Algorithm 3. The main learning loop
+𝜓
+consists of alternating updates to the policy 𝝅𝑛 and the critic 𝑄𝑛𝜃 .
+The most recent version of the policy is executed in the environment
+to collect more transitions into the replay buffer.
+
+Notice that Algorithm 3 uses a model-free approach to optimize
+the objective, which makes the exploration of particular importance.
+In comparison to traditional MDPs, MF-MDPs usually have a very
+constrained set of highly rewarding distributions, and most distributions offer poor rewards, which makes the exploration even more
+important. This is further complicated by what randomized actions
+imply in this scenario. In a traditional MDP, we can often assume,
+for instance, that executing random actions for a fixed number of
+initial steps would help in finding diversity in the reward space.
+This is not the case in MF-MDPs – depending on the granularity of
+the discretization that we use to represent probability distributions,
+we can expect the mean-field distribution to stay fairly stable. Similarly to [13], we might alleviate this issue by Gaussian mean-field
+initialization in each episode. Note, however, that this may not
+necessarily be appropriate in safety-constrained settings, as the
+initial mean-field distribution is expected to be safe. On top of that,
+we can add exploration noise to the actions obtained via the policy.
+Alternatively, we could add noise to the parameters of the policy
+network for a more consistent approach as in [59].
+
+D
+
+Experiments – Vehicle Repositioning
+
+In this section, we provide further analysis, the motivation behind
+our modeling decisions, and details for making our experiments
+easily replicable. We use a private cluster with GPUs to run our
+experiments. Safe-M3 -UCRL and M3 -UCRL under known transitions each used 15 minutes of one Intel Xeon Gold 511 CPU core,
+32 GB of RAM and one Nvidia GeForce RTX 3090 GPU. Training
+Safe-M3 -UCRL and M3 -UCRL under unknown transitions to produce results in Figure 2d, Figure 2f and Figure 8b had 24 hours of
+access to fifty Intel Xeon Gold 511 CPU cores, 64 GB of RAM and
+fifty Nvidia GeForce RTX 3090 GPUs during the batch execution
+necessary for training. The evaluation, i.e., generating the results
+for, e.g., Figure 9b and Figure 10 took around 1 hour of one Intel
+Xeon Gold 511 CPU core, 64 GB of RAM and one Nvidia GeForce
+RTX 3090 GPU. The only computationally intensive evaluation task
+was for Figure 9a for more than 1 million agents. We had access to
+Xeon Gold 511 CPU core, 128-256 GB of RAM, for around 8 hours.
+The implementation was predominantly done in Python packages
+PyTorch [57] and NumPy [34].
+Our experimental workflow has the following structure:
+(1) Input data preprocessing
+• Estimating the demand distribution for the service 𝜌 0
+• Estimating passenger’s trip destinations’ likelihood mapping Φ(·)
+(2) Modeling assumptions, model parameters, and distributions’
+representation
+• State-space, action space, noise, reward, safety constraint
+• Mean-field distribution representation
+• Mean-field transition 𝑈 (·)
+(3) Executing model-based learning protocol (Algorithm 1)
+• Optimizing Equation (9)
+• Learning unknown transitions using probabilistic neural
+network ensemble, i.e., statistical estimators 𝒎𝑛−1 (·) and
+Σ𝑛−1 (·)
+(4) Performance evaluation in the infinite regime
+(5) Performance evaluation in the finite regime
+
+represent Φ(·) as a 𝑘 2 × 𝑘 2 probability matrix, i.e., rows summing to
+one represent outgoing mass for each cell. The entries [Φ]𝑖 𝑗 with
+𝑖, 𝑗 ∈ {0, . . . , 𝑘 2 − 1} represent the likelihood of a passenger’s trip
+that originated in the neighborhood 𝑖 ending in the neighborhood
+𝑗. The likelihoods are estimated as an average over the considered
+period and kept constant. Figure 4 shows Φ column average, i.e.,
+the trip destinations’ likelihood given an arbitrary trip origin.
+
+D.2
+
+Figure 4: Passenger’s trip destinations’ likelihood during
+evening peak hours given an arbitrary trip origin (see Appendix D.1). We observe that the trips to most residential
+areas are almost equally likely and dispersed across the entire study region, which is consistent with the intuition that
+some residents commute back home (outside of the city center) after a work day, while others commute towards the city
+center for, e.g., leisure activities.
+
+D.1
+
+Input Data Preprocessing
+
+We consider vehicle trajectories collected in Shenzhen’s extended
+city center with the geographical area spanning from 114.015 to
+114.14 degrees longitude and from 22.5 to 22.625 degrees latitude.
+We have access to the trajectories of five full working weeks (Monday to Sunday) collected between 18th January 2016 and 25th September 2016. We restrict ourselves to evening peak hours between
+19:00 and 22:00. We represent probability distributions by discretizing the space into 𝑘 × 𝑘 unit grid with 𝑘 = 25 where each cell,
+𝑗 𝑗+1
+𝐶𝑖 𝑗 = [ 𝑘𝑖 , 𝑖+1
+𝑘 ⟩ × [ 𝑘 , 𝑘 ⟩ for 𝑖, 𝑗 ∈ {0, . . . , 𝑘 − 1}, represents a square
+neighborhood of around 550 × 550 meters on the city map. We represent the service demand distribution 𝜌 0 ∈ P(S) as a 𝑘 × 𝑘 matrix
+where entries [𝜌 0 ]𝑖 𝑗 , 𝑖, 𝑗 ∈ {0, . . . , 𝑘 − 1} represent a probability of
+a trip originating in the neighborhood 𝐶𝑖 𝑗 . The probabilities are
+estimated as an average over the considered period and kept constant during each step 𝑡 of the learning protocol (see Appendix D.3).
+To smooth out the demand distribution and remove possible noise
+in the raw data, we apply 2-dimensional median smoothing with
+a window equal to 3 and show the output in Figure 3a. If the passenger’s trip originates at the state 𝑠 ∈ S the likelihood of its
+destinations is defined by the mapping Φ : S → P(S) which we
+use in Appendix D.2 to define sequential transitions by first executing passenger trips followed by vehicle repositioning (see Figure 1).
+We flatten the 𝑘 × 𝑘 space grid into 𝑘 2 -dimensional vector and
+
+Modeling Assumptions and Model
+Parameters
+
+We represent our area of interest as a two-dimensional unit square,
+i.e., the state-space S = [0, 1]2 , and assume that vehicles can move
+freely using repositioning actions taken from A = [−1, 1]2 . If the
+action takes a vehicle outside of the state-space borders, we project
+it back onto the border. Since the fleet is operating in a noisy traffic
+environment, repositioning usually cannot be executed perfectly.
+We model the noise 𝜀𝑛,𝑡 ∼ TN(0, 𝜎 2 𝐼 2 ) by a Gaussian with a known
+variance 𝜎 2 truncated at the borders of S and 𝐼 2 is the 2 × 2 unit
+matrix. We use a standard deviation 𝜎 = 0.0175 to represent that
+the vehicle will be repositioned with a 68% probability within a
+circle with a 240-meter radius of the desired location or with 95%
+probability within a circle with a 480-meter radius. For simplicity,
+we assume that every passenger ride lasts fifteen minutes and that
+the repositioning is executed instantaneously. We assume that the
+representative agent (or multiple representative agents) reports the
+trajectories obtained during the interaction with the environment to
+the global controller at the end of the day. Therefore, we discretize
+our modeling horizon in fifteen-minute operational intervals, i.e.,
+𝑇 = 12, and each episode 𝑛 represents one day. The goal of the
+service provider is maximizing the profit, which correlates with
+the amount of satisfied demand. Therefore, we model the service
+provider goal of maximizing the coverage of the demand by the negative of the Kullback-Leibler divergence between the vehicles’ distribution 𝜇𝑛,𝑡 and demand for service 𝜌 0 , i.e., 𝑟 (𝑧𝑛,𝑡 ) = −𝐷𝐾𝐿 (𝜌 0 ||𝜇𝑛,𝑡 ).
+In other words, 𝑟 (·) measures the similarity between vehicles’ and
+demand distributions; the closer the distributions, the higher the
+profit. In practice, greedy profit maximization is often prevented by
+imposing service accessibility requirements by regulatory bodies.
+Due to the discrete representation of the mean-field distribution
+(discussed in the next paragraph), we use Shannon entropy to define
+the safety constraint
+∑︁
+ℎ𝐶 (𝜇𝑛,𝑡 ) = −
+log([𝜇𝑛,𝑡 ]𝑖 𝑗 )[𝜇𝑛,𝑡 ]𝑖 𝑗 − 𝐶
+(13)
+𝑖,𝑗
+
+to enforce the service accessibility across all residential areas. Therefore, the optimization objective in Equation (9) trades off between
+maximizing the profit 𝑟 (·) and adhering to accessibility requirements imposed by ℎ𝐶 (·). We use matrix Φ introduced Appendix D.1
+to model sequential transitions by first executing passenger trips
+followed by vehicle repositioning. Formally, the next state 𝑠𝑛,𝑡 +1 =
+𝑓 (𝑧𝑛,𝑡 ) + 𝜀𝑛,𝑡 is induced by the unknown transitions 𝑓 (𝑧𝑛,𝑡 ) =
+Φ + 𝑎 , 0, 1), where 𝑠 Φ ∼ Φ(𝑠 ). Firstly, we find origin
+clip(𝑠𝑛,𝑡
+𝑛,𝑡
+𝑛,𝑡
+𝑛,𝑡
+cell 𝑖 ∈ 𝑘 2 such that 𝑠𝑛,𝑡 resides in it and sample destination cell
+𝑗 ∈ 𝑘 2 given likelihoods defined in row 𝑖 of the probability matrix
+Φ by uniform
+Φ. Secondly, we determine the destination state 𝑠𝑛,𝑡
+sampling from the destination cell 𝑗, which is a simplified model
+
+of the passenger preferences of the final destination. Notice that
+the controller determines repositioning actions given intermediate
+Φ obtained after executing passenger trips.
+states 𝑠𝑛,𝑡
+Mean-field transitions. During the learning/training phase,
+we assume that the number of agents 𝑚 → ∞ and that these agents
+induce the mean-field distribution 𝜇𝑛,𝑡 for episode 𝑛 and step 𝑡.
+But, one of the major practical challenges is implementing the
+mean-field transition function 𝑈 (·) (see Equation (2)). The main
+difficulties are representing the mean-field distribution 𝜇𝑛,𝑡 and
+computing the integral in Equation (2). We use discretization to
+represent the mean-field distribution even though other representations, such as a mixture of Gaussians, are possible. Concretely,
+we represent the mean-field distribution as 𝜇𝑛,𝑡 = [𝜇𝑛,𝑡 ]𝑖 𝑗 with
+𝑖, 𝑗 ∈ {0, . . . , 𝑘 − 1} with 𝑘 = 25 by associating the probability
+[𝜇𝑛,𝑡 ]𝑖 𝑗 = P[𝑠𝑛,𝑡 ∈ 𝐶𝑖 𝑗 ] of the representative agent residing within
+each cell 𝐶𝑖 𝑗 during episode 𝑛 at step 𝑡. Note that the discrete
+representation of the mean-field distribution does not affect the
+state and action spaces, which remain continuous. The initial meanfield distributions, 𝜇𝑛,0 for every 𝑛, follow the uniform distribution
+which maximizes the Shannon entropy, ensuring the safety at the
+beginning of every episode 𝑛 at 𝑡 = 0, i.e., ℎ𝐶 (𝜇𝑛,0 ) ≥ 0. In vehicle repositioning, the mean-field transitions 𝑈 (·) consist of two
+sequential steps induced by transitions 𝑓 . Namely, first, the demand
+shifts the mean-field distribution, followed by the transition induced by the controller. Formally, the mean-field demand transition
+Φ = (𝜇
+is computed as 𝜇𝑛,𝑡
+𝑛,𝑡 · 𝑝) × Φ + 𝜇𝑛,𝑡 · (1 − 𝑝), where · denotes
+elementwise multiplication, × denotes matrix multiplication and
+𝜌
+𝑝 = min(1, 𝜇𝑛,𝑡0 ) represents elementwise proportion of occupied
+vehicles. The mean-field controller transition requires computing
+the integral in Equation (2) for which we use the discrete approximation given the points 𝑐𝑖 𝑗 uniformly chosen from cells 𝐶𝑖 𝑗 for
+𝑖, 𝑗 ∈ {0, . . . , 𝑘 − 1}
+∑︁
+Φ
+Φ
+Φ
+[𝜇𝑛,𝑡 +1 ]𝑖 𝑗 =
+P[𝑓 (𝑐𝑘𝑙 , 𝜇𝑛,𝑡
+, 𝜋𝑛,𝑡 (𝑐𝑘𝑙 , 𝜇𝑛,𝑡
+)) + 𝜀𝑛,𝑡 ∈ 𝐶𝑖 𝑗 ][𝜇𝑛,𝑡
+]𝑘𝑙 ,
+𝑘,𝑙
+
+(14)
+for the episode 𝑛 and step 𝑡. We assume that the noise term 𝜀𝑛,𝑡
+is independent across episodes and steps as well as along the two
+dimensions while the truncation parameters are adjusted relative
+to the state space borders. Thus, we have the following
+h
+i
+Φ
+Φ
+P 𝑓 (𝑐𝑘𝑙 , 𝜇𝑛,𝑡
+, 𝜋𝑛,𝑡 (𝑐𝑘𝑙 , 𝜇𝑛,𝑡
+)) + 𝜀𝑛,𝑡 ∈ 𝐶𝑖 𝑗
+
+
+
+𝑖 𝑖 +1
+Φ
+Φ
+= P 𝑓 (𝑐𝑘𝑙 , 𝜇𝑛,𝑡
+, 𝜋𝑛,𝑡 (𝑐𝑘𝑙 , 𝜇𝑛,𝑡
+))𝑥 + 𝜀𝑛,𝑡,𝑥 ∈
+,
+𝑘 𝑘
+
+
+
+𝑗 𝑗 +1
+Φ
+Φ
+× P 𝑓 (𝑐𝑘𝑙 , 𝜇𝑛,𝑡
+, 𝜋𝑛,𝑡 (𝑐𝑘𝑙 , 𝜇𝑛,𝑡
+))𝑦 + 𝜀𝑛,𝑡,𝑦 ∈
+,
+𝑘 𝑘
+
+ 
+𝑖 +1
+Φ
+Φ
+= 𝜙
+− 𝑓 (𝑐𝑘𝑙 , 𝜇𝑛,𝑡
+, 𝜋𝑛,𝑡 (𝑐𝑘𝑙 , 𝜇𝑛,𝑡
+))𝑥
+(15)
+𝑘
+
+
+𝑖
+Φ
+Φ
+−𝜙
+− 𝑓 (𝑐𝑘𝑙 , 𝜇𝑛,𝑡
+, 𝜋𝑛,𝑡 (𝑐𝑘𝑙 , 𝜇𝑛,𝑡
+))𝑥
+𝑘
+ 
+
+𝑗 +1
+Φ
+Φ
+· 𝜙
+− 𝑓 (𝑐𝑘𝑙 , 𝜇𝑛,𝑡
+, 𝜋𝑛,𝑡 (𝑐𝑘𝑙 , 𝜇𝑛,𝑡
+))𝑦
+𝑘
+
+
+𝑗
+Φ
+Φ
+−𝜙
+− 𝑓 (𝑐𝑘𝑙 , 𝜇𝑛,𝑡 , 𝜋𝑛,𝑡 (𝑐𝑘𝑙 , 𝜇𝑛,𝑡 ))𝑦 ,
+𝑘
+where 𝜙(·) is the cumulative distribution function of truncated
+Gaussian TN(0, 𝜎 2 ).
+
+Mean-field transitions in the finite regime In Appendix D.5,
+we instantiate a finite number of vehicles 𝑚 < ∞ to evaluate the
+policy performance in a realistic setting. We keep track of vehicles’
+(𝑙)
+states 𝑠𝑡 for every vehicle 𝑙 ∈ {1, . . . , 𝑚} at steps 𝑡 = 0, . . . ,𝑇 . In
+this setting, we approximate the mean-field transition 𝑈 (·) with the
+normalized two-dimensional histogram [𝜇𝑡 +1 ]𝑖 𝑗 with bins defined
+by the cells 𝐶𝑖 𝑗 for 𝑖, 𝑗 ∈ {0, . . . , 𝑘 − 1} given vehicles’ next states
+(𝑙)
+
+(𝑙)
+
+(𝑙)
+
+𝑠𝑡 +1 = 𝑓 (𝑠𝑡 , 𝜇𝑡Φ, 𝜋(𝑠𝑡 , 𝜇𝑡Φ )) + 𝜀𝑡 .
+
+D.3
+
+Model-Based Learning Protocol
+
+We use the learning protocol introduced in Algorithm 1 to train
+Safe-M3 -UCRL. For hyperparameters of the model, see Table 1.
+To optimize the objective in Equation (9) in the subroutine in
+Line 3, we use MF-BPTT (see Appendix C.3.1). We parametrize
+the policy via a fully-connected neural network with two hidden
+layers of 256 neurons and Leaky-ReLU activations. The output
+layer returns the agents’ actions using Tanh activation. We use
+Xavier uniform initialization [29] to randomly initialize weights
+while we set bias terms to zero. We use 20,000 training epochs
+with the early stopping if the policy does not improve at least
+0.5% within 500 epochs. To prevent gradient explosion, we use L2norm gradient clipping with max-norm set to 1. Note that in our
+experiments, a single neural network had enough predictive power
+to represent the whole policy profile 𝝅 = (𝜋0, . . . , 𝜋𝑇 −1 ), but using
+𝑇 networks, one for each individual policy 𝜋𝑡 is a natural extension.
+For further details about hyperparameters, see Table 2. Additionally,
+note that we parametrize policy by a neural network with Lipschitz
+continuous activations (Leakly-ReLU and Tanh). In the case of the
+bounded neural network’s weights, policy satisfies the Lipschitz
+continuity assumption (see Assumption 2). In practice, we bound
+the weights via L2-regularization.
+We estimate the confidence set of transitions F𝑛−1 in the subroutine in Line 5 using a probabilistic neural network ensemble (see
+Appendix C.1). We use an ensemble of 10 fully-connected neural
+networks with two hidden layers of 16 neurons and Leaky-ReLU
+activations. The output layer returns the mean vector and variance
+vector (because of the covariance matrix diagonality assumption)
+of the confidence set; the mean uses linear activation, and the
+variance uses Softplus activation. We minimize the negative loglikelihood (NLL) for each neural network under the assumption of
+heteroscedastic Gaussian noise as described in [42]. We randomly
+split the data from the replay buffer into a training set (90%) and a
+validation set (10%). We use 10,000 training epochs with the early
+stopping if the performance on the validation set does not improve
+for at least 0.5% within 100 consecutive epochs. For further details
+about hyperparameters, see Table 3.
+
+D.4
+
+Performance Evaluation in the Infinite
+Regime
+
+In this section, we extend the experiments presented in Section 5.2.
+We assume that the number of vehicles 𝑚 → + ∞ and show two important results. First, we show a conservative behavior of Safe-M3 UCRL by training model with Shannon entropy safety constraint
+(see Remark 2) with the safety threshold 𝐶 set to 𝑝 = 0.50 of the
+maximum Shannon entropy, i.e., 𝐶 = 𝑝 log(𝑘 2 ). We then evaluate its
+performance against a much higher safety threshold, i.e., against
+
+the safety threshold induced by 𝑝 = 0.85. Figure 8a shows that the
+model never violates stricter safety constraint regardless of its training in a weaker setting. Second, we show the data efficiency of the
+learning protocol (Algorithm 1) by training models with access to
+one, five, and ten representative agents for data collection. Figure 8b
+shows that the model under unknown transitions converges to the
+model trained under known transitions almost 6 times faster when
+using ten representative agents instead of one representative agent.
+It is a very useful result that can be utilized in many applications.
+For example, in most transportation applications, using tens or even
+hundreds of representative agents often does not cause cost-related
+issues. On the contrary, it might be more cost-effective to have ten
+representative agents for a month than one representative agent
+for a year.
+
+D.5
+
+Performance Evaluation in the Finite
+Regime
+
+In this section, we assume a finite number of vehicles 𝑚 < + ∞
+and approximate the mean-field distribution
+𝑚
+1 ∑︁
+(𝑖)
+𝜇𝑡 (𝑠) = lim
+I(𝑠 = 𝑠)
+𝑚→
+− ∞ 𝑚 𝑖=1 𝑡
+with the empirical distribution as explained in Appendix D.5. The
+policy profile 𝝅𝑛∗ trained in the infinite regime is used to reposition
+each of 𝑚 individual vehicles in the fleet. In Figure 9a, we show
+the relationship between model performance and the number of
+vehicles in the system. As expected, we observe that increasing
+the number of vehicles leads to better performance due to the increased precision of mean-field distribution 𝜇𝑡 approximation at
+step 𝑡. By performing 100 randomly initialized runs for each of
+various fleet sizes, we see that Safe-M3 -UCRL learned under unknown transitions and applied in the finite regime converges to the
+solution achieved in the infinite regime under known transitions.
+Furthermore, the model performs very well already for a fleet of
+10,000 vehicles, which is in the order of magnitude of the fleet size
+that operates in Shenzhen. Concretely, in 2016, the fleet had around
+17,000 vehicles, with an increasing trend. We also observe that
+in the finite regime, the difference in performance between SafeM3 -UCRL trained under known and unknown transitions becomes
+insignificant. To showcase the practical usefulness of the algorithm,
+in Figure 9b, we instantiate 10,000 vehicles and display their positions after the final repositioning at step 𝑇 = 12. We observe that
+the majority of vehicles are repositioned to areas of high demand.
+At the same time, some of them are sent to residential zones in the
+northwest and northeast to enforce accessibility. It is important to
+note that some vehicles are repositioned to aquatic areas and areas
+without infrastructure due to two reasons. First, our model guarantees global safety without explicit guarantees for individual/local
+safety. Notice that undesirable areas might be avoided by safety
+constraint shaping, e.g., by setting the weight function for these
+areas to zero as discussed in Appendix B.2. Second, the model loses
+some of its accuracy due to the finite regime approximation errors.
+In Figure 10, we observe only a slight decrease in dispersion when
+Safe-M3 -UCRL finite regime approximation is compared to the infinite regime performance. To conclude, we showcase the potential
+of Safe-M3 -UCRL for vehicle repositioning in the finite regime,
+which might be a positive signal for real-world practitioners.
+
+E
+
+Experiments – Swarm Motion
+
+In this section, we extend the swarm motion experiments discussed
+in Section 5.1 and complement the vehicle repositioning experiments elaborated in Section 5.2 and Appendix D. For this experiment, we use the same private cluster and approximately the same
+amount of computational resources as reported in Appendix D.
+
+E.1
+
+Modeling Assumptions and Model
+Parameters
+
+We model the state space S as the unit torus on the interval [0, 1]
+and set the action space as the interval A = [−7, 7] due to the
+knowledge of the range of actions from the continuous-time analytical solution [2]. We approximate the continuous-time swarm
+motion by partitioning unit time into 𝑇 = 100 equal steps of length
+∆𝑡 = 1/𝑇 . The next state 𝑠𝑛,𝑡 +1 = 𝑓 (𝑧𝑛,𝑡 ) + 𝜀𝑛,𝑡 is induced by the
+unknown transitions 𝑓 (𝑧𝑛,𝑡 ) = 𝑠𝑛,𝑡 + 𝑎𝑛,𝑡 ∆𝑡 with 𝜀𝑛,𝑡 ∼ N(0, ∆𝑡)
+for all episodes 𝑛 and steps 𝑡. The reward function is defined by
+2 − log(𝜇 ), where the first term 𝜙(𝑠) =
+𝑟 (𝑧𝑛,𝑡 ) = 𝜙(𝑠𝑛,𝑡 ) − 12 𝑎𝑛,𝑡
+𝑛,𝑡
+2𝜋 2 (sin(2𝜋𝑠) − cos2 (2𝜋𝑠)) + 2 sin(2𝜋𝑠) determines the positional reward received at the state 𝑠 (see Figure 5), the second term defines
+the kinetic energy penalizing large actions, and the last term penalizes overcrowding. Note that the optimal solution for continuous
+time setting, ∆𝑡 → 0, can be obtained analytically. Namely, for the
+infinite time horizon, i.e., 𝑇 → ∞, we have
+𝜋 ∗ (𝑠, 𝜇) = 2𝜋 cos(2𝜋𝑠)
+𝑒 2 sin(2𝜋𝑠)
+
+𝜇 ∗ (𝑠) = R
+S
+
+′
+𝑒 2 sin(2𝜋𝑠 )𝑑𝑠 ′
+
+(16)
+,
+
+where 𝜋 ∗ and 𝜇 ∗ form an ergodic solution satisfying 𝜇 ∗ = 𝑈 (𝜇 ∗, 𝜋 ∗, 𝑓 ).
+We use 𝜇 ∗ as a benchmark but note that it might no longer be an optimal solution in the discrete-time setting. Therefore, discrete-time
+solutions obtained under known transitions serve as a good benchmark for Safe-M3 -UCRL performance under unknown transitions.
+To control overcrowding, we use the Shannon-entropic constraint
+introduced in Equation (13) instead of having the overcrowding
+penalty term log(𝜇𝑛,𝑡 ) in the reward. As discussed in Appendix D.2,
+Shannon entropy is used because of the discrete mean-field distribution representation. Since higher entropy translates into less
+overcrowding, we can upfront determine and upper-bound the
+acceptable level of overcrowding by setting a desirable threshold
+𝐶. Similarly to the discussion in Appendix D.2, we represent the
+mean-field distribution by discretizing the state space into 𝑘 = 100
+uniform intervals and assigning the probability of the representative agent residing within each of them. To compute the mean-field
+transitions 𝑈 (·), we use one-dimensional equivalent of Equation (14)
+and Equation (15). We set the safety threshold 𝐶 as a proportion
+𝑝 ∈ [0, 1] of the maximum Shannon entropy Equation (13), i.e.,
+𝐶 = 𝑝 log(𝑘). We initialize safe mean-field distributions 𝜇𝑛,0 as uniform distributions since they maximize Shannon entropy, which
+makes them safe for every threshold 𝐶.
+
+E.2
+
+Model-Based Learning Protocol
+
+We follow the same procedure as described in Appendix D.3 with the
+hyperparameters from Tables 4 to 6. The only difference compared
+
+Figure 6: Safe-M3 -UCRL learning curve for 𝑝 = 0.5 for swarm
+motion.
+to Appendix D.3 is the increase in the complexity of the computational graph because of the high number of steps 𝑇 . Therefore, we
+use batch normalization [38] to prevent vanishing gradients.
+
+E.3
+
+Performance Evaluation
+
+In this section, we complement the results shown in Section 5.1.
+We first visualize the positional reward 𝜙(·) in Figure 5 for the ease
+of interpretation of the obtained results. We see that the reward
+has two local maxima, but due to a significant difference in their
+value, unconstrained benchmarks ignore the lower maxima. On the
+other hand, Safe-M3 -UCRL for 𝑝 = 0.95, and to a certain extent for
+𝑝 = 0.5, take advantage of it by reducing the kinetic energy in the
+neighborhood of lower maxima as shown in Figure 2e. In Figure 12,
+
+by policies learned by Safe-M3 -UCRL for 𝑝 = 0.5 and 𝑝 = 0.95.
+We observe that for 𝑝 = 0.5, we reach near-stationary distribution
+after only 10 steps (see Figure 12a), i.e., the distribution remains the
+same until the algorithm terminates at 𝑇 = 100. For 𝑝 = 0.95, we
+reach stationarity even faster, as shown in Figure 12b. The learning
+process presented in Figure 2a is explained by the reduction of the
+epistemic uncertainty in the estimated transitions 𝑓˜𝑛−1 . Before the
+first episode 𝑛 = 1, the statistical model is estimated only from
+trajectories collected by randomly initialized policy 𝜋0 . Due to the
+high epistemic uncertainty in regions that random policy did not
+explore, upper-confidence hallucinated transitions Equation (8) do
+not approximate well true transitions (see Figure 11a). By episode
+𝑛 = 5, the model already has a good approximation of the transitions (see Figure 11b), while at episode 𝑛 = 50, the transitions are
+known with near-certainty (see Figure 11c). These results coincide
+with the observation in Figure 2a where around episode 𝑛 = 50,
+Safe-M3 -UCRL starts obtaining the results as if the transitions
+were known. Note that we implement the toroidal state space on
+S = [0, 1] by assuming a sufficiently large extension, e.g., [−1, 2],
+of the interval over its borders such that a new state resulting from
+any possible action is captured with high probability. The new state
+is then mapped back to interval [0, 1] using the modulo operation.
+For completeness of the analysis, in Figure 6, we show that SafeM3 -UCRL for 𝑝 = 0.5 converges to the result obtained under known
+transitions. We further validate the observation presented in Figure 2b that the constraint for 𝑝 = 0.5 results in similar overcrowding
+as the reward penalty term − log(𝜇). Namely, in Figure 7, we see
+that Safe-M3 -UCRL for 𝑝 = 0.5 and M3 -UCRL with overcrowding
+penalty term satisfy the safety constraint ℎ𝐶 (𝜇) = 0.5 log(𝑘) with a
+similar margin.
+
+Figure 7: Swarm motion safety for 𝑝 = 0.5.
+Figure 5: Swarm motion positional reward 𝜙(·).
+we show the mean-field distributions progression over time guided
+
+(a) Safe-M3 -UCRL conservative behavior
+
+(b) Learning protocol data efficiency
+
+Figure 8: We showcase Safe-M3 -UCRL conservative behavior and data efficiency by training 10 randomly initialized policy
+profiles and statistical models where each setup uses the entropic safety constraint ℎ𝐶 (·) ≥ 0. We set the safety threshold 𝐶 as a
+proportion 𝑝 of the maximum Shannon entropy, i.e., 𝐶 = 𝑝 log(𝑘 2 ) with 𝑘 = 25. In (a), the policy profiles trained for satisfying
+ℎ 0.5 log(𝑘 2 ) (·) ≥ 0 never violate ℎ 0.85 log(𝑘 2 ) (·) ≥ 0, which shows the conservative behavior of our model. In (b), we show the data
+efficiency of the learning protocol (Algorithm 1) by comparing learning curves observed during training models that satisfy
+ℎ 0.85 log(𝑘 2 ) (·) ≥ 0 when using one, five and ten representative agents (RA) for data collection. We see that the model trained with
+1-RA converges to the performance of the model under known transitions in around 80 episodes, while it takes 25 and 15
+episodes for 5-RA and 10-RA models, respectively. Note that we use log-reward to emphasize learning speeds on a comparable
+scale.
+Table 1: Learning protocol hyperparameters for vehicle repositioning
+Hyperparameter
+
+Value
+
+Description
+
+𝑁
+𝑇
+𝑘
+𝜎
+𝐿ℎ
+𝜆
+# of representative agents
+
+200
+12
+25
+0.0175
+0.1
+1
+1 to 10
+
+Number of episodes
+Number of steps
+Number of discretization segments per axis
+Standard deviation of the system noise
+Lipschitz constant in Equation (9)
+Log-barrier hyperparameter in Equation (9)
+By default 1, but in some experiments, we use more
+
+Table 2: Policy hyperparameters for vehicle repositioning
+Hyperparameter
+# of hidden layers
+# of neurons
+hidden activations
+output activation
+𝛼
+𝑤
+initialization
+bias initialization
+𝑛
+early stopping
+
+Value
+2
+256
+Leaky-ReLU
+Tanh
+10 −4
+5 · 10 −4
+Xavier uniform
+0
+20,000
+0.5%
+
+Description
+Number of neurons per hidden layer
+
+Learning rate
+Weight decay
+
+Number of epochs
+If not improved after 500 epochs
+
+(a)
+Objective from Equation (9) achieved in the finite regime by
+approximating mean-field distribution with empirical distribution
+
+(b)
+Vehicles’ locations after repositioning action
+in the finite regime
+
+Figure 9: To showcase Safe-M3 -UCRL performance in the finite regime, we instantiate a finite number of vehicles, each following
+a policy profile 𝝅𝑛∗ learned in the infinite regime and satisfying the entropic safety constraint ℎ𝐶 (·) ≥ 0 for 𝐶 = 0.85 log(𝑘 2 ) with
+𝑘 = 25. We perform 100 randomly initialized runs for each of the various fleet sizes. In (a), we see that increasing the number of
+vehicles leads to better performance due to the increased precision of mean-field distribution approximation. Further, we see
+that Safe-M3 -UCRL learned under unknown transitions and applied in the finite regime converges to the solution achieved
+in the infinite regime under known transitions. We also see that the curves for Safe-M3 -UCRL trained under unknown and
+known transitions almost overlap, i.e., the value of knowing transitions has little to no insignificance in the finite regime. In
+(b), we showcase the performance for the realistic number of vehicles operating in Shenzhen (10,000 to 20,000). We display the
+positions of a randomly chosen subset of 1,000 vehicles (out of 10,000) at step 𝑇 = 12 after the final repositioning. We observe
+that the majority of vehicles are repositioned to areas of high demand, while some of them are sent to residential zones in the
+northwest and northeast to enforce accessibility.
+Table 3: Probabilistic neural network ensemble hyperparameters for vehicle repositioning
+Hyperparameter
+# of ensemble members
+# of hidden layers
+# of neurons
+hidden activations
+mean output activation
+variance output activation
+𝛼
+𝑤
+𝛽
+initialization
+bias initialization
+𝑛
+early stopping
+train-validation split
+replay buffer size
+batch size
+
+Value
+10
+2
+16
+Leaky-ReLU
+Linear
+Softplus
+10 −4
+5 · 10 −4
+1
+Xavier uniform
+0
+10,000
+0.5%
+90%-10%
+10-100
+8-128
+
+Description
+
+Number of neurons per hidden layer
+
+Learning rate
+Weight decay
+Assumption 4 hyperparameter
+
+Number of epochs
+If not improved for 100 consecutive epochs
+We use a validation set for early stopping
+By default 100
+Increasing with the replay buffer size
+
+(a)
+Safe-M3 -UCRL under unknown transitions in the infinite regime
+
+(b)
+Safe-M3 -UCRL under unknown transitions in the finite regime
+
+Figure 10: We show the difference in the performance introduced by approximating mean-field distribution with the finite
+number of vehicles as described in Appendix D.2. In (a), we see that the dispersion of Safe-M3 -UCRL in the infinite regime
+is 𝑝 = 0.96 as elaborated in Figure 3. In (b), the policy profile 𝝅𝑛∗ trained in the infinite regime is used to control a fleet of
+10,000 vehicles. We observe a slight decrease in the dispersion from 𝑝 = 0.96 to 𝑝 = 0.92 due to the mean-field distribution
+approximation errors.
+Table 4: Learning protocol hyperparameters for swarm motion
+Hyperparameter
+
+Value
+
+Description
+
+𝑁
+𝑇
+𝑘
+𝜎
+𝐿ℎ
+𝜆
+# of representative agents
+
+200
+100
+100
+1
+10 −4
+15
+1
+
+Number of episodes
+Number of steps
+Number of discretization segments per axis
+Standard deviation of the system noise
+Lipschitz constant in Equation (9)
+Log-barrier hyperparameter in Equation (9)
+
+(a)
+
+(b)
+
+(c)
+
+(a)
+
+(b)
+
+Figure 12: Mean-field distributions progression over time.
+Table 5: Policy hyperparameters for swarm motion
+Hyperparameter
+# of hidden layers
+# of neurons
+hidden activations
+output activation
+𝛼
+𝑤
+initialization
+bias initialization
+𝑛
+early stopping
+
+Value
+2
+16
+Leaky-ReLU
+Tanh
+5 · 10 −3
+5 · 10 −4
+Xavier uniform
+0
+50,000
+0.5%
+
+Description
+Number of neurons per hidden layer
+
+Learning rate
+Weight decay
+
+Number of epochs
+If not improved after 100 epochs
+
+Table 6: Probabilistic neural network ensemble hyperparameters for swarm motion
+Hyperparameter
+# of ensemble members
+# of hidden layers
+# of neurons
+hidden activations
+mean output activation
+variance output activation
+𝛼
+𝑤
+𝛽
+initialization
+bias initialization
+𝑛
+early stopping
+train-validation split
+replay buffer size
+batch size
+
+Value
+10
+2
+16
+Leaky-ReLU
+Linear
+Softplus
+5 · 10 −3
+5 · 10 −4
+1
+Xavier uniform
+0
+10,000
+0.5%
+90%-10%
+10,000
+8-512
+
+Description
+
+Number of neurons per hidden layer
+
+Learning rate
+Weight decay
+Assumption 4 hyperparameter
+
+Number of epochs
+If not improved for 30 consecutive epochs
+We use a validation set for early stopping
+Increasing with the replay buffer size
+
+

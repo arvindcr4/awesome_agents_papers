@@ -1,0 +1,3032 @@
+Proceedings of Machine Learning Research vol 242:1–25, 2024
+
+6th Annual Conference on Learning for Dynamics and Control
+
+Robust Cooperative Multi-Agent Reinforcement Learning:
+A Mean-Field Type Game Perspective
+Muhammad Aneeq uz Zaman
+
+MAZAMAN 2@ ILLINOIS . EDU
+
+Coordinated Science Laboratory, University of Illinois at Urbana-Champaign
+
+Mathieu Laurière
+
+MATHIEU . LAURIERE @ NYU . EDU
+
+Shanghai Frontiers Science Center of Artificial Intelligence and Deep Learning;
+NYU-ECNU Institute of Mathematical Sciences at NYU Shanghai
+
+Alec Koppel
+
+ALEC . KOPPEL @ JPMCHASE . COM
+
+Artificial Intelligence Research, JP Morgan Chase & Co.
+
+arXiv:2406.13992v2 [cs.MA] 13 Jun 2025
+
+Tamer Başar
+
+BASAR 1@ ILLINOIS . EDU
+
+Coordinated Science Laboratory, University of Illinois at Urbana-Champaign
+Editors: A. Abate, K. Margellos, A. Papachristodoulou
+
+Abstract
+In this paper, we study the problem of robust cooperative multi-agent reinforcement learning (RL) where a large
+number of cooperative agents with distributed information aim to learn policies in the presence of stochastic and nonstochastic uncertainties whose distributions are respectively known and unknown. Focusing on policy optimization
+that accounts for both types of uncertainties, we formulate the problem in a worst-case (minimax) framework, which
+is is intractable in general. Thus, we focus on the Linear Quadratic setting to derive benchmark solutions. First,
+since no standard theory exists for this problem due to the distributed information structure, we utilize the MeanField Type Game (MFTG) paradigm to establish guarantees on the solution quality in the sense of achieved Nash
+equilibrium of the MFTG. This in turn allows us to compare the performance against the corresponding original
+robust multi-agent control problem. Then, we propose a Receding-horizon Gradient Descent Ascent RL algorithm
+to find the MFTG Nash equilibrium and we prove a non-asymptotic rate of convergence. Finally, we provide
+numerical experiments to demonstrate the efficacy of our approach relative to a baseline algorithm.
+
+1. Introduction
+Reinforcement Learning (RL) has had many successes, such as autonomous driving (Sallab et al., 2017), robotics
+(Kober et al., 2013), and RL from human feedback (RLHF) (Ziegler et al., 2019), to name a few. These successes
+have been focused on single-agent scenarios, but many scenarios involving, e.g., financial markets, communication networks, distributed robotics involve multiple agents. Prevailing algorithms for Multi-Agent Reinforcement
+Learning (MARL) (Zhang et al., 2021b; Li et al., 2021), however, do not model the distinct effects of modeled
+and un-modeled uncertainties on the transition dynamics, which can result in practical instability in safety-critical
+applications (Riley et al., 2021).
+In this paper we consider a large population multi-agent setting, with stochastic and non-stochastic (un-modeled,
+possibly adversarial) uncertainties. These types of formulations have been studied under the guise of robust control
+in the single-agent case (Başar and Bernhard, 2008). The uncertainties (modeled and un-modeled) affect the performance of the system and might even lead to instability. Robust control seeks the robust controller which guarantees
+a certain level of performance for the system in under a worst-case hypothesis on these uncertainties. We employ
+here the popular Linear-Quadratic (LQ) setting in order to rigorously characterize and synthesize the solution to the
+robust multi-agent problem in a data-driven manner. The LQ setting entails a class of models in which the dynamics
+are linear and the costs are quadratic in the state and the action of the agent. This setting has been used extensively
+in the literature due to its tractability: the optimal decisions can be computed analytically or almost analytically, up
+to solving Riccati equations, when one has access to all system matrices. Instances of applications include permanent income theory (Sargent and Ljungqvist, 2000), portfolio management (Cardaliaguet and Lehalle, 2018), and
+wireless power control (Huang et al., 2003)), among many others. In the absence of knowledge of system parameters, model-free RL methods have also been developed (Fazel et al., 2018; Malik et al., 2019) for single agent LQ
+© 2024 M.A.u. Zaman, M. Laurière, A. Koppel & T. Başar.
+
+Z AMAN L AURI ÈRE KOPPEL BAŞAR
+
+settings. We refer to (Recht, 2019) for an overview. When one goes from single to multiple agents, the issue of
+communicating local state and control information among agents exhibit scalability problems, and in particular,
+practical algorithms require sharing state information that can scale exponential in the number of agents. Instead,
+here we consider a distributed information structure where each agent has access only to its own state and the average of states of the other agents. This distributed information structure causes the characterization of the solution to
+be very difficult, in that previous gradient dominance results from (Fazel et al., 2018) no longer hold. To overcome
+this difficulty, we utilize the mean-field game and control paradigm, first introduced in the purely non-cooperative
+agent setting in (Lasry and Lions, 2006; Huang et al., 2006), which replaces individual agents by a distribution over
+agent types, which enables characterization and computation of the solution. The approach has then been extended
+to the cooperative setting through the notion of mean field control (Bensoussan et al., 2013; Carmona and Delarue,
+2018). Building on this paradigm, this work is the first to develop scalable algorithms for MARL that can handle
+model mis-specification or adversarial inputs in the sense of robust control in the very large or possibly infinite
+number of agents defined by the mean-field.
+We start Section 2 by formulating a robust multi-agent control problem with stochastic and non-stochastic
+(un-modeled) noises. The agents have distributed information, such that they have access to their own states and
+the average behavior of all the agents. Solving this problem entails finding a noise attenuation level (noise-tooutput gain) for the multi-agent system and the corresponding robust controller. As in the single-agent setting
+(Başar and Bernhard, 2008), the robust multi-agent control problem is reformulated into an equivalent zero-sum
+min-max game between the maximizing non-stochastic noise (which may be interpreted as an adversary) and the
+minimizing controller. Solving this problem is not possible in the finite agent case due to the limited information
+available to each agent. Thus, in Section 3 we consider the mean-field (infinite population) version of the problem,
+that we call the Robust Mean-Field Control (RMFC) problem. As in the finite-population setting, RMFC has
+an equivalent zero-sum min-max formulation, referred to as the 2-player Zero-Sum Mean-Field Type Game (ZSMFTG) in (Carmona et al., 2020, 2021), where the controller is the minimizing player and the non-stochastic
+disturbance is the maximizing one.
+In Section 4 we propose a bi-level RL algorithm to compute the Nash equilibrium for the ZS-MFTG (which
+equivalently yields the robust controller for the robust multi-agent problem) in the form of Receding-horizon Gradient Descent Ascent (RGDA) (Algorithm 1). The upper-level of RGDA, uses a receding-horizon approach, i.e.,
+it finds the controller parameters starting from the last timestep T − 1 and moving backwards-in-time (à la dynamic programming). The receding-horizon policy gradient approach was used in Kalman filtering (Zhang et al.,
+2023) and LQR problems (Zhang and Başar, 2023). The present work builds on this approach to multi-agent problems, which helps in simplifying the complex nature of the cost landscape (known to be non-coercive (Zhang et al.,
+2021a)) and renders it convex-concave. The lower-level employs gradient descent-ascent to find the saddle point
+(Nash equilibrium) for each timestep t. The convex-concave nature of the cost (due to the receding-horizon approach) proves to be a key component in proving linear convergence of the gradient descent-ascent to the saddle
+point (Theorem 4). Further analysis shows that the total accumulated error in the RGDA is small given that the
+lower level of RGDA has good convergence (Theorem 5). The gradient descent-ascent step requires computation
+of the stochastic gradient. We use a zero-order method (Fazel et al., 2018; Malik et al., 2019) which only requires
+access to the cost to compute stochastic gradients, and hence is truly model-free.
+Literature Review: Robust control gained importance in the 1970s when control theorists realized the shortcomings of optimal control theory in dealing with model uncertainties (Athans et al., 1977; Harvey and Stein,
+1978). The work of (Başar, 1989) was the first one to formulate the robust control problem as a zero-sum dynamic game between the controller and the uncertainty. Robust RL first introduced by (Morimoto and Doya, 2005)
+has recently had an increase in interest in for the single agent setting, where its ability to process trajectory data
+without explicit knowledge of system parameters can be used to learn robust controllers to address worst-case
+uncertainty (Zhang et al., 2020a; Kos and Song, 2017; Zhang et al., 2021c). Some recent works consider RL in
+scenarios with reward uncertainties (Zhang et al., 2020b), state uncertainty (He et al., 2023) or uncertainty in other
+agents’ policies (Sun et al., 2022). There have been some works on the intersection of RL for robust and multiagent control (Li et al., 2019; He et al., 2023), yet there has not been any significant effort to provide (1) sufficient
+conditions for solvability of the multi-agent robust control problem i.e. determining the noise attenuation level of a
+2
+
+ROBUST C OOPERATIVE MARL
+
+system and (2) provable Robust multi-agent RL (RMARL) algorithms in the large population setting, as proposed
+in this paper.
+This is made possible due to the mean-field game and control paradigm, which considers the limiting case as the
+number of agents approaches infinity. This paradigm was first introduced in the context of non-cooperative game
+theory as Mean-Field Games (MFGs) concurrently by (Lasry and Lions, 2006; Huang et al., 2006). Since then, the
+question of learning equilibria in MFGs has gained momentum, see (Laurière et al., 2022b). In particular, there have
+been several works dealing with RL for MFGs (Guo et al., 2019; Elie et al., 2020; Perrin et al., 2020; Zaman et al.,
+2020; Xie et al., 2021; Anahtarci et al., 2023), deep RL for MFGs (Perrin et al., 2021; Cui and Koeppl, 2021a;
+Laurière et al., 2022a), learning in multi-population MFGs (Pérolat et al., 2022; Zaman et al., 2021, 2023b), independent learning in MFGs (Yongacoglu et al., 2022; Yardim et al., 2023), oracle-free RL for MFGs (Angiuli et al.,
+2022; Zaman et al., 2023a) and RL for graphon games (Cui and Koeppl, 2021b; Fabian et al., 2023). There have
+also been several works on RL for MFC, which is the cooperative counterpart, see e.g. (Carmona et al., 2019a,b;
+Gu et al., 2021; Mondal et al., 2022; Angiuli et al., 2022). But these works require ability to sample from the true
+transition model, and hence are inapplicable in the case of mis-specification or modeling errors. To address this
+setting, we introduce the Robust MFC problem. We will connect this problem to MFTGs Tembine (2017), which
+contain mixed cooperative-competitive elements. Zero-sum MFTG model a zero-sum competition between two infinitely large teams of agents. Prior work on the theoretical framework of zero-sum MFTG include (Choutri et al.,
+2019; Tembine, 2017; Cosso and Pham, 2019; Carmona et al., 2021; Guan et al., 2024). Related to RL, the works
+(Carmona et al., 2020, 2021) propose a data-driven RL algorithm based on Policy Gradient to compute the Nash
+equilibrium between the two coalitions in an LQ setting but do not provide a theoretical analysis of the algorithm.
+
+2. Formulation
+In this section we introduce the robust multi-agent control problem by first defining the dynamics of the multi-agent
+system along with its performance and noise indices. The performance and noise indices have been introduced in
+the literature (Başar and Bernhard, 2008) in order to quantify the affect of the accumulated noise (referred to as
+noise index) on the performance of the system (called the performance index). The noise attenuation level is then
+defined as an upper bound on the ratio between the performance and noise indices given that the agents employ a
+robust controller. Hence the robust multi-agent problem is that of finding the robust controller under which a certain
+noise attenuation is achieved. In order to solve this problem, we reformulate it as a min-max game problem as in
+the single-agent setting (Başar and Bernhard, 2008). Consider an N agent system. We let [N ] = {1, . . . , N }. The
+p
+ith agent has dynamics which are linear in its state xit ∈ Rm , its action u1,i
+t ∈ R , and the mean-field counterparts,
+2,i
+1
+i
+x̄t and ūt . The disturbance ut is referred to as non-stochastic noise since it is an un-modeled disturbance and can
+even be adversarial. This is similar in spirit to the works of (Simchowitz et al., 2020). Let T be a positive integer,
+interpreted as the horizon of the problem. The initial condition of agent i’s state, i ∈ [N ], is xi0 = ω 0,i + ω̄ 0 , where
+ω 0,i ∼ N(0, Σ0 ) and ω̄ 0 ∼ N(0, Σ̄0 ) are i.i.d. noises. For t ∈ {0, . . . , T − 1},
+
+2,i
+i
+2
+1
+(1)
+xit+1 = At xit + Āt x̄t + Bt u1,i
+t + B̄t ūt + ut + ūt + ωt + ω̄t , ∀i ∈ [N ]
+PN i
+th agent, x̄ :=
+where u1,i
+t
+t is the control action of the i
+i=1 xt /N is referred to as the state mean-field and
+P
+j
+N
+j,i
+ūt :=
+i=1 u /N for j ∈ {1, 2} are the control and noise mean-fields respectively. Each agent’s dynamics
+are perturbed by two types of noise: ωti and ω̄t are referred to as stochastic noises since they are i.i.d. and their
+distributions are known (ωti ∼ N(0, Σ) and ω̄t ∼ N(0, Σ̄)). All of our results (excluding the finite-sample analysis
+of the RL Algorithm) can be readily generalized for zero-mean non-Gaussian disturbances with finite variance.
+In order to define the robust control problem we define the performance index of the population which penalizes
+the deviation of the agents from their (state and control) mean-fields and also regulates the mean-fields:
+
+JN (u1 , u2 ) =
+
+T −1
+N
+i
+1 X Xh i
+1 2
+1 2
++ kxiT − x̄T k2QT + kx̄T k2Q̄T
+kxt − x̄t k2Qt + kx̄t k2Q̄t + ku1,i
+−
+ū
+k
++
+kū
+k
+E
+t
+t
+t
+N
+t=0
+
+(2)
+
+i=1
+
+1. The non-stochastic noise is assumed to have identity coefficient in the dynamics (1) for simplicity of analysis but can be easily changed
+to some other matrix of appropriate size.
+
+3
+
+Z AMAN L AURI ÈRE KOPPEL BAŞAR
+
+where the matrices Qt , Q̄t > 0 are symmetric matrices, uj = (uj,i )i∈[N ] where each uj,i for j ∈ {1, 2} is adapted
+to the distribution information structure i.e. σ-algebra generated by xit and x̄t and U1 , U2 represent the set of all
+possible u1 , u2 , respectively. We define the noise index of the population in a similar manner
+̟N (u1 , u2 ) =
+
+T −1
+N
+i
+1 X X h 2,i
+kut − ū2t k2 + kū2t k2 + kωti k2 + kω̄t k2 .
+E
+N
+t=0
+
+(3)
+
+i=1
+
+The robust control problem for this N agent system is that of finding the range of noise attenuation levels γ > 0
+such that:
+∃u1 ∈ U1 , ∀u2 ∈ U2 ,
+
+JN (u1 , u2 ) ≤ γ 2 ̟N (u1 , u2 )
+
+(4)
+
+Any γ for which the above inequality is satisfied is referred to as a viable attenuation level and the least among them
+is called the minimum attenuation level. The controller u1 which ensures a particular level γ of noise attenuation
+is referred to as the robust controller corresponding to γ (or robust controller in short). Since the inequality (4) can
+also be reformulated as JN (·)/̟N (·) ≤ γ 2 , a viable attenuation parameter γ 2 is also an upper bound on the noiseto-output gain of the system. As outlined in (Başar and Bernhard, 2008) for a single agent problem the condition
+(4) is equivalent to finding the range of value of γ > 0 such that
+
+(5)
+inf sup JN (u1 , u2 ) − γ 2 ̟N (u1 , u2 ) ≤ 0,
+u1 u2
+
+where the infimizing controller u1 is the robust controller and the supremizing controller u2 is the worst-case
+γ
+non-stochastic noise. If we define the robust N agent cost JN
+as follows
+N T −1
+
+γ
+JN
+(u1 , u2 ) =JN (u1 , u2 ) − γ 2 E
+
+
+1 XX
+2 2
+2 2
+ku2,i
+t − ūt k + kūt k ,
+N
+t=0
+i=1
+
+then using (2) and (3), the robust N agent control problem (5) can be equivalently written as
+N T −1
+
+γ
+inf sup JN
+(u1 , u2 ) − γ 2 E
+u1
+
+u2
+
+1 XX
+(kωti k2 + kω̄t k2 ) ≤ 0.
+N
+t=0
+
+(6)
+
+i=1
+
+Due to the distributed information structure of the agents the standard theory of single-agent robust control does
+not apply in this setting. Hence we are unable to provide sufficient conditions for a given γ > 0 to be a viable
+attenuation level, and we resort to the mean-field limit as N → ∞, which is of independent interest. The next
+section formulates the Robust Mean-Field Control (RMFC) problem and its equivalent 2-player zero-sum MeanField Type Game (ZS-MFTG) representation, and provides sufficient conditions for solvability of both.
+
+3. Robust Mean-Field Control
+Consider a system with infinitely many agents, where the generic agent has linear dynamics of its state xt for a
+finite-horizon t ∈ {0, . . . , T − 1}:
+xt+1 = At xt + Āt x̄t + Bt u1t + B̄t ū1t + u2t + ū2t + ωt + ω̄t ,
+
+(7)
+
+where u1t is the control action of the generic agent, x̄t := E[xt |(ω̄s )0≤s≤t−1 ] is referred to as the state mean-field
+and ūjt := E[ujt |(ω̄s )0≤s≤t−1 ] for j ∈ {1, 2} are the control and noise mean-fields respectively. The initial condition
+of the generic agent is x0 = ω 0 + ω̄ 0 , where ω 0 ∼ N(0, Σ0 ) and ω̄ 0 ∼ N(0, Σ̄0 ) are i.i.d. noises. The stochastic
+noises ωti and ω̄t are i.i.d. such that ωti ∼ N(0, Σ) and ω̄t ∼ N(0, Σ̄), whereas the non-stochastic noise u2t are
+un-modeled uncertainties. Similar to the N agent case, we define the robust mean-field cost J γ as follows
+γ
+
+1
+
+2
+
+J (u , u ) =E
+
+T
+−1 h
+X
+t=0
+
+kxt − x̄t k2Qt + kx̄t k2Q̄t + ku1t − ū1t k2 + kū1t k2 − γ 2 ku2t − ū2t k2 + kū2t k2
+
+
+
+(8)
+
+i
++ kxT − x̄T k2QT + kx̄T k2Q̄T .
+
+Now the robust mean-field control problem which is the mean-field analog to (6) is defined as follows.
+4
+
+ROBUST C OOPERATIVE MARL
+
+Definition 1 (Robust Mean-Field Control problem) If for a given γ > 0 the following inequality is satisfied,
+then γ is a viable noise attenuation level for the robust mean-field control problem.
+γ
+
+1
+
+2
+
+2
+
+inf sup J (u , u ) − γ E
+u1 u2
+
+T
+−1
+X
+t=0
+
+kωt k2 + kω̄t k2 ≤ 0.
+
+(9)
+
+Moreover, the infimizing controller u1 in (9) is a robust controller (corresponding to γ).
+Now, under the condition of interchangability of the inf and sup operations, the problem of finding
+inf u1 supu2 J γ (u1 , u2 ) is that of finding the Nash equilibrium (equivalently, saddle point, in this case) of the
+Zero-sum 2-player Mean-Field Type Game; see (Carmona et al., 2020, 2021) for a very similar LQ setting without
+the theoretical analysis of the RL algorithm. In the following section we provide sufficient conditions for existence
+and uniqueness of a solution to this saddle point problem along with the value of inf u1 supu2 J γ (u1 , u2 ).
+2-player Zero-sum Mean-Field Type Games: Let us define yt = xt − x̄t , zt = x̄t . The dynamics of yt and zt can
+be written as
+yt+1 = At yt + Bt (u1t − ū1t ) + u2t − ū2t + ωt − ω̄t , zt+1 = Ãt zt + B̃t ū1t + 2ū2t + 2ω̄t ,
+where Ãt = At + Āt and B̃t = Bt + B̄t . The optimal controls are known to be linear (Carmona et al., 2020), hence
+we restrict our attention the set of linear controls in yt and zt ,
+u1t = u1t (xt , x̄t ) = −Kt1 (xt − x̄t ) − L1t x̄t , u2t = u2t (xt , x̄t ) = Kt2 (xt − x̄t ) + L2t x̄t
+which implies that ū1t = −L1t x̄t and ū2t = L2t x̄t . The dynamics of the processes yt and zt can be re-written as
+yt+1 = (At − Bt Kt1 + Kt2 )yt + ωt − ω̄t , zt+1 = (Ãt − B̃t L1t + L2t )zt + 2ω̄t .
+
+(10)
+
+Since the dynamics of yt and zt are decoupled, we can decompose the cost J γ into the following two parts:
+J γ (K, L) = Jyγ (K) + Jzγ (L),
+−1
+i
+h TX
+γ
+yt⊤ (Qt + (Kt1 )⊤ Kt1 − γ 2 (Kt2 )⊤ Kt2 )yt + yT⊤ QT yT ,
+Jy (K) = E
+Jzγ (L) = E
+
+t=0
+−1
+h TX
+t=0
+
+(11)
+
+i
+zt⊤ (Q̄t + (L1t )⊤ L1t − γ 2 (L2t )⊤ L2t )zt + zT⊤ Q̄T zT .
+
+The 2-player MFTG (7)-(8) has been decoupled into two 2-player LQ dynamic game problems as shown below:
+min max J γ ((K 1 , K 2 ), (L1 , L2 )) = min max Jyγ (K) + min max Jzγ (L)
+
+K 1 ,L1 K 2 ,L2
+
+K1
+
+K2
+
+L1
+
+L2
+
+where the dynamics of yt and zt are defined in (10). In the following section, using results in the literature, we
+specify the sufficient conditions for existence and uniqueness of Nash equilibrium of the 2-player MFTG and also
+present the value (Nash cost) of the game. Building on the techniques developed in (Başar and Olsder, 1998;
+Carmona et al., 2020), we can prove the following result.
+Theorem 2 Assume for a given γ > 0,
+γ 2 I − Mtγ > 0 and γ 2 I − M̄tγ > 0,
+
+(12)
+
+where Mtγ and M̄tγ are positive semi-definite matrices which satisfy the Coupled Algebraic Riccati equations,
+γ
+γ
+−1
+⊤
+−2
+I)Mt+1
+, MTγ = QT ,
+Mtγ = Qt + A⊤
+t Mt+1 Λt At , Λt = I + (Bt Bt − γ
+γ
+γ
+γ
+−1
+⊤
+−2
+M̄tγ = Q̄t + Ã⊤
+t M̄t+1 Λ̄t Ãt , Λ̄t = I + (B̃t B̃t − γ I)M̄t+1 , M̄T = Q̄T
+
+γ
+γ
+Ntγ = Nt+1
++ Tr(Mt+1
+Σ),
+
+NTγ = 0,
+
+γ
+γ
+N̄tγ = N̄t+1
++ Tr(M̄t+1
+Σ),
+
+5
+
+N̄Tγ = 0.
+
+(13)
+
+Z AMAN L AURI ÈRE KOPPEL BAŞAR
+
+1∗
+1∗
+2∗
+2∗
+2∗
+Then, u1∗
+t = −Kt (xt − x̄t ) − Lt x̄t and ut = Kt (xt − x̄t ) + Lt x̄t (complete expressions provided in
+Supplementary Materials) are the unique Nash policies. Furthermore, the Nash equilibrium (equivalently, saddle
+point) value is
+
+inf sup J γ (u1 , u2 ) = Tr(M0γ Σ0 ) + Tr(M̄0γ Σ̄0 ) + N0γ + N̄0γ
+
+(14)
+
+u1 u2
+
+This result can be proved using techniques in proofs of Theorem 3.2 in (Başar and Bernhard, 2008) or Proposition
+36 in (Carmona et al., 2021). We now use the Nash value of the game (14) to come up with a condition for the
+attenuation
+γ which solves the robust mean-field control problem (9). First we simplify expression in (9)
+P −1 level
+E Tt=0
+kωt k2 + kω̄t k2 = T Tr(Σ + Σ̄) using the i.i.d. stochastic nature of the noise. Combining this fact with
+(14), we arrive at the conclusion that (9) will be satisfied if and only if
+T
+X
+t=1
+
+Tr((Mtγ − γ 2 I)Σ + (M̄tγ − γ 2 I)Σ̄) + Tr(M0γ Σ0 ) + Tr(M̄0γ Σ̄0 ) ≤ 0
+
+(15)
+
+Notice that the conditions (12) and (15) are different, as the first one requires positive definiteness of matrices
+and the second one requires a scalar inequality. Now we solve the robust N agent control problem by providing
+sufficient conditions for a given attenuation level γ satisfying (4).
+Theorem 3 Let γ > 0. Assume, in addition to (12), that we also have
+T
+X
+t=1
+
+Tr((Mtγ − γ 2 I)Σ + (M̄tγ − γ 2 I)Σ̄) + Tr(M0γ Σ0 ) + Tr(M̄0γ Σ̄0 ) ≤ −
+
+CT
+,
+N
+
+(16)
+
+where C is a constant which depends only on the model parameters and Mtγ and M̄tγ (13). Then γ is a viable
+attenuation level for the Robust N agent control problem (4). Moreover the robust controller for each agent i is
+given by u1,i∗
+= −Kt1∗ (xit − x̄t ) − L1∗
+t x̄t .
+t
+The proof of this result can be found in the full version of this paper (Zaman et al., 2024). The above theorem
+states that, if for a given γ, conditions (12) and (16) are satisfied (given that Mtγ and M̄tγ are defined by (13)), then
+not only is γ a viable attenuation level for the original Robust multi-agent control problem (1)-(4), but the Nash
+equilibrium for the ZS-MFTG also yields the robust controller u1,i∗
+= −Kt1∗ (xit − x̄t ) − L1∗
+t x̄t for the original
+t
+finite-agent game. Condition (16) is strictly stronger than condition (15) but approaches (16) as N → ∞.
+
+4. Reinforcement Learning for Robust Mean-Field Control
+In this section we present the Receding-horizon policy Gradient Descent Ascent (RGDA) algorithm to compute
+the Nash equilibrium (Theorem 2) of the 2-player MFTG (7)-(8), which will also generate the robust controller for
+a fixed noise attenuation level γ. For this section we assume access to only the finite-horizon costs of the agents
+under a set of control policies, and not the state trajectories. Under this setting the model of the agents cannot be
+constructed hence our approach is truly model free (Malik et al., 2019). Due to the non-convex non-concave (also
+non-coercive (Zhang et al., 2020b)) nature of the cost function J γ in (11), instead we solve the receding-horizon
+problem, for each t = {T − 1, . . . , 1, 0} backwards-in-time. This entails solving 2 × T min-max problems, where
+each problem is convex-concave and aims at finding (Kt , Lt ) = (Kt1 , Kt2 ), (L1t , L2t ) at time step t, given the set
+
+of future controllers (controllers for times greater than t), (K̃t+1 , L̃t+1 ), . . . , (K̃T , L̃T ) are held constant. But
+first we must approximate the mean-field term using finitely many agents.
+Approximation of mean-field terms using M agents: Since simulating infinitely many agents is impractical, in
+this section we outline how to use a set of 2 ≤ M < ∞ agents to approximately simulate the mean-field in a
+MFTG. Each of the M agents has state xit at time t where i ∈ [M ]. The agents follow controllers linear in their
+z̃t , respectively, u1t = −Kt1 (xit − z̃t )−L1t z̃t , u2t = Kt2 (xit − z̃t )+L2t z̃t ,
+private state and empirical mean-field, xit and
+P
+M
+1
+i
+where the empirical mean-field is z̃t := M
+i=1 xt . Under these control laws, the dynamics of agent i ∈ [M ] are
+i
+xit+1 = (At − Bt Kt1 + Kt2 )(xit − z̃t ) + (Ãt − B̃t L1t + L2t )z̃t + ωt+1
++ ω̄t
+
+6
+
+ROBUST C OOPERATIVE MARL
+
+0 , where ω̃ 0
+and the dynamics of the empirical mean-field z̃t is z̃t+1 = (Ãt − B̃t L1t + L2t )z̃t + ω̃t+1
+t+1 = ω̄t +
+P
+M
+1
+i
+i=1 ωt+1 . The cost of each agent is
+M
+
+J˜i,γ (u1 , u2 ) =E
+
+−1
+h TX
+(xit − z̃t )⊤ [Qt + (Kt1 )⊤ Kt1 − γ 2 (Kt2 )⊤ Kt2 ](xit − z̃t ) + (xiT − z̃T )⊤ QT (xiT − z̃T )
+t=0
+
+i
++ z̃t⊤ [Q̄t + (L1t )⊤ L1t − γ 2 (L2t )⊤ L2t ]z̃t + z̃T⊤ Q̄T z̃T .
+
+i
+= (At − Bt Kt1 +
+Now, similarly to the previous section, we define yti = xit − z̃t . The dynamics of yti are yt+1
+j
+M −1 i
+1 P
+i
+i
+i
+2
+Kt )yt + ω̃t+1 , where ω̃t+1 = M ωt+1 − M j6=i ωt+1 . The cost can then be decomposed in a manner similar
+to (11):
+
+
+J˜i,γ (Kt1 , Kt2 ), (L1t , L2t ) = J˜yi,γ (Kt1 , Kt2 ) + J˜zi,γ (L1t , L2t ),
+−1
+i
+h TX
+i,γ
+1
+2
+˜
+Jy (Kt , Kt ) = E
+(yti )⊤ [Qt + (Kt1 )⊤ Kt1 − γ 2 (Kt2 )⊤ Kt2 ]yti + (yTi )⊤ QT yTi ,
+J˜zi,γ (L1t , L2t ) = E
+
+t=0
+−1
+h TX
+t=0
+
+(17)
+
+i
+z̃t⊤ [Q̄t + (L1t )⊤ L1t − γ 2 (L2t )⊤ L2t ]z̃t + z̃T⊤ Q̄T z̃T .
+
+Receding-horizon approach: Similar to the approach in Section 2, instead of finding the optimal, K ∗ and L∗
+which optimizes J˜ in (17), we solve the receding-horizon problem for each t = {T − 1, , . . . , 1, 0} backwards-in-
+time. This forms two decoupled min-max convex-concave problems of finding (Kt , Lt ) = (Kt1 , Kt2 ), (L1t , L2t )
+
+at each time step t, given the set of controllers for times greater than t, (K̃t+1 , L̃t+1 ), . . . , (K̃T , L̃T )
+min
+
+max J˜ti,γ (Kt , Lt ) =
+
+(Kt1 ,L1t ) (Kt2 ,L2t )
+
+h
+
+E yt⊤ (Qt + (Kt1 )⊤ Kt1 − γ 2 (Kt2 )⊤ Kt2 )yt +
+|
+
+T
+X
+
+k=t+1
+
+{z
+
+yk⊤ (Qt + (K̃k1 )⊤ K̃k1 − γ 2 (K̃k2 )⊤ K̃k2 )yk
+
+i,γ
+J˜y,t
+
+h
+
++ E zt⊤ (Q̄t + (L1t )⊤ L1t − γ 2 (L2t )⊤ L2t )zt +
+|
+
+T
+X
+
+k=t+1
+
+{z
+
+i,γ
+J˜z,t
+
+i
+1
+2
+2 ⊤ 2
+zk⊤ (Q̄t + L̃⊤
+1,k L̃k − γ (L̃k ) L̃k )zk ,
+
+i
+
+(18)
+
+}
+
+}
+
+for any i ∈ [M ] and yt ∼ N(0, Σy ), zt ∼ N(0, Σz ). This receding-horizon problem is solved using Recedinghorizon policy Gradient Descent Ascent (RGDA) (Algorithm 1) where at each time instant t the Nash control is
+approached using gradient descent ascent. We anticipate a small approximation error between the optimal controller
+and its computed approximation K̃t (respectively L̃t ). However, this error is shown to be well-behaved (Theorem
+5), as we progress backwards-in-time, given that the hyper-parameters of RGDA satisfy certain bounds.
+Receding-horizon policy Gradient Descent Ascent (RGDA) Algorithm: The RGDA Algorithm (Algorithm 1 is
+a bi-level optimization algorithm where the outer loop starts at time t = T − 1 and moves backwards-in-time, and
+the inner loop is a gradient descent (for control parameters (Kt1 , L1t )) ascent (for control policy (Kt2 , L2t )) update
+with learning rate ηk . The gradient descent ascent step entails computing an approximation of the exact gradients
+of cost J˜ti,γ with respect to the controls variables (Kt1 , L1t ), (Kt2 , L2t ). To obtain this approximation in a data driven
+˜ 1 J˜i,γ (Kt , Lt ), ∇
+˜ 2 J˜i,γ (Kt , Lt ) (Fazel et al., 2018; Malik et al.,
+manner we utilize a zero-order stochastic gradient ∇
+t
+t
+7
+
+Z AMAN L AURI ÈRE KOPPEL BAŞAR
+
+2019) which requires cost computation under a given set of controllers (18) as shown below.
+!  
+M
+j,1
+X
+n
+K
+Kt1
+i,γ
+i,γ
+j,1
+j,1
+2
+2
+t
+˜ 1 J˜ (Kt , Lt ) =
+∇
+J˜t ((Kt , Kt ), (Lt , Lt ))ej ,
+=
++ ej , ej ∼ Sn−1 (r)
+j,1
+1
+t
+2
+L
+Mr
+L
+t
+t
+j=1
+!
+
+
+M
+j,2
+2
+X
+n
+K
+K
+i,γ
+j,2
+j,2
+i,γ
+1
+1
+t
+t
+˜ 2 J˜ (Kt , Lt ) =
+J˜t ((Kt , Kt ), (Lt , Lt ))ej ,
+=
++ ej , ej ∼ Sn−1 (r).
+∇
+2
+t
+L
+M r2
+Lj,2
+t
+t
+j=1
+
+Stochastic gradient computation entails computing the cost of Nb different perturbed controllers, with a perturbation magnitude if r also called the smoothing radius. This stochastic gradient provides us with a biased approximation of the exact gradient whose bias and variance can be controlled by tuning the values of Nb and r. Finally to
+ensure stability of the learning algorithm, we use projection ProjD onto a D-ball such that the norm of the matrices
+is bounded by D, k(Kt , Lt )k2 ≤ D. The radius of the ball D is chosen such that the Nash equilibrium controllers
+lie within this ball.
+Algorithm 1 RGDA Algorithm for 2-player MFTG
+1: for t = T − 1, . . . , 1, 0, do
+
+Initialize Kt = (Kt1 , Kt2 ) = 0, Lt = (L1t , L2t ) = 0
+3:
+for k = 0, . . . , K do  
+  1
+
+Kt1
+Kt
+i,γ
+˜ 1 J˜ (Kt , Lt ) ,
+← ProjD
+− ηk ∇
+4:
+Gradient Descent
+t
+L1
+L1
+ 2t
+  2t
+
+Kt
+Kt
+i,γ
+˜ 2 J˜ (Kt , Lt ) ,
+← ProjD
++ ηk ∇
+5:
+Gradient Ascent
+t
+L2t
+L2t
+6:
+end for
+7: end for
+2:
+
+RGDA algorithm analysis: In this section we start by showing linear convergence of the inner loop gradient
+descent ascent (Theorem 4), which is made possible by the convex-concave property of the cost function under
+the receding horizon approach (18). Then we show that if the error accumulated in each inner loop computation is
+small enough, the total accumulated error is well behaved (Theorem 5).
+We first define some relevant notation. We define the joint controllers for each timestep t as K̄t = [(Kt1 )⊤ , (Kt2 )⊤ ]⊤
+and L̄t = [(L1t )⊤ , (L2t )⊤ ]⊤ , for the sake of conciseness. For each timestep t ∈ {T − 1, . . . , 1, 0} let us also de˜ ∗ = (K̃ 1∗ , K̃ 2∗ ), L̄
+˜ ∗ = (L̃1∗ , L̃2∗ ), as the set of policies which exactly solve
+fine the target joint controllers K̄
+t
+t
+t
+t
+t
+t
+˜ ∗ are unique (due to
+˜ ∗ , L̄
+the receding-horizon min-max problem (18). Notice that the set of target controllers K̄
+t
+t
+convex-concave nature of (18)) but do depend on the set of future joint controllers (K̄s , L̄s )t<s<T . On the other
+2∗
+hand, the Nash joint controllers are denoted by K̄t∗ = (Kt1∗ , Kt2∗ ) and L̄∗t = (L1∗
+t , Lt ). Furthermore, the target
+˜ ∗ ) = (K̄ ∗ , L̄∗ ) only if the future joint controllers are
+˜ ∗ , L̄
+joint controllers are equal to the Nash joint controllers (K̄
+t
+t
+t
+t
+∗
+∗
+also Nash (K̄s , L̄s )t<s<T = (K̄s , L̄s )t<s<T .
+Theorem 4 If the learning rate ηk is smaller than a certain function of model parameters, the number of inner
+loop iterations K = Ω(log(1/ǫ)), the mini-batch size Nb = Ω(1/ǫ) and the smoothing radius r = O(ǫ), then at
+˜ ∗ k2 ≤ ǫ.
+˜ ∗ k2 ≤ ǫ and kL̄ − L̄
+each timestep t ∈ {T − 1, . . . , 1, 0} the optimality gaps are kK̄t − K̄
+t
+t 2
+t 2
+Closed form expressions of the bounds can be found in the proof given in the full version of the paper (Zaman et al.,
+2024). The linear rate of convergence is made possible by building upon the convergence analysis of descent
+ascent in (Fallah et al., 2020) due to the convex-concave nature of the cost function (18). The proof generalizes
+the techniques used in (Fallah et al., 2020) to stochastic unbiased gradients by utilizing the fact that the bias in
+˜ j J˜i,γ for j ∈ {1, 2} can be reduced by reducing the smoothing radius r. This in turn causes
+stochastic gradients ∇
+t
+an increase in the variance of the stochastic gradient which is controlled by increasing the mini-batch size Nb .
+Now we present the non-asymptotic convergence guarantee of the paper stating that even though each iteration
+of the outer loop (as timestep t moves backwards-in-time) accumulates error, if the error in each outer loop iteration
+8
+
+ROBUST C OOPERATIVE MARL
+
+(a)
+
+(b)
+
+Figure 1: Performance of RGDA Algorithm
+
+is small enough, the total accumulated error will also be small enough. The proof can be found in the complete
+version of the paper (Zaman et al., 2024).
+Theorem 5 If all conditions in Theorem 4 are satisfied, then maxj∈{1,2} kKtj −Ktj∗ k = O(ǫ) and maxj∈{1,2} kLjt −
+Lj∗
+t k = O(ǫ) for a small ǫ > 0 and t ∈ {T − 1, . . . , 0}.
+The Nash gaps at each time t, kKtj −Ktj∗k and kLjt −Lj∗
+t k for j ∈ {1, 2} are due to a combination of the optimality
+˜
+˜
+2
+∗
+2
+∗
+gap in the inner loop kK̄t − K̄t k2 , kL̄t − L̄t k2 and the accumulated Nash gap in the future joint controllers
+kKsj − Ksj∗ k and kLjs − Lj∗
+s k for j ∈ {1, 2} and t < s < T . The proof of Theorem 5 characterizes these two
+quantities and then shows that if the optimality gap at each timestep t ∈ {0, . . . , T − 1} never exceeds some small
+ǫ, then the Nash gap at any time t never exceeds ǫ scaled by a constant.
+
+5. Numerical Analysis
+First, we simulate the RGDA algorithm for time horizon T = 3, number of agents M = 1000 and the dimension
+of the state and action spaces m = p = 2. For each timestep t ∈ {2, 1, 0}, the number of inner-loop iterations
+K = 1000, the mini-batch size Nb = 5 × 104 and the learning rate ηk = 0.001. In Figure 1(a) we compare the
+RGDA algorithm (Algorithm 1) with its exact version (E-RGDA) which has access to the exact policy gradients
+∇1 J˜ti,γ = δJ˜ti,γ /δ(Kt1 , L1t ) and ∇2 J˜ti,γ = δJ˜ti,γ /δ(Kt2 , L2t ) at each iteration k ∈ [K]. The error plots in Figures
+1(a) and 1(b) show the mean (solid lines) and standard deviation (shaded regions) of error, which is the norm
+of difference between iterates and Nash controllers. In Figure 1(a) the blue plot shows error convergence of the
+E-RGDA algorithm, which computes the Nash controllers for the last timestep t = 2 (using gradient descent
+ascent with exact gradients) and moves backwards in time. Since at each timestep it has good convergence to
+Nash policies, the convexity-concavity of cost function at the next timestep is ensured, which results in linear
+convergence. The red plot in Figure 1(a) shows the error convergence in the RGDA algorithm which uses stochastic
+gradients, which results in a noisy but downward trend in error. Notice that RGDA imitates E-RGDA in a noisy
+fashion and at each timestep the iterates only approximate the Nash controllers. This approximation can be further
+sharpened by increasing the mini-batch size Nb and decreasing smoothing radius r. Figure 1(a) shows the error
+convergence of E-RGDA for a ZS-MFTG with T = 15 and state and action space dimensions m = p = 2.
+Figure 2 compares the E-RGDA algorithm with the exact 2-player zero-sum version of the MADPG algorithm
+(referred to as E-DDPG) (Lowe et al., 2017) which serves as a baseline as it does not use the receding-horizon
+approach. The number of inner-loop iterations for E-RGDA is K = 70 and the learning rate for both algorithms is
+η = 0.025. The four figures represent the comparisons for T = {2, 3, 4, 5} and the y-axis is scaled in a logarithmic
+manner to best show the behavior of the algorithms. For all T > 1 the E-DDPG first diverges until it reaches the
+projection threshold then eventually starts to converge. This is due to the fact that errors in later timesteps cause
+the convexity-concavity condition to fail resulting in divergence in earlier timesteps. Over time the error decreases
+9
+
+Z AMAN L AURI ÈRE KOPPEL BAŞAR
+
+Figure 2: Comparison between E-RGDA and E-DDPG. The time-horizon is increasing from left to right with T = 2 (leftmost), T = 3 (center left), T = 4 (center right) and T = 5 (right-most)
+
+in the later timesteps, which causes the error in earlier timesteps to gradually decrease as well. But as seen from
+Figure 2, the convergence for E-DDPG takes significantly longer as the time-horizon increases.
+
+6. Conclusion
+In this paper, we solve an MARL problem with the objective of designing robust controllers in the presence of
+modeled and un-modeled uncertainties. We introduce the concept of Robust Mean Field Control (RMFC) problem
+as the limiting problem when the number of agents grows to infinity. We then establish a connection with Zero-Sum
+Mean-Field Type Games (ZS-MFTG). We resort to the Linear-Quadratic (LQ) structure which, combined with the
+mean-field approximation, helps to have a more tractable model and to help resolve the analytical difficulty induced
+by the distributed information structure. This helps us obtain sufficient conditions for robustness of the problem as
+well as characterization of the robust control policy. We design and provide non-asymptotic analysis of a recedinghorizon based RL algorithm which renders the non-coercive cost as convex-concave. Through numerical analysis
+the receding-horizon approach is shown to ameliorate the overshooting problem observed in the performance of
+the vanilla algorithm. In future work we would like to explore this type of robust mean-field problems beyond the
+LQ setting and to develop RL algorithms which go beyond the gradient descent-ascent updates used in this paper.
+Furthermore, our work is a first step in the direction of using mean-field approximations to study robust MARL
+problems which occur in many real-world scenarios, but the study of concrete examples is left for future work.
+
+Acknowledgments
+The authors would like to thank Xiangyuan Zhang (University of Illinois Urbana-Champaign) for useful discussions
+regarding the Receding-horizon Policy Gradient algorithm.
+
+Disclaimer:
+This paper was prepared for informational purposes in part by the Artificial Intelligence Research group of JP
+Morgan Chase & Co and its affiliates (“JP Morgan”), and is not a product of the Research Department of JP Morgan.
+JP Morgan makes no representation and warranty whatsoever and disclaims all liability, for the completeness,
+accuracy or reliability of the information contained herein. This document is not intended as investment research
+or investment advice, or a recommendation, offer or solicitation for the purchase or sale of any security, financial
+instrument, financial product or service, or to be used in any way for evaluating the merits of participating in any
+transaction, and shall not constitute a solicitation under any jurisdiction or to any person, if such solicitation under
+such jurisdiction or to such person would be unlawful.
+10
+
+ROBUST C OOPERATIVE MARL
+
+References
+Berkay Anahtarci, Can Deha Kariksiz, and Naci Saldi. Q-learning in regularized mean-field games. Dynamic
+Games and Applications, 13(1):89–117, 2023.
+Andrea Angiuli, Jean-Pierre Fouque, and Mathieu Laurière. Unified reinforcement Q-learning for mean field game
+and control problems. Mathematics of Control, Signals, and Systems, pages 1–55, 2022.
+Michael Athans, David Castanon, K-P Dunn, C Greene, Wing Lee, N Sandell, and A Willsky. The stochastic
+control of the f-8c aircraft using a multiple model adaptive control (mmac) method–part i: Equilibrium flight.
+IEEE Transactions on Automatic Control, 22(5):768–780, 1977.
+Tamer Başar. A dynamic games approach to controller design: Disturbance rejection in discrete time. In Proceedings of the 28th IEEE Conference on Decision and Control,, pages 407–414. IEEE, 1989.
+Tamer Başar and Pierre Bernhard. H-infinity optimal control and related minimax design problems: a dynamic
+game approach. Springer Science & Business Media, 2008.
+Tamer Başar and Geert Jan Olsder. Dynamic noncooperative game theory. SIAM, 1998.
+Alain Bensoussan, Jens Frehse, Phillip Yam, et al. Mean field games and mean field type control theory, volume
+101. Springer, 2013.
+Pierre Cardaliaguet and Charles-Albert Lehalle. Mean field game of controls and an application to trade crowding.
+Mathematics and Financial Economics, 12(3):335–363, 2018.
+Rene Carmona and François Delarue. Probabilistic Theory of Mean Field Games with Applications I. Springer,
+Cham, 2018.
+René Carmona, Mathieu Laurière, and Zongjun Tan. Linear-quadratic mean-field reinforcement learning: convergence of policy gradient methods. arXiv preprint arXiv:1910.04295, 2019a.
+René Carmona, Mathieu Laurière, and Zongjun Tan. Model-free mean-field reinforcement learning: mean-field
+MDP and mean-field Q-learning. arXiv preprint arXiv:1910.12802, 2019b.
+René Carmona, Kenza Hamidouche, Mathieu Laurière, and Zongjun Tan. Policy optimization for linear-quadratic
+zero-sum mean-field type games. In 2020 59th IEEE Conference on Decision and Control (CDC), pages 1038–
+1043. IEEE, 2020.
+René Carmona, Kenza Hamidouche, Mathieu Laurière, and Zongjun Tan. Linear-quadratic zero-sum mean-field
+type games: Optimality conditions and policy optimization. Journal of Dynamics & Games, 8(4), 2021.
+Salah Eddine Choutri, Boualem Djehiche, and Hamidou Tembine. Optimal control and zero-sum games for markov
+chains of mean-field type. Mathematical Control and Related Fields, 9(3):571–605, 2019.
+Andrea Cosso and Huyên Pham. Zero-sum stochastic differential games of generalized mckean–vlasov type. Journal de Mathématiques Pures et Appliquées, 129:180–212, 2019.
+Kai Cui and Heinz Koeppl. Approximately solving mean field games via entropy-regularized deep reinforcement
+learning. In International Conference on Artificial Intelligence and Statistics, pages 1909–1917. PMLR, 2021a.
+Kai Cui and Heinz Koeppl. Learning graphon mean field games and approximate Nash equilibria. 2021b.
+Romuald Elie, Julien Perolat, Mathieu Laurière, Matthieu Geist, and Olivier Pietquin. On the convergence of model
+free learning in mean field games. 34(05):7143–7150, 2020.
+11
+
+Z AMAN L AURI ÈRE KOPPEL BAŞAR
+
+Christian Fabian, Kai Cui, and Heinz Koeppl. Learning sparse graphon mean field games. In International Conference on Artificial Intelligence and Statistics, pages 4486–4514. PMLR, 2023.
+Alireza Fallah, Asuman Ozdaglar, and Sarath Pattathil. An optimal multistage stochastic gradient method for
+minimax problems. In 2020 59th IEEE Conference on Decision and Control (CDC), pages 3573–3579. IEEE,
+2020.
+Maryam Fazel, Rong Ge, Sham M Kakade, and Mehran Mesbahi. Global convergence of policy gradient methods
+for the linear quadratic regulator. In International Conference on Machine Learning, pages 1467–1476, 2018.
+Haotian Gu, Xin Guo, Xiaoli Wei, and Renyuan Xu. Mean-field controls with Q-learning for cooperative MARL:
+convergence and complexity analysis. SIAM Journal on Mathematics of Data Science, 3(4):1168–1196, 2021.
+Yue Guan, Mohammad Afshari, and Panagiotis Tsiotras. Zero-sum games between mean-field teams: Reachabilitybased analysis under mean-field sharing. In Proceedings of the AAAI Conference on Artificial Intelligence,
+volume 38, pages 9731–9739, 2024.
+Xin Guo, Anran Hu, Renyuan Xu, and Junzi Zhang. Learning mean-field games. In Advances in Neural Information
+Processing Systems, 2019.
+Charles Harvey and Gunter Stein. Quadratic weights for asymptotic regulator properties. IEEE Transactions on
+Automatic Control, 23(3):378–387, 1978.
+Sihong He, Songyang Han, Sanbao Su, Shuo Han, Shaofeng Zou, and Fei Miao. Robust multi-agent reinforcement
+learning with state uncertainty. Transactions on Machine Learning Research, 2023.
+Minyi Huang, Peter E Caines, and Roland P Malhamé. Individual and mass behaviour in large population stochastic
+wireless power control problems: Centralized and Nash equilibrium solutions. In IEEE International Conference
+on Decision and Control, volume 1, pages 98–103. IEEE, 2003.
+Minyi Huang, Roland P Malhamé, and Peter E Caines. Large population stochastic dynamic games: Closedloop Mckean-Vlasov systems and the Nash certainty equivalence principle. Communications in Information &
+Systems, 6(3):221–252, 2006.
+Jens Kober, J Andrew Bagnell, and Jan Peters. Reinforcement learning in robotics: A survey. The International
+Journal of Robotics Research, 32(11):1238–1274, 2013.
+Jernej Kos and Dawn Song. Delving into adversarial attacks on deep policies. arXiv preprint arXiv:1705.06452,
+2017.
+Jean-Michel Lasry and Pierre-Louis Lions.
+Mathématique, 343(9):619–625, 2006.
+
+Jeux à champ moyen. i–le cas stationnaire.
+
+Comptes Rendus
+
+Mathieu Laurière, Sarah Perrin, Sertan Girgin, Paul Muller, Ayush Jain, Theophile Cabannes, Georgios Piliouras,
+Julien Pérolat, Romuald Elie, Olivier Pietquin, et al. Scalable deep reinforcement learning algorithms for mean
+field games. In International Conference on Machine Learning, pages 12078–12095. PMLR, 2022a.
+Mathieu Laurière, Sarah Perrin, Julien Pérolat, Sertan Girgin, Paul Muller, Romuald Élie, Matthieu Geist, and
+Olivier Pietquin. Learning mean field games: A survey. arXiv preprint arXiv:2205.12944, 2022b.
+Shihui Li, Yi Wu, Xinyue Cui, Honghua Dong, Fei Fang, and Stuart Russell. Robust multi-agent reinforcement
+learning via minimax deep deterministic policy gradient. In Proceedings of the AAAI conference on artificial
+intelligence, volume 33, pages 4213–4220, 2019.
+12
+
+ROBUST C OOPERATIVE MARL
+
+Yingying Li, Yujie Tang, Runyu Zhang, and Na Li. Distributed reinforcement learning for decentralized linear
+quadratic control: A derivative-free policy optimization approach. IEEE Transactions on Automatic Control, 67
+(12):6429–6444, 2021.
+Ryan Lowe, Yi I Wu, Aviv Tamar, Jean Harb, OpenAI Pieter Abbeel, and Igor Mordatch. Multi-agent actor-critic
+for mixed cooperative-competitive environments. Advances in neural information processing systems, 30, 2017.
+Dhruv Malik, Ashwin Pananjady, Kush Bhatia, Koulik Khamaru, Peter Bartlett, and Martin Wainwright.
+Derivative-free methods for policy optimization: Guarantees for linear quadratic systems. In The 22nd International Conference on Artificial Intelligence and Statistics, pages 2916–2925. PMLR, 2019.
+Washim Uddin Mondal, Mridul Agarwal, Vaneet Aggarwal, and Satish V Ukkusuri. On the approximation of cooperative heterogeneous multi-agent reinforcement learning (marl) using mean field control (mfc). The Journal
+of Machine Learning Research, 23(1):5614–5659, 2022.
+Jun Morimoto and Kenji Doya. Robust reinforcement learning. Neural computation, 17(2):335–359, 2005.
+Julien Pérolat, Sarah Perrin, Romuald Elie, Mathieu Laurière, Georgios Piliouras, Matthieu Geist, Karl Tuyls, and
+Olivier Pietquin. Scaling mean field games by online mirror descent. In Proceedings of the 21st International
+Conference on Autonomous Agents and Multiagent Systems, pages 1028–1037, 2022.
+Sarah Perrin, Julien Pérolat, Mathieu Laurière, Matthieu Geist, Romuald Elie, and Olivier Pietquin. Fictitious play
+for mean field games: Continuous time analysis and applications. Advances in Neural Information Processing
+Systems, 33:13199–13213, 2020.
+Sarah Perrin, Mathieu Laurière, Julien Pérolat, Matthieu Geist, Romuald Élie, and Olivier Pietquin. Mean field
+games flock! The reinforcement learning way. In proc. of IJCAI, 2021.
+Benjamin Recht. A tour of reinforcement learning: The view from continuous control. Annual Review of Control,
+Robotics, and Autonomous Systems, 2:253–279, 2019.
+Joshua Riley, Radu Calinescu, Colin Paterson, Daniel Kudenko, and Alec Banks. Utilising assured multi-agent
+reinforcement learning within safety-critical scenarios. Procedia Computer Science, 192:1061–1070, 2021.
+Ahmad EL Sallab, Mohammed Abdou, Etienne Perot, and Senthil Yogamani. Deep reinforcement learning framework for autonomous driving. arXiv preprint arXiv:1704.02532, 2017.
+Thomas J Sargent and Lars Ljungqvist. Recursive macroeconomic theory. Massachusetss Institute of Technology,
+2000.
+Max Simchowitz, Karan Singh, and Elad Hazan. Improper learning for non-stochastic control. In Conference on
+Learning Theory, pages 3320–3436. PMLR, 2020.
+Chuangchuang Sun, Dong-Ki Kim, and Jonathan P How. Romax: Certifiably robust deep multiagent reinforcement
+learning via convex relaxation. In 2022 International Conference on Robotics and Automation (ICRA), pages
+5503–5510. IEEE, 2022.
+Hamidou Tembine. Mean-field-type games. AIMS Math, 2(4):706–735, 2017.
+Qiaomin Xie, Zhuoran Yang, Zhaoran Wang, and Andreea Minca. Learning while playing in mean-field games:
+Convergence and optimality. In International Conference on Machine Learning, pages 11436–11447. PMLR,
+2021.
+Batuhan Yardim, Semih Cayci, Matthieu Geist, and Niao He. Policy mirror ascent for efficient and independent
+learning in mean field games. In International Conference on Machine Learning, pages 39722–39754. PMLR,
+2023.
+13
+
+Z AMAN L AURI ÈRE KOPPEL BAŞAR
+
+Bora Yongacoglu, Gürdal Arslan, and Serdar Yüksel. Independent learning and subjectivity in mean-field games.
+In 2022 IEEE 61st Conference on Decision and Control (CDC), pages 2845–2850. IEEE, 2022.
+Muhammad Aneeq uz Zaman, Kaiqing Zhang, Erik Miehling, and Tamer Bas, ar. Reinforcement learning in nonstationary discrete-time linear-quadratic mean-field games. In 2020 59th IEEE Conference on Decision and
+Control (CDC), pages 2278–2284. IEEE, 2020.
+Muhammad Aneeq Uz Zaman, Sujay Bhatt, and Tamer Başar. Adversarial linear-quadratic mean-field games over
+multigraphs. In 2021 60th IEEE Conference on Decision and Control (CDC), pages 209–214. IEEE, 2021.
+Muhammad Aneeq uz Zaman, Alec Koppel, Sujay Bhatt, and Tamer Başar. Oracle-free reinforcement learning
+in mean-field games along a single sample path. In International Conference on Artificial Intelligence and
+Statistics, pages 10178–10206. PMLR, 2023a.
+Muhammad Aneeq Uz Zaman, Erik Miehling, and Tamer Başar. Reinforcement learning for non-stationary
+discrete-time linear–quadratic mean-field games in multiple populations. Dynamic Games and Applications,
+13(1):118–164, 2023b.
+Muhammad Aneeq uz Zaman, Mathieu Laurière, Alec Koppel, and Tamer Başar. Robust cooperative multi-agent
+reinforcement learning: A mean-field type game perspective. arXiv preprint arXiv:2406.13992, 2024.
+Huan Zhang, Hongge Chen, Chaowei Xiao, Bo Li, Mingyan Liu, Duane Boning, and Cho-Jui Hsieh. Robust deep
+reinforcement learning against adversarial perturbations on state observations. Advances in Neural Information
+Processing Systems, 33:21024–21037, 2020a.
+Kaiqing Zhang, Tao Sun, Yunzhe Tao, Sahika Genc, Sunil Mallya, and Tamer Başar. Robust multi-agent reinforcement learning with model uncertainty. Advances in neural information processing systems, 33:10571–10583,
+2020b.
+Kaiqing Zhang, Bin Hu, and Tamer Başar. Policy optimization for H 2 linear control with H ∞ robustness guarantee: Implicit regularization and global convergence. SIAM Journal on Control and Optimization, 59(6):4081–
+4109, 2021a.
+Kaiqing Zhang, Zhuoran Yang, and Tamer Başar. Multi-agent reinforcement learning: A selective overview of
+theories and algorithms. Handbook of Reinforcement Learning and Control, pages 321–384, 2021b.
+Kaiqing Zhang, Xiangyuan Zhang, Bin Hu, and Tamer Başar. Derivative-free policy optimization for linear risksensitive and robust control design: Implicit regularization and sample complexity. Advances in Neural Information Processing Systems, 34:2949–2964, 2021c.
+Xiangyuan Zhang and Tamer Başar. Revisiting LQR control from the perspective of receding-horizon policy
+gradient. IEEE Control Systems Letters, 2023.
+Xiangyuan Zhang, Bin Hu, and Tamer Başar. Learning the kalman filter with fine-grained sample complexity.
+arXiv preprint arXiv:2301.12624, 2023.
+Daniel M Ziegler, Nisan Stiennon, Jeffrey Wu, Tom B Brown, Alec Radford, Dario Amodei, Paul Christiano, and
+Geoffrey Irving. Fine-tuning language models from human preferences. arXiv preprint arXiv:1909.08593, 2019.
+
+14
+
+ROBUST C OOPERATIVE MARL
+
+Supplementary Materials
+Proof of Theorem 3
+Proof: Central to this analysis is the quantification of the difference between the finite and infinite population
+costs for a given set of control policies. First we express the state and mean-field processes in terms of the noise
+processes, for the finite and infinite population settings. This then allows us to write the costs (in both settings) as
+quadratic functions of the noise process, which simplifies quantification of the difference between these two costs.
+Let us first consider the finite agent setting with M number of agents. Consider the dynamics of state xj of
+agent j ∈ [M ] under the NE of the MFTG (Theorem 2)
+1∗
+2∗ j∗,M
+1∗
+1∗
+2∗
+2∗ M ∗
+xj∗,M
++ (Āt − Bt (L1∗
++ ωtj + ω̄t
+t − Kt ) − B̄t Lt + Lt − Kt )x̄t
+t+1 = (At − Bt Kt + Kt )xt
+1
+where the superscript M denotes the dynamics in the finite population game (1) and x̄M ∗ = M
+the empirical mean-field. We can also write the dynamics of the empirical mean-field as
+
+P
+
+(19)
+
+j∗,M
+is
+j∈[M ] xt
+
+ M∗
+1 X j
+∗
+1∗
+2∗
+ωt + ω̄t .
+x̄t +
+x̄M
+t+1 = At + Āt − Bt Lt + Lt
+M
+{z
+}
+|
+j∈[M
+]
+L̃∗t
+|
+{z
+}
+
+(20)
+
+ω̄tM
+
+∗ = ω̄ M . Using (20) we get the
+= ω0j + ω̄0 which also implies that x̄M
+For simplicity we assume that xj∗,M
+0
+0
+0
+recursive definition of x̄M
+t as
+∗
+x̄M
+=
+t
+
+t
+X
+s=0
+
+L̃∗[t−1,s] ω̄sN , where L̃∗[s,t] := L̃∗s L̃∗s−1 . . . L̃∗t , if s ≥ t. and L̃∗[s,t] = I otherwise.
+
+∗ can be characterized as a linear function of the noise process
+Hence x̄M
+t
+
+
+ M
+I
+0
+0
+...
+ω̄0
+L̃∗
+
+M
+I
+0
+.
+.
+.
+
+ [0,0]
+
+ω̄1 
+
+
+
+∗
+∗
+
+∗
+L̃
+L̃[1,1]
+I
+. . . and ω̄ M = ω̄2M 
+x̄M
+= Ψ̄∗ ω̄ M t , where Ψ̄∗ = 
+
+t
+ ∗[1,0]
+
+ .. 
+∗
+∗
+L̃
+
+L̃
+L̃
+.
+.
+.
+
+[2,1]
+[2,2]
+. 
+ [2,0]
+
+..
+..
+..
+..
+ω̄TM
+.
+.
+.
+.
+
+where (M )t denotes the tth block of matrix M and the covariance matrix of ω̄ M is E[ω̄ M (ω̄ M )⊤ ] = diag((Σ/M +
+∗
+Σ0 )0≤t≤T ). Similarly we characterize the deviation process xj∗,M
+− x̄M
+t , using (19) and (20)
+t
+j∗,M
+j∗,M
+∗
+∗
+1∗
+2∗
+− x̄M
+xt+1
+− x̄M
+t )+
+t+1 = (At − Bt Kt + Kt )(xt
+|
+{z
+}
+L∗t
+
+Hence
+∗
+xtj∗,M − x̄M
+=
+t
+
+t
+X
+
+1 X k
+M −1 j
+ωt .
+ωt +
+M
+M
+k6=j
+|
+{z
+}
+ω̄tj,M
+
+L∗[t−1,s] ω̄sj,M
+
+s=0
+
+
+
+ P
+k
+ω0j
+k6=j ω0
+
+1 
+M −1 . 
+
+..
+= Ψ∗ ω̄ j,M t , where ω̄ j,M =
+
+ ..  +
+
+.
+M
+M P
+j
+k
+ωT −1
+k6=j ωT −1
+
+
+15
+
+Z AMAN L AURI ÈRE KOPPEL BAŞAR
+
+where the covariance matrix of ω̄ j,M is E[ω̄ j,M (ω̄ j,M )⊤ ] = diag(((M − 1)/M × Σ)0≤t≤T ). Similarly the infinite
+agent limit of this process is x∗t − x̄∗t = (Ψ∗ ω)t where ω = (ω0⊤ , . . . , ωT⊤−1 )⊤ whose covariance is E[ωω ⊤ ] =
+diag((Σ)0≤t≤T ). Now we compute the finite agent cost in terms of the noise processes,
+γ
+JM
+(u∗ ) = E
+
+
+
+T
+1 X X j∗,M
+1,j∗,M
+M∗ 2
+∗ 2
+− ūt1,M ∗ k2 + kūt1,M ∗ k2
+kxt
+− x̄M
+t kQt + kx̄t kQ̄t + kut
+M
+j∈[M ] t=0
+
+
+
+− γ (kut2,j∗,M − ūt2,M ∗ k2 + kūt2,M ∗ k2 )
+2
+
+=E
+
+
+
+=E
+
+
+
+
+T
+1 X X j∗,M
+∗ 2
+M∗ 2
+kxt
+− x̄M
+k
++
+kx̄
+k
+2,∗ ⊤ 2,∗
+t
+⊤ 1,∗
+2
+t
+Qt +(Kt1,∗ )⊤ Kt1,∗ −γ 2 (Kt2,∗ )⊤ Kt2,∗
+Q̄t +(L1,∗
+t ) Lt −γ (Lt ) Lt
+M
+t=0
+j∈[M ]
+
+
+1 X
+(Ψ∗ ω̄ j,M )⊤ Q + (K ∗ )⊤ RK ∗ Ψ∗ ω̄ j,M
+M
+j∈[M ]
+
+∗ M ⊤
+
+∗ ⊤
+
++ (Ψ̄ ω̄ )
+
+∗
+
+
+
+∗ M
+
+
+
+Q̄ + (K̄ ) R̄K̄ Ψ̄ ω̄
+
+
+
+= Tr (Ψ∗ )⊤ Q + (K ∗ )⊤ RK ∗ Ψ∗ E ω̄ j,M (ω̄ j,M )⊤
+
+
+
++ Tr (Ψ̄∗ )⊤ Q̄ + (K̄ ∗ )⊤ R̄K̄ ∗ Ψ̄∗ E ω̄ M (ω̄ M )⊤
+
+where Q = diag((Qt )0≤T ), R = diag((diag(I, −γ 2 I))0≤T ) and K ∗ = diag((Kt1,∗ , Kt2,∗ )0≤T ) with KT1,∗ = 0
+and KT2,∗ = 0. Similarly Q̄ = diag((Q̄t )0≤T ), R̄ = diag((diag(I, −γ 2 I))0≤T ) and K̄ ∗ = diag((Lt1,∗ , Lt2,∗ )0≤T )
+2,∗
+with L1,∗
+T = 0 and LT = 0. Using a similar technique we can compute the infinite agent cost:
+X
+
+T
+∗ 2
+∗
+∗ 2
+∗ 2
+∗
+∗ 2
+kxt − x̄t kQt + kx̄t kQ̄t + kut − ūt k + kūt k
+J (u ) = E
+γ
+
+∗
+
+t=0
+
+
+
+
+= Tr (Ψ∗ )⊤ Q + (K ∗ )⊤ RK ∗ Ψ∗ E ωω ⊤
+
+
+
+
++ Tr (Ψ̄∗ )⊤ Q̄ + (K̄ ∗ )⊤ R̄K̄ ∗ Ψ̄∗ E ω̄ 0 (ω̄ 0 )⊤ .
+
+Now evaluating the difference between the finite and infinite population costs:
+γ
+(u∗ ) − J γ (u∗ )|
+|JM
+
+
+
+
+
+= Tr (Ψ∗ )⊤ Q + (K ∗ )⊤ RK ∗ Ψ∗ E ω̄ j,M (ω̄ j,M )⊤ − E ωω ⊤
+
+
+
+
+
++ Tr (Ψ̄∗ )⊤ Q̄ + (K̄ ∗ )⊤ R̄K̄ ∗ Ψ̄∗ E ω̄ M (ω̄ M )⊤ − E ω̄ 0 (ω̄ 0 )⊤
+
+
+
+
+≤ k(Ψ∗ )⊤ Q + (K ∗ )⊤ RK ∗ Ψ∗ kF + k(Ψ̄∗ )⊤ Q̄ + (K̄ ∗ )⊤ R̄K̄ ∗ Ψ̄∗ kF
+{z
+}
+|
+C1∗
+
+≤ C1∗
+
+
+Tr diag((Σ/M )0≤t≤T )
+
+σT
+M
+
+(21)
+
+where σ = kΣkF . Now let us consider the same dynamics but under-Nash controls. The difference between finite
+and infinite population costs under these controls are
+ σT
+
+
+
+γ
+|JM
+(u) − J γ (u)| ≤ k(Ψ)⊤ Q + (K)⊤ RK ΨkF + k(Ψ̄)⊤ Q̄ + (K̄)⊤ R̄K̄ Ψ̄kF
+{z
+}M
+|
+C1
+
+16
+
+(22)
+
+ROBUST C OOPERATIVE MARL
+
+Using this bound along we can deduce that if,
+T −1
+
+inf sup J γ (u1 , u2 ) + C1
+u1 u2
+
+X
+σT
+kωt k2 + kω̄t k2 ≤ 0,
+− γ 2E
+M
+
+(23)
+
+t=0
+
+then the robustness condition (6) will be satisfied. Using results form Theorem 2 we can rewrite (23) into the
+following condition
+T
+X
+t=1
+
+Tr((Mtγ − γ 2 I)Σ + (M̄tγ − γ 2 I)Σ̄) + Tr(M0γ Σ0 ) + Tr(M̄0γ Σ̄0 ) ≤ −
+
+CT
+N
+
+which concludes the proof. 
+
+Proof of Theorem 4
+2 ⊤ ⊤
+Proof: We start by analyzing the problem associated with the process y i and the controller K̄t = [(Kt1 )⊤ , (K
+t ) ] .
+Using the Lyapunov equation the cost for the given set of future controllers (K̃t+1 , L̃t+1 ), . . . , (K̃T , L̃T ) can be
+defined in terms of symmetric matrix M̃t+1 and covariance matrix Σ̃yt ,
+
+
+i,γ
+(K̄t ) = Ey y ⊤ (Qt + K̄t⊤ R̄K̄t )y + y ⊤ (A − B̄t K̄t )⊤ M̃t+1 (A − B̄t K̄t )y + Σ̃yt ,
+min max J˜y,t
+Kt1
+
+Kt2
+
+2
+where B̄t = [Bt , I] and R̄ = diag(I,
+M̃t+1 and Σ̃yt are fixed and can be computed offline
+ −γ I). iThei matrices
+⊤
+using (K̃t+1 , L̃t+1 ) , . . . , (K̃T , L̃T ) and E[ω̃s (ω̃s ) ].
+
+M̃s = Qt + (K̃t1 )⊤ K̃t1 − γ 2 (K̃t2 )⊤ K̃t2 + γ(At − Bt K̃t1 + K̃t2 )T M̃s+1 (At − Bt K̃t1 + K̃t2 ),
+Σ̃ys = Tr(M̃s+1 E[ω̃si (ω̃si )⊤ ]) + Σ̃ys+1 ,
+
+i,γ
+for all s ≥ t + 1. For a given t ∈ {T − 1, . . . , 1, 0} the exact policy gradient of cost J˜y,t
+with respect to Kt1 and
+2
+Kt is
+i,γ
+
+δJ˜y,t
+= 2 (I + Bt⊤ M̃t+1 Bt )Kt1 − Bt⊤ M̃t+1 (At − Kt2 ) Σy ,
+1
+δKt
+i,γ
+
+δJ˜y,t
+−
+= −2 (−γ 2 I + M̃t+1 )Kt2 + M̃t+1 (At − Bt Kt1 ) Σz
+2
+δKt
+
+(24)
+
+i,γ
+First we prove smoothness and convex-concave property of the function J˜y,t
+. Due to the projection operation
+1
+2
+ProjD the norms of Kt , Kt are bounded by scalar D. Using Definition 2.1 in (Fallah et al., 2020) and (24), the
+i,γ
+function J˜y,t
+is smooth with smoothness parameter
+
+
+L = kI + Bt⊤ M̃t+1 Bt k + kM̃t+1 − γ 2 Ik (kΣy k + kΣz k)
+
+i,γ
+The function J˜y,t
+is also convex-concave since, using (24) and convexity-concavity parameters are obtained using
+direct calculation,
+
+µx = σ((I + Bt⊤ M̃t+1 Bt )Σy ) > 0 and µy = σ((M̃t+1 − γ 2 I)Σz ) > 0
+
+(25)
+
+where the second inequality is ensured when M̃t+1 −γ 2 I > 0. Moreover satisfying Assumption 2.3 in (Fallah et al.,
+2020) requires component-wise smoothness which can be satisfied with Lx = kI + Bt⊤ M̃t+1 Bt kkΣy k and Ly =
+kM̃t+1 − γ 2 IkkΣz k. Having satisfied Assumption 2.3 in (Fallah et al., 2020) now we generalize the proof of
+˜ 1 J˜i,γ and ∇
+˜ 2 J˜i,γ .
+convergence for gradient descent-ascent to biased stochastic gradients as is the case with ∇
+t
+t
+17
+
+Z AMAN L AURI ÈRE KOPPEL BAŞAR
+
+Let us first introduce a couple of notations, ∇Ki,t J˜i,γ (Kt , Lt ) is exact gradient of cost J˜i,γ w.r.t. controller Ki,t ,
+∇Ki,t J˜i,γ (Kt , Lt ) =
+
+δJ˜i,γ (Kt , Lt )
+δKi,t
+
+˜ K J˜i,γ (Kt , Lt ) is stochastic gradient of cost J˜i,γ w.r.t. controller Ki,t ,
+∇
+i,t
+M
+
+˜ K J˜i,γ (Kt , Lt ) =
+∇
+i,t t
+
+n X ˜i,γ
+J ((Ktj,1 , Kt2 ), Lt )ej , Ktj,1 = Kt1 + ej , ej ∼ Sn−1 (r),
+M r2
+j=1
+
+∇rKi,t J˜i,γ (Kt , Lt ) is the smoothed gradient of cost J˜i,γ w.r.t. controller Ki,t ,
+s.t. ∇rKi,t J˜i,γ (Kt , Lt ) =
+
+
+m  ˜i,γ
+Ee J ((Ki,t + e, K−i,t ), Lt )e , where e ∼ Sm−1 (r)
+r
+
+Now we introduce some results from literature. The following result proves that the stochastic gradient is an
+unbiased estimator of the smoothed gradient and the bias between the smoothed gradient and the stochastic gradient
+is bounded by a linear function of smoothing radius r.
+Lemma 6 ((Fazel et al., 2018))
+˜ K J˜i,γ (Kt , Lt )] = ∇r J˜i,γ (Kt , Lt ),
+E[∇
+Ki,t
+i,t
+
+k∇rKi,t J˜i,γ (Kt , Lt ) − ∇Ki,t J˜i,γ (Kt , Lt )k2 ≤ φi r, where φi = kI + Bi⊤ M ∗ Bi k2
+Next we present the result that difference between the mini-batched stochastic gradient and the smoothed gradient
+can be bounded with high probability.
+Lemma 7 ((Malik et al., 2019))
+s 
+
+2m
+m
+i,γ
+i,γ
+r
+i,γ
+˜
+˜
+˜
+˜
+(J (Kt , Lt ) + λr) log
+k∇Ki,t J (Kt , Lt ) − ∇Ki,t J (Kt , Lt )k2 ≤
+Mr
+δ
+with probability 1 − δ.
+Now we compute finite sample guarantees for theGradient
+ Descent Ascent (GDA) update as given in Algorithm 1.
+1
+K
+t
+For each t ∈ [T ], let us concatenate Kt1 as K̄t =
+. Let us also denote the optimal controller which optimizes
+Kt2
+ 1∗ 
+Kt
+i,γ
+i,γ
+i,γ
+i,γ
+J˜y,t
+as K̄t∗ =
+such that J˜y,t
+(Kt1∗ , Kt2 ) ≤ J˜y,t
+(Kt1∗ , Kt2∗ ) ≤ J˜y,t
+(Kt1 , Kt2∗ ). Since the timestep t is fixed
+Kt2∗
+inside the inner loop of the algorithm we discard it, instead we use the iteration index k ∈ [K]. The update rule
+given in Algorithm 1 is given by
+K̄k+1 = K̄k − ηk
+
+˜ 1 J˜yi,γ (K̄k )
+−∇
+˜ 2 J˜yi,γ (K̄k )
+∇
+
+!
+
+˜ J˜i,γ (K̄k ) = X K̄k + Y ∇
+˜ J˜i,γ (K̄k )
+= K̄k − η ∇
+y
+y
+
+˜ 1 J˜yi,γ (K̄k ) = ∇
+˜ 1 J˜yi,γ (K̄k ), ∇
+˜ 2 J˜yi,γ (K̄k ) = ∇
+˜ 2 J˜yi,γ (K̄k ), X = I and Y = ηI. We the controller error
+where ∇
+Kt
+Kt
+as K̂k = K̄k − K̄k∗ , the evolution of this error is
+
+˜ J˜i,γ (K̄k )
+K̂k+1 = X K̂k + Y ∇
+18
+
+ROBUST C OOPERATIVE MARL
+
+We define a Lyapunov function Vp (K̄k ) := K̂k⊤ P K̂k = pkK̂k k22 for P = pI for some p > 0.
+˜ J˜i,γ (K̄k ))⊤ P (X K̂k + Y ∇
+˜ J˜i,γ (K̄k )) − ρ2 K̂k P K̂k ,
+Vp (K̄k+1 ) − ρ2 Vp (K̄k ) = (X K̂k + Y ∇
+≤(X K̂k + Y ∇J˜i,γ (K̄k ))⊤ P (X K̂k + Y ∇J˜i,γ (K̄k )) − ρ2 K̂k P K̂k
+
+˜ J˜i,γ (K̄k ) − ∇J˜i,γ (K̄k )))⊤ P X K̂k + (X K̂k )⊤ P (Y (∇
+˜ J˜i,γ (K̄k ) − ∇J˜i,γ (K̄k )))
++ (Y (∇
+˜ J˜i,γ (K̄k ) − ∇J˜i,γ (K̄k ))⊤ Y ⊤ P Y (∇
+˜ J˜i,γ (K̄k ) − ∇J˜i,γ (K̄k )),
++ (∇
+
+⊤  T
+
+
+X P X − ρ2 P X ⊤ P Y
+K̂k
+K̂k
+˜ J˜i,γ (K̄k ) − ∇J˜i,γ k2
++ η 2 pk∇
+≤
+2
+Y ⊤P X
+Y ⊤P Y
+∇J˜i,γ (K̄k )
+∇J˜i,γ (K̄k )
+
+⊤ 
+
+
+0
+X ⊤P Y
+K̂k
+K̂k
++ ˜ ˜i,γ
+˜ J˜i,γ (K̄k ) − ∇J˜i,γ (K̄k ) .
+Y ⊤P X
+0
+∇J (K̄k ) − ∇J˜i,γ (K̄k )
+∇
+
+Let us enforce ρ2 = 1 − mη, then we know due to (Fallah et al., 2020) that
+
+
+⊤  T
+X P X − ρ2 P
+K̂k
+Y ⊤P X
+∇J˜i,γ (K̄k )
+
+X ⊤P Y
+Y ⊤P Y
+
+
+
+K̂k
+i,γ
+˜
+∇J (K̄k )
+
+
+
+≤0
+
+⊤
+˜ J˜i,γ (K̄k ) − ∇J˜i,γ (K̄k )k2 kK̂k k2 + η 2 k∇
+˜ J˜i,γ (K̄k ) − ∇J˜i,γ (K̄k )k22 ,
+K̂k+1
+K̂k+1 − (1 − mη)K̂k⊤ K̂k ≤ ηk∇
+√ ˜ ˜i,γ
+ηk∇J (K̄k ) − ∇J˜i,γ (K̄k )k2
+√
+˜ J˜i,γ (K̄k ) − ∇J˜i,γ (K̄k )k22
+√
++ η 2 k∇
+= mηkK̂k k2
+m
+
+Using the fact 2ab ≤ a2 + b2 and for η < 1 we get
+
+1
+mη
+˜ J˜i,γ (K̄k ) − ∇J˜i,γ (K̄k )k22 ,
+kK̂k k2 + η
++ 1 k∇
+kK̂k+1 k22 ≤ (1 − mη)kK̂k k22 +
+2
+m
+
+
+
+
+1
+mη
+˜ J˜i,γ (K̄k ) − ∇J˜i,γ (K̄k )k2 ,
++ 1 k∇
+kK̂k k22 + η
+≤ 1−
+2
+2
+m
+Hence
+X
+
+k 
+mη j ˜ ˜i,γ
+1
+1−
++1
+k∇J (K̄j ) − ∇J˜i,γ (K̄j )k22 ,
+m
+2
+j=0
+
+X
+
+k
+
+∞ 
+mη
+1
+mη j ˜ ˜i,γ
+≤ 1−
++1
+kK̂0 k22 + η
+1−
+k∇J (K̄j ) − ∇J˜i,γ (K̄j )k22 ,
+2
+m
+2
+j=0
+s 
+
+
+k
+
+
+
+2m
+m ˜i,γ
+2 1
+mη
+2
+kK̂0 k2 +
+≤ 1−
++1
+(J (Kt , Lt ) + λr) log
++ φi r ,
+2
+m m
+Mr
+δ
+
+kK̂k k22 ≤
+
+
+
+mη
+1−
+2
+
+k
+
+kK̂0 k22 + η
+
+
+
+If k = O(log(1/ǫ)), M = O(1/ǫ) and r = Ω(ǫ) then kK̂k k22 ≤ ǫ. 
+
+Proof of Theorem 5
+Proof: In this proof we show that maxj∈{1,2} kKtj − Ktj∗ k = O(ǫ) for t ∈ {T − 1, . . . , 0} and the result
+maxj∈{1,2} kLjt − Lj∗
+t k = O(ǫ) can be obtained in a similar manner. Throughout the proof we refer to the output of
+the inner loop of Algorithm 1 as the set of output controllers (Kti )i∈[2],t∈{0,...,T −1} . In the proof we use two other
+sets of controllers as well. The first set (Kti∗ )i∈[2],t∈{0,...,T −1} which denotes the NE as characterized in Theorem
+2. The second set is called the local-NE (as in proof of Theorem 4) and is denoted by (K̃ti∗ )i∈[2],t∈{0,...,T −1} . The
+proof quantifies the error between the output controllers (Kti )i∈[2] and the corresponding NE controllers (Kti∗ )i∈[2]
+19
+
+Z AMAN L AURI ÈRE KOPPEL BAŞAR
+
+by utilizing the intermediate local-NE controllers (K̃ti∗ )i∈[2] for each time t ∈ {T − 1, . . . , 0}. For each t the error
+is shown to depend on error in future controllers (Ksi )s≥t,i∈[2] and the approximation error ∆t introduced by the
+gradient descent-ascent update. If ∆t = O(ǫ), then the error between the output and NE controllers is shown to be
+O(ǫ).
+Let us start by denoting the NE value function matrices for agent i ∈ [2] at time t ∈ {0, 1, . . . , T − 1}, under
+the NE control matrices (Ksi∗ )i∈[2],s∈{t+1,...,T −1} by Mti∗ . Using results in literature Başar and Olsder (1998) the
+local-NE control matrices can be characterized as:
+−1
+2∗
+K̃t1∗ = −Bt⊤ Mt+1 Λ−1
+t At , K̃t = Mt+1 Λt At
+
+where
+−1
+⊤
+−2
+I)Mt+1
+M̃t = Qt + A⊤
+t Mt+1 Λt At , Λt = I + (Bt Bt − γ
+
+Similarly the NE control matrices can be characterized as:
+∗
+∗
+Λ∗t −1 At
+Kt1∗ = −Bt⊤ Mt+1
+Λ∗t −1 At , Kt2∗ = Mt+1
+
+where
+∗
+∗
+∗ −1
+At , Λ∗t = I + (Bt Bt⊤ − γ −2 I)Mt+1
+Mt∗ = Qt + A⊤
+t Mt+1 Λt
+
+The matrix Λ∗t is invertible Başar and Olsder (1998) and the matrix Λt will also be invertible if Mt+1 is close
+∗ . Now we characterize the difference between the local NE and NE controllers.
+enough to Mt+1
+∗
+Kt1∗ − K̃t1∗ = Bt⊤ (Mt+1
+Λ∗t −1 − Mt+1 Λ−1
+t )At
+
+∗
+Λ∗t −1 − Mt+1 Λ∗t −1 + Mt+1 Λ∗t −1 − Mt+1 Λ−1
+= Bt⊤ (Mt+1
+t )At
+
+−1
+⊤
+∗
+∗ −1
+∗ −1
+= Bt (Mt+1 − Mt+1 )Λt + Mt+1 (Λt − Λt ) At
+
+(26)
+
+⊤
+−2
+∗
+− Mt+1 )Λ∗t −1
+I)(Mt+1
+= Λ−1
+t (Bt Bt − γ
+
+(27)
+
+To characterize the difference given above we must evaluate Λ∗t −1 − Λ−1
+t . Using matrix manipulations we can
+write down
+ ∗ −1
+∗ −1
+Λt
+Λ∗t − Λ−1
+= Λ−1
+Λ−1
+t
+t
+t − Λt
+Using (26) and (27) we can bound the difference between the local-NE and NE controllers
+
+∗
+kKt1∗ − K̃t1∗ k = kBt⊤ (Mt+1
+− Mt+1 )Λ∗t −1 + Mt+1 (Λ∗t −1 − Λ−1
+t ) At k
+
+∗
+≤ cA cB 1 + cM kΛ−1
+t k cΛ kMt+1 − Mt+1 k
+
+(28)
+
+∗
+assuming kMt+1
+− Mt+1 k ≤ 1 where cA := maxt kAt k, cB := maxt kBt k, cM := maxt kMt∗ k and cΛ :=
+−1
+−2
+∗
+⊤
+∗
+maxt kΛ−1
+t k. Now we bound kΛt k by first defining Λ̂t := Λt − Λt = (Bt Bt − γ I)(Mt+1 − Mt+1 )
+∗ −1
+kΛ−1
+Λ̂t )−1 Λ∗t −1 k
+t k = k(I + Λt
+∞
+∞
+X
+X
+k
+k
+∗
+(c2B + γ −2 )cΛ kMt+1 − Mt+1
+k ≤ 2cΛ
+cΛ kΛ̂t k ≤ cΛ
+≤ cΛ
+k=0
+
+k=0
+
+1
+∗ k≤
+. Using (28) and (29) we arrive at
+where the last inequality is possible due to kMt+1 − Mt+1
+2c (c2 +γ −2 )
+Λ
+
+B
+
+∗
+− Mt+1 k
+kKt1∗ − K̃t1∗ k ≤ cA cB 1 + 2cM cΛ )cΛ kMt+1
+
+20
+
+(29)
+
+ROBUST C OOPERATIVE MARL
+
+Similarly the difference between Kt1∗ − K̃t1∗ can be bounded as
+∗
+− Mt+1 k
+kKt2∗ − K̃t2∗ k ≤ cA 1 + 2cM cΛ )cΛ kMt+1
+
+Hence we can equivalently write
+∗
+max kKti∗ − K̃ti∗ k ≤ cA max(cB , 1) 1 + 2cM cΛ )cΛ kMt+1
+− Mt+1 k
+|
+{z
+}
+
+i∈{1,2}
+
+(30)
+
+c̄1
+
+Having bounded the difference between local-NE and the NE controllers at time t, now we turn towards bounding the difference between the value matrices Mt∗ and Mt . First we define a change of notation to keep the analysis
+concise. Let
+Bt1 = Bt , Bt2 = I, Q1t = Qt , Q2t = −Qt , Rt1 = I, Rt2 = −γ 2 I, Mt1 = Mt , Mt2 = −Mt
+where the sequence (Mt )∀t will be defined in the following analysis. The NE value function matrices are be defined
+recursively using the Lyapunov equation and NE controllers as
+⊤
+i∗
+i∗
+i∗ ⊤
+i∗
+i
+i
+i ⊤
+i∗
+i −1
+i ⊤
+i∗
+i∗
+Mti∗ = Qit + (Ai∗
+t ) Mt+1 At − (At ) Mt+1 Bt (Rt + (Bt ) Mt+1 Bt ) (Bt ) Mt+1 At
+⊤
+i∗
+i∗
+i i∗
+= Qit + (Ai∗
+t ) Mt+1 (At + Bt Kt ),
+
+MTi∗ = QiT
+
+(31)
+
+P
+j j∗
+i∗
+where Ai∗
+t := At +
+j6=i Bt Kt . The sufficient condition for existence and uniqueness of the set of matrices Kt
+and Mti∗ is shown in Theorem 2. Let us now define the perturbed values matrices M̃ti (resulting from the control
+matrices (Ksi )i∈[2],s∈{t+1,...,T −1} ). Using these matrices we define the value function matrices (M̃ti )i∈[2] using the
+Lyapunov equations as follows
+M̃ti = Qit + (K̃ti∗ )⊤ Rti K̃ti∗ +
+
+
+
+At +
+
+N
+X
+
+Btj K̃ti∗
+
+j=1
+
+⊤
+
+i
+Mt+1
+
+
+
+At +
+
+2
+X
+
+Bti K̃tj∗
+
+j=1
+
+
+
+i
+i
+i
+i
+= Qit + (Ãit )⊤ Mt+1
+Ãit − (Ãit )⊤ Mt+1
+Bti (Rti + (Bti )⊤ Mt+1
+Bti )−1 (Bti )⊤ Mt+1
+Ãit
+i
+= Qit + (Ãit )⊤ Mt+1
+(Ãit + Bti K̃ti∗ )
+M̃Ti = QiT
+
+(32)
+
+P
+j
+where K̃ j∗ = (K̃tj∗ , Kt+1
+, . . . , KTj −1 ) and Ãit := At + j6=i Btj K̃tj∗ . Finally we define the perturbed value
+function matrices Mti which result from the perturbed matrices (Ksi )i∈[2],s∈{t+1,...,T −1} obtained using the gradient
+descent-ascent in Algorithm 1:
+
+⊤
+
+
+2
+2
+X
+X
+i
+Btj Ktj
+Btj Ktj Mt+1
+At +
+Mti = Qit + (Kti )⊤ Rti Kti + At +
+j=1
+
+(33)
+
+j=1
+
+Throughout this proof we assume that the output of the inner loop in Algorithm 1, also called the output matrices
+Kti , are ∆t away from the target matrices K̃ti∗ , such that kKti − K̃ti∗ k ≤ ∆t . We know that,
+kKti − Kti∗ k ≤ kKti − K̃ti∗ k + kK̃ti∗ − Kti∗ k ≤ ∆t + kK̃ti∗ − Kti∗ k.
+21
+
+Z AMAN L AURI ÈRE KOPPEL BAŞAR
+
+Now we characterize the difference Mti − Mti∗ = Mti − M̃ti + M̃ti − Mti∗ . First we can characterize M̃ti − Mti∗
+using (31) and (32):
+
+i
+⊤
+i∗
+i∗
+i i∗
+M̃ti − Mti∗ = (Ãit )⊤ Mt+1
+(Ãit + Bti K̃ti∗ ) − (Ai∗
+t ) Mt+1 (At + Bt Kt )
+
+⊤
+i
+i
+i i∗
+i∗ ⊤
+i
+i∗
+i
+i i∗
+= (Ãit − Ai∗
+t ) Mt+1 (Ãt + Bt K̃t ) + (At ) (Mt+1 − Mt+1 )(Ãt + Bt K̃t )
+
+=
+
+X
+j6=i
+
+⊤
+
+Btj (K̃tj∗ − Ktj∗ )
+
+⊤
+i∗
+i
+i i∗
+i∗
+i i∗
++ (Ai∗
+t ) Mt+1 (Ãt + Bt K̃t − At − Bt Kt )
+
+i
+⊤
+i
+i∗
+i
+i i∗
+Mt+1
+(Ãit + Bti K̃ti∗ ) + (Ai∗
+t ) (Mt+1 − Mt+1 )(Ãt + Bt K̃t )
+⊤
+i∗
++ (Ai∗
+t ) Mt+1
+
+2
+X
+j=1
+
+Btj (K̃tj∗ − Ktj∗ )
+
+(34)
+
+Using this characterization we bound kM̃ti − Mti∗ k using the AM-GM inequality
+
+kM̃ti − Mti∗ k
+i∗
+≤ 2kA∗t kkMt+1
+kcB
+
++
+
+2
+X
+kK̃tj∗ − Ktj∗ k
+j=1
+
+
+
+i∗
+kA∗t k/2 + kMt+1
+kcB + kAi∗
+t k/2 cB
+
+4
+ 2
+2
+X
+2
+c4B X j∗
+j∗
+j∗
+j∗
+kK̃t − Kt k
+kK̃t − Kt k +
+2
+
+j=1
+j=1
+
+∗
+i∗
+i
+i∗ 2
+i∗
+∗
+i
+i∗
++ kAt k/2 + 1/2 + kAt k/2 kMt+1 − Mt+1 k + kAt kkAt kkMt+1 − Mt+1
+k
+2
+ X j∗
+4
+≤ 2c∗A c∗M cB + (c∗A /2 + c∗M cB + ci∗
+kK̃t − Ktj∗ k
+A /2)cB + cB /2
+|
+{z
+} j=1
+c̄2
+i∗ ∗
+i
+i∗
++ c∗A /2 + 1/2 + ci∗
+A /2 + cA cA kMt+1 − Mt+1 k
+
+|
+
+{z
+
+i
+i∗
+≤ c̄2 N maxkK̃tj∗ − Ktj∗ k + c̄3 kMt+1
+− Mt+1
+k
+j∈[2]
+
+}
+
+c̄3
+
+(35)
+
+∗
+i∗
+i∗
+i∗
+∗
+i i∗ ∗
+where A∗t = Ai∗
+t + Bt Kt , cA = kAt k, cA := maxt∈{0,...,T −1} kAt k, cM := maxi∈[2],t∈{0,...,T −1} kMt+1 k, and
+j∗
+j∗
+i
+i∗
+i
+the last inequality is possible due to the fact that kMt+1 − Mt+1 k, kK̃t − Kt k ≤ 1/N . Similarly Mt − M̃ti can
+be decomposed using (32) and (33):
+
+Mti − M̃ti = (Kti )⊤ Rti Kti +
+
+
+
+
+At +
+
+2
+X
+
+Btj Ktj
+
+j=1
+
+⊤
+
+
+
+i
+Mt+1
+
+− (K̃ti∗ )⊤ Rti K̃ti∗ + At +
+
+22
+
+
+
+2
+X
+j=1
+
+At +
+
+Btj K̃ti∗
+
+2
+X
+j=1
+
+⊤
+
+Btj Ktj
+
+
+
+
+
+2
+X
+i
+Bti K̃tj∗ .
+Mt+1
+At +
+j=1
+
+ROBUST C OOPERATIVE MARL
+
+We start by analyzing the quadratic form x⊤ Mti x:
+
+x
+
+⊤
+
+Mti x = x⊤
+=x
+
+⊤
+
+"
+
+
+Qit + (Kti )⊤ Rti Kti +
+
+
+
+At +
+
+=x
+
+
+
+i
+(Kti )⊤ Rti + (Bti )⊤ Mt+1
+Bt
+
+
+
+i
+Mt+1
+
+
+
+At +
+
+i
+Kti + 2(Bti Kti )⊤ Mt+1
+
+X
+
+Btj Ktj
+
+j6=i
+
+
+
+⊤
+
+i
+Mt+1
+
+
+
+X
+j6=i
+
+X
+j6=i
+
+Btj (Ktj − K̃tj∗ ) +
+
+
+
+At +
+
+X
+
+2
+X
+
+Btj Ktj
+
+j=1
+
+
+
+At +
+
+X
+
+X
+
+Btj Ktj
+
+At +
+
+Btj K̃tj∗
+
+j6=i
+
+X
+
+
+
+
+
+i
+Mt+1
+
+
+
++ Qit
+
+x
+
+Btj K̃tj∗
+
+j6=i
+
+⊤
+
+x
+
+Btj Ktj
+
+j6=i
+
+
+
+
+
+j6=i
+
+At +
+
+i
+i
+(Kti )⊤ Rti + (Bti )⊤ Mt+1
+Bti Kti + 2(Bti Kti )⊤ Mt+1
+
+i
++ 2(Bti Kti )⊤ Mt+1
+
++
+
+⊤
+
+Btj Ktj
+
+j=1
+
+
+i
+
++ At +
+⊤
+
+2
+X
+
+
+
+At +
+
++ Qit
+X
+
+Btj K̃tj∗
+
+j6=i
+
+X
+
+⊤
+j
+j
+j∗
+j
+j
+j∗
+i
+Bt (Kt − K̃t )
+Bt (Kt − K̃t ) Mt+1
+
+
+
+j6=i
+
+
+
+X
+X j j∗ 
+j
+j
+j∗
+i
++ 2 At +
+Bt K̃t Mt+1
+Bt (Kt − K̃t ) x
+j6=i
+
+j6=i
+
+Completing squares we get
+
+x⊤ Mti x
+"
+
+(36)
+
+
+i
+Bti (Kti − K̃ti∗ )
+= x⊤ (Kti − K̃ti∗ )⊤ Rti + (Bti )⊤ Mt+1
+
+
++ At +
+
+
+− At +
+
+X
+
+Btj K̃tj∗
+
+⊤
+
+i
+Mt+1
+
+X
+
+Btj K̃tj∗
+
+⊤
+
+i
+i
+Mt+1
+Bti Rti + (Bti )⊤ Mt+1
+Bti
+
+j6=i
+
+j6=i
+
+
+
+At +
+
+X
+
+Btj K̃tj∗
+
+j6=i
+
+
+
++ Qit
+−1
+
+
+X j j∗ 
+i
+(Bti )⊤ Mt+1
+At +
+Bt K̃t
+j6=i
+
+⊤
+ 
+X
+ X
+
+2
+2
+X
+j j∗
+j
+j
+j∗
+j
+j
+j∗
+i
+Bt K̃t
+Bt (Kt − K̃t ) Mt+1
++ 2 At +
++
+Bt (Kt − K̃t
+x.
+j=1
+
+j=1
+
+j6=i
+
+23
+
+Z AMAN L AURI ÈRE KOPPEL BAŞAR
+
+Now we take a look at the quadratic x⊤ M̃ti x:
+x⊤ M̃ti x
+
+
+
+⊤
+
+2
+2
+X
+X
+j j∗
+j j∗
+⊤
+i
+i∗ ⊤ i i∗
+i
+= x Qt + (K̃t ) Rt K̃t + At +
+Bt K̃t
+Mt+1 At +
+Bt K̃t
+x
+j=1
+
+
+
+j=1
+
+
+
+
+i
+
+i
+i
+= x⊤ (K̃ti∗ )⊤ Rti + (Bti )⊤ Mt+1
+Bt K̃ti∗ + 2(Bti K̃ti∗ )⊤ Mt+1
+At +
+
+
+
++ At +
+= x⊤
+
+X
+
+Btj K̃tj∗
+
+j6=i
+
+
+
+At +
+
+X
+
+Btj K̃tj∗
+
+j6=i
+
+
+
+− At +
+
+X
+
+⊤
+
+Btj K̃tj∗
+
+j6=i
+
+
+
+i
+Mt+1
+At +
+
+⊤
+
+⊤
+
+2
+X
+
+Btj K̃tj∗
+
+j6=i
+
+
+
+i
+Mt+1
+At +
+
+2
+X
+j6=i
+
+
+
+X
+j6=i
+
+
+Btj K̃tj∗ + Qit
+
+x
+
+
+Btj K̃tj∗ + Qit
+
+(37)
+
+
+
+−1
+i
+i
+i
+Mt+1
+Bti Rti + (Bti )⊤ Mt+1
+Bti
+(Bti )⊤ Mt+1
+
+
+X j j∗ 
+At +
+Bt K̃t
+x.
+j6=i
+
+Using (36) and (37), we get
+x⊤ (Mti − M̃ti )x
+"
+
+
+i
+Bti (Kti − K̃ti∗ )
+= x⊤ (Kti − K̃ti∗ )⊤ Rti + (Bti )⊤ Mt+1
+
+⊤
+X
+
+ X
+ 
+2
+2
+X
+j∗
+j
+j
+j
+j∗
+j
+j j∗
+i
+Bt (Kt − K̃t ) Mt+1
+x
+Bt (Kt − K̃t
++
+Bt K̃t
++ 2 At +
+j6=i
+
+j=1
+
+j=1
+
+"
+
+
+i
+Bti (Kti − K̃ti∗ )
+= x⊤ (Kti − K̃ti∗ )⊤ Rti + (Bti )⊤ Mt+1
+
+⊤
+
+ 
+2
+2
+2
+X
+X
+X
+j
+j
+j∗
+j
+j∗
+j∗
+j j∗
+Bt (Kt − K̃t )
+Bt (K̃t − Kt ) +
++2
+Bt Kt
++ 2 At +
+j=1
+
+j=1
+
+j=1
+
+i
+Mt+1
+
+X
+j6=i
+
+Btj (Ktj − K̃tj∗
+
+
+
+Using this characterization we bound kMti − M̃ti k:
+kMti − M̃ti k
+
+ i  i
+i∗
+i∗
+i∗
+≤ kRti + (Bti )⊤ Mt+1
+Bti k + k(Bti )⊤ Mt+1
+− Mt+1
+Bt k kKt − K̃ti∗ k
++ (2ci∗
+A + 2cB
+
+2
+X
+j=1
+
+
+
+i∗
+i
+i∗
+kK̃tj∗ − Kt∗ k + kKtj − K̃tj∗ k kMt+1
+k + kMt+1
+− Mt+1
+k
+cB
+
+2
+X
+j=1
+
+24
+
+kKtj − K̃tj∗ k
+
+x
+
+ROBUST C OOPERATIVE MARL
+
+i∗ k, kK̃ j∗ − K j∗ k ≤ 1/N ,
+i
+− Mt+1
+As before assuming kMt+1
+t
+t
+2
+X
+kK j − K̃tj∗ k
+kMti − M̃ti k ≤ c̄∗ + c2B /2 + 2c2B (c∗M + 1) + 2ci∗
+A
+{z
+} j=1 t
+|
+c̄4
+
+2
+X
+
+i
+i∗
+∗
++ c2B /2 + ci∗
++
+c
+kK̃tj∗ − Ktj∗ k
+kM
+−
+M
+k
++
+c
+(c
++
+1)
+B
+t+1
+{z
+}
+|B M
+|
+{zA
+} t+1
+j=1
+c̄6
+
+c̄5
+
+i
+i∗
+≤ c̄4 N ∆t + c̄5 kMt+1
+− Mt+1
+k + c̄6
+
+2
+X
+kK̃tj∗ − Ktj∗ k
+
+(38)
+
+j=1
+
+j
+j∗
+P
+i∗ B i k. Let us define eK := max
+where c̄∗ := maxi∈[2],t∈{0,...,T −1} kRti + (Bti )⊤ Mt+1
+j∈[2] kKt − Kt k, et :=
+t
+t
+j
+j∗
+maxj∈[2] kMt − Mt k. Using (30), (35) and (38) we get
+P
+eK
+t ≤ c̄1 et+1 + ∆t
+
+P
+ePt ≤ (c̄2 + c̄6 )N eK
+t + (c̄3 + c̄5 )et+1 + c̄4 N ∆
+
+≤ (c̄1 (c̄2 + c̄6 )N + c̄3 + c̄5 ) ePt+1 + (c̄2 + c̄4 + c̄6 )N ∆t
+|
+{z
+}
+{z
+}
+|
+c̄7
+
+c̄8
+
+Using this recursive definition we deduce
+
+ePt ≤ c̄T7 −t ePT + c̄8
+
+T
+−1
+X
+
+c̄s7 ∆t+s = c̄8
+
+T
+−1
+X
+
+c̄s7 ∆t+s
+
+s=0
+
+s=0
+
+Hence if ∆ = O(ǫ), in particular ∆t ≤ ǫ/(2c̄1 c̄t7 c̄8 T ) then ePt ≤ ǫ/2c̄1 and eK
+t ≤ ǫ for t ∈ {0, . . . , T − 1}. 
+
+25
+
+

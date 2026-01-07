@@ -1,0 +1,2788 @@
+Advantage Actor-Critic with Reasoner: Explaining the Agent’s Behavior from an
+Exploratory Perspective
+Muzhe Guo1 , Feixu Yu2 , Tian Lan2 , Fang Jin1
+1
+
+arXiv:2309.04707v1 [cs.AI] 9 Sep 2023
+
+2
+
+Department of Statistics, George Washington University, United States
+Department of Electrical and Computer Engineering, George Washington University, United States
+{muzheguo, fxyu, tlan, fangjin}@gwu.edu
+
+Abstract
+Reinforcement learning (RL) is a powerful tool for solving
+complex decision-making problems, but its lack of transparency and interpretability has been a major challenge in
+domains where decisions have significant real-world consequences. In this paper, we propose a novel Advantage ActorCritic with Reasoner (A2CR), which can be easily applied to
+Actor-Critic-based RL models and make them interpretable.
+A2CR consists of three interconnected networks: the Policy Network, the Value Network, and the Reasoner Network.
+By predefining and classifying the underlying purpose of the
+actor’s actions, A2CR automatically generates a more comprehensive and interpretable paradigm for understanding the
+agent’s decision-making process. It offers a range of functionalities such as purpose-based saliency, early failure detection,
+and model supervision, thereby promoting responsible and
+trustworthy RL. Evaluations conducted in action-rich Super
+Mario Bros environments yield intriguing findings: Reasonerpredicted label proportions decrease for “Breakout” and increase for “Hovering” as the exploration level of the RL algorithm intensifies. Additionally, purpose-based saliencies are
+more focused and comprehensible.
+
+1
+
+Introduction
+
+Reinforcement learning (RL) has demonstrated great potential in solving complex decision-making problems, enabling intelligent agents to acquire decision-making abilities through interactions with their environment. Despite
+its successes in diverse applications, such as gaming (Mnih
+et al. 2013; Silver et al. 2016), robotics (Zhao, Queralta,
+and Westerlund 2020), large-scale models training (OpenAI 2023), and recommendation systems (Afsar, Crump,
+and Far 2022), RL models face criticism for their lack of
+transparency and interpretability. This is a challenging problem due to the dynamics of the underlying Markov Decision
+Process, as well as the interaction with complex environments and agent settings that shapes an agent’s behavior.
+Furthermore, RL models are often trained through a trialand-error process, leading to non-intuitive and unpredictable
+behavior, particularly in novel scenarios. This unpredictability presents a challenge for interpreting the model’s decisions, which can be especially problematic in safety-critical
+domains where transparency is essential.
+The field of RL interpretability is relatively new, lacking standardized approaches. As a result, researchers must
+
+explore a variety of techniques to gain valuable insights
+into RL decision-making processes (Dazeley, Vamplew,
+and Cruz 2023). However, the existing explainable RL approaches frequently come up short in furnishing intuitive
+comprehension of agents’ actions. Certain explanations revolve around methodologies like tracing nodes (Krarup et al.
+2019), policy summarization (Lage et al. 2019), or goaldriven interpretation (Sado et al. 2023). While these approaches allow the system to articulate why a selected action
+aligns with achieving its goal, the resulting explanations frequently lack context-specific meaning or depth.
+In this work, we propose a novel and general approach
+to interpreting the agent’s actions from an exploratory perspective. Our framework, named Advantage Actor-Critic
+with Reasoner (A2CR), consists of three interconnected networks: Policy Network (πθ ), Value Network (vω ), and Reasoner Network (Rϕ ). Overall, πθ learns policies for selecting
+actions, vω observes the actions and evaluates states, and Rϕ
+provides an interpretation of the agent by predicting the purpose of the actor’s action, taking into account the state differences, state values, and rewards after each action. Rϕ aims
+to collect training data, generate training labels, and train the
+network automatically and simultaneously by engaging with
+policies and actors without interfering with them.
+We provide the theoretical feasibility of computing
+the state shift between two states using Phase Correlation (Foroosh, Zerubia, and Berthod 2002), theoretically
+supporting the autonomous generation of training labels of
+Rϕ . Additionally, we prove the statistical convergence of the
+proportion of training labels within Rϕ ’s data collection process. This convergence forms the foundation for an effective
+collector and smooth training of Rϕ . Through experiments
+with Super Mario Bros games, our main findings indicate
+that saliencies with specific action purposes offer heightened comprehensibility. Besides, the high instability in action purposes reveals instances where agents are headed for
+failure. Moreover, the proportion of predicted labels unveils
+the degree of inherent exploration in RL algorithms.
+In summary, this paper has several contributions and innovations: (1) Our approach offers a more transparent model
+for the agent’s decision-making process, making it applicable to a wide range of Actor-Critic algorithms without
+compromising the original Actor-Critic’s performance. (2)
+A2CR can be further combined with other interpretation
+
+techniques. To the best of our knowledge, we are the first to
+provide action purpose-based saliency maps for RL agents.
+(3) Without manual annotation, Rϕ automates its training
+data collection by dynamically adapting to new scenarios,
+and we have demonstrated the statistical convergence of its
+training label proportions during training.
+
+2
+
+Related work
+
+Despite significant advancements in the field of Explainable Artificial Intelligence (XAI), achieving interpretability
+in deep reinforcement learning remains a challenging task,
+with the absence of a unified and universally applicable approach. Various approaches have been explored in this regard. Saliency-based methods (Greydanus et al. 2018; Mott
+et al. 2019) aim to visualize the decision-making process of
+the agent via saliency maps but may highlight unwanted areas due to the agent’s unobvious intentions. Attention-based
+methods (Wu, Khetarpal, and Precup 2021) can extract keypoints from salient regions and are not related to particular object semantics. The Causal Lens method (Madumal
+et al. 2020) encodes causal relationships to learn a structural causal model, facilitating interpretability, but might not
+be easily understandable for non-technical users. Decision
+tree-based methods (Vasic et al. 2019; Liu et al. 2021) identify influential features driving the agent’s behavior and construct decision trees. However, this approach may result in
+numerous nodes tracing back to the decision rule path. Interaction data-based methods (Ehsan et al. 2018, 2019) involve collecting explanations from human players during
+the decision-making process to gain insights into how the
+agent’s behavior is perceived, but annotations are costly and
+specific to only a single scenario. In this work, our method
+serves as a plug-in module for existing Actor-Critic algorithms, enhancing their generalizability and comprehensibility, with specific experiments conducted using the Advantage Actor-Critic (A2C) approach (Mnih et al. 2016).
+
+3
+
+Methods
+
+Basic RL is commonly modeled as a Markov decision
+process (MDP), which is defined as a four-element tuple
+(S, A, P, r), representing the state set, action set, state transition function, and reward function, respectively. In such
+an environment setting, we begin by providing an overview
+of both A2C and our A2CR frameworks, then focus on the
+A2CR, covering its interpretation goal, structure, training
+process, training label generation, and label properties.
+
+Advantage Actor-Critic Review
+The Actor-Critic approach consists of two networks: the Policy Network πθ (a|s), parameterized by θ, and the Value Network vω (s), parameterized by ω. The Actor selects actions
+a ∈ A based on the policy, while the Critic evaluates actions
+using TD error to determine their effectiveness. TD error,
+denoted as δt , is calculated as the difference between the TD
+Target rt + γvω (st+1 ) and the current state’s value vω (st ),
+where rt is the reward obtained from the environment and
+γ is the discount factor. δt of A2C serves as the advantage
+function, influencing the probability of selecting actions in
+
+future steps based on their effectiveness. Positive advantages
+increase the likelihood of choosing an action, while negative
+advantages decrease the probability of selection. The network parameters are updated at each step using δt as follows: θ ← θ − β · δt · ∂logπθ (at |st )/∂θ for Actor and
+ω ← ω − α · δt · ∂vω (st )/∂ω for Critic. β and α represent
+the learning rates for the Actor and Critic, respectively.
+
+Advantage Actor-Critic with Reasoner Overview
+As shown in Figure 1, our proposed A2CR retains the original architecture of A2C but integrates an additional network
+called the Reasoner Network, parameterized by ϕ, denoted
+by Rϕ (∆s), where the input ∆s = st+1 − st represents
+the pixel-wise difference between two adjacent state frames
+obtained from the A2C agent’s interactions with the environment. The Reasoner plays two roles: the Collector and
+the Explainer. The Collector employs separate agents, independent of the A2C agents, to collect data and train Rϕ simultaneously. The Explainer utilizes the well-trained model
+to interpret the behavior of the A2C agents.
+
+Interpretation of agent actions
+To interpret an agent’s actions effectively, we rely on two
+fundamental assumptions: (1) All actions taken by the agent
+are deemed rational. This assumption serves as the foundation for explaining the agent’s behavior, ensuring that
+any derived explanation holds significance and motivation.
+Therefore, even when confronted with seemingly irrational
+behavior, we begin by assuming its underlying reasonability and subsequently explore contradictory explanations if
+necessary. (2) The agent exhibits a tendency toward “laziness” or a lack of subjective motivation. This assumption
+aligns with the RL principles, recognizing that agents typically avoid venturing into unknown environments unless
+prompted by external stimuli such as rewards. It reflects
+the agent’s inclination to remain in relatively stable environments to ensure its survival. The two assumptions form the
+basis for our subsequent categorization of action purposes.
+Consider an MDP denoted by (st , at , rt , st+1 ), where at
+time t, the agent takes action at in state st , receives a reward rt , and transitions to a new state st+1 . The difference in state values before and after the action, vω (st+1 ) −
+vω (st ), represents the “indirect gain” of at , reflecting the
+increase in the environmental advantage enabled by the action. Additionally, the reward rt represents the “direct gain”
+of at . Therefore, we define the “total gain (G)” of at as
+w1 (vω (st+1 ) − vω (st )) + (1 − w1 )rt , where w1 ∈ [0, 1]
+is a weighting parameter. Moreover, we can measure the
+general change in the environment before and after an action at through the difference between the states, termed
+“state exploration (Se )”. In video games, Se can be obtained
+by comparing pixel-wise differences between two frames,
+encompassing areas of overlap, disappearance, and appearance. Specifically, we define Se as the sum of the Frobenius norms of the common area difference, disappeared area,
+and appeared area, i.e., Se = ∥common area difference∥F +
+∥disappeared area∥F + ∥appeared area∥F .
+G and Se provide distinct perspectives for evaluating the
+impact of action at . In the context of Atari video games,
+
+Binary cross entropy
+
+Policy
+Actor
+
+action
+
+Pseudo-Groundtruth
+labels
+Shift
+
+TD error
+Critic
+
+DFT
+
+Value
+function
+
+state
+St
+
+state
+exploration
+Se
+values
+
+Prospect
+(P)
+
+2
+1
+-3
+
+-1 1
+-1
+
+-2
+
+rewards
+Hamming
+window
+
+r
+
+st, st+1
+
+interaction
+
+2
+
+3
+
+-2
+-3
+
+training
+states
+
+Breakout
+(B)
+3
+
+inference
+
+vt, vt+1
+
+reward
+
+Environment
+
+Reasoner
+Network
+
+state difference
+Δs
+
+Hovering
+(H)
+
+Self-improvement
+(S)
+
+Explainer
+
+Collector
+
+Reasoner
+Figure 1: The proposed A2CR framework incorporates a Reasoner module to provide interpretable explanations of the agent’s
+behavior. The blue flow lines depict the Collector’s process of collecting data, generating Pseudo-Groundtruth labels, and
+training the Reasoner Network. The yellow flow lines represent the process and results of reasoning by the Explainer once the
+model is well-trained.
+we classify explanations of the agent’s actions into four categories based on G and Se : (1) Breakout, encoded (1,1):
+This category encompasses actions that result in significant
+state changes and substantial gains. It represents the agent
+making noteworthy progress in the game, such as entering
+a new level, defeating opponents, or achieving major milestones associated with high rewards. (2) Self-improvement,
+encoded (1,0): Actions falling under this category yield significant gains with small state changes. The agent prefers
+such actions as they offer a relatively safe pathway to obtain rewards, such as acquiring gold, equipment, or experience in a game. (3) Hovering (H), encoded (0,0): This category comprises actions that lead to smaller state changes
+and gains, often indicating mundane or conservative behavior. It includes routine actions, repetitive exploration of already known states, and stop-in-place or null actions. (4)
+Prospect (P), encoded (0,1): Actions in this category result
+in substantial state changes but poor gains in the short term.
+However, they may signify the agent’s exploration of the environment and preparation for potential long-term benefits.
+Examples include preliminary actions to gain an advantage,
+such as early attacks on opponents and dangerous exploration moves. Although these early actions involve risks and
+offer no immediate rewards, they may lead to greater benefits upon successful execution.
+The Reasoner Network plays a crucial role in gaining
+valuable insights into the agent’s decision-making process
+by classifying the purpose of each action of the A2C agent
+and conducting subsequent analysis.
+
+Structure of A2CR
+As mentioned earlier, A2CR consists of three interconnected
+networks: πθ , vω , and Rϕ . The Actor selects actions based
+on learned policies, the Critic observes the actions and provides critical evaluation, and the Reasoner interprets the actions taken by the A2C agent. Our approach preserves the
+
+original architecture of πθ and vω in A2C but integrates Rϕ
+alongside them. This integration ensures that Rϕ does not
+interfere with the other two networks’ training, making it
+widely applicable to various Actor-Critic structures.
+πθ (a|s) and vω (s) share the input state features obtained
+from three convolutional layers, each connected to a ReLU
+activation function. After obtaining the state features, πθ utilizes two fully connected layers, followed by ReLU and softmax activation functions respectively to map the state features to a vector. This vector has the same length as the size
+of the action set A and is known as policy, which is a probability distribution. vω also has two fully connected layers,
+but omits the final softmax activation function, outputting a
+scale known as the state value. Rϕ (∆s) has the same convolutional structure as A2C but is specifically designed to
+capture the features of stage differences ∆s. It has an additional fully connected layer compared to πθ . The output of
+Rϕ is a vector of length four, representing the probability of
+predictions for the four main interpretation categories. The
+Reasoner serves two roles: (1) Collector, responsible for Rϕ
+training data collection, and (2) Explainer, utilizing the welltrained Rϕ to classify the action purposes of A2C agents.
+Collector: data collection The role of the Collector is to
+obtain training data for Rϕ , while ensuring that the data collection process is synchronized with the A2C training process. This synchronization guarantees that Rϕ accurately reflects the level of training achieved by A2C agents. Importantly, the Collector leverages A2C networks but does not
+disrupt A2C training. This is achieved by employing independent agents within Rϕ to interact with the environment,
+with their behavior controlled by the parameters of the A2C.
+This design ensures that the Collector can gather highly relevant data for the A2C agent while not interfering with the
+A2C training process. To ensure a diverse range of actions,
+the Collector employs multiple agents to collect data, which
+
+is subsequently stored in a container called Exploring Pool
+(E). Whenever new data is added to the E, a classification
+label of interpretation is automatically calculated based on
+the existing data within the pool. This label, known as the
+“Pseudo-Groundtruth” label, serves as the supervised label
+for Rϕ training. E has a fixed capacity N and is constantly
+updated during A2CR training, with old data being continuously dropped to accommodate new data.
+Explainer: action explanation The Explainer component
+of Reasoner aims to classify the purpose and provide interpretations of each action undertaken by the A2C agent. This
+is achieved by training Rϕ (∆s) to perform a classification
+task using the state difference ∆s = st+1 −st as inputs. The
+resulting classification enables various interpretation and inference tasks, including (1) saliency maps based on the
+agent’s action purposes, (2) early detection of agent failures,
+(3) identification of the agent’s level of exploration, and (4)
+metrics for RL training completion. By leveraging the classification results of the well-trained Rϕ , we gain valuable
+insights into the agent’s behavior and decision-making process, thereby enhancing the understanding of Actor-Critic
+RL models.
+
+A2CR training
+As the training of Rϕ relies on the data collected by the Collector, which may initially be of lower quality due to the
+underfitting in the Policy and Value networks, it would be
+computationally inefficient to train Rϕ at this early stage. To
+address this, we propose an optional strategy of setting a predetermined critical number of frames, such as 4/5 of the total number, before initiating the training of Rϕ . This ensures
+that Rϕ training begins only when the A2C networks have
+achieved a suitable level of proficiency. The A2CR training
+process is depicted in Algorithm 1.
+Training of Actor and Critic The training process for
+the Actor and Critic in A2CR follows the methodology employed in the original A2C approach. The TD error and policy gradient serve as the foundation for updating vω and πθ ,
+respectively. To strike a balance between the critic loss (Lc )
+and actor loss (La ), we introduce a weighting parameter ρ1 .
+Additionally, we incorporate an entropy bonus (H) with a
+parameter ρ2 into the total loss. This entropy bonus encourages the policy entropy to increase, enhancing the model’s
+exploratory capabilities and preventing premature convergence to local optima. The total loss can be expressed as
+L = La + ρ1 Lc − ρ2 H.
+Training of Reasoner The parameters of Rϕ are updated
+regularly based on the data available in the Exploring Pool,
+which is continuously refreshed during the training process.
+This constant updating of the pool, along with its fixed capacity, ensures a smooth training process. For the loss function, we employ Binary Cross Entropy (with logits) for
+Multi-Class classification. Specifically, assuming that the
+Pseudo-Groundtruth label has M classes, Rϕ predicts the
+probability of a given data sample belonging to the j-th class
+as pj . Using one-hot encoding, we represent the j-th element
+of the Pseudo-Groundtruth label as yj . The Reasoner loss
+
+PM
+can be expressed as: Lr = − j=1 yj log(s(pj )), where
+s(x) = 1/(1 + e−x ) denotes the sigmoid function.
+Algorithm 1: Training of Advantage Actor-Critic with Reasoner
+Initialize Policy Network πθ (a|s), Value Network vω (s),
+and Reasoner Network Rϕ (∆s)
+Initialize the Exploring Pool E with a capacity of N
+Parameter: weights ρ1 , ρ2 , w1 , and discount factor γ
+Output: Well-trained A2CR
+1: for episode = 1, ..., M do
+2:
+For A2C agent: observe initial state s0
+3:
+for t = 1,..., T do
+4:
+Sample action at ∼ πθ (a|st )
+5:
+Calculate thePentropy of distribution determined by
+πθ : H = − x∈π p(x)logp(x)
+6:
+Obtain reward rt and new state st+1
+7:
+Calculate TD target: yt = rt + γvω (st+1 )
+8:
+Get Advantage (TD error): δt = yt − vω (st )
+9:
+Critic loss: Lc = δt2
+10:
+Actor loss: La = −logπθ (at |st )δt
+11:
+Update ω and θ by minimizing total loss L = La +
+ρ1 Lc − ρ2 H
+12:
+end for
+13:
+For Reasoner agent: observe initial state s0
+(optional: start only if episode > 4M/5)
+14:
+for t = 1,..., T do
+15:
+Sample action at ∼ πθ (a|st )
+16:
+Obtain reward rt and new state st+1
+17:
+State difference: ∆st = st+1 − st
+18:
+State value difference: ∆vt = vω (st+1 ) − vω (st )
+19:
+Calculate the total gain value:
+Gt = w1 (vω (st+1 ) − vω (st )) + (1 − w1 )rt
+20:
+Calculate the state exploration value Se,t using
+phase correlation
+21:
+Sample half of the data randomly from the exploring pool: E0 ∼ E, E0 ⊊ E
+22:
+Get Pseudo-Groundtruth label:
+lt = (1Gt ≥2 Pi∈E Gi /N , 1Se,t ≥2 Pi∈E Se,i /N )
+0
+0
+23:
+Add (Gt , Se,t , lt ) to E and update E at regular intervals
+24:
+Reasoner loss: Lr = cross entropy with logits using the data (∆st , lt )
+25:
+Update ϕ by minimizing Lr
+26:
+end for
+27: end for
+
+Pseudo-Groundtruth labels
+We utilize the data collected by the Collector to provide supervised training for Rϕ , with the labels of the collected data
+dependent on factors G and Se , both of which require calculation. The calculation of G is straightforward:
+Gt = w1 (vω (st+1 ) − vω (st )) + (1 − w1 )rt
+On the other hand, acquiring Se necessitates measuring the
+shift between adjacent states. In determining the amount of
+shift, we employ the principle of Phase Correlation. Given
+
+two states st+1 and st with dimensions W × H pixels, we
+assume they undergo a relative shift denoted by ∆x along
+the x-axis and ∆y along the y-axis. To reduce boundary effects, we first apply the Hamming window to the states. This
+allows us to approximate the circular shift of the two states:
+Using the shift theorem of 2D Discrete Fourier Transform
+(DFT), we derive the following equation:
+x∆x
+
+y∆y
+
+Fst+1 (x, y) = Fst (x, y)e−2πi( W + H )
+From this, the cross-power spectrum can be expressed as:
+R(x, y) =
+=
+
+{
+
+state t+1
+
+=
+
+{
+
+st+1 (x, y) ≈ st ((x − ∆x) mod W, (y − ∆y) mod H)
+
+Δx
+
+Δx
+
+state t
+
++
+
+appeared
+area
+
++
+
+common area
+difference
+
+disappeared
+area
+
+Figure 2: The state exploration Se is computed as the sum of
+the Frobenius norms of three areas: the area where the new
+state appears, the area where the old state disappears, and
+the difference between the common areas of both states. It’s
+worth noting that in Super Mario Bros, ∆y is always zero.
+
+Fst (x, y) ◦ Fst+1 (x, y)
+|Fst (x, y) ◦ Fst+1 (x, y)|
+Fst (x, y) ◦ Fst (x, y)e
+
+y∆y
+2πi( x∆x
+W + H )
+x∆x
+
+y∆y
+
+|Fst (x, y) ◦ Fst (x, y)e2πi( W + H ) |
+x∆x
+
+y∆y
+
+= e2πi( W + H ) .
+Next, we introduce the 2D shifted impulse function dedef
+fined as δ(x − a, y − b) = δ(x − a)δ(y − b) where
+a and b are arbitrary constants. This function can be
+obtained as the product of two Dirac-Delta functions
+1
+1
+δ(x − a) = limn→∞ n1[− 2n
+≤x−a≤ 2n
+] and δ(y − b) =
+1 . Applying the Fourier transform
+1
+limn→∞ n1[− 2n
+≤y−b≤ 2n ]
+to δ(x − a, y − b) yields:
+ZZ
+F (δ(x − a, y − b)) =
+δ(x − a, y − b)e−i2π(xξx +yξy ) dxdy
+R2
+−i2π(aξx +bξy )
+
+=e
+
+,
+
+where ξx and ξy are oscillation frequencies
+ along x and y
+axes. This leads to F−1 e−i2π(aξx +bξy ) = δ(x − a, y −
+b). Thus, the inverse Fourier transform of the cross-power
+spectrum R(x, y) is:
+
+
+y∆y
+x∆x
+F−1 (R(x, y)) = F−1 ei2π( W + H ) = δ(x+∆x, y+∆y).
+This indicates that we can obtain the shifts ∆x and ∆y
+by finding the location of the peak in the
+ above results:
+(∆x, ∆y) = argmaxx,y F−1 (R(x, y)) . In practice, the
+fast Fourier transform (FFT) can be used to efficiently compute the discrete Fourier transform and its inverse. Once ∆x
+and ∆y are obtained, we can get the corresponding value of
+factor Se using the following relationship:
+Se,t = ∥st+1 [0:W −∆x,0:H−∆y] − st [∆x:W,∆y:H]∥F
+|
+{z
+}
+common area difference
+
++ ∥st [0:W,0:∆y] + st [0:∆x,0:H] − st [0:∆x,0:∆y]∥F
+|
+{z
+}
+disappeared area
+
++ ∥st+1 [W −∆x:W,0:H] + st+1 [0:W,H−∆y:H]
+−st+1 [W −∆x:W,H−∆y:H]∥F
+|
+{z
+}
+appeared area
+
+In the above relation, ∥.∥F is the Frobenius Norm and we
+assume that st+1 is shifted to the upper right relative to st
+
+with ∆x ≥ 0 and ∆y ≥ 0. For the Open AI Super Mario
+Bros, we observed that ∆y is always zero. Figure 2 illustrates the procedure for obtaining the value of Se in this case.
+After computing Gt and Se,t , we need to assign a PseudoGroundtruth label to them. Suppose the current Exploring Pool E with a capacity of N contains the data tuples
+t−1
+{(Gi , Se,i , li )}i=t−N
+. We start by randomly sampling half
+of the data to shuffle their order, which yields a subset E0 ,
+then the 2D 0-1 encoded label for (Gt , Se,t ) is given by:
+
+
+lt = 1Gt ≥2 Pi∈E Gi /N , 1Se,t ≥2 Pi∈E Se,i /N ,
+0
+
+0
+
+where 1 is the indicator function. Once lt is obtained, the
+tuple (Gt , Se,t , lt ) is stored in the E, and the oldest tuple
+with an index of i = t−N is removed to maintain the pool’s
+up-to-date status.
+
+Convergence of Pseudo-Groundtruth labels
+An essential attribute of a quality Collector is its ability for
+collecting labels that accurately represent the environment
+in which it operates. In an MDP, where the future evolution
+of Markov processes is independent of the past, it is possible to consider two random variables representing the same
+feature collected by the agents before and after a sufficiently
+long interval as approximately independent. For example, if
+a feature X0 is generated by agents and follows the distribution F0 (x) in the global environment, throughout the long
+training process, this feature can be modeled as a sequence
+of random variables X1 , ..., Xn at different update moments
+of E. The variables X1 , ..., Xn are considered to be nearly
+independent and exhibit approximate convergence towards
+X0 . The data in E at each update time can be treated as a
+random sample from the corresponding Xi . In Theorem 1
+and its corollary, we introduce the convergence of the proportion of labels in E in the context of Reasoner training.
+Theorem 1. Assume X1 , ..., Xn : Ω → R are independent random variables defined on a common probability
+space (Ω, F, P). They have continuous cumulative distribution function Fi (x) and expectations E(Xi ) = µi <
+(1)
+(2)
+(N )
+∞. Let {(xi , xi , ..., xi )}ni=1 be a sequence of samn
+ples of {Xi }i=1 with a sequence of mean values{x̄i }ni=1 .
+The corresponding label sequence is defined as {Li |Li =
+1X0 ≥x̄i }ni=1 , where X0 ∼ F0 (x) with expectation µ0 . If
+{Fi (x)}ni=1 converge pointwise to F0 and {µi (x)}ni=1 con-
+
+verge to µ0 in probability, then
+F0 (µ0 ) in probability.
+
+Pn
+
+i=1 Li /n converges to
+
+improved performance and expanded exploration of maps,
+providing empirical support for the assumptions in Theorem
+1. For a more general case, assuming that we partition the
+Proof. Define the empirical distribution function
+interpretability of the agent’s behavior using d independent
+P
+N
+F̂i (t) = n1 j=1 1x(j) ≤t , i = 1, 2, ..., n, then Li ∼
+variables, the label dimension would be d. This leads us to
+i
+derive the following Corollary 1.
+Bernoulli(F̂i (x̄i )) with mean E(Li ) = F̂i (x̄i ) and variance
+Pn
+Corollary 1. Assume {Xij }1≤i≤n
+1≤j≤d : Ω → R are n×d indevar(Li ) = F̂i (x̄i )(1 − F̂i (x̄i )). Let Sn =
+i=1 Li ,
+pendent random variables defined on a common probability
+According to Kolmogorov’s inequality, we obtain:
+space (Ω, F, P). They have continuous cumulative distri!
+n
+K
+bution function Fij (x) and expectations E(Xij ) = µij <
+X
+X
+1
+(1)
+(2)
+(N )
+P
+max Sn −
+E(Li ) ≥ λ ≤ 2
+var(Li ),
+∞. For any 1 ≤ j ≤ d, Let {(xij , xij , ..., xij )}ni=1
+1≤n≤K
+λ i=1
+i=1
+be a sequence of samples of {Xij }ni=1 with a sequence
+∀λ > 0, K ≥ n
+of mean values{x̄ij }ni=1 . Define the d-dimension label se⃗i = (Li1 , Li2 , ..., Lid )|Lij = 1X ≥x̄ }n ,
+quence as {L
+0j
+ij i=1
+Setting K = n and using the constraints 0 ≤ F̂i (t) ≤ 1,
+where
+X
+∼
+F0j (x) with expectations µ0j . If {Fij (x)}ni=1
+0j
+!
+n
+n
+converge pointwise to F0j and {µij (x)}ni=1 converge to
+Sn
+1 X
+1X
+P
+−
+F̂i (x̄i ) ≥ λ ≤ 2 2
+F̂i (x̄i )(1 − F̂i (x̄i )) µ0j in probability, then #(l1 , l2 , ..., ld )/n converges to
+n
+n i=1
+λ n i=1
+Πdj=1 (F0j (µ0j ))lj (1 − F0j (µ0j ))1−lj in probability, where
+1
+# is symbol for counting and lj ∈ {0, 1}.
+≤
+,
+4nλ2
+Proof. Consider the function T(k) given by: T (k) =
+Pn
+p
+which implies that: Snn − n1 i=1 F̂i (x̄i ) → 0. By the strong
+#(0 ∨ 1, . . . , 0 ∨ 1, lk , lk+1 , . . . , ld )/n. Using Theorem 1
+{z
+}
+|
+law of large numbers, F̂i (t) converges to Fi (t) as N → ∞
+k−1 times
+almost surely for every t. In addition, simple algebra by Tay⃗i are
+and the condition that the d elements in each label L
+lor’s theorem yields:
+independent, we can get:
+n
+n 
+
+X
+X
+#(l1 , l2 , . . . , ld )
+1
+1
+T (1) =
+Fi (x̄i ) =
+Fi (µi )+Fi′ (µi )(x̄i −µi )+o(x̄i −µi )
+n
+n i=1
+n i=1
+
+l 
+1−l1
+#(1, l2 , . . . , ld ) 1 #(0, l2 , . . . , ld )
+=
+Combining the above√results, taking into account the propn
+n
+p
+erty x̄i − µi = O(1/ N ) = o(1) → 0, we can arrive at:
+
+l
+#(1, l2 , . . . , ld ) #(0 ∨ 1, l2 , . . . , ld ) 1
+n
+n
+n
+=
+X
+Sn p 1 X
+p 1 X
+a.s. 1
+#(0 ∨ 1, l2 , . . . , ld )
+n
+F̂i (x̄i ) →
+Fi (x̄i ) →
+Fi (µi )
+→
+
+1−l1
+n
+n i=1
+n i=1
+n i=1
+#(0, l2 , . . . , ld ) #(0 ∨ 1, l2 , . . . , ld )
+×
+#(0 ∨ 1, l2 , . . . , ld )
+n
+Finally, we know that for any ϵ > 0,
+l1
+1−l1
+p
+n
+→
+F
+(µ
+)T
+(2)
+1
+−
+F
+(µ
+)T
+(2)
+01
+01
+01
+01
+X
+1
+l1
+1−l1
+P(
+Fi (µi ) − F0 (µ0 ) > ϵ)
+= F01 (µ01 )
+1 − F01 (µ01 )
+T (2)
+n i=1
+n
+
+1X
+ϵ
+≤P (
+Fi (µi ) − F0 (µi ) > )
+n i=1
+2
+n
+
++ P(
+where P ( n1
+
+1X
+ϵ
+F0 (µi ) − F0 (µ0 ) > )
+n i=1
+2
+
+Pn
+
+Fi (µi )−F0 (µi ) > 2ϵ )→0 can be derived
+Pn
+from pointwise convergence of Fi , P ( n1 i=1 F0 (µi ) −
+i=1
+
+F0 (µ0 ) > 2ϵ )→0 is the result of convergence in probability under the continuous mapping theorem. Thus we proved
+Pn
+p
+p
+1
+i=1 Fi (µi ) → F0 (µ0 ), leading to Sn /n → F0 (µ0 ).
+n
+As the training progresses, the feature values collected
+from both G and Se progressively align with the global settings and feature distributions become more similar to that
+of the global environment. This is attributed to the agents’
+
+p
+
+p
+
+d−1
+→ . . . → Πj=1
+(F0j (µ0j ))lj (1 − F0j (µ0j ))1−lj T (d)
+p
+
+→Πdj=1 (F0j (µ0j ))lj (1 − F0j (µ0j ))1−lj
+Since our experiments involve two features G and Se , this
+corresponds to a specific case with d = 2.
+
+4
+
+Evaluation
+
+To evaluate our model’s performance in an action-rich environment and also ensure readers’ easy comprehension,
+we use eight distinct maps from the Super Mario Bros
+games (Kauten 2018) as examples. All games use “complex
+movement” action settings and are with an OpenAI Gym interface. Details of model configurations can be found in the
+Appendix.
+
+State saliency maps on agent intents
+The Reasoner Network can be effectively combined with visual explanation techniques to provide state saliency maps
+
+Environment 1 Environment 2 Environment 3
+
+Environment 4 Environment 5 Environment 6
+
+Environment 7
+
+Environment 8
+
+Breakout
+
+Prospect
+
+States
+
+Jacobian
+(critic+actor）
+
+Perturbation
+(critic+actor）
+Breakout
+
+Breakout
+
+Hovering
+
+Prospect
+
+Hovering
+
+Self-improvement
+
+GradCAM of
+Reasoner
+predicted
+purpose
+(Ours)
+
+GradCAM of
+all potential
+purposes
+(Ours)
+
+Figure 3: Comparison of Jacobian saliency, perturbation-based saliency to our purpose-driven saliency. One of the greatest
+strengths of our approach is that the saliency maps can be generated according to the underlying purpose of the agent’s action.
+that reveal the key features and regions influencing the
+agent’s intent during the decision-making process. By employing GradCam (Selvaraju et al. 2017) on the Reasoner
+Network, the last two rows of Figure 3 showcase the saliency
+maps that highlight important areas corresponding to the
+agent’s intended purposes. These purposes include the one
+identified by the Reasoner’s classification (borders outlined
+in red) as well as the other three potential purposes. Compared to the traditional methods of understanding agents
+such as Jacobian saliency (Wang et al. 2016; Zahavy,
+Ben-Zrihem, and Mannor 2016) and Perturbation-based approach (Greydanus et al. 2018), one of the greatest strengths
+of our approach is that the saliency maps can be generated
+according to the purpose of the agent’s actions.
+Our saliency information not only informs an RL agent’s
+decisions about “important regions” but also offers more
+profound insights into how these “important regions” serve
+specific and distinct purposes in the agent’s actions. A clear
+example can be observed in the first column, where the regions highlighted by gradient-based Jacobian saliency lack
+human interpretability. Although Perturbation saliency highlights “important” regions more effectively, humans still
+struggle to comprehend why certain highlighted regions,
+such as the cloud at the top of the frame, are considered important, which is counterintuitive. In contrast, our approach
+initially predicts that the agent’s current action is “Breakout”
+
+and then highlights only the area with the mushroom as crucial for this specific purpose. Another intriguing observation
+can be made in the examples in the third and fifth columns,
+where the Saliency maps obtained by our method for the
+“Hovering” purpose are notably broader, aligning well with
+the expected nature of the agent’s action for this purpose.
+The saliency maps representing alternative potential action purposes in the last row are intended as auxiliary information rather than the primary focus. They allow us to
+explore how saliency changes under different action purposes. It’s important to note that the absence of underlying
+features for these potential purposes may occasionally result
+in less clear saliency patterns, but in the majority of cases,
+these maps offer meaningful insights for human interpretation. These saliency maps not only provide user-friendly insights into the decision-making process and interactions of
+RL agents with their environment but also aid domain experts in comprehending the reasoning behind the Reasoner
+Network’s classifications.
+
+AI safety: before the failure
+The Reasoner Network plays a crucial role in classifying the actions taken by the agent. Figure 4 illustrates the
+classification results of the agent’s actions in a final failed
+episode, providing valuable insights into the agent’s behavior throughout the episode. In RL, agent failure is a common
+
+the policy increases, there is a gradual decrease in the proportion of “Breakout” labels, accompanied by an increase
+in the proportion of “Hovering” labels. On the other hand,
+“Self-improvement” and “Prospect” labels show no clear
+trend. The observed changes in the proportions of “Breakout” and “Hovering” labels align with our expectations, as
+providing more exploration encouragement to the agent allows it to explore the environment rather than directly selecting an optimal strategy. In practice, by utilizing the ratio
+of labels provided by Rϕ , we are able to estimate the level
+of exploration encouragement in RL algorithms. This identification of the exploration hierarchy empowers us to proactively select the most suitable exploration strategy algorithm
+for agents across different environments.
+Figure 4: Action classification and early failure detection
+
+Convergence of Pseudo-Groundtruth labels
+
+occurrence, especially when the model is not well-trained.
+Our approach presents a novel method for detecting potentially dangerous behavior in the agent, making contributions
+to the field of AI safety. Notably, we have discovered that
+substantial fluctuations in the continuous action classification in the short term indicate the agent’s action purpose or
+behavior is becoming unstable, which may ultimately lead
+to failure. This finding offers new insight into ensuring AI
+safety, as it allows for early detection and prevention of dangerous behaviors in RL agents.
+
+Identifying the exploration encouragement
+
+Figure 5: The relationship between policy entropy increment
+and the ratio of Reasoner-provided labels
+Our proposed framework enables the identification of the
+level of exploration encouragement within RL models. We
+achieve this by introducing an entropy increment on the
+well-trained A2C policy and examining its relationship with
+the ratio of the four labels provided by Rϕ . To increment
+the entropy of the policy distribution, we employ a specific
+method. At each time step, we uniformly add a value of
+0.001 to the policy distribution, which consists of 12 discrete values. Subsequently, we normalize the policy distribution to ensure it remains a valid probability distribution.
+The degree of entropy increment, denoted as entropy+, is
+determined by the number of such additions. We conducted
+100 episodes for each degree of entropy+ per environment.
+As depicted in Figure 5, we observe that as the entropy of
+
+Figure 6: Convergence of four Pseudo-Groundtruth labels
+We record the proportions of Pseudo-Groundtruth labels
+throughout Rϕ training process to support the conclusions
+of Corollary 1 for the d = 2 case with the assumption G and
+Se are two independent features. The trends are shown in
+Figure 6, where it can be observed that all four label proportions eventually converge to relatively stable values. Specifically, we observe that the proportions of “Breakout” and
+“Self-improvement” rise initially before leveling off, while
+the proportion of “Prospect” experiences a decline to reach
+a stable state. Additionally, the proportion of “Hovering”
+exhibits minor fluctuations before ultimately settling into a
+consistent pattern. The convergence of training label proportions not only highlights the evolving trend of the agent’s
+actions during the training process but also serves as an indicator of the completion of A2C model training.
+
+5
+
+Conclusion
+
+Incorporating the Reasoner module into the Actor-Critic
+framework significantly enhances its interpretability, during both the training process and the inference process.
+Through theoretical proof and experimental validation, we
+have demonstrated the effectiveness of our proposed A2CR
+framework, which offers valuable contributions in the areas
+of visual interpretation, failure early detection, RL algorithm
+exploration identification, and RL supervision. By providing
+a more interpretable RL framework, our goal is to improve
+understanding, trust, and practical deployment of RL models
+in a wide range of scenarios.
+
+References
+Afsar, M. M.; Crump, T.; and Far, B. 2022. Reinforcement
+learning based recommender systems: A survey. ACM Computing Surveys, 55(7): 1–38.
+Dazeley, R.; Vamplew, P.; and Cruz, F. 2023. Explainable reinforcement learning for broad-xai: a conceptual framework
+and survey. Neural Computing and Applications, 1–24.
+Ehsan, U.; Harrison, B.; Chan, L.; and Riedl, M. O. 2018.
+Rationalization: A neural machine translation approach to
+generating natural language explanations. In Proceedings of
+the 2018 AAAI/ACM Conference on AI, Ethics, and Society,
+81–87.
+Ehsan, U.; Tambwekar, P.; Chan, L.; Harrison, B.; and Riedl,
+M. O. 2019. Automated rationale generation: a technique for
+explainable AI and its effects on human perceptions. In Proceedings of the 24th International Conference on Intelligent
+User Interfaces, 263–274.
+Foroosh, H.; Zerubia, J. B.; and Berthod, M. 2002. Extension of phase correlation to subpixel registration. IEEE
+transactions on image processing, 11(3): 188–200.
+Greydanus, S.; Koul, A.; Dodge, J.; and Fern, A. 2018. Visualizing and understanding atari agents. In International
+conference on machine learning, 1792–1801. PMLR.
+Kauten, C. 2018. Super Mario Bros for OpenAI Gym.
+GitHub.
+Krarup, B.; Cashmore, M.; Magazzeni, D.; and Miller, T.
+2019. Model-based contrastive explanations for explainable
+planning.
+Lage, I.; Lifschitz, D.; Doshi-Velez, F.; and Amir, O. 2019.
+Exploring computational user models for agent policy summarization. In IJCAI: proceedings of the conference, volume 28, 1401. NIH Public Access.
+Liu, G.; Sun, X.; Schulte, O.; and Poupart, P. 2021. Learning
+tree interpretation from object representation for deep reinforcement learning. Advances in Neural Information Processing Systems, 34: 19622–19636.
+Madumal, P.; Miller, T.; Sonenberg, L.; and Vetere, F. 2020.
+Explainable reinforcement learning through a causal lens.
+In Proceedings of the AAAI conference on artificial intelligence, volume 34, 2493–2500.
+Mnih, V.; Badia, A. P.; Mirza, M.; Graves, A.; Lillicrap, T.;
+Harley, T.; Silver, D.; and Kavukcuoglu, K. 2016. Asynchronous methods for deep reinforcement learning. In International conference on machine learning, 1928–1937.
+PMLR.
+Mnih, V.; Kavukcuoglu, K.; Silver, D.; Graves, A.;
+Antonoglou, I.; Wierstra, D.; and Riedmiller, M. 2013. Playing atari with deep reinforcement learning. arXiv preprint
+arXiv:1312.5602.
+Mott, A.; Zoran, D.; Chrzanowski, M.; Wierstra, D.; and
+Jimenez Rezende, D. 2019. Towards interpretable reinforcement learning using attention augmented agents. Advances
+in neural information processing systems, 32.
+OpenAI. 2023. GPT-4 Technical Report. arXiv:2303.08774.
+
+Sado, F.; Loo, C. K.; Liew, W. S.; Kerzel, M.; and Wermter,
+S. 2023. Explainable Goal-driven Agents and Robots-A
+Comprehensive Review. ACM Computing Surveys, 55(10):
+1–41.
+Selvaraju, R. R.; Cogswell, M.; Das, A.; Vedantam, R.;
+Parikh, D.; and Batra, D. 2017. Grad-cam: Visual explanations from deep networks via gradient-based localization. In
+Proceedings of the IEEE international conference on computer vision, 618–626.
+Silver, D.; Huang, A.; Maddison, C. J.; Guez, A.; Sifre, L.;
+Van Den Driessche, G.; Schrittwieser, J.; Antonoglou, I.;
+Panneershelvam, V.; Lanctot, M.; et al. 2016. Mastering the
+game of Go with deep neural networks and tree search. nature, 529(7587): 484–489.
+Vasic, M.; Petrovic, A.; Wang, K.; Nikolic, M.; Singh, R.;
+and Khurshid, S. 2019. Moët: Interpretable and verifiable
+reinforcement learning via mixture of expert trees. arXiv
+preprint arXiv:1906.06717.
+Wang, Z.; Schaul, T.; Hessel, M.; Hasselt, H.; Lanctot, M.;
+and Freitas, N. 2016. Dueling network architectures for deep
+reinforcement learning. In International conference on machine learning, 1995–2003. PMLR.
+Wu, H.; Khetarpal, K.; and Precup, D. 2021. Self-supervised
+attention-aware reinforcement learning. In Proceedings of
+the AAAI Conference on Artificial Intelligence, volume 35,
+10311–10319.
+Zahavy, T.; Ben-Zrihem, N.; and Mannor, S. 2016. Graying
+the black box: Understanding dqns. In International conference on machine learning, 1899–1908. PMLR.
+Zhao, W.; Queralta, J. P.; and Westerlund, T. 2020. Sim-toreal transfer in deep reinforcement learning for robotics: a
+survey. In 2020 IEEE symposium series on computational
+intelligence (SSCI), 737–744. IEEE.
+
+6
+
+Appendix
+
+Setting and Scores in Training
+Our objective is to offer an interpretation of the agent’s behavior in reinforcement learning, allowing and acknowledging situations where the agent may not successfully complete the game. Based on our observations, setting the value of ρ2 to be between
+0.1 and 0.3 has been found to facilitate the agent’s learning and successful completion. However, we intentionally set ρ2 to 0.5
+to promote behavioral diversity and increase the likelihood of the agent failing the game. The Frame stack is configured with
+a value of 3 to facilitate its integration with the Grad-CAM technique. It is recommended to set the discount factor γ between
+0.9 and 0.99 and set the parameter ρ1 between 0.3 and 1. Additionally, w1 represents the relative importance of the state value
+difference (∆v) and the reward (r) in the feature “total gain” value (G). Considering both factors to be equally significant, we
+set w1 to 0.5.
+Table 1: Parameter settings for the A2CR training
+Environment
+World
+Version
+Movement
+Warp frame size
+Frame stack
+γ
+ρ1
+ρ2
+w1
+Total number of training frames for A2C
+Total number of training frames for Reasoner
+Batch size
+Learning rate for A2C
+Learning rate for Reasoner
+Number of A2C workers
+Number of Reasoner workers (collector)
+Exploring Pool size (N)
+Number of Reasoner classification (M)
+
+SuperMarioBros
+{1, 2, 3, 4, 5, 6, 7, 8}
+0 (standard ROM)
+COMPLEX MOVEMENT
+84 × 84
+3
+0.9
+0.5
+0.5
+0.5
+2e+7
+2e+7
+16
+2.5e-4
+2.5e-4
+16
+4
+1000
+4
+
+Based on the provided configurations, Table 2 presents the average scores of the agent over the last 100 episodes during
+the training phase. According to the tests, the agent is able to successfully pass the SuperMarioBros World {1, 3, 4, 5, 6, 7}
+However, in the case of World {2}, it is challenging for the agent to pass it. Furthermore, in World {8}, it is observed that the
+agent consistently fails in the final steps leading up to completing the game.
+Table 2: Average score for the last 100 training episodes
+Environment
+
+score
+
+pass/fail status
+
+SuperMarioBros-1-1-v0
+SuperMarioBros-2-1-v0
+SuperMarioBros-3-1-v0
+SuperMarioBros-4-1-v0
+SuperMarioBros-5-1-v0
+SuperMarioBros-6-1-v0
+SuperMarioBros-7-1-v0
+SuperMarioBros-8-1-v0
+
+2591.29
+1355.30
+2175.47
+2952.64
+1849.54
+2632.66
+1916.08
+2283.60
+
+pass
+fail
+pass
+pass
+pass
+pass
+pass
+fail (close to pass)
+
+Exploration Encouragement Level and Proportions of Reasoner-Provided Labels
+Table 3: The relationship between policy entropy increment (entropy+) and the proportion of ”Breakout” labels (mean µ,
+standard deviation σ) based on 100 test episodes for each entropy+ per environment.
+Env 1
+
+Env 2
+
+Env 3
+
+Env 4
+
+Env 5
+
+Env 6
+
+Env 7
+
+Env 8
+
+entropy+
+
+µ
+
+σ
+
+µ
+
+σ
+
+µ
+
+σ
+
+µ
+
+σ
+
+µ
+
+σ
+
+µ
+
+σ
+
+µ
+
+σ
+
+µ
+
+σ
+
+0
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+
+0.81
+0.80
+0.77
+0.77
+0.73
+0.71
+0.70
+0.71
+0.68
+0.66
+0.64
+0.69
+0.62
+0.64
+0.62
+0.60
+0.61
+0.59
+0.57
+0.56
+
+0.06
+0.05
+0.09
+0.07
+0.10
+0.10
+0.09
+0.10
+0.11
+0.12
+0.14
+0.11
+0.13
+0.13
+0.14
+0.12
+0.15
+0.14
+0.15
+0.15
+
+0.74
+0.76
+0.70
+0.72
+0.69
+0.67
+0.68
+0.65
+0.62
+0.63
+0.63
+0.62
+0.60
+0.61
+0.59
+0.58
+0.57
+0.58
+0.56
+0.56
+
+0.16
+0.09
+0.13
+0.12
+0.10
+0.12
+0.09
+0.11
+0.12
+0.11
+0.12
+0.12
+0.10
+0.11
+0.13
+0.10
+0.14
+0.10
+0.12
+0.12
+
+0.35
+0.33
+0.32
+0.31
+0.31
+0.31
+0.29
+0.27
+0.30
+0.28
+0.27
+0.27
+0.26
+0.28
+0.26
+0.27
+0.25
+0.25
+0.26
+0.22
+
+0.07
+0.07
+0.08
+0.07
+0.06
+0.06
+0.07
+0.07
+0.05
+0.06
+0.07
+0.07
+0.06
+0.06
+0.08
+0.05
+0.07
+0.06
+0.07
+0.07
+
+0.56
+0.56
+0.54
+0.53
+0.48
+0.48
+0.48
+0.45
+0.46
+0.42
+0.40
+0.42
+0.41
+0.39
+0.37
+0.36
+0.35
+0.37
+0.36
+0.35
+
+0.06
+0.03
+0.07
+0.11
+0.12
+0.12
+0.13
+0.12
+0.11
+0.13
+0.14
+0.14
+0.14
+0.15
+0.16
+0.13
+0.12
+0.12
+0.14
+0.13
+
+0.47
+0.46
+0.47
+0.45
+0.44
+0.36
+0.36
+0.38
+0.40
+0.35
+0.36
+0.33
+0.35
+0.31
+0.33
+0.34
+0.32
+0.31
+0.27
+0.28
+
+0.10
+0.10
+0.11
+0.12
+0.12
+0.17
+0.15
+0.15
+0.14
+0.16
+0.14
+0.15
+0.15
+0.15
+0.16
+0.13
+0.14
+0.13
+0.16
+0.14
+
+0.49
+0.44
+0.43
+0.41
+0.40
+0.38
+0.36
+0.37
+0.33
+0.32
+0.34
+0.28
+0.29
+0.26
+0.29
+0.27
+0.28
+0.25
+0.28
+0.27
+
+0.06
+0.11
+0.13
+0.10
+0.11
+0.11
+0.11
+0.11
+0.09
+0.10
+0.09
+0.12
+0.09
+0.10
+0.09
+0.11
+0.10
+0.09
+0.09
+0.09
+
+0.62
+0.53
+0.53
+0.52
+0.52
+0.46
+0.46
+0.47
+0.41
+0.39
+0.34
+0.36
+0.36
+0.32
+0.30
+0.31
+0.28
+0.28
+0.28
+0.30
+
+0.12
+0.18
+0.19
+0.20
+0.18
+0.17
+0.16
+0.19
+0.18
+0.19
+0.15
+0.17
+0.14
+0.15
+0.14
+0.14
+0.13
+0.13
+0.15
+0.12
+
+0.57
+0.53
+0.52
+0.46
+0.46
+0.46
+0.45
+0.41
+0.41
+0.40
+0.38
+0.42
+0.32
+0.35
+0.38
+0.30
+0.32
+0.32
+0.28
+0.30
+
+0.10
+0.11
+0.13
+0.15
+0.12
+0.15
+0.15
+0.15
+0.16
+0.14
+0.15
+0.15
+0.12
+0.16
+0.11
+0.14
+0.15
+0.15
+0.13
+0.13
+
+Table 4: The relationship between policy entropy increment (entropy+) and the proportion of ”Self-improvement” labels (mean
+µ, standard deviation σ) based on 100 test episodes for each entropy+ per environment.
+Env 1
+
+Env 2
+
+Env 3
+
+Env 4
+
+Env 5
+
+Env 6
+
+Env 7
+
+Env 8
+
+entropy+
+
+µ
+
+σ
+
+µ
+
+σ
+
+µ
+
+σ
+
+µ
+
+σ
+
+µ
+
+σ
+
+µ
+
+σ
+
+µ
+
+σ
+
+µ
+
+σ
+
+0
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+
+0.09
+0.09
+0.10
+0.10
+0.11
+0.12
+0.11
+0.13
+0.12
+0.12
+0.13
+0.12
+0.13
+0.12
+0.13
+0.13
+0.14
+0.13
+0.15
+0.13
+
+0.03
+0.03
+0.04
+0.04
+0.04
+0.04
+0.04
+0.05
+0.04
+0.04
+0.06
+0.05
+0.05
+0.04
+0.06
+0.05
+0.05
+0.04
+0.06
+0.05
+
+0.10
+0.12
+0.12
+0.12
+0.13
+0.14
+0.14
+0.13
+0.14
+0.15
+0.14
+0.14
+0.14
+0.14
+0.14
+0.14
+0.14
+0.16
+0.15
+0.17
+
+0.04
+0.04
+0.05
+0.05
+0.05
+0.05
+0.05
+0.05
+0.06
+0.06
+0.06
+0.06
+0.06
+0.05
+0.06
+0.06
+0.05
+0.06
+0.06
+0.06
+
+0.22
+0.23
+0.24
+0.23
+0.23
+0.23
+0.22
+0.25
+0.24
+0.23
+0.22
+0.24
+0.23
+0.23
+0.22
+0.24
+0.21
+0.23
+0.22
+0.21
+
+0.03
+0.05
+0.06
+0.07
+0.04
+0.06
+0.07
+0.08
+0.07
+0.06
+0.07
+0.07
+0.08
+0.06
+0.08
+0.08
+0.07
+0.07
+0.07
+0.07
+
+0.20
+0.19
+0.20
+0.21
+0.22
+0.22
+0.22
+0.23
+0.20
+0.23
+0.23
+0.22
+0.23
+0.22
+0.21
+0.24
+0.22
+0.21
+0.22
+0.22
+
+0.02
+0.02
+0.06
+0.07
+0.06
+0.05
+0.08
+0.07
+0.04
+0.07
+0.08
+0.07
+0.07
+0.06
+0.06
+0.08
+0.06
+0.06
+0.07
+0.07
+
+0.20
+0.21
+0.22
+0.23
+0.22
+0.30
+0.25
+0.26
+0.24
+0.24
+0.24
+0.24
+0.23
+0.25
+0.24
+0.23
+0.24
+0.23
+0.26
+0.23
+
+0.09
+0.08
+0.09
+0.13
+0.10
+0.17
+0.13
+0.13
+0.12
+0.12
+0.16
+0.10
+0.12
+0.13
+0.15
+0.12
+0.14
+0.11
+0.15
+0.12
+
+0.36
+0.36
+0.38
+0.37
+0.38
+0.37
+0.37
+0.39
+0.37
+0.37
+0.38
+0.38
+0.37
+0.37
+0.36
+0.35
+0.37
+0.37
+0.35
+0.36
+
+0.05
+0.06
+0.07
+0.05
+0.07
+0.07
+0.07
+0.07
+0.07
+0.07
+0.06
+0.09
+0.08
+0.08
+0.08
+0.08
+0.06
+0.08
+0.07
+0.07
+
+0.10
+0.16
+0.17
+0.17
+0.18
+0.18
+0.18
+0.17
+0.20
+0.19
+0.21
+0.22
+0.24
+0.23
+0.22
+0.21
+0.20
+0.27
+0.26
+0.20
+
+0.05
+0.12
+0.13
+0.10
+0.11
+0.10
+0.10
+0.11
+0.13
+0.12
+0.10
+0.12
+0.15
+0.14
+0.12
+0.10
+0.10
+0.15
+0.12
+0.11
+
+0.18
+0.21
+0.21
+0.26
+0.24
+0.22
+0.25
+0.28
+0.28
+0.29
+0.32
+0.25
+0.31
+0.28
+0.28
+0.31
+0.29
+0.29
+0.33
+0.27
+
+0.09
+0.12
+0.13
+0.12
+0.12
+0.11
+0.12
+0.15
+0.12
+0.13
+0.10
+0.10
+0.12
+0.12
+0.11
+0.13
+0.12
+0.13
+0.15
+0.13
+
+Table 5: The relationship between policy entropy increment (entropy+) and the proportion of ”Hovering” labels (mean µ,
+standard deviation σ) based on 100 test episodes for each entropy+ per environment.
+Env 1
+
+Env 2
+
+Env 3
+
+Env 4
+
+Env 5
+
+Env 6
+
+Env 7
+
+Env 8
+
+entropy+
+
+µ
+
+σ
+
+µ
+
+σ
+
+µ
+
+σ
+
+µ
+
+σ
+
+µ
+
+σ
+
+µ
+
+σ
+
+µ
+
+σ
+
+µ
+
+σ
+
+0
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+
+0.04
+0.05
+0.07
+0.06
+0.09
+0.10
+0.10
+0.09
+0.12
+0.14
+0.15
+0.11
+0.17
+0.16
+0.16
+0.19
+0.18
+0.19
+0.20
+0.23
+
+0.04
+0.04
+0.07
+0.05
+0.08
+0.07
+0.06
+0.07
+0.10
+0.10
+0.14
+0.07
+0.13
+0.11
+0.11
+0.12
+0.15
+0.13
+0.15
+0.14
+
+0.10
+0.06
+0.11
+0.10
+0.10
+0.12
+0.11
+0.14
+0.16
+0.14
+0.15
+0.15
+0.17
+0.17
+0.18
+0.18
+0.20
+0.17
+0.20
+0.19
+
+0.18
+0.07
+0.13
+0.12
+0.09
+0.10
+0.09
+0.10
+0.13
+0.10
+0.12
+0.12
+0.10
+0.11
+0.13
+0.11
+0.14
+0.10
+0.13
+0.13
+
+0.28
+0.29
+0.29
+0.33
+0.33
+0.32
+0.36
+0.37
+0.33
+0.35
+0.38
+0.36
+0.41
+0.36
+0.40
+0.38
+0.43
+0.41
+0.40
+0.45
+
+0.07
+0.08
+0.10
+0.10
+0.08
+0.08
+0.13
+0.10
+0.09
+0.11
+0.12
+0.13
+0.10
+0.10
+0.12
+0.09
+0.12
+0.11
+0.11
+0.12
+
+0.07
+0.09
+0.10
+0.11
+0.16
+0.15
+0.16
+0.18
+0.19
+0.22
+0.22
+0.22
+0.23
+0.25
+0.28
+0.26
+0.29
+0.26
+0.29
+0.28
+
+0.07
+0.05
+0.06
+0.08
+0.10
+0.10
+0.10
+0.11
+0.12
+0.13
+0.13
+0.14
+0.13
+0.15
+0.18
+0.13
+0.13
+0.14
+0.16
+0.14
+
+0.15
+0.15
+0.15
+0.15
+0.17
+0.20
+0.24
+0.22
+0.19
+0.26
+0.25
+0.29
+0.27
+0.28
+0.29
+0.26
+0.30
+0.31
+0.34
+0.35
+
+0.07
+0.05
+0.08
+0.06
+0.08
+0.12
+0.18
+0.15
+0.10
+0.18
+0.16
+0.18
+0.18
+0.17
+0.18
+0.12
+0.20
+0.19
+0.21
+0.18
+
+0.09
+0.13
+0.12
+0.16
+0.16
+0.19
+0.19
+0.19
+0.24
+0.25
+0.23
+0.27
+0.27
+0.31
+0.28
+0.31
+0.28
+0.30
+0.29
+0.29
+
+0.06
+0.09
+0.08
+0.09
+0.09
+0.11
+0.09
+0.09
+0.10
+0.10
+0.09
+0.11
+0.10
+0.12
+0.09
+0.12
+0.10
+0.09
+0.10
+0.10
+
+0.12
+0.17
+0.18
+0.20
+0.19
+0.25
+0.23
+0.23
+0.27
+0.30
+0.32
+0.29
+0.28
+0.32
+0.36
+0.35
+0.38
+0.33
+0.34
+0.37
+
+0.08
+0.13
+0.14
+0.14
+0.13
+0.15
+0.14
+0.14
+0.15
+0.14
+0.14
+0.16
+0.14
+0.18
+0.17
+0.16
+0.14
+0.15
+0.16
+0.15
+
+0.09
+0.12
+0.13
+0.17
+0.17
+0.20
+0.19
+0.20
+0.21
+0.20
+0.20
+0.22
+0.26
+0.26
+0.24
+0.29
+0.29
+0.29
+0.29
+0.33
+
+0.05
+0.07
+0.08
+0.10
+0.09
+0.11
+0.11
+0.10
+0.13
+0.11
+0.13
+0.12
+0.14
+0.13
+0.12
+0.15
+0.16
+0.18
+0.12
+0.19
+
+Table 6: The relationship between policy entropy increment (entropy+) and the proportion of ”Prospect” labels (mean µ, standard deviation σ) based on 100 test episodes for each entropy+ per environment.
+Env 1
+
+Env 2
+
+Env 3
+
+Env 4
+
+Env 5
+
+Env 6
+
+Env 7
+
+Env 8
+
+entropy+
+
+µ
+
+σ
+
+µ
+
+σ
+
+µ
+
+σ
+
+µ
+
+σ
+
+µ
+
+σ
+
+µ
+
+σ
+
+µ
+
+σ
+
+µ
+
+σ
+
+0
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+
+0.06
+0.07
+0.07
+0.07
+0.07
+0.07
+0.08
+0.08
+0.07
+0.08
+0.08
+0.07
+0.08
+0.08
+0.09
+0.09
+0.08
+0.09
+0.08
+0.09
+
+0.03
+0.03
+0.03
+0.03
+0.04
+0.04
+0.05
+0.04
+0.04
+0.04
+0.04
+0.04
+0.05
+0.04
+0.04
+0.04
+0.05
+0.04
+0.04
+0.04
+
+0.06
+0.06
+0.07
+0.06
+0.07
+0.08
+0.07
+0.08
+0.08
+0.08
+0.08
+0.08
+0.09
+0.08
+0.08
+0.09
+0.10
+0.09
+0.08
+0.08
+
+0.02
+0.02
+0.03
+0.03
+0.03
+0.03
+0.03
+0.03
+0.03
+0.03
+0.03
+0.04
+0.04
+0.04
+0.04
+0.04
+0.04
+0.04
+0.04
+0.04
+
+0.15
+0.15
+0.14
+0.13
+0.14
+0.14
+0.12
+0.12
+0.13
+0.13
+0.13
+0.12
+0.11
+0.12
+0.12
+0.11
+0.12
+0.12
+0.12
+0.12
+
+0.03
+0.04
+0.04
+0.05
+0.04
+0.05
+0.05
+0.05
+0.04
+0.04
+0.04
+0.04
+0.04
+0.05
+0.05
+0.05
+0.05
+0.05
+0.04
+0.04
+
+0.17
+0.17
+0.16
+0.15
+0.15
+0.15
+0.14
+0.15
+0.15
+0.14
+0.14
+0.14
+0.13
+0.14
+0.14
+0.14
+0.14
+0.15
+0.14
+0.14
+
+0.02
+0.03
+0.04
+0.04
+0.04
+0.03
+0.03
+0.04
+0.04
+0.04
+0.05
+0.04
+0.04
+0.04
+0.04
+0.04
+0.04
+0.04
+0.05
+0.04
+
+0.18
+0.18
+0.16
+0.17
+0.17
+0.15
+0.15
+0.15
+0.17
+0.15
+0.15
+0.13
+0.15
+0.16
+0.14
+0.17
+0.14
+0.15
+0.13
+0.15
+
+0.04
+0.05
+0.05
+0.06
+0.05
+0.07
+0.08
+0.06
+0.05
+0.07
+0.07
+0.07
+0.06
+0.09
+0.08
+0.08
+0.08
+0.07
+0.08
+0.07
+
+0.06
+0.07
+0.07
+0.07
+0.06
+0.06
+0.08
+0.06
+0.06
+0.07
+0.06
+0.08
+0.07
+0.06
+0.07
+0.07
+0.08
+0.08
+0.08
+0.08
+
+0.02
+0.03
+0.02
+0.04
+0.03
+0.04
+0.03
+0.03
+0.03
+0.04
+0.04
+0.04
+0.04
+0.04
+0.04
+0.04
+0.04
+0.04
+0.04
+0.04
+
+0.16
+0.14
+0.12
+0.11
+0.12
+0.12
+0.12
+0.12
+0.13
+0.13
+0.13
+0.12
+0.12
+0.13
+0.13
+0.13
+0.14
+0.12
+0.12
+0.13
+
+0.07
+0.07
+0.06
+0.05
+0.05
+0.06
+0.06
+0.06
+0.05
+0.05
+0.05
+0.05
+0.05
+0.05
+0.04
+0.06
+0.06
+0.06
+0.05
+0.05
+
+0.16
+0.13
+0.14
+0.12
+0.13
+0.12
+0.11
+0.11
+0.10
+0.10
+0.09
+0.11
+0.10
+0.10
+0.10
+0.10
+0.09
+0.10
+0.10
+0.10
+
+0.05
+0.06
+0.05
+0.05
+0.05
+0.05
+0.05
+0.05
+0.05
+0.05
+0.04
+0.04
+0.05
+0.05
+0.05
+0.05
+0.06
+0.05
+0.05
+0.06
+
+Label Convergence and Completion Identification in A2CR Training
+
+Figure 7: Convergence of four Pseudo-Groundtruth labels in A2CR Training
+Figure 7 illustrates the convergence of the Pseudo-Groundtruth label proportion during A2CR training. In World {2}, where
+the agent is not trained to successfully pass the game, the label proportion shows continuous fluctuations without convergence.
+This indicates that the training is incomplete and requires additional training time. In World {8}, the agent consistently fails in
+the last few steps, suggesting that the algorithm is trapped in a local optimal solution. Instead of extending the training time,
+adjusting training parameters such as ρ1 , ρ2 , and γ becomes necessary at this stage. In other words, the training process is
+completed but unsuccessful. In World {1, 3, 4, 5, 6, 7}, all agents are trained to successfully pass the game. The training process
+is deemed completed in these worlds, supported by the convergence of the label proportions.
+
+

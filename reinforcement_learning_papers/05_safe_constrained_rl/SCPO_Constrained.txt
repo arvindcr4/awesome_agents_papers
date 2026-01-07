@@ -1,0 +1,3060 @@
+Published in Transactions on Machine Learning Research (04/2024)
+
+State-wise Constrained Policy Optimization
+Weiye Zhao
+
+weiyezha@andrew.cmu.edu
+
+Robotics Institute
+Carnegie Mellon University
+
+Rui Chen
+
+ruic3@andrew.cmu.edu
+
+arXiv:2306.12594v3 [cs.LG] 17 Jun 2024
+
+Robotics Institute
+Carnegie Mellon University
+
+Yifan Sun
+
+yifansu2@andrew.cmu.edu
+
+Robotics Institute
+Carnegie Mellon University
+
+Feihan Li
+
+feihanl@andrew.cmu.edu
+
+Robotics Institute
+Carnegie Mellon University
+
+Tianhao Wei
+
+twei2@andrew.cmu.edu
+
+Robotics Institute
+Carnegie Mellon University
+
+Changliu Liu
+
+cliu6@andrew.cmu.edu
+
+Robotics Institute
+Carnegie Mellon University
+Reviewed on OpenReview: https: // openreview. net/ forum? id= NgK5etmhz9
+
+Abstract
+Reinforcement Learning (RL) algorithms have shown tremendous success in simulation
+environments, but their application to real-world problems faces significant challenges, with
+safety being a major concern. In particular, enforcing state-wise constraints is essential
+for many challenging tasks such as autonomous driving and robot manipulation. However,
+existing safe RL algorithms under the framework of Constrained Markov decision process
+(CMDP) do not consider state-wise constraints. To address this gap, we propose State-wise
+Constrained Policy Optimization (SCPO), the first general-purpose policy search algorithm
+for state-wise constrained reinforcement learning. SCPO provides guarantees for state-wise
+constraint satisfaction in expectation. In particular, we introduce the framework of Maximum
+Markov decision process, and prove that the worst-case safety violation is bounded under
+SCPO. We demonstrate the effectiveness of our approach on training neural network policies
+for extensive robot locomotion tasks, where the agent must satisfy a variety of state-wise
+safety constraints. Our results show that SCPO significantly outperforms existing methods
+and can handle state-wise constraints in high-dimensional robotics tasks.
+
+1
+
+Introduction
+
+Reinforcement learning (RL) has achieved remarkable progress in games and control tasks (Mnih et al., 2015;
+Vinyals et al., 2019; Brown & Sandholm, 2018). However, one major barrier that limits the application of RL
+algorithms to real-world problems is the lack of safety assurance. RL agents learn to make reward-maximizing
+decisions, which may violate safety constraints. For example, an RL agent controlling a self-driving car may
+receive high rewards by driving at high speeds but will be exposed to high chances of collision. Although the
+1
+
+Published in Transactions on Machine Learning Research (04/2024)
+
+reward signals can be designed to penalize risky behaviors, there is no guarantee for safety. In other words,
+RL agents may sometimes prioritize maximizing the reward over ensuring safety, which can lead to unsafe or
+even catastrophic outcomes (Gu et al., 2022).
+Emerging in the literature, safe RL aims to provide safety guarantees during or after training. Early attempts
+have been made under the framework of constrained Markov decision process, where the majority of works
+enforce cumulative constraints or chance constraints (Ray et al., 2019; Achiam et al., 2017; Liu et al., 2021). In
+real-world applications, however, many critical constraints are instantaneous. For instance, collision avoidance
+must be enforced at all times for autonomous cars (Zhao et al., 2023). Another example is that when a robot
+holds a glass, the robot can only release the glass when the glass is on a stable surface. The violation of those
+constraints will lead to irreversible failures of the task. In this work, we focus on state-wise (instantaneous)
+constraints.
+The State-wise Constrained Markov decision process (SCMDP) is a novel formulation in reinforcement
+learning that requires policies to satisfy state-wise constraints. Unlike cumulative or probabilistic constraints,
+state-wise constraints demand full compliance at each time step as formalized by Zhao et al. (2023). Existing
+state-wise safe RL methods can be categorized based on whether safety is ensured during training. There is
+a fundamental limitation that it is impossible to guarantee hard state-wise safety during training without
+prior knowledge of the dynamic model. In a model-free setting, the more feasible approach is to statistically
+learn to satisfy state-wise constraints using as few samples as possible. Our paper concentrates on achieving
+state-wise constraint satisfaction in expectation.
+We aim to provide theoretical guarantees on expected state-wise safety violation and worst case reward
+degradation during training. Our approach is underpinned by a key insight that constraining the maximum
+violation is equivalent to enforcing state-wise safety. This insight leads to a novel formulation of MDP
+called the Maximum Markov decision process (MMDP). With MMDP, we establish a new theoretical result
+that provides a bound on the difference between the maximum cost of two policies for episodic tasks. This
+result expands upon the cumulative discounted reward and cost bounds for policy search using trust regions,
+as previously documented in literature (Achiam et al., 2017). We leverage this result to design a policy
+improvement step that not only guarantees worst-case performance degradation but also ensures state-wise
+cost constraints. Our proposed algorithm, State-wise Constrained Policy Optimization (SCPO), approximates
+the theoretically-justified update, which achieves a state-of-the-art trade-off between safety and performance.
+Through experiments, we demonstrate that SCPO effectively trains neural network policies with thousands
+of parameters on high-dimensional simulated robot locomotion tasks; and is able to optimize rewards while
+enforcing state-wise safety constraints. This work represents a significant step towards developing practical
+safe RL algorithms that can be applied to many real-world problems. Our code is available on Github1 .
+
+2
+
+Related Work
+
+2.1
+
+Cumulative Safety
+
+Cumulative safety requires that the expected discounted return with respect to some cost function is upperbounded over the entire trajectory. One representative approach is constrained policy optimization (CPO)
+(Achiam et al., 2017), which builds on a theoretical bound on the difference between the costs of different
+policies and derives a policy improvement procedure to ensure constraints satisfaction. Another approach is
+interior-point policy optimization (IPO) (Liu et al., 2019), which augments the reward-maximizing objective
+with logarithmic barrier functions as penalty functions to accommodate the constraints. Other methods
+include Lagrangian methods (Ray et al., 2019) which use adaptive penalty coefficients to enforce constraints
+and projection-based constrained policy optimization (PCPO) (Yang et al., 2020a) which projects trust-region
+policy updates onto the constraint set. Although our focus is on a different setting of constraints, existing
+methods are still valuable references for illustrating the advantages of our SCPO. By utilizing MMDP, SCPO
+breaks the conventional safety-reward trade-off, which results in stronger convergence of state-wise safety
+constraints and guaranteed performance degradation bounds.
+1 https://github.com/intelligent-control-lab/StateWise_Constrained_Policy_Optimization
+
+2
+
+Published in Transactions on Machine Learning Research (04/2024)
+
+2.2
+
+State-wise Safety
+
+Hierarchical Policy One way to enforce state-wise safety constraints is to use hierarchical policies, with
+an RL policy generating reward-maximizing actions, and a safety monitor modifying the actions to satisfy
+state-wise safety constraints (Zhao et al., 2023). Such an approach often requires a perfect safety critic to
+function well. For example, conservative safety critics (CSC) (Bharadhwaj et al., 2020) propose a safe critic
+QC (s, a), providing a conservative estimate of the likelihood of being unsafe given a state-action pair. If the
+safety violation exceeds a predefined threshold, a new action is re-sampled from the policy until it passes the
+safety critic. However, this approach is time-consuming. On the other hand, optimization-based methods such
+as gradient descent or quadratic programming can be used to find a safe action that satisfies the constraint
+while staying close to the reference action. Unrolling safety layer (USL) (Zhang et al., 2022b) follows a
+similar hierarchical structure as CSC but performs gradient descent on the reference action iteratively until
+the constraint is satisfied based on learned safety critic QC (s, a). Finally, instead of using gradient descent,
+Lyapunov-based policy gradient (LPG) (Chow et al., 2019) and SafeLayer (Dalal et al., 2018) directly solve
+quadratic programming (QP) to project actions to the safe action set induced by the linearized versions
+of some learned critic QC (s, a). All these approaches suffer from safety violations due to imperfect critic
+QC (s, a), while those solving QPs further suffer from errors due to the linear approximation of the critic. To
+avoid those issues, we propose SCPO as an end-to-end policy which does not explicitly maintain a safety
+monitor.
+
+End-to-End Policy End-to-end policies maximize task rewards while ensuring safety at the same time.
+Related work regarding state-wise safety after convergence has been explored recently. Some approaches (Liang
+et al., 2018; Tessler et al., 2018) solve a primal-dual optimization problem to satisfy the safety constraint
+in expectation. However, the associated optimization is hard in practice because the optimization problem
+changes at every learning step. Bohez et al. (2019) approaches the same setting by augmenting the reward
+with the sum of the constraint penalty weighted by the Lagrangian multiplier. Although claimed state-wise
+safety performance, the aforementioned methods do not provide theoretical guarantee and fail to achieve
+near-zero safety violation in practice. He et al. (2023) proposes AutoCost to automatically find an appropriate
+cost function using evolutionary search over the space of cost functions as parameterized by a simple neural
+network. It is empirically shown that the evolved cost functions achieve near-zero safety violation, however,
+no theoretical guarantee is provided, and extensive computation is required. FAC (Ma et al., 2021) does
+provide theoretically guaranteed state-wise safety via parameterized Lagrange functions. However, FAC
+replies on strong assumptions and performs poorly in practice. To resolve the above issues, we propose SCPO
+as an easy-to-implement and theoretically sound approach with no prior assumptions on the underlying safety
+functions.
+
+3
+
+Problem Formulation
+
+3.1
+
+Preliminaries
+
+In this paper, we are especially interested in guaranteeing safety for episodic tasks, which falls within in the
+scope of finite-horizon Markov decision process (MDP). An MDP is specified by a tuple (S, A, γ, R, P, µ),
+where S is the state space, and A is the control space, R : S × A 7→ R is the reward function, 0 ≤ γ < 1
+is the discount factor, µ : S 7→ R is the initial state distribution, and P : S × A × S 7→ R is the transition
+probability function. P (s′ |s, a) is the probability of transitioning to state s′ given that the previous state
+was s and the agent took action a at state s. A stationary policy π : S 7→ P(A) is a map from states to a
+probability distribution over actions, with π(a|s) denoting the probability of selecting action a in state s. We
+denote the set of all stationary policies by Π. Subsequently, we denote πθ as the policy that is parameterized
+by the parameter θ.
+3
+
+Published in Transactions on Machine Learning Research (04/2024)
+
+The standard goal for MDP is to learn a policy π that maximizes a performance measure J0 (π) which is
+computed via the discounted sum of reward:
+"H
+#
+X
+t
+J0 (π) = Eτ ∼π
+γ R(st , at , st+1 ) ,
+(1)
+t=0
+
+where H ∈ N is the horizon, τ = [s0 , a0 , s1 , · · · ], and τ ∼ π is shorthand for that the distribution over
+trajectories depends on π : s0 ∼ µ, at ∼ π(·|st ), st+1 ∼ P (·|st , at ).
+3.2
+
+State-wise Constrained Markov Decision Process
+
+A constrained Markov decision process (CMDP) is an MDP augmented with constraints that restrict the
+set of allowable policies. Specifically, CMDP introduces a set of cost functions, C1 , C2 , · · · , Cm , where
+Ci : S × A × S 7→ R maps the state action transition tuple into a cost value. Analogous to equation 1, we
+denote
+"H
+#
+X
+t
+JCi (π) = Eτ ∼π
+γ Ci (st , at , st+1 ) , i ∈ 1, · · · , m.
+(2)
+t=0
+
+as the cost measure for policy π with respect to cost function Ci . Hence, the set of feasible stationary policies
+for CMDP is then defined as follows, where di ∈ R:
+ΠC = {π ∈ Π ∀i∈ 1, · · · , m, JCi (π) ≤ di }.
+
+(3)
+
+In CMDP, the objective is to select a feasible stationary policy πθ that maximizes the performance measure:
+max J0 (π), s.t. π ∈ ΠC .
+
+(4)
+
+π
+
+In this paper, we are interested in a special type of CMDP where the safety specification is to persistently
+satisfy a cost constraint at every step (as opposed to constraint of cumulative discounted cost sum over
+trajectories), which we refer to as State-wise Constrained Markov decision process (SCMDP). Like CMDP,
+SCMDP uses the set of cost functions C1 , C2 , · · · , Cm to evaluate the instantaneous cost of state action
+transition tuples. Unlike CMDP, SCMDP requires the cost for every state action transition to satisfy a
+constraint. Hence, the set of feasible stationary policies for SCMDP is defined as
+
+
+Π̄C = {π ∈ Π ∀i∈ 1, · · · , m, E(st ,at ,st+1 )∼τ,τ ∼π Ci (st , at , st+1 ) ≤ wi }
+(5)
+where wi ∈ R. Then the objective for SCMDP is to find a feasible stationary policy from Π̄C that
+max J0 (π), s.t. π ∈ Π̄C
+
+(6)
+
+π
+
+(1+H)
+
+The validity of Π̄C ∈ ΠC is demonstrated through the selection of di = wi 1−γ1−γ
+in Equation (4). This
+indicates that stationary policies feasible for SCMDP are also applicable to CMDP; however, the reverse is not assured.
+As a result,
+policies within Π̄C offer a higher level of safety, ensuring that
+
+
+E(st ,at ,st+1 )∼τ,τ ∼π Ci (st , at , st+1 ) for each state is bounded– a condition not guaranteed by CMDP.
+3.3
+
+Maximum Markov Decision Process
+
+Note that for equation 6, each state-action transition pair introduces a constraint, leading to a complexity
+that increases nearly cubically as the MDP horizon (H) grows, even when tackled by the fastest algorithms
+(Cohen et al., 2021) (The detailed SCMDP complexity analysis is summarized in Appendix A). Thus it’s
+intractable to solve using conventional reinforcement learning algorithms. Our intuition is that, instead of
+directly constraining the cost of each possible state-action transition, we can constrain the expected maximum
+state-wise cost along the trajectory, which is much easier to solve.
+4
+
+Published in Transactions on Machine Learning Research (04/2024)
+
+M
+Cost
+
+Cost
+M
+D1
+
+D4
+D3
+
+D2
+
+D5
+
+M
+Cost
+
+D6
+
+D4
+D3
+
+D2
+
+D1
+Time Step
+
+D1
+
+D5
+
+D6
+
+D2
+
+Time Step
+
+Time Step
+
+1
+
+2
+
+Figure 1: Intuition of the maximum state-wise cost: The three figures above illustrate the evolution of the maximum state-wise
+cost, denoted as M (shown by the red line), across a single episode. The orange curve represents the state-wise cost, while the
+green lines with arrows labeled as D indicate the increments of M at each step. Steps with D = 0 are not labeled in the figures.
+
+The key challenge lies in efficiently computing the maximum state-wise cost, leveraging the cumulative
+summation nature inherent in MDP. To achieve this, we introduce a tag (M ) that travels along the trajectory,
+logging the maximum state-wise cost encountered so far. Whenever a higher state-wise cost is identified, M
+is updated by adding an increment (D), ensuring it consistently reflects the maximum state-wise cost. This
+tagging mechanism maintains a desirable summation characteristic, facilitating subsequent solutions based on
+established theoretical results from MDP. This intuition is illustrated in Figure 1
+Following that intuition, we define a novel Maximum Markov decision process (MMDP), which further extends
+.
+CMDP via (i) a set of up-to-now maximum state-wise costs M = [M1 , M2 , · · · , Mm ] where Mi ∈ Mi ⊂ R,
+and (ii) a set of cost increment functions, D1 , D2 , · · · , Dm , where Di : (S, Mi ) × A × S 7→ [0, R+ ] maps
+the augmented state action transition tuple into a non-negative cost increment. We define the augmented
+.
+state ŝ = (s, M) ∈ (S, Mm ) = Ŝ, where Ŝ is the augmented state space with Mm = (M1 , M2 , · · · , Mm ).
+Formally,
+
+Di ŝt , at , ŝt+1 = max{Ci (st , at , st+1 ) − Mit , 0}, i ∈ 1, · · · , m.
+
+(7)
+
+
+
+Pt−1
+By setting Di ŝ0 , a0 , ŝ1 = Ci (s0 , a0 , s1 ), we have Mit = k=0 Di ŝk , ak , ŝk+1 for t ≥ 1. Hence, we define
+expected maximum state-wise cost (or Di -return) for π:
+" H
+X
+
+JDi (π) = Eτ ∼π
+
+#
+Di ŝt , at , ŝt+1
+
+
+
+, i ∈ 1, · · · , m.
+
+(8)
+
+t=0
+
+Importantly, equation 8 is the key component of MMDP and differs our work from existing safe RL approaches
+that are based on CMDP cost measure equation 2. With equation 8, equation 6 can be rewritten as:
+maxJ (π), s.t. ∀i∈ 1, · · · , m, JDi (π) ≤ wi ,
+π
+
+(9)
+
+.
+and R(ŝ, a, ŝ′ ) = R(s, a, s′ ). With R(τ ) being the discounted
+.
+return of a trajectory, we define the on-policy value function as V π (ŝ) = Eτ ∼π [R(τ )|ŝ0 = ŝ], the on.
+π
+policy action-value function as Q (ŝ, a) = Eτ ∼π [R(τ )|ŝ0 = ŝ, a0 = a], and the advantage function as
+.
+Aπ (ŝ, a) = Qπ (ŝ, a) − V π (ŝ). Lastly, we define on-policy value functions, action-value functions, and
+advantage functions for the cost increments in analogy to V π , Qπ , and Aπ , with Di replacing R, respectively.
+We denote those by VDπi , QπDi and AπDi .
+where J (π) = Eτ ∼π
+
+4
+
+hP
+H
+
+i
+
+t
+t=0 γ R(ŝt , at , ŝt+1 )
+
+State-wise Constrained Policy Optimization
+
+To solve large and continuous MDPs, policy search algorithms search for the optimal policy within a set
+Πθ ⊂ Π of parametrized policies. In local policy search (Peters & Schaal, 2008), the policy is iteratively
+updated by maximizing J (π) over a local neighborhood of the most recent policy πk . In local policy search
+5
+
+Published in Transactions on Machine Learning Research (04/2024)
+
+for SCMDPs, policy iterates must be feasible, so optimization is over Πθ
+
+T
+
+Π̄C . The optimization problem is:
+
+πk+1 = argmax J (π),
+
+(10)
+
+π∈Πθ
+
+s.t. Dist(π, πk ) ≤ δ,
+JDi (π) ≤ wi , i = 1, · · · , m.
+where Dist is some distance measure, and δ > 0 is a step size. For actual implementation, we need to
+evaluate the constraints first in order to determine the feasible set. However, it is challenging to evaluate
+the constraints using samples during the learning process. In this work, we propose SCPO inspired by
+trust region optimization methods (Schulman et al., 2015). SCPO approximates equation 10 using (i) KL
+divergence distance metric Dist and (ii) surrogate functions for the objective and constraints, which can be
+easily estimated from samples on πk . Mathematically, SCPO requires the policy update at each iteration to
+be bounded within a trust region, and updates policy via solving the following optimization:
+πk+1 = argmax
+π∈Πθ
+
+E [Aπk (ŝ, a)]
+
+(11)
+
+ŝ∼dπk
+a∼π
+
+s.t. Eŝ∼d¯πk [DKL (π∥πk )[ŝ]] ≤ δ,
+"
+#
+JDi (πk ) +
+
+AπDki (ŝ, a)
+
+Eπ
+
+ŝ∼d¯ k
+a∼π
+
+r
++ 2(H + 1)ϵπDi
+
+1
+δ ≤ wi , i = 1, · · · , m.
+2
+
+where DKL (π ′ ∥π)[ŝ] is KL divergence between two policy (π ′ , π) at state ŝ, the set {π ∈
+PH
+.
+.
+Πθ : Eŝ∼d¯πk [DKL (π∥πk )[ŝ]] ≤ δ} is called trust region, dπk = (1 − γ) t=0 γ t P (ŝt = ŝ|πk ), d¯πk =
+PH
+.
+πk
+π
+t=0 P (ŝt = ŝ|πk ) and ϵDi = maxŝ |Ea∼π [ADi (ŝ, a)]|. We then show that SCPO guarantees (i) worst case
+maximum state-wise cost violation, and (ii) worst case performance degradation for policy update, by
+establishing new bounds on the difference in returns between two stochastic policies π and π ′ for MMDPs.
+Theoretical Guarantees for SCPO We start with the theoretical foundation for our approach, i.e. a new
+bound on the difference in state-wise maximum cost between two arbitrary policies. The following theorem
+connects the difference in maximum state-wise cost between two arbitrary policies to the total variation
+divergence between them.PHere total variation divergence between discrete probability distributions p, q is
+defined as DT V (p∥q) = 12 i |pi − qi |. This measure can be easily extended to continuous states and actions
+by replacing the sums with integrals. Thus, the total variation divergence between two policy (π ′ , π) at state
+ŝ is defined as: DT V (π ′ ∥π)[ŝ] = DT V (π ′ (·|ŝ)∥π(·|ŝ)).
+′ .
+Theorem 1 (Trust Region Update State-wise Maximum Cost Bound). For any policies π ′ , π, with ϵπD =
+P
+H
+maxŝ |Ea∼π′ [AπD (ŝ, a)]|, and define d¯π = t=0 P (ŝt = ŝ|π) as the non-discounted augmented state distribution
+using π, then the following bound holds:
+h
+i
+′
+JD (π ′ ) − JD (π) ≤ E π AπD (ŝ, a) + 2(H + 1)ϵπD DT V (π ′ ||π)[ŝ] .
+(12)
+ŝ∼d¯
+a∼π ′
+
+The proof for Theorem 1 is summarized in Appendix C. Next, we note the following relationship between the total variation
+q divergence and the KL divergence (Boyd et al., 2003; Achiam et al., 2017):
+Eŝ∼d¯π [DT V (p∥q)[ŝ]] ≤
+
+1
+2 Eŝ∼d¯π [DKL (p∥q)[ŝ]]. The following bound then follows directly from Theorem 1:
+
+"
+JD (π ) ≤ JD (π) + E π
+′
+
+ŝ∼d¯
+a∼π ′
+
+′
+AπD (ŝ, a) + 2(H + 1)ϵπD
+
+r
+
+#
+1
+′
+E ¯π [DKL (π ∥π)[ŝ]] .
+2 ŝ∼d
+
+By Equation (13), we have a guarantee for satisfaction of maximum state-wise constraints:
+6
+
+(13)
+
+Published in Transactions on Machine Learning Research (04/2024)
+
+Proposition 1 (SCPO Update Constraint Satisfaction). Suppose πk , πk+1 are related by equation 11, then
+Di -return for πk+1 satisfies
+∀i∈ 1, · · · , m, JDi (πk+1 ) ≤ wi .
+
+Proposition 1 is the first finite-horizon variant of the policy improvement theorem, and it also presents the
+first constraint satisfaction guarantee under MMDP. Unlike trust region methods such as CPO and TRPO,
+which assume a discounted infinite horizon sum characteristic, MMDP’s non-discounted finite horizon sum
+characteristic invalidates these theories and separate treatment is required. As the maximum state-wise cost
+is calculated through a summation of non-discounted increments, analysis must be performed on a finite
+horizon to upper bound the worst-case summation.
+Next, we provide the performance guarantee of SCPO. Previous analyses of performance guarantees have
+focused on infinite-horizon MDP. We generalize the analysis to finite-horizon MDP, inspired by previous
+work (Kakade & Langford, 2002; Schulman et al., 2015; Achiam et al., 2017), and prove it in Appendix D.
+The infinite-horizon case can be viewed as a special case of the finite-horizon setting.
+Proposition 2 (SCPO Update Worst Performance Degradation). Suppose πk , πk+1 are related by equation 11,
+.
+with ϵπk+1 = maxŝ |Ea∼πk+1 [Aπk (ŝ, a)]|, then performance return for πk+1 satisfies
+√
+J (πk+1 ) − J (πk ) > −
+
+2δγϵπk+1
+.
+1−γ
+
+Proposition 2 establishes a fundamental result that bounds the performance degradation when policy updates
+are carried out via solving equation 10, which ensures satisfaction of the trust region step size constraint
+and the state-wise maximum cost constraints. Intuitively, this proposition assures that when our policy is
+updated within these specified constraints, the degradation in reward performance will be limited. This
+means that our approach strikes a balance between improving the policy’s performance and satisfying the
+state-wise safety constraints.
+
+5
+
+Practical Implementation
+
+In this section, we show how to (a) implement an efficient approximation to the update equation 11, (b)
+encourage learning even when equation 11 becomes infeasible, and (c) handle the difficulty of fitting augmented
+value VDπi which is unique to our novel MMDP formulation. The full SCPO pseudocode is given as algorithm 1
+in appendix E.
+Practical implementation with sample-based estimation We first estimate the objective and constraints in equation 11 using samples. Note that we can replace the expected advantage on rewards using an
+importance sampling estimator with a sampling distribution πk (Achiam et al., 2017) as
+Eŝ∼d
+
+πk
+
+, a∼π [A
+
+πk
+
+(ŝ, a)] = Eŝ∼d
+
+πk
+
+
+, a∼πk
+
+
+π(a|ŝ) πk
+A (ŝ, a) .
+πk (a|ŝ)
+
+(14)
+
+equation 14 allows us to replace Aπk with empirical estimates at each state-action pair (ŝ, a) from rollouts by
+the previous policy πk . The empirical estimate of reward advantage is given by R(ŝ, a, ŝ′ ) + γV πk (ŝ′ ) − V πk (ŝ).
+V πk (ŝ) can be computed at each augmented state by taking the discounted future return. The same can
+be applied to the expected advantage with respect to cost increments, with the sample estimates given
+by Di (ŝ, a, ŝ′ ) + VDπik (ŝ′ ) − VDπik (ŝ). VDπik (ŝ) is computed by taking the non-discounted future Di -return.
+To proceed, we convexify equation 11 by approximating the objective and cost constraint via first-order
+expansions, and the trust region constraint via second-order expansions. Then, equation 11 can be efficiently
+solved using duality (Achiam et al., 2017).
+7
+
+Published in Transactions on Machine Learning Research (04/2024)
+
+Infeasible constraints An update to θ is computed every time equation 11 is solved. However, due to
+approximation errors, sometimes equation 11 can become infeasible. In that case, we follow Achiam et al.
+(2017) to propose an recovery update that only decreases the constraint value within the trust region. In
+addition, approximation errors can also cause the proposed policy update (either feasible or recovery) to
+violate the original constraints in equation 11. Hence, each policy update is followed by a backtracking line
+search to ensure constraint satisfaction. If all these fails, we relax the search condition by also accepting
+decreasing expected advantage with p
+respect to the costs, when the cost constraints are already violated.
+.
+Denoting ci = JDi (πk ) + 2(H + 1)ϵπD δ/2 − wi , the above criteria can be summarized as
+Eŝ∼d¯πk [DKL (π∥πk )[ŝ]] ≤ δ
+(15)
+ πk
+
+ πk
+
+Eŝ∼d¯πk ,a∼π ADi (ŝ, a) − Eŝ∼d¯πk ,a∼πk ADi (ŝ, a) ≤ max(−ci , 0), i ∈ 1, · · · , m.
+(16)
+ πk
+
+Note that the previous expected advantage Eŝ∼d¯πk ,a∼πk ADi (ŝ, a) is also estimated from rollouts by πk and
+converges to zero asymptotically, which recovers the original cost constraints in equation 11.
+Imbalanced cost value targets A critical step in solving equation 11 is to fit the cost increment value
+functions VDπik (ŝt ). By definition, VDπik (ŝt ) is equal to the maximum cost increment in any future state over
+the maximal state-wise cost so far. In other words, the true VDπik will always be zero for all ŝt:H when the
+maximal state-wise cost has already occurred before time t. In practice, this causes the distribution of cost
+increment value function to be highly zero-skewed and makes the fitting very hard. To mitigate the problem,
+we sub-sample the zero-valued targets to match the population of non-zero values. We provide more analysis
+on this trick in Q3 in section 6.2.
+
+6
+
+Experiments
+
+In our experiments, we aim to answer these questions:
+Q1 How does SCPO compare with other state-of-the-art
+methods for safe RL?
+Q2 What benefits are demonstrated by constraining the
+maximum state-wise cost?
+Q3 How does the sub-sampling trick of SCPO impact its
+performance? Does sub-sampling work for other baselines?
+Q4 How tight is our derived surrogate function?
+Q5 How does the resource usage of our algorithm
+compare to other algorithms?
+6.1
+
+Experiment Setups
+
+New Safety Gym To showcase the effectiveness of our
+state-wise constrained policy optimization approach, we
+enhance the widely recognized safe reinforcement learning
+benchmark environment, Safety Gym (Ray et al., 2019),
+by incorporating additional robots and constraints. Subsequently, we perform a series of experiments on this
+augmented environment.
+
+(a) Ant-Hazard-8
+
+(b) Walker-Hazard-8
+
+Our experiments are based on five different robots: (i) Figure 2: Comparison of results from two representative
+Point: Figure 3a A point-mass robot (A ⊆ R2 ) that test suites in high dimensional systems (Ant and Walker).
+can move on the ground. (ii) Swimmer: Figure 3b A
+three-link robot (A ⊆ R2 ) that can move on the ground.
+(iii) Walker: Figure 3d A bipedal robot (A ⊆ R10 ) that can move on the ground. (iv) Ant: Figure 3c
+A quadrupedal robot (A ⊆ R8 ) that can move on the ground. (v) Drone: Figure 3e A quadrotor robot
+8
+
+Published in Transactions on Machine Learning Research (04/2024)
+
+(a) Point
+
+(b) Swimmer
+
+(c) Ant
+
+(d) Walker
+
+(e) Drone
+
+(f) Arm3
+
+(g) Humanoid
+
+Figure 3: Robots for benchmark problems in upgraded Safety Gym.
+
+(a) Hazard
+
+(b) 3D Hazard
+
+(c) Pillar
+
+Figure 4: Constraints for benchmark problems in upgraded Safety Gym.
+
+(A ⊆ R4 ) that can move in the air. (vi) Arm3: Figure 3f A fixed three-joint robot arm(A ⊆ R3 ) that can
+move its end effector around with high flexibility. (vii) Humanoid: Figure 3g A bipedal robot(A ⊆ R17 )
+that has a torso with a pair of legs and arms.
+All of the experiments are based on the goal task where the robot must navigate to a goal. Additionally,
+since we are interested in episodic tasks (finite-horizon MDP), the environment will be reset once the goal is
+reached. For the robots that can move in 3D spaces (e.g, the Drone robot, Arm3 robot), we also design a new
+3D goal task with a sphere goal floating in the 3D space. Three different types of constraints are considered:
+(i) Hazard: Dangerous areas as shown in Figure 4a. Hazards are trespassable circles on the ground. The
+agent is penalized for entering them. (ii) 3D Hazard: 3D Dangerous areas as shown in Figure 4b. 3D
+Hazards are trespassable spheres in the air. The agent is penalized for entering them. (iii) Pillar: Fixed
+obstacles as shown in Figure 4c. The agent is penalized for hitting them.
+Considering different robots, constraint types, and constraint difficulty levels, we design 14 test suites with 5
+types of robots and 9 types of constraints, which are summarized in Table 1 in Appendix. We name these
+test suites as {Robot}-{Constraint Type}-{Constraint Number}.
+Comparison Group The methods in the comparison group include: (i) unconstrained RL algorithm
+TRPO (Schulman et al., 2015) (ii) end-to-end constrained safe RL algorithms CPO (Achiam et al., 2017),
+TRPO-Lagrangian (Bohez et al., 2019), TRPO-FAC (Ma et al., 2021), TRPO-IPO (Liu et al., 2020),
+PCPO (Yang et al., 2020b), and (iii) hierarchical safe RL algorithms TRPO-SL (TRPO-Safety Layer) (Dalal
+et al., 2018), TRPO-USL (TRPO-Unrolling Safety Layer) (Zhang et al., 2022a). We select TRPO as our
+baseline method since it is state-of-the-art and already has safety-constrained derivatives that can be tested
+off-the-shelf. For hierarchical safe RL algorithms, we employ a warm-up phase (1/3 of the whole epochs)
+which does unconstrained TRPO training, and the generated data will be used to pre-train the safety critic
+for future epochs. For all experiments, the policy π, the value (V π , VDπ ) are all encoded in feedforward
+neural networks using two hidden layers of size (64,64) with tanh activations. More details are provided in
+Appendix F.
+Evaluation Metrics For comparison, we evaluate algorithm performance based on (i) reward performance, (ii) average episode cost and (iii) cost rate (state-wise cost). Comparison metric details are
+provided in Appendix F.3. We set the limit of cost to 0 for all the safe RL algorithms since we aim to avoid
+any violation of the constraints. For our comparison, we implement the baseline safe RL algorithms exactly
+following the policy update / action correction procedure from the original papers. We emphasize that in
+order for the comparison to be fair, we give baseline safe RL algorithms every advantage that is given to
+SCPO, including equivalent trust region policy updates.
+9
+
+Published in Transactions on Machine Learning Research (04/2024)
+
+(a) Point-Hazard-8
+
+(b) Point-Pillar-4
+
+(c) Swimmer-Hazard-8
+
+(d) Drone-3DHazard-8
+
+(e) Arm3-Hazard-8
+
+(f) Humanoid-Hazard-8
+
+Figure 5: Comparison of results from (i) four representative test suites in low dimensional systems (Point, Swimmer, Drone), (ii)
+Arm reaching, and (iii) Humanoid locomotion.
+
+10
+
+Published in Transactions on Machine Learning Research (04/2024)
+
+6.2
+
+Evaluating SCPO and Comparison Analysis
+
+Low Dimension System We select four representative test suites
+on low dimensional system (Point, Swimmer, Drone) and summarize the
+comparison results on Figure 5, which demonstrate that SCPO is successful
+at approximately enforcing zero constraints violation safety performance
+in all environments after the policy converges. Specifically, compared
+with the baseline safe RL methods, SCPO is able to achieve (i) near zero
+average episode cost and (ii) significantly lower cost rate without sacrificing
+reward performance. The baseline end-to-end safe RL methods (TRPOLagrangian, TRPO-FAC, TRPO-IPO, CPO, PCPO) fail to achieve the
+near zero cost performance even when the cost limit is set to be 0. The
+Figure 6:
+baseline hierarchical safe RL methods (TRPO-SL, TRPO-USL) also fail
+Maximum state-wise cost
+to achieve near zero cost performance even with an explicit safety layer
+to correct the unsafe action at every time step. End-to-end safe RL algorithms fail since all methods rely
+on CMDP to minimize the discounted cumulative cost while SCPO directly work with MMDP to restrict
+the state-wise maximum cost by Proposition 1. We also observe that TRPO-SL fails to lower the violation
+during training, due to the fact that the linear approximation of cost function C(ŝt , a, ŝt+1 ) (Dalal et al.,
+2018) becomes inaccurate when the dynamics are highly nonlinear like the ones we used in MuJoCo (Todorov
+et al., 2012). More detailed metrics for comparison and experimental results on test suites with low dimension
+systems are summarized in Appendix F.3.
+High Dimension System To demonstrate the scalability and performance of SCPO in high-dimensional
+systems, we conducted tests on the Ant-Hazard-8 Walker-Hazard-8 suites, with 8-dimensional and 10dimensional control spaces, respectively. The comparison results for high-dimensional systems are summarized
+in Figure 2, which show that SCPO outperforms all other baselines in enforcing zero safety violation without
+compromising performance in terms of return. SCPO rapidly stabilizes the cost return around zero and
+significantly reduces the cost rate, while the other baselines fail to converge to a policy with near-zero cost.
+Furthermore, we tackled more scenarios involving robot arm goal reaching and humanoid locomotion. The comparative results for these tasks are detailed in Figure 5e and Figure 5f, respectively. Notably, SCPO consistently
+achieves the lowest cost rate (state-wise cost) in both assignments. It’s essential to highlight an observation
+in the humanoid task: while the episodic cost is higher compared to several baseline methods, the cost rate is
+the most favorable. This discrepancy arises because SCPO intentionally takes more cautious paths around
+hazards to ensure safety, leading to an increased number of time steps per episode. Consequently, although
+the state-wise cost is minimized, the average episodic cost rises due to the longer average episodic horizon.
+The comparison results of both low dimension and high
+dimension systems answer Q1.
+Maximum State-wise Cost As pointed in Section 3.3,
+the underlying magic for enabling near-zero safety violaFigure 7: Cost value function target of five randomly
+tion is to restrict the maximum state-wise cost to stay sampled episode of different tasks
+around zero. To have a better understanding of this process, we visualize the evolution of maximum state-wise cost for SCPO on the challenging high-dimensional
+Ant-Hazard-8 and Walker-Hazard-8 test suites in Figure 6 , which answers Q2. Within Figure 6, each data
+point is obtained by averaging the maximum state-wise cost across all episodes within the current epoch. To
+facilitate better comparisons with other works, we consistently employ the cost rate as a metric to illustrate
+the state-wise cost performance in our results.
+Ablation on Sub-sampling Imbalanced Cost Increment Value Targets One critical step in SCPO
+involves learning the cost increments value functions VDπik (ŝt ). These functions represent the maximum cost increment in any future state relative to the maximal state-wise cost encountered so far. In simpler terms, VDπik (ŝt )
+is a non-increasing step function. In particular, it resembles a staircase, with many steps locating at zero after
+11
+
+Published in Transactions on Machine Learning Research (04/2024)
+
+Figure 10: Resource usage compared to other algorithms under the Goal-Hazard-8 task, where TRPO is set as the baseline
+
+the point where the maximum state-wise cost over the trajectory has been reached. This characteristic gives
+the cost increment value target a skewed distribution with a high frequency of zeros, as illustrated in Figure 7.
+paraSub-sampling is employed to bring down the zero
+targets population to match the population of non-zero
+targets. This adjustment is unique to SCPO, as other safe
+RL baselines try to fit a cost value function VCπik (sh ) =
+ PH
+
+t−h
+Eτ ∼πk
+Ci (st , at , st+1 ) . In these baselines, the
+t=h γ
+population of zero-cost value targets (only after encountering the last cost) is usually much smaller than the
+population of non-zero targets, rendering sub-sampling Figure 8: SCPO sub-sampling ablation study with Droneunnecessary. We also visualize VCπik (sh ) targets in the 3DHazard-8
+left hand side of Figure 7. Consequently, applying subsampling to reduce the zero VCπik (ŝt ) target population is irrelevant and has no impact on their performance.
+Next, to demonstrate the necessity of sub-sampling for solving this challenge, we compare the performance of SCPO with and without subsampling trick on the aerial robot test suite, summarized in Figure 8.
+It is evident that with sub-sampling, the agent achieves higher rewards
+and more importantly, converges to near-zero costs. That is because
+sub-sampling effectively balances the cost increment value targets and
+improves the fitting of VDπik (ŝt ). We also attempted to solve the imbalance
+issue via over-sampling non-zero targets, but did not observe promising
+results. This ablation study provides insights into Q3.
+Figure 9: Visualization of true cost
+function and surrogate function
+Tightness of State-wise Maximum Cost Bound To assess the
+tightness of the state-wise maximum cost bound in equation 12 (surrogate
+cost function in equation 11), we track and visualize the true values and surrogate values (bound estimates
+using the policy from the previous iteration) of JD throughout policy training in the Point-Hazard-8 testing
+suite, as depicted in Figure 9. Due to approximation errors, a minor overlap between true values and
+surrogate values is noticeable at the initial stages of training. However, this overlap is quickly resolved,
+and thereafter, the surrogate cost consistently functions as a precise upper bound for the true value. The
+deviation, approximately 1e-3, is remarkable considering the scale of the true value, which ranges from 1e-2
+to 5e-2. This observation underscores the good tightness in the theoretical state-wise maximum cost bound
+and answers Q4.
+
+12
+
+Published in Transactions on Machine Learning Research (04/2024)
+
+Resources Usage Situation We conduct tests comparing GPU and CPU memory usage, as well as wallclock time, for CPO, TRPO, and SCPO, all allocated with identical system resources in the Goal-Hazard-8
+task. As illustrated in Figure 10, it is observed that CPO and SCPO exhibit nearly identical GPU occupancy
+and time consumption, with SCPO utilizing slightly more CPU resources. Notably, when considering the
+scale change on the horizontal axis, the three algorithms demonstrate comparable performance across all
+three metrics. This suggests that our algorithm achieves improved performance without noticeable increased
+system load or consuming additional time, affirming its superior overall efficiency. The results provide answer
+to Q5.
+
+7
+
+Conclusion and Future Work
+
+This paper proposed SCPO, the first general-purpose policy search algorithm for state-wise constrained RL.
+Our approach provides guarantees for state-wise constraint satisfaction at each iteration, allows training of
+high-dimensional neural network policies while ensuring policy behavior, and is based on a new theoretical
+result on Maximum Markov decision process. We demonstrate SCPO’s effectiveness on robot locomotion
+tasks, showing its significant performance improvement compared to existing methods and ability to handle
+state-wise constraints.
+Limitation and future work One limitation of our work is that, although SCPO satisfies state-wise
+constraints, the theoretical results are valid only in expectation, meaning that constraint violations are still
+possible during deployment. To address that, we will study absolute state-wise constraint satisfaction, i.e.
+bounding the maximal possible state-wise cost, which is even stronger than the current result (satisfaction in
+expectation).
+
+References
+Joshua Achiam, David Held, Aviv Tamar, and Pieter Abbeel. Constrained policy optimization. In International
+conference on machine learning, pp. 22–31. PMLR, 2017.
+Homanga Bharadhwaj, Aviral Kumar, Nicholas Rhinehart, Sergey Levine, Florian Shkurti, and Animesh
+Garg. Conservative safety critics for exploration. arXiv preprint arXiv:2010.14497, 2020.
+Steven Bohez, Abbas Abdolmaleki, Michael Neunert, Jonas Buchli, Nicolas Heess, and Raia Hadsell. Value
+constrained model-free continuous control. arXiv preprint arXiv:1902.04623, 2019.
+Stephen Boyd, Lin Xiao, and Almir Mutapcic. Subgradient methods. lecture notes of EE392o, Stanford
+University, Autumn Quarter, 2004:2004–2005, 2003.
+Noam Brown and Tuomas Sandholm. Superhuman ai for heads-up no-limit poker: Libratus beats top
+professionals. Science, 359(6374):418–424, 2018.
+Yinlam Chow, Ofir Nachum, Aleksandra Faust, Edgar Duenez-Guzman, and Mohammad Ghavamzadeh.
+Lyapunov-based safe policy optimization for continuous control. ICML 2019 Workshop RL4RealLife,
+abs/1901.10031, 2019.
+Michael B. Cohen, Yin Tat Lee, and Zhao Song. Solving linear programs in the current matrix multiplication
+time. J. ACM, 68(1), jan 2021. ISSN 0004-5411. doi: 10.1145/3424305. URL https://doi.org/10.1145/
+3424305.
+Gal Dalal, Krishnamurthy Dvijotham, Matej Vecerik, Todd Hester, Cosmin Paduraru, and Yuval Tassa. Safe
+exploration in continuous action spaces. CoRR, abs/1801.08757, 2018.
+Shangding Gu, Long Yang, Yali Du, Guang Chen, Florian Walter, Jun Wang, Yaodong Yang, and Alois Knoll.
+A review of safe reinforcement learning: Methods, theory and applications. arXiv preprint arXiv:2205.10330,
+2022.
+13
+
+Published in Transactions on Machine Learning Research (04/2024)
+
+Tairan He, Weiye Zhao, and Changliu Liu. Autocost: Evolving intrinsic cost for zero-violation reinforcement
+learning. Proceedings of the AAAI Conference on Artificial Intelligence, 2023.
+Sham Kakade and John Langford. Approximately optimal approximate reinforcement learning. In Proceedings
+of the Nineteenth International Conference on Machine Learning, pp. 267–274, 2002.
+Qingkai Liang, Fanyu Que, and Eytan Modiano. Accelerated primal-dual policy optimization for safe
+reinforcement learning. arXiv preprint arXiv:1802.06480, 2018.
+Yongshuai Liu, Jiaxin Ding, and Xin Liu. IPO: interior-point policy optimization under constraints. CoRR,
+abs/1910.09615, 2019. URL http://arxiv.org/abs/1910.09615.
+Yongshuai Liu, Jiaxin Ding, and Xin Liu. Ipo: Interior-point policy optimization under constraints. In
+Proceedings of the AAAI conference on artificial intelligence, volume 34, pp. 4940–4947, 2020.
+Yongshuai Liu, Avishai Halev, and Xin Liu. Policy learning with constraints in model-free reinforcement
+learning: A survey. In The 30th International Joint Conference on Artificial Intelligence (IJCAI), 2021.
+Haitong Ma, Yang Guan, Shegnbo Eben Li, Xiangteng Zhang, Sifa Zheng, and Jianyu Chen. Feasible actorcritic: Constrained reinforcement learning for ensuring statewise safety. arXiv preprint arXiv:2105.10682,
+2021.
+Volodymyr Mnih, Koray Kavukcuoglu, David Silver, Andrei A Rusu, Joel Veness, Marc G Bellemare, Alex
+Graves, Martin Riedmiller, Andreas K Fidjeland, Georg Ostrovski, et al. Human-level control through
+deep reinforcement learning. nature, 518(7540):529–533, 2015.
+Jan Peters and Stefan Schaal. Reinforcement learning of motor skills with policy gradients. Neural networks,
+21(4):682–697, 2008.
+Alex Ray, Joshua Achiam, and Dario Amodei. Benchmarking safe exploration in deep reinforcement learning.
+CoRR, abs/1910.01708, 2019.
+John Schulman, Sergey Levine, Pieter Abbeel, Michael Jordan, and Philipp Moritz. Trust region policy
+optimization. In International conference on machine learning, pp. 1889–1897. PMLR, 2015.
+Chen Tessler, Daniel J Mankowitz, and Shie Mannor. arXiv preprint arXiv:1805.11074, 2018.
+Emanuel Todorov, Tom Erez, and Yuval Tassa. Mujoco: A physics engine for model-based control. In 2012
+IEEE/RSJ International Conference on Intelligent Robots and Systems, pp. 5026–5033. IEEE, 2012.
+Oriol Vinyals, Igor Babuschkin, Wojciech M Czarnecki, Michaël Mathieu, Andrew Dudzik, Junyoung Chung,
+David H Choi, Richard Powell, Timo Ewalds, Petko Georgiev, et al. Grandmaster level in starcraft ii using
+multi-agent reinforcement learning. Nature, 575(7782):350–354, 2019.
+Tsung-Yen Yang, Justinian Rosca, Karthik Narasimhan, and Peter J. Ramadge. Projection-based constrained
+policy optimization. CoRR, abs/2010.03152, 2020a. URL https://arxiv.org/abs/2010.03152.
+Tsung-Yen Yang, Justinian Rosca, Karthik Narasimhan, and Peter J Ramadge. Projection-based constrained
+policy optimization. arXiv preprint arXiv:2010.03152, 2020b.
+Linrui Zhang, Qin Zhang, Li Shen, Bo Yuan, and Xueqian Wang. Saferl-kit: Evaluating efficient reinforcement
+learning methods for safe autonomous driving. arXiv preprint arXiv:2206.08528, 2022a.
+Linrui Zhang, Qin Zhang, Li Shen, Bo Yuan, Xueqian Wang, and Dacheng Tao. Evaluating model-free
+reinforcement learning toward safety-critical tasks. arXiv preprint arXiv:2212.05727, 2022b.
+Weiye Zhao, Tairan He, Rui Chen, Tianhao Wei, and Changliu Liu. State-wise safe reinforcement learning: A
+survey. The 32nd International Joint Conference on Artificial Intelligence (IJCAI), 2023.
+
+14
+
+Published in Transactions on Machine Learning Research (04/2024)
+
+A
+
+Complexity analysis for SCMDP
+
+The complete form of equation 6 is:
+
+
+
+max J0 (π), s.t. ∀ (st , at , st+1 ) ∼ τ, τ ∼ π , ∀i∈ 1, · · · , m, E Ci (st , at , st+1 ) ≤ wi ,
+π
+
+(17)
+
+where each state-action transition pair corresponds to a constraint. Consider there’s only one constraint
+function C1 , equation 17 is transformed as:
+max J0 (π),
+π
+
+s.t.
+
+.
+G1 (π) =
+.
+G2 (π) =
+
+E
+
+
+
+C1 (s0 , a0 , s1 ) − w1 ≤ 0
+
+E
+
+
+
+C1 (s1 , a1 , s2 ) − w1 ≤ 0
+
+(s0 ,a0 ,s1 )∼τ
+τ ∼π
+(s1 ,a1 ,s2 )∼τ
+τ ∼π
+
+..
+.
+
+.
+GH (π) =
+
+E
+
+(sH−1 ,aH−1 ,sH )∼τ
+τ ∼π
+
+
+
+C1 (sH−1 , aH−1 , sH ) − w1 ≤ 0
+
+.
+
+(18)
+
+Suppose π is parameterized by θ̂ ∈ Rnπ , With KKT conditions, equation 18 can be optimized via solving the
+following program:
+ ∂L(π,λ)
+
+ ∂πi = 0, i = 1, 2, · · · , nπ
+(19)
+λj Gj (π) = 0, j = 1, 2, · · · , H
+
+
+λi ≥ 0, j = 1, 2, · · · , H ,
+where L(π, λ) = J0 (π) +
+
+PH
+
+i=1 λi Gi (π).
+
+To understand the time complexity of equation 19, we can treat J0 and Gi as linear functions with respect to
+π. So that equation 19 represents a linear program, which can be solved by the fastest algorithm (Cohen
+et al., 2021) in time
+O∗ (((nπ + H)ω + (nπ + H)2.5−α/2 + (nπ + H)2+1/6 ) log((nπ + H)/δ))
+
+(20)
+
+where ω is the exponent of matrix multiplicatoin, α is the dual exponent of matrix multiplication, and δ is
+the relative accuracy. For the current value of ω ∼ 2.37 and α ∼ 0.31, the state-of-the-art algorithm takes
+O∗ ((nπ + H)ω log((nπ + H)/δ)) time (Cohen et al., 2021).
+Consider (i) there are multiple cost functions Ci , and (ii) J0 and Gi are nonlinear functions with respect
+to π, the complexity of solving equation 17 with good accuracy, i.e. solving SCMDP, will be larger than
+O∗ ((nπ + H)2 ).
+
+B
+
+Preliminaries
+
+NEW
+
+To facilitate the proof of Theorem 1, we begin by establishing key preliminaries that underpin the foundations
+of finite-horizon variations of the performance improvement bound, considering the discounted sum nature.
+The subsequent section, Appendix C, will elucidate the policy improvement of finite-horizon undiscounted
+sum Markov decision process (MDP). Our preliminary groundwork draws inspiration from [Appendix 10.1,
+Achiam et al. (2017)], extending the theoretical framework for finite-horizon scenarios.
+15
+
+Published in Transactions on Machine Learning Research (04/2024)
+
+d˙π we used is defined as
+d˙π (ŝ) =
+
+H
+X
+
+γ t P (ŝt = ŝ|π).
+
+(21)
+
+t=0
+
+which has a little difference with dπ and is used to ensure the continuity of function we used for proof later.
+Then it allows us to express the expected discounted total reward or cost compactly as:
+Jg (π) = E [g(ŝ, a, ŝ′ )] ,
+
+(22)
+
+ŝ∼d˙π
+a∼π
+ŝ′ ∼P
+
+where by a ∼ π, we mean a ∼ π(·|ŝ), and by ŝ′ ∼ P ,we mean ŝ′ ∼ P (·|ŝ, a). g(ŝ, a, ŝ′ ) represents the cost or
+reward function. We drop the explicit notation for the sake of reducing clutter, but it should be clear from
+context that a and ŝ′ depend on ŝ.
+Define P (ŝ′ |ŝ, a) is the probability of transitioning to state ŝ′ given that the previous state was ŝ and the
+agent took action a at state ŝ, and µ̂ : Ŝ 7→ [0, 1] is the initial augmented state distribution. Let ptπ ∈ R|Ŝ|
+denote the vector with components
+ptπ (ŝ) = P (ŝt = ŝ|π), and let Pπ ∈ R|Ŝ|×|Ŝ| denote the transition matrix
+R
+′
+′
+with components Pπ (ŝ |ŝ) = P (ŝ |ŝ, a)π(a|ŝ)da; then ptπ = Pπ pt−1
+= Pπt µ̂ and
+π
+d˙π =
+
+H
+X
+
+(γPπ )t µ̂
+
+(23)
+
+t=0
+
+= (I − (γPπ )H+1 )(I − γPπ )−1 µ̂
+= (I − γPπ )−1 µ̂
+Noticing that the finite MDP ends up at step H, thus (Pπ )H+1 should be set to zero matrix.
+This formulation helps us easily obtain the following lemma.
+Lemma 1. For any function f : Ŝ 7→ R and any policy π,
+E [f (ŝ)] + E [γf (ŝ′ )] − E [f (ŝ)] = 0.
+
+ŝ∼µ̂
+
+ŝ∼d˙π
+a∼π
+ŝ′ ∼P
+
+(24)
+
+ŝ∼d˙π
+
+Proof. Multiply both sides of equation 23 by (I −γPπ ) and take the inner product with the vector f ∈ R|Ŝ| .
+Combining Lemma 1 with equation 22, we obtain the following, for any function f and any policy π:
+Jg (π) = E [f (ŝ)] + E [g(ŝ, a, ŝ′ ) + γf (ŝ′ ) − f (ŝ)]
+ŝ∼µ̂
+
+ŝ∼d˙π
+a∼π
+ŝ′ ∼P
+
+Lemma 2. For any function f 7→ R and any policies π ′ and π, define
+
+
+ ′
+π (a|ŝ)
+′ .
+′
+′
+− 1 (g(ŝ, a, ŝ ) + γf (ŝ ) − f (ŝ)) ,
+Lπ,f (π ) = E
+π(a|ŝ)
+ŝ∼d˙π
+
+(25)
+
+(26)
+
+a∼π
+ŝ′ ∼P
+
+.
+′
+′
+and ϵπ′
+f = maxŝ |Ea∼π ′ ,ŝ′ ∼P [R(ŝ, a, ŝ ) + γf (ŝ ) − f (ŝ)]|. Then the following bounds hold:
+Jg (π ′ ) − Jg (π) ≥ Lπ,f (π ′ ) − ϵπf
+
+′
+
+Jg (π ′ ) − Jg (π) ≤ Lπ,f (π ′ ) + ϵπf
+
+′
+
+′
+d˙π − d˙π
+
+,
+
+(27)
+
+,
+
+(28)
+
+1
+′
+d˙π − d˙π
+
+1
+
+where DT V is the total variational divergence. Furthermore, the bounds are tight(when π ′ = π, the LHS and
+RHS are identically zero).
+16
+
+Published in Transactions on Machine Learning Research (04/2024)
+
+.
+Proof. First, for notational convenience, let δf (ŝ, a, ŝ′ ) = g(ŝ, a, ŝ′ ) + γf (ŝ′ ) − f (ŝ). By equation 25, we obtain
+the identity
+Jg (π ′ ) − Jg (π) = E ′ [δf (ŝ, a, ŝ′ )] − E [δf (ŝ, a, ŝ′ )]
+
+(29)
+
+ŝ∼d˙π
+a∼π
+ŝ′ ∼P
+
+ŝ∼d˙π
+a∼π ′
+ŝ′ ∼P
+
+′
+
+Now, we restrict our attention to the first term in equation 29. Let †δfπ ∈ R|Ŝ| denote the vector of
+′
+components, where †δfπ (ŝ) = Ea∼π′ ,ŝ′ ∼P [δf (ŝ, a, ŝ′ )|ŝ]. Observe that
+D ′
+E
+′
+E ′ [δf (ŝ, a, ŝ′ )] = d˙π , †δfπ
+
+ŝ∼d˙π
+a∼π ′
+ŝ′ ∼P
+
+D
+E D ′
+E
+′
+′
+= d˙π , †δfπ + d˙π − d˙π , †δfπ
+1 1
++ = 1, we have
+p q
+D
+E
+′
+′
+E ′ [δf (ŝ, a, ŝ′ )] ≥ d˙π , †δfπ − dπ − d˙π
+
+With the Hölder’s inequality; for any p, q ∈ [1, ∞] such that
+D
+E
+′
+′
+d˙π , †δfπ + d˙π − d˙π
+
+†δfπ
+
+p
+
+′
+
+We choose p = 1 and q = ∞; With †δfπ
+
+≥
+q
+
+′
+
+ŝ∼d˙π
+a∼π ′
+ŝ′ ∼P
+
+= E [
+
+
+
+ŝ∼d˙π
+a∼π
+ŝ′ ∼P
+
+∞
+
+q
+
+(30)
+
+= ϵπf , and by the importance sampling identity, we have
+(31)
+
+ŝ∼d˙π
+a∼π ′
+ŝ′ ∼P
+
+′
+
+′
+
+′
+
+∞
+
+D
+E
+′
+d˙π , †δfπ = E [δf (ŝ, a, ŝ′ )]
+
+After bringing equation 31, †δfπ
+
+p
+
+†δfπ
+
+π ′ (a|ŝ)
+π(a|ŝ)
+
+
+
+δf (ŝ, a, ŝ′ )]
+
+into equation 30, then substract E [δf (ŝ, a, ŝ′ )], the bounds are obtained.
+ŝ∼d˙π
+a∼π
+ŝ′ ∼P
+
+The lower bound leads to equation 27, and the upper bound leads to equation 28.
+′
+Lemma 3. The divergence between discounted future state visitation distributions, ||d˙π − d˙π ||1 , is bounded
+by an average divergence of the policies π ′ and π:
+
+∥d˙π − d˙π ∥1 ≤ 2
+′
+
+H
+X
+
+γ t+1 E [DT V (π ′ ||π)[ŝ]] ,
+ŝ∼d˙π
+
+t=0
+
+where DT V (π ′ ||π)[ŝ] =
+
+(32)
+
+1P
+|π ′ (a|ŝ) − π(a|ŝ)|.
+2 a
+
+Proof. Firstly, we introduce an identity for the vector difference of the discounted future state visitation
+.
+.
+distributions on two different policies, π ′ and π. Define the matrices G = (I − γPπ )−1 , Ḡ = (I − γPπ′ )−1 ,
+and ∆ = Pπ′ − Pπ . Then:
+
+G−1 − Ḡ−1 = (I − γPπ ) − (I − γPπ′ )
+= γ∆,
+17
+
+(33)
+
+Published in Transactions on Machine Learning Research (04/2024)
+
+left-multiplying by G and right-multiplying by Ḡ, we obtain
+
+Ḡ − G = γ Ḡ∆G.
+
+(34)
+
+
+′
+d˙π − d˙π = (1 − γ) Ḡ − G µ̂
+
+(35)
+
+Thus, the following equality holds:
+
+= γ(1 − γ)Ḡ∆Gµ̂
+= γ Ḡ∆d˙π .
+Using equation 35, we obtain
+
+′
+∥d˙π − d˙π ∥1 = γ∥Ḡ∆dπ ∥1
+≤ γ∥Ḡ∥1 ∥∆d˙π ∥1 ,
+
+(36)
+
+where ||Ḡ||1 is bounded by:
+∥Ḡ∥1 = ∥(I − γPπ′ )−1 ∥1 ≤
+
+∞
+X
+
+γ t ∥Pπt ′ ∥1 =
+
+t=0
+
+H
+X
+
+γt.
+
+(37)
+
+t=0
+
+Next, we bound ∥∆d˙π1 ∥ as following:
+
+∥∆d˙π ∥1 =
+
+X X
+ŝ′
+
+≤
+
+X
+
+∆(ŝ′ |ŝ)d˙π (ŝ)
+
+ŝ
+
+|∆(ŝ′ |ŝ)|d˙π (ŝ)
+
+ŝ,ŝ′
+
+=
+≤
+
+X X
+
+P (ŝ′ |ŝ, a) (π ′ (a|ŝ) − π(a|ŝ)) d˙π (ŝ)
+
+ŝ,ŝ′
+
+a
+
+X
+
+P (ŝ′ |ŝ, a)|π ′ (a|ŝ) − π(a|ŝ)|d˙π (ŝ)
+
+ŝ,a,ŝ′
+
+|π ′ (a|ŝ) − π(a|ŝ)|d˙π (ŝ)
+
+=
+
+X
+
+=
+
+2 E [DT V (π ′ ||π)[ŝ]].
+
+ŝ,a
+ŝ∼d˙π
+
+By taking equation 38 and equation 37 into equation 36, this lemma is proved.
+
+The new policy improvement bound follows immediately.
+18
+
+(38)
+
+Published in Transactions on Machine Learning Research (04/2024)
+
+.
+Lemma 4. For any function f : Ŝ 7→ R and any policies π ′ and π, define δf (ŝ, a, ŝ′ ) = g(ŝ, a, ŝ′ )+γf (ŝ′ )−f (ŝ),
+′ .
+ϵπf = max |Ea∼π′ ,ŝ′ ∼P [δf (ŝ, a, ŝ′ )]|,
+ŝ
+ ′
+
+
+π (a|ŝ)
+′ .
+Lπ,f (π ) = E
+− 1 δf (ŝ, a, ŝ′ ) , and
+π(a|ŝ)
+ŝ∼d˙π
+
+a∼π
+ŝ′ ∼P
+
+H
+
+X
+′
+.
+±
+Dπ,f
+(π ′ ) = Lπ,f (π ′ ) ± 2(
+γ t+1 )ϵπf E [DT V (π ′ ||π)[ŝ]],
+t=0
+
+ŝ∼d˙π
+
+P
+where DT V (π ′ ||π)[ŝ] = 12 a |π ′ (a|ŝ) − π(a|ŝ)| is the total variational divergence between action distributions
+at ŝ. The following bounds hold:
+−
++
+Dπ,f
+(π ′ ) ≥ Jg (π ′ ) − Jg (π) ≥ Dπ,f
+(π ′ ).
+
+Furthermore, the bounds are tight (when π ′ = π, all three expressions are identically zero)
+Proof. Begin with the bounds from lemma 2 and bound the divergence DT V (d˙π ||d˙π ) by lemma 3.
+′
+
+C
+
+Proof for Theorem 1
+
+Proof. The choice of f = V̂Dπ , g = D in lemma 4 leads to following inequality:
+
+JˆD (π ′ ) − JˆD (π) ≤ E
+
+"
+
+ŝ∼d˙π
+a∼π ′
+
+ÂπD (ŝ, a) + 2(
+
+H
+X
+
+#
+′
+
+γ t+1 )ϵπD DT V (π ′ ||π)[ŝ] .
+
+(39)
+
+t=0
+
+"
+#
+
+PH t
+ˆ
+where JD (π) = Eτ ∼π
+, need to distinguish from JD (π). And V̂Dπ , ÂπD are also the
+t=0 γ D ŝt , at , ŝt+1
+discounted version of VDπ and AπD . Note that according to Lemma 4 one can only get this the inequality holds
+when γ ∈ (0, 1).
+h
+i
+PH
+′
+Then we can define F(γ) = E ÂπD (ŝ, a) + 2( t=0 γ t+1 )ϵπD DT V (π ′ ||π)[ŝ] − JˆD (π ′ ) + JˆD (π) with the
+following condition holds:
+
+ŝ∼d˙π
+a∼π ′
+
+F(γ) ≥ 0, when γ ∈ (0, 1)
+
+(40)
+
+F(γ)’s domain of definition is R
+F(γ) is a polynomial function
+Because F(γ) is a polynomial function and coefficients are all limited, thus lim F(γ) exists and F(γ) is
+γ→1−
+
+continuous at point (1, F(1)). So F(1) = lim− F(γ) ≥ 0, which equals to:
+γ→1
+
+h
+i
+′
+JD (π ′ ) − JD (π) ≤ E π AπD (ŝ, a) + 2(H + 1)ϵπD DT V (π ′ ||π)[ŝ] .
+ŝ∼d¯
+a∼π ′
+
+where d¯π =
+
+PH
+
+t=0 P (ŝt = ŝ|π).
+
+19
+
+Published in Transactions on Machine Learning Research (04/2024)
+
+D
+
+Proof for Proposition 2
+
+Proof. Here we first present a new bound on the difference in returns between two arbitrary policies in the
+context of finite-horizon MDP:
+′ .
+Theorem 2 (Trust Region Update Performance). For any policies π ′ , π, with ϵπ = maxŝ |Ea∼π′ [Aπ (ŝ, a)]|,
+H
+P
+and define dπ = (1 − γ)
+γ t P (ŝt = ŝ|π) as the discounted augmented state distribution using π, then the
+
+t=0
+
+following bound holds:
+
+
+′
+1
+2γϵπ
+π
+′
+J (π ) − J (π) >
+E A (ŝ, a) −
+DT V (π ∥π)[ŝ]
+1 − γ ŝ∼dπ′
+1−γ
+′
+
+(41)
+
+a∼π
+
+We provide the proof for Theorem 2 in Appendix D.2. The following bound then follows directly from
+Theorem 2 using the relationship between the total variation divergence and the KL divergence:
+
+
+′ r
+1
+2γϵπ
+1
+π
+J (π ) − J (π) >
+E π A (ŝ, a) −
+Eŝ∼dπ [DKL (π ′ ∥π)[ŝ]] .
+1 − γ ŝ∼d ′
+1−γ 2
+′
+
+(42)
+
+a∼π
+
+In equation 11, the reward performance between two policies is associated with trust region, i.e.
+
+πk+1 = argmax
+π∈Πθ
+
+E [Aπk (ŝ, a)]
+
+ŝ∼dπk
+a∼π
+
+(43)
+
+s.t. Eŝ∼d¯πk [DKL (π∥πk )[ŝ]] ≤ δ.
+Due to Lemma 5 (proved in Appendix D.1), if two policies are related with Equation (43), they are related
+with the following optimization:
+πk+1 = argmax
+π∈Πθ
+
+E [Aπk (ŝ, a)]
+
+ŝ∼dπk
+a∼π
+
+(44)
+
+s.t. Eŝ∼dπk [DKL (π∥πk )[ŝ]] ≤ δ.
+By equation 42 and equation 44, if πk , πk+1 are related by equation 11, then performance return for πk+1
+satisfies
+√
+J (πk+1 ) − J (πk ) > −
+
+D.1
+
+KL Divergence Relationship Between dπk and d¯πk
+
+Lemma 5.
+
+E [DKL (π ′ ∥π)[ŝ]] < E [DKL (π ′ ∥π)[ŝ]]
+
+ŝ∼dπ
+
+ŝ∼d¯π
+
+20
+
+2δγϵπk+1
+.
+1−γ
+
+Published in Transactions on Machine Learning Research (04/2024)
+
+Proof.
+E [DKL (π ′ ∥π)[ŝ]] =
+
+ŝ∼dπ
+
+X
+
+(1 − γ)
+
+H
+X
+t=0
+
+ŝ
+
+<
+
+H
+XX
+ŝ
+
+<
+
+γ t P (ŝt = ŝ|π)DKL (π ′ ∥π)[ŝ]
+
+t=0
+
+H
+XX
+ŝ
+
+γ t P (ŝt = ŝ|π)DKL (π ′ ∥π)[ŝ]
+
+P (ŝt = ŝ|π)DKL (π ′ ∥π)[ŝ]
+
+t=0
+
+= E [DKL (π ′ ∥π)[ŝ]].
+ŝ∼d¯π
+
+D.2
+
+Proof for Theorem 2
+
+The choice of f = Vπ , g = R in lemma 4 leads to following inequality:
+′ .
+For any policies π ′ , π, with ϵπ = maxŝ |Ea∼π′ [Aπ (ŝ, a)]|, the following bound holds:
+"
+#
+H
+X
+′
+J (π ′ ) − J (π) ≥ E Aπ (ŝ, a) − 2(
+γ t+1 )ϵπ DT V (π ′ ||π)[ŝ]
+ŝ∼d˙π
+a∼π ′
+
+t=0
+
+#
+′
+1
+2γϵπ
+′
+E Aπ (ŝ, a) −
+DT V (π ||π)[ŝ]
+>
+1 − γ ŝ∼dπ′
+1−γ
+"
+
+a∼π
+
+At this point, the theorem 2 is proved.
+
+21
+
+Published in Transactions on Machine Learning Research (04/2024)
+
+E
+
+SCPO Pseudocode
+
+Algorithm 1 State-wise Constrained Policy Optimization
+Input: Initial policy π0 ∈ Πθ .
+for k = 0, 1, 2, . . . do
+Sample trajectory τ ∼ πk = πθk
+Estimate gradient g ← ∇θ Eŝ,a∼τ [Aπ (ŝ, a)]|θ=θk
+
+
+Estimate gradient bi ← ∇θ Eŝ,a∼τ AπDi (ŝ, a) θ=θ , ∀i = 1, 2, . . . , m
+k
+Estimate Hessian H ← ∇2θ Eŝ∼τ [DKL (π∥πk )[ŝ]] θ=θ
+k
+Solve convex programming
+
+▷ section 5
+▷ section 5
+▷ Achiam et al. (2017)
+
+∗
+θk+1
+= argmax g ⊤ (θ − θk )
+θ
+
+s.t.
+
+1
+(θ − θk )⊤ H(θ − θk ) ≤ δ
+2
+c i + b⊤
+i (θ − θk ) ≤ 0, i = 1, 2, . . . , m
+
+∗
+− θk
+Get search direction ∆θ∗ ← θk+1
+for j = 0, 1, 2, . . . do
+▷ Line search
+θ′ ← θk + ξ j ∆θ∗
+▷ ξ ∈ (0, 1) is the backtracking coefficient
+if Eŝ∼τ [DKL (πθ′ ∥πk )[ŝ]]
+≤ δ and
+▷ Trust region
+
+
+
+π
+Eŝ,a∼τ ADθi′ (ŝ, a) − Eŝ,a∼τ AπDki (ŝ, a) ≤ max(−ci , 0), ∀i and
+▷ Costs
+(Eŝ,a∼τ [Aπθ′ (ŝ, a)] ≥ Eŝ,a∼τ [Aπk (ŝ, a)] or infeasible equation 11) then
+▷ Rewards
+θk+1 ← θ′
+▷ Update policy
+break
+end if
+end for
+end for
+
+22
+
+Published in Transactions on Machine Learning Research (04/2024)
+
+Table 1: The test suites environments of our experiments
+
+Task Setting
+Hazard-1
+Hazard-4
+Hazard-8
+Pillar-1
+Pillar-4
+Pillar-8
+3DHazard-1
+3DHazard-4
+3DHazard-8
+
+Ground robot
+Low dimension
+High dimension
+Point Swimmer Arm3 Walker Ant Humanoid
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+
+Drone
+
+✓
+✓
+✓
+
+F
+
+Expeiment Details
+
+F.1
+
+Environment Settings
+
+Goal Task
+
+Aerial robot
+
+In the Goal task environments, the reward function is:
+r(xt ) = dgt−1 − dgt + 1[dgt < Rg ] ,
+
+where dgt is the distance from the robot to its closest goal and Rg is the size (radius) of the goal. When a
+goal is achieved, the goal location is randomly reset to someplace new while keeping the rest of the layout the
+same. The test suites of our experiments are summarized in Table 1.
+Hazard Constraint
+
+In the Hazard constraint environments, the cost function is:
+c(xt ) = max(0, Rh − dht ) ,
+
+where dht is the distance to the closest hazard and Rh is the size (radius) of the hazard.
+Pillar Constraint In the Pillar constraint environments, the cost ct = 1 if the robot contacts with the
+pillar otherwise ct = 0.
+State Space The state space is composed of two parts. The internal state spaces describe the state of
+the robots, which can be obtained from standard robot sensors (accelerometer, gyroscope, magnetometer,
+velocimeter, joint position sensor, joint velocity sensor and touch sensor). The details of the internal state
+spaces of the robots in our test suites are summarized in Table 2. The external state spaces are describe the
+state of the environment observed by the robots, which can be obtained from 2D lidar or 3D lidar (where
+each lidar sensor perceives objects of a single kind). The state spaces of all the test suites are summarized in
+Table 3. Note that Vase and Gremlin are two other constraints in Safety Gym (Ray et al., 2019) and all the
+returns of vase lidar and gremlin lidar are zero vectors (i.e., [0, 0, · · · , 0] ∈ R16 ) in our experiments since none
+of our test suites environments has vases.
+Control Space
+to [-1, +1].
+F.2
+
+For all the experiments, the control space of all robots are continuous, and linearly scaled
+
+Policy Settings
+
+The hyper-parameters used in our experiments are listed in Table 4 as default.
+23
+
+Published in Transactions on Machine Learning Research (04/2024)
+
+Table 2: The internal state space components of different test suites environments.
+
+Internal State Space
+Accelerometer (R3 )
+Gyroscope (R3 )
+Magnetometer (R3 )
+Velocimeter (R3 )
+Joint position sensor (Rn )
+Joint velocity sensor (Rn )
+Touch sensor (Rn )
+
+Point
+✓
+✓
+✓
+✓
+n=0
+n=0
+n=0
+
+Swimmer
+✓
+✓
+✓
+✓
+n=2
+n=2
+n=4
+
+Walker
+✓
+✓
+✓
+✓
+n = 10
+n = 10
+n=2
+
+Ant
+✓
+✓
+✓
+✓
+n=8
+n=8
+n=8
+
+Drone
+✓
+✓
+✓
+✓
+n=0
+n=0
+n=0
+
+Arm3
+✓×5
+✓×5
+✓×5
+✓×5
+n=3
+n=3
+n=1
+
+Humanoid
+✓
+✓
+✓
+✓
+n = 17
+n = 17
+n=2
+
+Table 3: The external state space components of different test suites environments.
+
+External State Space
+
+Goal-Hazard
+
+3D-Goal-Hazard
+
+Goal-Pillar
+
+Goal Compass (R )
+Goal Lidar (R16 )
+3D Goal Lidar (R60 )
+Hazard Lidar (R16 )
+3D Hazard Lidar (R60 )
+Pillar Lidar (R16 )
+Vase Lidar (R16 )
+Gremlin Lidar (R16 )
+
+✓
+✓
+✗
+✓
+✗
+✗
+✓
+✓
+
+✓
+✗
+✓
+✗
+✓
+✗
+✗
+✗
+
+✓
+✓
+✗
+✗
+✗
+✓
+✓
+✓
+
+3
+
+Our experiments use separate multi-layer perception with tanh activations for the policy network, value
+network and cost network. Each network consists of two hidden layers of size (64,64). All of the networks are
+trained using Adam optimizer with learning rate of 0.01.
+We apply an on-policy framework in our experiments. During each epoch the agent interact B times with the
+environment and then perform a policy update based on the experience collected from the current epoch.
+The maximum length of the trajectory is set to 1000 and the total epoch number N is set to 200 as default.
+In our experiments the Walker and the Ant were trained for 1000 epochs due to the high dimension.
+The policy update step is based on the scheme of TRPO, which performs up to 100 steps of backtracking
+with a coefficient of 0.8 for line searching.
+For all experiments, we use a discount factor of γ = 0.99, an advantage discount factor λ = 0.95, and a
+KL-divergence step size of δKL = 0.02.
+For experiments which consider cost constraints we adopt a target cost δc = 0.0 to pursue a zero-violation
+policy.
+Other unique hyper-parameters for each algorithms are hand-tuned to attain reasonable performance.
+Each model is trained on a server with a 48-core Intel(R) Xeon(R) Silver 4214 CPU @ 2.2.GHz, Nvidia RTX
+A4000 GPU with 16GB memory, and Ubuntu 20.04.
+For low-dimensional tasks, we train each model for 6e6 steps which takes around seven hours. For highdimensional tasks, we train each model for 3e7 steps which takes around 60 hours.
+F.3
+
+Metrics Comparison
+
+In Tables 5 to 9, we report all the 14 results of our test suites by three metrics:
+24
+
+Policy Parameter
+Epochs
+Steps per epoch
+Maximum length of trajectory
+Policy network hidden layers
+Discount factor
+Advantage discount factor
+TRPO backtracking steps
+TRPO backtracking coefficient
+Target KL
+Value network hidden layers
+Value network iteration
+Value network optimizer
+Value learning rate
+Cost network hidden layers
+Cost network iteration
+Cost network optimizer
+Cost learning rate
+Target Cost
+Lagrangian optimizer
+Lagrangian learning rate
+USL correction iteration
+USL correction rate
+Warmup ratio
+IPO parameter
+Cost reduction
+
+25
+t
+
+δc
+
+δKL
+
+γ
+λ
+
+N
+B
+L
+
+TRPO
+200
+30000
+1000
+(64, 64)
+0.99
+0.97
+100
+0.8
+0.02
+(64, 64)
+80
+Adam
+0.001
+-
+
+TRPO-Lagrangian
+200
+30000
+1000
+(64, 64)
+0.99
+0.97
+100
+0.8
+0.02
+(64, 64)
+80
+Adam
+0.001
+(64, 64)
+80
+Adam
+0.001
+0.0
+0.005
+-
+
+TRPO-SL [18’ Dalal]
+200
+30000
+1000
+(64, 64)
+0.99
+0.97
+100
+0.8
+0.02
+(64, 64)
+80
+Adam
+0.001
+(64, 64)
+80
+Adam
+0.001
+0.0
+1/3
+-
+
+TRPO-USL
+200
+30000
+1000
+(64, 64)
+0.99
+0.97
+100
+0.8
+0.02
+(64, 64)
+80
+Adam
+0.001
+(64, 64)
+80
+Adam
+0.001
+0.0
+20
+0.05
+1/3
+-
+
+TRPO-IPO
+200
+30000
+1000
+(64, 64)
+0.99
+0.97
+100
+0.8
+0.02
+(64, 64)
+80
+Adam
+0.001
+0.0
+0.01
+-
+
+Table 4: Important hyper-parameters of different algorithms in our experiments
+
+TRPO-FAC
+200
+30000
+1000
+(64, 64)
+0.99
+0.97
+100
+0.8
+0.02
+(64, 64)
+80
+Adam
+0.001
+(64, 64)
+80
+Adam
+0.001
+0.0
+Adam
+0.0001
+-
+
+CPO
+200
+30000
+1000
+(64, 64)
+0.99
+0.97
+100
+0.8
+0.02
+(64, 64)
+80
+Adam
+0.001
+(64, 64)
+80
+Adam
+0.001
+0.0
+0.0
+
+PCPO
+200
+30000
+1000
+(64, 64)
+0.99
+0.97
+0.02
+(64, 64)
+80
+Adam
+0.001
+(64, 64)
+80
+Adam
+0.001
+0.0
+-
+
+SCPO
+200
+30000
+1000
+(64, 64)
+0.99
+0.97
+100
+0.8
+0.02
+(64, 64)
+80
+Adam
+0.001
+(64, 64)
+80
+Adam
+0.001
+0.0
+0.0
+
+Published in Transactions on Machine Learning Research (04/2024)
+
+Published in Transactions on Machine Learning Research (04/2024)
+
+• The average episode return Jr .
+• The average episodic sum of costs Mc .
+• The average state-wise cost over the entirety of training ρc .
+All of the three metrics were obtained from the final epoch after convergence. Each metric was averaged over
+two random seed.
+The learning curves of all experiments are shown in Figures 11 to 15.
+A few general trends can be observed:
+• All methods can converge to good reward performance under different task settings after about 1e6
+time steps. However, it often takes more time for the cost performance to get converge.
+• The reward learning speed and the cost learning rate trade off against each other because the
+algorithms without state-wise constraints are more likely to explore unsafe state to gather more
+rewards.
+F.4
+
+Ablation study on large penalty for infractions
+
+We used adaptive penalty coefficient in
+our experiments with the Lagrangian
+method. Thus, we scale it up by a certain amount λ to perform an investigation of the balance between reward and
+satisfying constraints. We name the experiment TRPO-LAG-{λ} and compare
+it with SCPO in Figure 16. We can see
+Figure 16: TRPO-Lagrangian method ablation study with Point-Hazard-8
+that the cost rate and cost value of the
+Lagrangian method decreases significantly when lambda increases. But at the same time, the speed of
+convergence of the reward is greatly reduced. On the contrary, SCPO achieves the fastest convergence speed
+and the best convergence value in terms of both reward convergence and cost value decrease, and at the
+same time, it is not inferior in terms of cost rate. This shows that the simple coefficient adjustment of the
+Lagrangian method is not comparable to the superiority of our algorithm.
+
+G
+
+Broader Impact
+
+Our SCPO algorithm has been theoretically proven to effectively enforce state-wise instantaneous constraints,
+including safety-critical ones such as collision avoidance. However, achieving zero constraint violation in
+practical applications requires careful fine-tuning of the implementation and training process. Factors such
+as neural network structure, learning rate, and cost limits need to be properly adjusted to the specific task
+at hand. It is important to note that improper implementation and training of SCPO can still result in
+constraint violations, posing potential safety risks. Therefore, when deploying SCPO policies in safety-critical
+applications, it is strongly recommended to incorporate an explicit safety monitor, such as control saturation,
+to completely eliminate any potential safety issues.
+
+26
+
+Published in Transactions on Machine Learning Research (04/2024)
+
+Table 5: Metrics of three Point-Hazard environments obtained from the final epoch.
+(a) Point-Hazard-1
+
+(b) Point-Hazard-4
+
+(c) Point-Hazard-8
+
+Algorithm
+
+J¯r
+
+M̄c
+
+ρ̄c
+
+Algorithm
+
+J¯r
+
+M̄c
+
+ρ̄c
+
+Algorithm
+
+J¯r
+
+M̄c
+
+ρ̄c
+
+TRPO
+TRPO-Lagrangian
+TRPO-SL
+TRPO-USL
+TRPO-IPO
+TRPO-FAC
+CPO
+PCPO
+SCPO
+
+2.5779
+2.6313
+2.4721
+2.5410
+2.5779
+2.5731
+2.4988
+2.4928
+2.5822
+
+0.7340
+0.5977
+11.7396
+0.5381
+0.7340
+0.3263
+0.1713
+0.3765
+0.0807
+
+0.0086
+0.0058
+0.0116
+0.0083
+0.0086
+0.0040
+0.0045
+0.0054
+0.0013
+
+TRPO
+TRPO-Lagrangian
+TRPO-SL
+TRPO-USL
+TRPO-IPO
+TRPO-FAC
+CPO
+PCPO
+SCPO
+
+2.5925
+2.5494
+2.5174
+2.6140
+2.5946
+2.5566
+2.5924
+2.5575
+2.5607
+
+0.2412
+0.2108
+0.2915
+0.2695
+0.2297
+0.1848
+0.1654
+0.1824
+0.0687
+
+0.0037
+0.0034
+0.0037
+0.0035
+0.0038
+0.0028
+0.0024
+0.0025
+0.0009
+
+TRPO
+TRPO-Lagrangian
+TRPO-SL
+TRPO-USL
+TRPO-IPO
+TRPO-FAC
+CPO
+PCPO
+SCPO
+
+2.5761
+2.5851
+2.5683
+2.5808
+2.5625
+2.6599
+2.6440
+2.6249
+2.5793
+
+0.5413
+0.5119
+0.8681
+0.5921
+0.5047
+0.4819
+0.2944
+0.3843
+0.1427
+
+0.0071
+0.0064
+0.0071
+0.0070
+0.0071
+0.0059
+0.0041
+0.0052
+0.0020
+
+Table 6: Metrics of three Point-Pillar experiments obtained from the final epoch.
+(b) Point-Pillar-4
+
+(a) Point-Pillar-1
+
+(c) Point-Pillar-8
+
+Algorithm
+
+J¯r
+
+M̄c
+
+ρ̄c
+
+Algorithm
+
+J¯r
+
+M̄c
+
+ρ̄c
+
+Algorithm
+
+J¯r
+
+M̄c
+
+ρ̄c
+
+TRPO
+TRPO-Lagrangian
+TRPO-SL
+TRPO-USL
+TRPO-IPO
+TRPO-FAC
+CPO
+PCPO
+SCPO
+
+2.6059
+2.5772
+2.5049
+2.5924
+2.6059
+2.6362
+2.5464
+2.5857
+2.5928
+
+0.2899
+0.1218
+0.1191
+0.1483
+0.2899
+0.0698
+0.2342
+0.2088
+0.0040
+
+0.0026
+0.0020
+0.0014
+0.0021
+0.0026
+0.0013
+0.0028
+0.0025
+0.0003
+
+TRPO
+TRPO-Lagrangian
+TRPO-SL
+TRPO-USL
+TRPO-IPO
+TRPO-FAC
+CPO
+PCPO
+SCPO
+
+2.5958
+2.6040
+2.5417
+2.5623
+2.5958
+2.6105
+2.5720
+2.5709
+2.5367
+
+0.4281
+0.2786
+0.2548
+0.2977
+0.4281
+0.3223
+0.5523
+0.3240
+0.0064
+
+0.0061
+0.0050
+0.0031
+0.0063
+0.0061
+0.0040
+0.0062
+0.0052
+0.0005
+
+TRPO
+TRPO-Lagrangian
+TRPO-SL
+TRPO-USL
+TRPO-IPO
+TRPO-FAC
+CPO
+PCPO
+SCPO
+
+2.6095
+2.6164
+2.5585
+2.5836
+2.6095
+2.5701
+2.6440
+2.5704
+2.4162
+
+3.4805
+0.6632
+1.5260
+0.6743
+3.4805
+0.4257
+0.5655
+6.6251
+0.2589
+
+0.0212
+0.0129
+0.0074
+0.0172
+0.0212
+0.0068
+0.0166
+0.0219
+0.0024
+
+Table 7: Metrics of three Swimmer-Hazard experiments obtained from the final epoch.
+(a) Swimmer-Hazard-1
+
+(b) Swimmer-Hazard-4
+
+(c) Swimmer-Hazard-8
+
+Algorithm
+
+J¯r
+
+M̄c
+
+ρ̄c
+
+Algorithm
+
+J¯r
+
+M̄c
+
+ρ̄c
+
+Algorithm
+
+J¯r
+
+M̄c
+
+ρ̄c
+
+TRPO
+TRPO-Lagrangian
+TRPO-SL
+TRPO-USL
+TRPO-IPO
+TRPO-FAC
+CPO
+PCPO
+SCPO
+
+2.6062
+2.6044
+2.5269
+2.6296
+2.6062
+2.5765
+2.6126
+2.5741
+2.6006
+
+0.5326
+0.4060
+10.0374
+0.3754
+0.5326
+0.2439
+0.4115
+0.4670
+0.0743
+
+0.0070
+0.0056
+0.0382
+0.0050
+0.0070
+0.0041
+0.0049
+0.0051
+0.0009
+
+TRPO
+TRPO-Lagrangian
+TRPO-SL
+TRPO-USL
+TRPO-IPO
+TRPO-FAC
+CPO
+PCPO
+SCPO
+
+2.5897
+2.6128
+2.5056
+2.6103
+2.5844
+2.5984
+2.6023
+2.5922
+2.6317
+
+0.2046
+0.3953
+4.6391
+0.2260
+0.2739
+0.1997
+0.1368
+0.4265
+0.1082
+
+0.0033
+0.0038
+0.0206
+0.0027
+0.0033
+0.0028
+0.0021
+0.0033
+0.0012
+
+TRPO
+TRPO-Lagrangian
+TRPO-SL
+TRPO-USL
+TRPO-IPO
+TRPO-FAC
+CPO
+PCPO
+SCPO
+
+2.6322
+2.5979
+2.4930
+2.6133
+2.6322
+2.6037
+2.6335
+2.5895
+2.5604
+
+0.4843
+0.4205
+9.6048
+0.4259
+0.4843
+0.5606
+0.4201
+0.7420
+0.1527
+
+0.0067
+0.0058
+0.0316
+0.0059
+0.0067
+0.0056
+0.0045
+0.0063
+0.0030
+
+Table 8: Metrics of three Drone-3DHazard experiments obtained from the final epoch.
+(a) Drone-3DHazard-1
+
+(b) Drone-3DHazard-4
+
+(c) Drone-3DHazard-8
+
+Algorithm
+
+J¯r
+
+M̄c
+
+ρ̄c
+
+Algorithm
+
+J¯r
+
+M̄c
+
+ρ̄c
+
+Algorithm
+
+J¯r
+
+M̄c
+
+ρ̄c
+
+TRPO
+TRPO-Lagrangian
+TRPO-SL
+TRPO-USL
+TRPO-IPO
+TRPO-FAC
+CPO
+PCPO
+SCPO
+
+2.3777
+2.4149
+2.4300
+2.3760
+2.3724
+2.3856
+2.4464
+2.1118
+2.3860
+
+0.3086
+0.0766
+0.0044
+0.0690
+0.2032
+0.0537
+0.0706
+3.2450
+0.0423
+
+0.0014
+0.0007
+0.0004
+0.0008
+0.0011
+0.0007
+0.0007
+0.0015
+0.0002
+
+TRPO
+TRPO-Lagrangian
+TRPO-SL
+TRPO-USL
+TRPO-IPO
+TRPO-FAC
+CPO
+PCPO
+SCPO
+
+2.4163
+2.4175
+2.3748
+2.4658
+2.4163
+2.3839
+2.3995
+2.4180
+2.4034
+
+0.3008
+0.1990
+0.0529
+0.1264
+0.3008
+0.0867
+0.3610
+1.0088
+0.0545
+
+0.0025
+0.0022
+0.0011
+0.0017
+0.0025
+0.0015
+0.0026
+0.0034
+0.0008
+
+TRPO
+TRPO-Lagrangian
+TRPO-SL
+TRPO-USL
+TRPO-IPO
+TRPO-FAC
+CPO
+PCPO
+SCPO
+
+2.4206
+2.4237
+2.4255
+2.4488
+2.4206
+2.4600
+2.4221
+2.1837
+2.3846
+
+0.4561
+0.1962
+0.1635
+0.2052
+0.4561
+0.1069
+0.6941
+0.5179
+0.0478
+
+0.0057
+0.0034
+0.0022
+0.0037
+0.0057
+0.0022
+0.0041
+0.0027
+0.0012
+
+Table 9: Metrics of Ant-Hazard and Walker-Hazard experiments obtained from the final epoch.
+(a) Ant-Hazard-8
+
+(b) Walker-Hazard-8
+
+Algorithm
+
+J¯r
+
+M̄c
+
+ρ̄c
+
+Algorithm
+
+J¯r
+
+M̄c
+
+ρ̄c
+
+TRPO
+TRPO-Lagrangian
+TRPO-SL
+TRPO-USL
+TRPO-IPO
+TRPO-FAC
+CPO
+PCPO
+SCPO
+
+2.6203
+2.6336
+2.5522
+2.6153
+2.6197
+2.6218
+2.6103
+2.6281
+2.5873
+
+0.1869
+0.1667
+4.1269
+0.2108
+0.1990
+0.0955
+0.1330
+0.1046
+0.0327
+
+0.0084
+0.0058
+0.0510
+0.0083
+0.0083
+0.0051
+0.0066
+0.0059
+0.0021
+
+TRPO
+TRPO-Lagrangian
+TRPO-SL
+TRPO-USL
+TRPO-IPO
+TRPO-FAC
+CPO
+PCPO
+SCPO
+
+2.6471
+2.6167
+2.6476
+2.6239
+2.6397
+2.5917
+2.6211
+2.6410
+2.5751
+
+0.3274
+0.2194
+0.9863
+0.3148
+0.3115
+0.1283
+0.1779
+0.2013
+0.0546
+
+0.0096
+0.0071
+0.0204
+0.0095
+0.0096
+0.0049
+0.0069
+0.0074
+0.0029
+
+27
+
+Published in Transactions on Machine Learning Research (04/2024)
+
+(a) Point-Hazard-1
+
+(b) Point-Hazard-4
+Figure 11: Point-Hazard
+
+28
+
+(c) Point-Hazard-8
+
+Published in Transactions on Machine Learning Research (04/2024)
+
+(a) Point-Pillar-1
+
+(b) Point-Pillar-4
+Figure 12: Point-Pillar
+
+29
+
+(c) Point-Pillar-8
+
+Published in Transactions on Machine Learning Research (04/2024)
+
+(a) Swimmer-Hazard-1
+
+(b) Swimmer-Hazard-4
+Figure 13: Swimmer-Hazard
+
+30
+
+(c) Swimmer-Hazard-8
+
+Published in Transactions on Machine Learning Research (04/2024)
+
+(a) Drone-3DHazard-1
+
+(b) Drone-3DHazard-4
+Figure 14: Drone-3DHazard
+
+31
+
+(c) Drone-3DHazard-8
+
+Published in Transactions on Machine Learning Research (04/2024)
+
+(a) Ant-Hazard-8
+
+(b) Walker-Hazard-8
+
+Figure 15: High dimensional hazard tasks
+
+32
+
+

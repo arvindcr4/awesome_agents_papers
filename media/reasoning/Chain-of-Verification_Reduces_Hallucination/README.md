@@ -1,5 +1,5 @@
 # Chain-of-Verification Reduces Hallucination
-- Paper: [Chain-of-Verification_Reduces_Hallucination.pdf](../../../papers/reasoning/Chain-of-Verification_Reduces_Hallucination.pdf)
+- Paper: [Chain-of-Verification_Reduces_Hallucination.pdf](../../../reinforcement_learning_papers/09_agentic_rl/Chain-of-Verification_Reduces_Hallucination.pdf)
 
 ## Gemini diagrams
 

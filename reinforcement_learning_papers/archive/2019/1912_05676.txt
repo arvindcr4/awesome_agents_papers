@@ -1,0 +1,1267 @@
+arXiv:1912.05676v1 [cs.MA] 11 Dec 2019
+
+Biases for Emergent Communication in
+Multi-agent Reinforcement Learning
+
+Tom Eccles
+DeepMind
+London, UK
+eccles@google.com
+Yoram Bachrach
+DeepMind
+London, UK
+yorambac@google.com
+
+Guy Lever
+DeepMind
+London, UK
+guylever@google.com
+
+Angeliki Lazaridou
+DeepMind
+London, UK
+angeliki@google.com
+
+Thore Graepel
+DeepMind
+London, UK
+thore@google.com
+
+Abstract
+We study the problem of emergent communication, in which language arises
+because speakers and listeners must communicate information in order to solve
+tasks. In temporally extended reinforcement learning domains, it has proved hard
+to learn such communication without centralized training of agents, due in part to
+a difficult joint exploration problem. We introduce inductive biases for positive
+signalling and positive listening, which ease this problem. In a simple one-step
+environment, we demonstrate how these biases ease the learning problem. We
+also apply our methods to a more extended environment, showing that agents
+with these inductive biases achieve better performance, and analyse the resulting
+communication protocols.
+
+1
+
+Introduction
+
+Environments where multiple learning agents interact can model important real-world problems,
+ranging from multi-robot or autonomous vehicle control to societal social dilemmas [4, 27, 23].
+Further, such systems leverage implicit natural curricula, and can serve as building blocks in the
+route for constructing aritficial general intelligence [22, 1]. Multi-agent games provide longstanding
+grand-challenges for AI [17], with important recent successes such as learning a cooperative and
+competitive multi-player first-person video game to human level [14]. An important unsolved problem
+in multi-agent reinforcement learning (MARL) is communication between independent agents. In
+many domains, agents can benefit from sharing information about their beliefs, preferences and
+intents with their peers, allowing them to coordinate joint plans or jointly optimize objectives.
+A natural question that arises when agents inhibiting the same environment are given a communication
+channel without an agreed protocol of communication is that of emergent communication [34, 37, 8]:
+how would the agents learn a “language” over the joint channel, allowing them to maximize their
+utility? The most naturalistic model for emergent communication in MARL is that used in Reinforced
+Inter-Agent Learning (RIAL) [8] where agents optimize a message policy via reinforcement from the
+environment’s reward signal. Unfortunately, straightforward implementations perform poorly [8],
+33rd Conference on Neural Information Processing Systems (NeurIPS 2019), Vancouver, Canada.
+
+driving recent research to focus on differentiable communication models [8, 30, 35, 12], even though
+these models are less generally applicable or realistic.
+RIAL offers the advantage of having decentralized training and execution; similarly to human
+communication, each agent treats others as a part of its environment, without the need to have access
+to other agents’ internal parameters or to back-propagate gradients “through” parameters of others.
+Further, agents communicate with discrete symbols, providing symbolic scaffolding for extending to
+natural language. We build on these advantages, while facilitating joint exploration and learning via
+communication-specific inductive biases.
+We tackle emergent communication through the lens of Paul Grice [10, 31], and capitalize on the
+dual view of communication in which interaction takes place between a speaker, whose goal is to be
+informative and relevant (adhering to the equivalent Gricean maxims), and a listener, who receives a
+piece of information and assumes that their speaker is cooperative (providing informative and relevant
+information). Our methodology is inspired by the recent work of Lowe et al. [25], who proposed a
+set of comprehensive measures of emergent communication along two axis of positive signalling and
+positive listening, aiming at identifying real cases of communication from pathological ones.
+Our contribution: we formulate losses which encourage positive signaling and positive listening,
+which are used as auxiliary speaker and listener losses, respectively, and are appended to the RIAL
+communication framework. We design measures in the spirit of Lowe et al. [25] but rather than using
+these as an introspection tool, we use them as an optimization objective for emergent communication.
+We design two sets of experiments that help us clearly isolate the real contribution of communication
+in task success. In a one-step environment based on summing MNIST digits, we show that the
+biases we use facilitate the emergence of communication, and analyze how they change the learning
+problem. In a gridworld environment based on search of a treasure, we show that the biases we use
+make communication appear more consistently, and we interpret the resulting protocol.
+1.1
+
+Related Work
+
+Differentiable communication was considered for discrete messages [8, 30] and continuous messages [35, 12], by allowing gradients to flow through the communication channel. This improves
+performance, but effectively models multiple agents as a single entity. In contrast we assume agents
+are independent learners, making the communication channel non-differentiable. Earlier work on
+emergent communication focused on cooperative “embodied” agents, showing how communication
+helps accomplish a common goal [8, 30, 6], or investigating communication in mixed cooperativecompetitive environments [26, 3, 15], studying properties of the emergent protocols [21, 18, 25].
+Previous research has investigated independent reinforcement learners in cooperative settings [36],
+with more recent work focusing on canonical RL algorithms. One version of decentralized Q-learning
+converges to optimal policies in deterministic tabular environments without additional communication [19], but does not trivially extend to stochastic environments or function approximation.
+Centralized critics [26, 9] improve stability by allowing agents to use information from other agents
+during training, but these violate our assumptions of independence, and may not scale well.
+
+2
+
+Setting
+
+We apply multi-agent reinforcement learning (MARL) in partially-observable Markov games (i.e.
+partially-observable stochastic games) [33, 24, 11], in environments where agents have a joint
+communication channel. In every state, agents take actions given partial observations of the true
+world state, including messages sent on a shared channel, and each agent obtains an individual reward.
+Through their individual experiences interacting with one another and the environment, agents learn
+to broadcast appropriate messages, interpret messages received from peers and act accordingly.
+Formally, we consider an N -player partially observable Markov game G [33, 24] defined on a
+finite state set S, with action sets (A1 , . . . , AN ) and message sets (M1 , . . . , MN ). An observation
+function O : S × {1, . . . , N } → Rd defines each agent’s d-dimensional restricted view of the true
+state space. On each timestep t, each agent i receives as an observation oit = O(St , i), and the
+messages mjt−1 sent in the previous state for all j 6= i. Each agent i then select an environment action
+1
+N
+ait ∈ Ai and a message action mit ∈ Mi . Given the joint action (a1t , . . . , aN
+t ) ∈ (A , . . . , A )
+1
+N
+the state changes based on a transition function T : S × A × · · · × A → ∆(S); this is a
+stochastic transition, and we denote the set of discrete probability distributions over S as ∆(S). Every
+2
+
+agent gets an individual reward rti : S × A1 × · · · × AN → R for player i. We use the notation
+1
+N
+1
+N
+1
+N
+at = (a1t , . . . , aN
+t ), mt = (mt , . . . , mt ), and ot = (ot , . . . ot ). We write mī,t for (mt , . . . , mt ),
+i
+1
+N
+i
+excluding mt , and Mī for (M , . . . , M ), excluding M .
+In our fully cooperative setting, each agent receives the same reward at each timestep, rti =
+rtj ∀i, j ≤ N , which we denote by rt . Each agent maintains an action and a message policy
+i
+i
+from which actions and messages are sampled, ait ∼ πA
+(·|xit ) and mit ∼ πM
+(·|xit ), and which can in
+i
+i
+general be functions of their entire trajectory of experience xt := (m0 , o1 , ai1 , ..., ait−1 , mt−1 , oit ).
+These policies
+to maximize discounted cumulative joint reward J(π A , π M ) :=
+P∞are optimized
+
+t−1
+EπA ,πM ,T
+rt (which is discounted by γ < 1 to ensure convergence), where π A :=
+t=1 γ
+1
+N
+1
+N
+{πA
+, ..., πA
+}, π M := {πM
+, ..., πM
+}. Although the objective J(π A , π M ) is a joint objective, our
+model is that of decentralized learning and execution, where every agent has its own experience in the
+environment, and independently optimizes the objective J with respect to its own action and message
+i
+i
+policies πA
+and πM
+; there is no communication between agents other than using the actions and
+message channel in the environment. Applying independent reinforcement learning to cooperative
+Markov games results in a problem for each agent which is non-stationary and non-Markov, and
+presents difficult joint exploration and coordination problems [2, 5, 20, 28].
+
+3
+
+Shaping Losses for Facilitating Communication
+
+One difficulty in emergent communication is getting the communication channel to help with the task
+at all. There is an equilibrium where the speaker produces random symbols, and the listener’s policy
+is independent of the communication. This might seem like an unstable equilibrium: if one agent
+uses the communication channel, however weakly, the other will have some learning signal. However,
+this is not the case in some tasks. If the task without communication has a single, deterministic
+optimal policy, then messages from policies sufficiently close to the uniform message policy should
+be ignored by the listener. Furthermore, any entropy costs imposed on the communication channel,
+which are often crucial for exploration, exacerbate the problem, as they produce a positive pressure
+for the speaker’s policy to be close to random. Empirically, we often see agents fail to use the
+communication channel at all; but when agents start to use the channel meaningfully, they are then
+able to find at least a locally optimal solution to the communication problem.
+We propose two shaping losses for communication to alleviate these problems. The first is for positive
+signalling [25]: encouraging the speaker to produce diverse messages in different situations. The
+second is for positive listening [25]: encouraging the listener to act differently for different messages.
+In each case, the goal is for one agent to learn to ascribe some meaning to the communication, even
+while the other does not, which eases the exploration problem for the other agent.
+We note that most policies which maximize these biases do not lead to high reward. Much information
+about an agent’s state is unhelpful to the task at hand, so with a limited communication channel
+positive signalling is not sufficient to have useful communication. For positive listening, the situation
+is even worse – most ways of conditioning actions on messages are actively unhelpful to the task,
+particularly when the speaker has not developed a good protocol. These losses should therefore not
+be expected to lead directly to good communication. Rather, they are intended to ensure that the
+agents begin to use the communication channel at all – after this, MARL can find a useful protocol.
+3.1 Bias for positive signalling
+The first inductive bias we use promotes positive signalling, incentivizing the speaker to produce
+different messages in different situations. We add a loss term which is minimized by message policies
+that have high mutual information with the speaker’s trajectory. This encourages the speaker to
+produce messages uniformly at random overall, but non-randomly when conditioned on the speaker’s
+trajectory.
+i the average message policy for agent i over all trajectories, weighted by how often
+We denote by πM
+they are visited under the current action policies for all agents. The mutual information of agent i’s
+message mit with their trajectory xit is:
+
+I(mit , xit ) = H(mit ) − H(mit |xit )
+X
+X
+i
+i
+i (m) log(π i (m)) + E i
+=−
+πM
+πM
+(m|xit ) log(πM
+(m|xit ))
+xt
+M
+m∈Mi
+
+m∈Mi
+
+3
+
+(1)
+(2)
+
+We estimate this mutual information from a batch of rollouts of the agent policy. We calculate
+H(mit |xit ) exactly for each timestep from the agent’s policy. To estimate H(πm ), we estimate πm
+as the average message policy in the batch of experience. Intuitively, we would like to maximize
+I(mit , xit ), so that the speaker’s message depends maximally on their current trajectory. However,
+adding this objective as a loss for gradient descent leads to poor solutions. We hypothesize that this is
+due to properties of the loss landscape for this loss. Policies which maximize mutual information are
+deterministic for any particular trajectory xit , but uniformly random unconditional on xit . At such
+i
+policies, the gradient of the term H(πM
+(·|xit )) is infinite. Further, for any c < log(2) the space of
+policies which have entropy at most c is disconnected, in that there is no continuous path in policy
+space between some policies in this set.
+i )
+To overcome these problems, we instead use a loss which is minimized for a high value for H(πM
+i
+and a target value for H(πM |si ). The loss we use is:
+
+i
+2
+i ) − (H(mi |x ) − H
+Lps (πM
+, si ) = −E λH(πM
+(3)
+target ) ,
+t t
+
+for some target entropy Htarget , which is a hyperparameter. This loss has finite gradients around
+its minima, and for suitable choices of Htarget the space of policies which minimizes this loss is
+connected. In practice, we found low sensitivity to Htarget , and typically use a value of around
+log(|A|)/2, which is half the maximum possible entropy.
+Algorithm 1 Calculation of positive signalling loss
+1: πM i ← 0.
+2: Lps ← 0.
+3: Target conditional entropy Htarget .
+4: Weighting λ for conditional entropy.
+5: for b=1; b ≤ B; b++ do # Batch of rollouts.
+6:
+Observations oit for 1 ≤ t ≤ T .
+7:
+Actions ait for 1 ≤ t ≤ T .
+8:
+Other agent messages mt,ī from Mī for 1 ≤ t ≤ T .
+9:
+Initial hidden state hi0 .
+10:
+Action set Ai , message set Mi , observation space Oi , hidden state space H i .
+i
+11:
+Message policy πM
+: Oi × Ai × H i × Mī 7→ Mi .
+12:
+Hidden state update rule hi : Oi × Ai × H i × Mī 7→ H i .
+13:
+for t = 1; t ≤ T; t++ do
+14:
+hit ← hi (oit , ait−1 , hit−1 , mt−1,ī ).
+i
+(oit , hit−1 , mt−1,ī ).
+15:
+pit ← πM
+16:
+πM ← P
+πM + πti /(T × B).
+17:
+Hti ← m∈Mi pit (m) log(pit (m)).
+18:
+Lps ← Lps + λ(Hti − Htarget )2 .
+19:
+end for
+20: end for
+P
+21: H = m∈Mi π(m) log(π(m)).
+22: Lps ← Lps + T × B × H.
+
+3.2
+
+Bias for positive listening
+
+The second bias promotes positive listening: encouraging the listener to condition their actions on the
+communication channel. This gives the speaker some signal to learn to communicate, as its messages
+have an effect on the listener’s policy and thus on the speaker’s reward. The way we encourage
+positive listening is akin to the causal influence of communication, or CIC [15, 25]. In [15], this was
+used as a bias for the speaker, to produce influential messages, and in [25] as a measure of whether
+communication is taking place. We use a similar measure as a loss for the listener to be influenced by
+messages. In [15, 25], CIC was defined over one timestep as the mutual information between the
+speaker’s message and the listener’s action. We extend this to multiple timesteps using the mutual
+information between all of the speaker’s previous messages on a single listener action – using this
+as an objective encourages the listener to pay attention to all the speaker’s messages, rather than
+just the most recet. For a listener trajectory xt = (o1 , a1 , m1 , . . . , ot−1 , at−1 , mt−1 , ot ), we define
+4
+
+x0t = (o1 , a1 , . . . , at−1 , ot ) (this is the trajectory xt , with the messages removed). We define the
+multiple timestep CIC as:
+CIC(xt ) = H(at |x0t ) − H(at |xt ).
+
+= DKL (at |xt )||(at |x0t )
+
+(4)
+(5)
+
+i
+We estimate this multiple timestep CIC by learning the distribution πA
+(·|x0t ). We do this by performing a rollout of the agent’s policy network, with the actual observations and actions in the
+trajectory, and zero inputs in the place of the messages. We fit the resulting function π iA (·|x0t ) to
+i
+predict πA
+(·|xt ), using a cross-entropy loss between these distributions:
+
+Lce (xt ) = −
+
+X
+
+i
+πA
+(a|xt ) log(π iA (a|x0t )),
+
+(6)
+
+a∈Ai
+i
+where we backpropagate only through the π iA (a|xt ) term. For a given policy πA
+, this loss is
+i
+i
+0
+i
+0
+minimized in expectation when π A (·|xt ) = E(πA (·|xt )). Thus π A is trained to be an approximation
+of the listener’s policy unconditioned on the messages it has received. The multi-timestep CIC can then
+be estimated by the KL divergence between the message-conditioned policy and the unconditioned
+policy:
+i
+CIC(xt ) ≈ DKL (πA
+(·|xt )||π iA (·|x0t )).
+
+(7)
+
+For training positive listening we use a different divergence between these two distributions, which
+we empirically find achieves more stable training. We use the L1 norm between the two distributions:
+X
+i
+(8)
+Lpl (xt ) = −
+πA
+(a|xt ) − π iA (a|x0t ) .
+a∈Ai
+
+Algorithm 2 Calculation of positive listening losses
+1: Observations oit for 1 ≤ t ≤ T .
+2: Actions ait for 1 ≤ t ≤ T .
+3: Other agent messages mt,ī from Mī for 1 ≤ t ≤ T .
+4: Initial hidden state hi0 = h00 .
+5: Action set Ai , observation space O i , hidden state space H i .
+i
+: Oi × Ai × H i × Mī 7→ Ai .
+6: Action policy πA
+7: Hidden state update rule hi : O i × Ai × H i × Mī 7→ H i .
+8: Lce ← 0.
+9: Lpl ← 0.
+10: for i = 1; t ≤ T; t++ do
+11:
+hit ← hi (oit , ait−1 , hit−1 , mt−1,ī ).
+i
+12:
+pit ← πA
+(oit , hit−1 , mt−1,ī ).
+0
+i i i
+13:
+ht ← h (ot , at−1 , h0t−1 , 0).
+i
+14:
+pit ← πA
+(oit , ait−1 , h0t , 0).
+P
+15:
+Lce ← Lce + a∈A stop_gradient(pit (a)) log(pit (a)).
+P
+16:
+Lpl ← Lpl + a∈A |pit (a) − stop_gradient(pit (a))|.
+17: end for
+
+4
+
+Empirical Analysis
+
+We consider two environments. The first is a simple one-step environment, where agents must sum
+MNIST digits by communicating their value. This environment has the advantage of being very
+amenable to analysis, as we can readily quantify how valuable the communication channel currently
+is to each agent. In this environment, we provide evidence for our hypotheses about how the biases
+we introduce in Section 3 ease the learning of communication protocols. The second environment is
+a new multi-step MARL environment which we name Treasure Hunt. It is designed to have a clear
+5
+
+performance ceiling for agents which do not utilise a communication channel. In this environment,
+we show that the biases enable agents to learn to communicate in a multi-step reinforcement learning
+environment. We also analyze the resulting protocols, finding interpretable protocols that allow us
+to intervene in the environment and observe the effect on listener behaviour. The full details of the
+Treasure Hunt environment, together with the hyperparameters used in our agents, can be found in
+the supplementary material.
+4.1 Summing MNIST digits
+In this task, depicted in Figure 1, the speaker and listener agents each observe a different MNIST
+digit (as an image), and must determine the sum of the digits. The speaker observes an MNIST digit,
+and selects one of 20 possible messages. The listener receives this message, observes an independent
+MNIST digit, and must produce one of 19 possible actions. If this action matches the sum of the
+digits, both agents get a fixed reward of 1, otherwise, both receive no reward. The agents used in this
+environment consist of a convolutional neural net, followed by an multi-layer perceptron and a linear
+layer to produce policy logits. For the listener, we concatenate the message sent to the output of the
+convnet as a one-hot vector. The agents are trained independently with REINFORCE.
+
+Figure 1: Summing MNIST environment. In this example, both agents would get reward 1 if a = 9.
+
+The purpose of this environment is to test whether and how the biases we propose ease the learning
+task. To do this, we quantify how useful the communication channel is to the speaker and to the
+listener. We periodically calculate the rewards for the following policies:
+1. The optimal listener policy πlc , given the current speaker and the labels of the listener’s
+MNIST digits.
+2. The optimal listener policy πlnc , given the labels of the listener’s MNIST digits and no
+communication channel.
+3. The optimal speaker policy πsc , given the current listener and the labels of the speaker’s
+MNIST digits.
+4. The uniform speaker policy πsu , given the current listener.
+We calculate these quantities by running over many batches of MNIST digits, and calculating the
+optimal policies explicitly. The reward the listener can gain from using the communication channel is
+Pl (πs ) = R(πlc , πs ) − R(πlnc , πs ), so this is a proxy for the strength of the learning signal for the
+listener to use the channel. Similarly, Ps (πs ) = R(πl , πsc ) − R(πl , πsu ) is how much reward the
+speaker can gain from using the communication channel, and so is a proxy for the strength of the
+learning signal for the speaker.
+The results (Figure 2) support the hypothesis that the bias for positive signalling eases the learning
+problem for the listener, and the bias for positive listening eases the learning problem for the speaker.
+When neither agent has any inductive bias, we see both Pl and Ps stay low throughout training, and
+the final reward of 0.1 is exactly what can be achieved in this environment with no communication.
+When we add a bias for positive signalling or positive listening, we see the communication channel
+used in most runs (Table 1), leading to greater reward, and Ps and Pl both increase. Importantly,
+when we add our inductive bias for positive listening, we see Ps increase initially, followed by Pl .
+This is consistent with the hypothesis that the positive listening bias bias produces a stronger learning
+signal for the speaker; then once the speaker has begun to learn to communicate meaningfully, the
+listener also has a strong learning signal. When we add the bias for positive signalling the reverse is
+true – Pl increases before Ps . This again fits the hypothesis that speaker’s bias produces a stronger
+learning signal for the speaker.
+We also ran experiments with the speaker getting an extra reward for positive listening, as in [15].
+However, we did not see any gain from this over the no-bias baseline; in our setup, it seems the
+6
+
+Figure 2: (a) Both biases lead to more reward. (b,c, d) Listener and speaker power in various settings. Listener
+power increases first with positive signalling, and speaker power increases first with positive listening.
+
+speaker agent was unable to gain any influence over the listener. We think that there is a natural
+reason this bias would not help in this environment; for a fixed listener, the speaker policy which
+optimizes positive listening has no relation to the speaker’s input. Thus this bias does not force the
+speaker to produce different messages for different inputs, and so does not increase the learning
+signal for the listener.
+Biases
+No bias
+Social influence
+Positive listening
+Positive signalling
+Both
+
+Proportion of good runs
+0.00
+0.00
+0.88
+0.98
+1.00
+
+CI
+0.00-0.07
+0.00-0.07
+0.76-0.94
+0.90-1.00
+0.93-1.0
+
+Final reward of good runs
+N/A
+N/A
+0.92 ± 0.03
+0.99 ± 0.00
+0.98 ± 0.01
+
+Table 1: Both biases lead to consistent discovery of useful communication. We define a good run to be one with
+final average reward greater than 0.2. Averages are over 50 runs for each setting.
+
+4.2
+
+Treasure Hunt
+
+We propose a new cooperative RL environment called Treasure Hunt, where agents explore several
+tunnels to find treasure 1 . When successful, both agents receive a reward of 1. The agents have a
+limited field of view; one agent is able to efficiently find the treasure, but can never reach it, while the
+other can reach the treasure but must perform costly exploration to find it. In the optimal solution,
+the agent which can see the treasure finds it and communicates the position to the agent which can
+reach it. Agents communicate by sending one of five discrete symbols on each timestep. The precise
+generation rules for the environment can be found in the supplementary material.
+The agents used in this environment are Advantage Actor-Critic methods [29] with the V-trace
+correction [7]. The agent architecture employs a single convolutional layer, followed by a multi-layer
+perceptron. The message from the other agent is concatenated to the output of the MLP, and fed into
+an LSTM. The network’s action policy, message policy and value function heads are linear layers.
+1
+
+Videos for this environment can be found at https://youtu.be/eueK8WPkBYs and https://youtu.
+be/HJbVwh10jYk.
+
+7
+
+Figure 3: Treasure hunt environment.
+
+Biases
+No bias
+Positive signalling
+Positive listening
+Both
+
+Proportion good
+0.28
+0.84
+0.64
+0.94
+
+Figure 4: Positive signalling and listening biases leads
+to more reward.
+
+CI
+0.18-0.42
+0.71-0.92
+0.50-0.76
+0.84-0.98
+
+Final reward (good runs)
+14.67 ± 0.29
+14.69 ± 0.18
+14.95 ± 0.20
+15.41 ± 0.14
+
+Final reward
+12.45 ± 0.48
+14.22 ± 0.36
+13.94 ± 0.44
+15.14 ± 0.33
+
+Table 2: Proportion and average reward of good runs. Values are means over 50 runs with 95% confidence
+intervals, calculated using Wilson approximation in the case of Bernoulli variables.
+
+Run
+Median
+Best
+
+Mean time (unmodified)
+100.6 ± 14.7
+85.4 ± 14.1
+
+Mean visit time (modified)
+36.1 ± 3.3
+41.3 ± 7.9
+
+Table 3: Visit time to tunnel, with and without modified messages. Values are means over 100 episodes with
+95% confidence intervals.
+
+Our training follows the independent multiagent reinforcement learning paradigm: each agent is
+trained independently using their own experience of states and actions. We use RMSProp [13] to
+adjust the weights of the agent’s neural network. We co-train two agents, each in a consistent role
+(finder or collector) across episodes.
+The results are shown in Table 2. We find that biases for positive signalling and positive listening
+both lead to increased reward, and adding either bias to the agents leads to more consistent discovery
+of useful communication protocols; we define these as runs which get reward greater than 13, the
+maximum final reward in 50 runs with no communication. With or without biases, the agents still
+frequently only discover local optima - for example, protocols where the agent which can find treasure
+reports on the status of only one tunnel, leaving the other to search the remaining tunnels. This
+demonstrates a limitation of these methods; positive signalling and listening biases are useful for
+finding some helpful communication protocol, but they do not completely solve the joint exploration
+problem in emergent communication. However, among runs which achieve some communication, we
+see greater reward on average among runs with both biases, corresponding to reaching better local
+optima for the communication protocol on average.
+We also ran experiments with the speaker getting an extra reward for influencing the listener, as in
+[15]. Here, we used the centralized model in [15], where the listener calculates the social influence of
+the speaker’s messages, and the speaker gets an intrinsic reward for increasing this influence. We did
+not see a significant improvement in task reward, as compared to communication with no additional
+bias.
+We analyze the communication protocols for two runs, which correspond to the two videos linked in1 .
+One is a typical solution among runs where communication emerges; we picked this run by taking the
+median final reward out of all runs with both positive signalling and positive listening biases enabled.
+Qualitatively, the behaviour is simple – the finder finds the rightmost tunnel, and then reports whether
+there is treasure in that tunnel for the remainder of the episode. The other run we analyze is the one
+with the greatest final reward; this has more complicated communication behaviour. To analyze these
+runs, we rolled out 100 episodes using the final policies from each.
+8
+
+First, we relate the finder’s communication protocol to the actual location of the treasure on this
+frame; in both runs, we see that these are well correlated. In the median run, we see that one symbol
+relates strongly to the presence of treasure; when this symbol is sent, the treasure is in the rightmost
+tunnel around 75% of the time. In the best run, where multiple tunnels appear to be reported on by the
+finder, the protocol is more complicated, with various symbols correlating with one or more tunnels.
+Details of the correlations between tunnels and symbols can be found in the supplementary material.
+Next, we intervene in the environment to demonstrate that these communication protocols have
+the expected effect on the collector. For each of these pairs of agents, we produce a version of the
+environment where the message channel is overridden, starting after 100 frames. We override the
+channel with a constant message, using the symbol which most strongly indicates a particular tunnel.
+We then measure how long the collector takes to reach a square 3 from the bottom, where the agent is
+just out of view of the treasure. In Table 3, we compare this to the baseline where we do not override
+the communication channel. In both cases, the collector reaches the tunnel significantly faster than in
+the baseline, indicating that the finder’s consistent communication is being acted on as expected.
+
+5
+
+Conclusion
+
+We introduced two new shaping losses to encourage the emergence of communication in decentralized
+learning; one on the speaker’s side for positive signalling, and one on the listener’s side for positive
+listening. In a simple environment, we showed that these losses have the intended effect of easing the
+learning problem for the other agent, and so increase the consistency with which agents learn useful
+communication protocols. In a temporally extended environment, we again showed that these losses
+increase the consistency with which agents learn to communicate.
+Several questions remain open for future research. Firstly, we investigate only fully co-operative
+environments; does this approach can help in environments which are neither fully cooperative nor
+fully competitive? In such settings, both positive signalling and positive listening can be harmful
+to an agent, as it becomes more easily exploited via the communication channel. However, since
+the losses we use mainly serve to ensure the communication channel starts to be used, this may be
+as large a problem as it initially seems. Secondly, the environments investigated here have difficult
+communication problems, but are otherwise simple; can these methods be extended to improve
+performance in decentralized agents in large-scale multi-agent domains? There are a few dimensions
+along which these experiments could be scaled – to more complex observations and action spaces,
+but also to environments with more than two players, and to larger communication channels.
+
+References
+[1] Trapit Bansal, Jakub Pachocki, Szymon Sidor, Ilya Sutskever, and Igor Mordatch. Emergent
+complexity via multi-agent competition. In 6th International Conference on Learning Representations, ICLR 2018, Vancouver, BC, Canada, April 30 - May 3, 2018, Conference Track
+Proceedings, 2018.
+[2] Daniel S. Bernstein, Shlomo Zilberstein, and Neil Immerman. The complexity of decentralized
+control of Markov Decision Processes. In UAI ’00: Proceedings of the 16th Conference in
+Uncertainty in Artificial Intelligence, Stanford University, Stanford, California, USA, June 30 July 3, 2000, pages 32–37, 2000.
+[3] Kris Cao, Angeliki Lazaridou, Marc Lanctot, Joel Z Leibo, Karl Tuyls, and Stephen Clark.
+Emergent communication through negotiation. arXiv preprint arXiv:1804.03980, 2018.
+[4] Yongcan Cao, Wenwu Yu, Wei Ren, and Guanrong Chen. An overview of recent progress in the
+study of distributed multi-agent coordination. IEEE Trans. Industrial Informatics, 9(1):427–438,
+2013.
+[5] Caroline Claus and Craig Boutilier. The dynamics of reinforcement learning in cooperative multiagent systems. In Proceedings of the Fifteenth National Conference on Artificial Intelligence
+and Tenth Innovative Applications of Artificial Intelligence Conference, AAAI 98, IAAI 98, July
+26-30, 1998, Madison, Wisconsin, USA., pages 746–752, 1998.
+[6] Abhishek Das, Théophile Gervet, Joshua Romoff, Dhruv Batra, Devi Parikh, Michael Rabbat, and Joelle Pineau. Tarmac: Targeted multi-agent communication. arXiv preprint
+arXiv:1810.11187, 2018.
+9
+
+[7] L. Espeholt, H. Soyer, R. Munos, K. Simonyan, V. Mnih, T. Ward, Y. Doron, V. Firoiu,
+T. Harley, I. Dunning, S. Legg, and K. Kavukcuoglu. IMPALA: Scalable Distributed Deep-RL
+with Importance Weighted Actor-Learner Architectures. ArXiv e-prints, February 2018.
+[8] Jakob Foerster, Ioannis Alexandros Assael, Nando de Freitas, and Shimon Whiteson. Learning to
+communicate with deep multi-agent reinforcement learning. In Advances in Neural Information
+Processing Systems, pages 2137–2145, 2016.
+[9] Jakob N. Foerster, Gregory Farquhar, Triantafyllos Afouras, Nantas Nardelli, and Shimon
+Whiteson. Counterfactual multi-agent policy gradients. In Proceedings of the Thirty-Second
+AAAI Conference on Artificial Intelligence, (AAAI-18), the 30th innovative Applications of
+Artificial Intelligence (IAAI-18), and the 8th AAAI Symposium on Educational Advances in
+Artificial Intelligence (EAAI-18), New Orleans, Louisiana, USA, February 2-7, 2018, pages
+2974–2982, 2018.
+[10] H Paul Grice. Utterer’s meaning, sentence-meaning, and word-meaning. In Philosophy,
+Language, and Artificial Intelligence, pages 49–66. Springer, 1968.
+[11] Eric A. Hansen, Daniel S. Bernstein, and Shlomo Zilberstein. Dynamic programming for
+partially observable stochastic games. In Proceedings of the 19th National Conference on
+Artifical Intelligence, AAAI’04, pages 709–715. AAAI Press, 2004.
+[12] Matthew John Hausknecht. Cooperation and communication in multiagent deep reinforcement
+learning. PhD thesis, University of Texas at Austin, Austin, USA, 2016.
+[13] G. Hinton, N. Srivastava, , and K. Swersky. Lecture 6a: Overview of mini–batch gradient
+descent. Coursera, 2012.
+[14] Max Jaderberg, Wojciech M. Czarnecki, Iain Dunning, Luke Marris, Guy Lever, Antonio García
+Castañeda, Charles Beattie, Neil C. Rabinowitz, Ari S. Morcos, Avraham Ruderman, Nicolas
+Sonnerat, Tim Green, Louise Deason, Joel Z. Leibo, David Silver, Demis Hassabis, Koray
+Kavukcuoglu, and Thore Graepel. Human-level performance in first-person multiplayer games
+with population-based deep reinforcement learning. CoRR, abs/1807.01281, 2018.
+[15] Natasha Jaques, Angeliki Lazaridou, Edward Hughes, Caglar Gulcehre, Pedro A Ortega,
+DJ Strouse, Joel Z Leibo, and Nando de Freitas. Intrinsic social motivation via causal influence
+in multi-agent rl. International Conference of Machine Learning, 2019.
+[16] Diederik P Kingma and Jimmy Ba. Adam: A method for stochastic optimization. arXiv preprint
+arXiv:1412.6980, 2014.
+[17] Hiroaki Kitano, Minoru Asada, Yasuo Kuniyoshi, Itsuki Noda, and Eiichi Osawa. Robocup:
+The robot world cup initiative. In Agents, pages 340–347, 1997.
+[18] Satwik Kottur, José MF Moura, Stefan Lee, and Dhruv Batra. Natural language does not
+emerge’naturally’in multi-agent dialog. arXiv preprint arXiv:1706.08502, 2017.
+[19] Martin Lauer and Martin A. Riedmiller. An algorithm for distributed reinforcement learning in
+cooperative multi-agent systems. In Proceedings of the Seventeenth International Conference
+on Machine Learning (ICML 2000), Stanford University, Stanford, CA, USA, June 29 - July 2,
+2000, pages 535–542, 2000.
+[20] Guillaume J. Laurent, Laëtitia Matignon, and Nadine Le Fort-Piat. The world of Independent learners is not Markovian. International Journal of Knowledge-Based and Intelligent
+Engineering Systems, 15(1):55–64, March 2011.
+[21] Angeliki Lazaridou, Karl Moritz Hermann, Karl Tuyls, and Stephen Clark. Emergence of
+linguistic communication from referential games with symbolic and pixel input. arXiv preprint
+arXiv:1804.03984, 2018.
+[22] Joel Z. Leibo, Edward Hughes, Marc Lanctot, and Thore Graepel. Autocurricula and the
+emergence of innovation from social interaction: A manifesto for multi-agent intelligence
+research. CoRR, abs/1903.00742, 2019.
+10
+
+[23] Joel Z. Leibo, Vinícius Flores Zambaldi, Marc Lanctot, Janusz Marecki, and Thore Graepel.
+Multi-agent reinforcement learning in sequential social dilemmas. In Proceedings of the 16th
+Conference on Autonomous Agents and MultiAgent Systems, AAMAS 2017, São Paulo, Brazil,
+May 8-12, 2017, pages 464–473, 2017.
+[24] Michael L. Littman. Markov games as a framework for multi-agent reinforcement learning. In
+In Proceedings of the Eleventh International Conference on Machine Learning, pages 157–163.
+Morgan Kaufmann, 1994.
+[25] Ryan Lowe, Jakob Foerster, Y-Lan Boureau, Joelle Pineau, and Yann Dauphin. On the pitfalls
+of measuring emergent communication. arXiv preprint arXiv:1903.05168, 2019.
+[26] Ryan Lowe, Yi Wu, Aviv Tamar, Jean Harb, OpenAI Pieter Abbeel, and Igor Mordatch. Multiagent actor-critic for mixed cooperative-competitive environments. In Advances in Neural
+Information Processing Systems, pages 6379–6390, 2017.
+[27] Laëtitia Matignon, Laurent Jeanpierre, and Abdel-Illah Mouaddib. Coordinated multi-robot
+exploration under communication constraints using decentralized markov decision processes.
+In Proceedings of the Twenty-Sixth AAAI Conference on Artificial Intelligence, July 22-26, 2012,
+Toronto, Ontario, Canada., 2012.
+[28] Laëtitia Matignon, Guillaume J. Laurent, and Nadine Le Fort-Piat. Independent reinforcement
+learners in cooperative markov games: a survey regarding coordination problems. Knowledge
+Eng. Review, 27(1):1–31, 2012.
+[29] Volodymyr Mnih, Adria Puigdomenech Badia, Mehdi Mirza, Alex Graves, Timothy Lillicrap, Tim Harley, David Silver, and Koray Kavukcuoglu. Asynchronous methods for deep
+reinforcement learning. In International conference on machine learning, pages 1928–1937,
+2016.
+[30] Igor Mordatch and Pieter Abbeel. Emergence of grounded compositional language in multiagent populations. In Thirty-Second AAAI Conference on Artificial Intelligence, 2018.
+[31] Stephen Neale. Paul grice and the philosophy of language. Linguistics and philosophy,
+15(5):509–559, 1992.
+[32] Malcolm Reynolds, Gabriel Barth-Maron, Frederic Besse, Diego de Las Casas, Andreas
+Fidjeland, Tim Green, Andria Puigdomenech, Sébastien Racanière, Jack Rae, and Fabio
+Viola. Open sourcing Sonnet - a new library for constructing neural networks. https:
+//deepmind.com/blog/open-sourcing-sonnet/, 2017.
+[33] L. S. Shapley. Stochastic games. Proceedings of the National Academy of Sciences of the
+United States of America, 39(10):1095–1100, 1953.
+[34] Luc Steels. Evolving grounded communication for robots. Trends in cognitive sciences,
+7(7):308–312, 2003.
+[35] Sainbayar Sukhbaatar, Arthur Szlam, and Rob Fergus. Learning multiagent communication
+with backpropagation. In Advances in Neural Information Processing Systems 29: Annual
+Conference on Neural Information Processing Systems 2016, December 5-10, 2016, Barcelona,
+Spain, pages 2244–2252, 2016.
+[36] Ming Tan. Multi-agent reinforcement learning: Independent versus cooperative agents. In Machine Learning, Proceedings of the Tenth International Conference, University of Massachusetts,
+Amherst, MA, USA, June 27-29, 1993, pages 330–337, 1993.
+[37] Kyle Wagner, James A Reggia, Juan Uriagereka, and Gerald S Wilkinson. Progress in the
+simulation of emergent communication and language. Adaptive Behavior, 11(1):37–69, 2003.
+
+11
+
+A
+
+Environment details
+
+To generate a map for the treasure hunt environment, we:
+1. Create a rectangle of grey pixels with height 18 and width 24.
+2. Draw a black tunnel on the second row up, including all but the leftmost and rightmost
+pixels.
+3. Draw a black tunnel on the second row down, including all but the leftmost and rightmost
+pixels.
+4. Pick 4 starting positions on the top horizontal tunnel for vertical tunnels. These are randomly
+selected among sets of positions which are all at least 3 pixels apart (so no tunnel is visible
+from another). Draw black tunnels from these positions to 2 pixels above the bottom tunnel.
+5. Place the yellow treasure at the bottom of a random tunnel.
+6. Place one agent uniformly at random in the top tunnel, and one uniformly at random in the
+bottom tunnel.
+The episode length is 500 timesteps. The agents have 5 actions, corresponding to the 4 directions
+and a no-op action. They can move in the black tunnels and onto the treasure, but not onto the grey
+walls. The agent observation is a 5 × 5 square, centered on the agent. When an agent moves onto the
+treasure, both agents receive reward 1, and the treasure respawns at the bottom of a random tunnel.
+The RGB values of the colors of the pixels in the observations are:
+• Blue self: (0, 0, 255).
+• Red partner agent: (255, 0, 0).
+• Grey walls: (128, 128, 128).
+• Black tunnels: (0, 0, 0).
+• Yellow treasure: (255, 255, 0).
+
+B
+
+Treasure hunt communication protocols
+
+In this section, we give more details on the communication protocols in Treasure Hunt. First, we give
+full details of the correlations between messages and treasure location in the two runs discussed in
+the main text. These are the median and the best runs in terms of final reward, in the setting where we
+use both positive signalling and positive listening biases. We generated 100 episodes using the final
+policies for the 2 agents, and recorded the treasure locations and symbols on each timestep. Each cell
+shows the probability of each treasure location, given that the speaker transmits a particular symbol.
+In Table 4, we see that symbol 2 is particularly meaningful, fairly reliably indicating the presence of
+treasure in the final tunnel. In Table 5, we see that three symbols appear to be used; 0 and 2 correlate
+with righthand tunnels, and 3 with lefthand ones.
+S
+0
+1
+2
+3
+4
+
+P(T = 1|S)
+0.12 ± 0.01
+0.36 ± 0.02
+0.06 ± 0.01
+0.32 ± 0.01
+0.27 ± 0.01
+
+P(T = 2|S)
+0.08 ± 0.01
+0.35 ± 0.02
+0.05 ± 0.00
+0.35 ± 0.02
+0.28 ± 0.02
+
+P(T = 3|S)
+0.35 ± 0.03
+0.22 ± 0.01
+0.14 ± 0.01
+0.24 ± 0.01
+0.24 ± 0.01
+
+P(T = 4|S)
+0.46 ± 0.03
+0.07 ± 0.01
+0.75 ± 0.02
+0.09 ± 0.01
+0.20 ± 0.01
+
+Table 4: Message tunnel correlations for median Treasure Hunt run.
+
+12
+
+S
+0
+1
+2
+3
+4
+
+P(T = 1|S)
+0.08 ± 0.01
+0.15 ± 0.01
+0.12 ± 0.01
+0.56 ± 0.03
+0.23 ± 0.02
+
+P(T = 2|S)
+0.12 ± 0.01
+0.31 ± 0.02
+0.15 ± 0.01
+0.19 ± 0.02
+0.32 ± 0.02
+
+P(T = 3|S)
+0.32 ± 0.02
+0.31 ± 0.02
+0.29 ± 0.02
+0.16 ± 0.02
+0.27 ± 0.02
+
+P(T = 4|S)
+0.48 ± 0.02
+0.22 ± 0.01
+0.44 ± 0.02
+0.09 ± 0.02
+0.18 ± 0.02
+
+Table 5: Message tunnel correlations for best Treasure Hunt run.
+
+We also show the correlations between messages and listener actions, in Tables 6 and 7. In both cases,
+these are as expected from the correlations between tunnels and messages; we see the listener move
+more in the direction which the messages correlate with.
+S
+0
+1
+2
+3
+4
+
+P(N oop|S)
+0.00 ± 0.00
+0.00 ± 0.00
+0.00 ± 0.00
+0.00 ± 0.00
+0.00 ± 0.00
+
+P(U p|S)
+0.14 ± 0.01
+0.20 ± 0.00
+0.48 ± 0.01
+0.78 ± 0.00
+0.14 ± 0.00
+
+P(Right|S)
+0.46 ± 0.01
+0.05 ± 0.00
+0.32 ± 0.01
+0.04 ± 0.00
+0.03 ± 0.00
+
+P(Down|S)
+0.34 ± 0.01
+0.49 ± 0.00
+0.17 ± 0.01
+0.09 ± 0.00
+0.73 ± 0.00
+
+P(Lef t|S)
+0.05 ± 0.00
+0.26 ± 0.00
+0.03 ± 0.00
+0.09 ± 0.00
+0.09 ± 0.00
+
+Table 6: Message action correlations for median Treasure Hunt run.
+
+S
+0
+1
+2
+3
+4
+
+P(N oop|S)
+0.01 ± 0.00
+0.01 ± 0.00
+0.01 ± 0.00
+0.01 ± 0.00
+0.00 ± 0.00
+
+P(U p|S)
+0.49 ± 0.01
+0.37 ± 0.01
+0.25 ± 0.01
+0.47 ± 0.01
+0.26 ± 0.01
+
+P(Right|S)
+0.28 ± 0.01
+0.07 ± 0.00
+0.23 ± 0.01
+0.04 ± 0.01
+0.07 ± 0.00
+
+P(Down|S)
+0.11 ± 0.00
+0.38 ± 0.01
+0.42 ± 0.01
+0.27 ± 0.01
+0.52 ± 0.01
+
+P(Lef t|S)
+0.10 ± 0.01
+0.17 ± 0.00
+0.09 ± 0.00
+0.21 ± 0.01
+0.14 ± 0.00
+
+Table 7: Message action correlations for best Treasure Hunt run.
+
+C
+
+Network details and hyperparameters
+
+C.1
+
+MNIST sums experiments
+
+In the MNIST sums environment, the agent architecture used was from an existing MNIST classifier;
+we did not optimize this, as the goal was to investigate the effect of communication biases rather than
+to achieve optimal performance. This architecture is:
+• A convolutional neural network, with 2 layers, which have 32 and 64 channels respectively.
+Both layers have kernel size 5, stride 1, and rectified linear unit (ReLU) activations. We use
+max pooling, with stride and kernel 2.
+• One hidden linear layer with 1024 neurons, with ReLU activations.
+We used the Adam optimizer [16], with a learning rate of 0.0003 and parameters β1 = 0.9, β2 =
+0.999,  = 10−8 . These layers were implemented using the Sonnet library [32]. The agents were
+trained using REINFORCE; the total loss for each agent consists of the REINFORCE loss, entropy
+regularization, and the biases for positive signalling (Lps ) and positive listening, (Lpl and Lce ).
+For the listener agent, the message is concatenated to the flattened output of the convolutional net
+before the hidden linear layer.
+The final hyperparameters used for the 5 settings were:
+To select the hyperparameters for the no bias setting, we performed a joint sweep over action and
+message entropy bonuses, consider a range of values from 0.0 to 0.3 for each. No values were found
+which improved over the no communication policy; the final values reported here are those which
+worked best in the other settings.
+13
+
+Hyperparameter
+Batch size
+Action policy entropy bonus
+Message policy entropy bonus
+Target message entropy Htarget
+Weight of Lpl
+Weight of Lps
+Weight of Lce
+λ for Lps
+
+No bias
+32
+0.03
+0.03
+N/A
+N/A
+N/A
+N/A
+N/A
+
+PS
+32
+0.03
+0.0
+1.0
+N/A
+0.1
+N/A
+3.0
+
+PL
+32
+0.03
+0.03
+1.0
+0.01
+N/A
+0.001
+N/A
+
+Both
+32
+0.03
+0.0
+N/A
+0.01
+0.1
+0.001
+3.0
+
+SI
+32
+0.01
+0.01
+N/A
+N/A
+N/A
+0.001
+N/A
+
+Table 8: Hyperparameters for final MNIST experiments.
+
+In the positive listening setting, we performed sweeps:
+• Over the weight of Lpl , using values in (0.01, 0.03, 0.1, 0.3).
+• Over the entropy costs for messages and actions, using values (0.01, 0.03, 0.1).
+• Over the weight of Lce , using values of (0.0, 0.001, 0.01, 0.1); aside from 0, which unsurprisingly produced worse results, there was no significant difference in the results of these
+runs.
+In the positive signalling setting, we performed sweeps:
+• Jointly over the weight of Lps and λ, using values in (0.01, 0.03, 0.1) for Lps , and
+(0.01, 0.03, 0.1) for the product λLps .
+In the setting with both biases, we ran no additional sweeps, simply combining the hyperparameters
+from the best runs with positive signalling and positive listening.
+In the social influence setting, we performed sweeps:
+• Over the weight of the social influence reward, using values (0.01, 0.03, 0.1, 0.3, 1.0, 10.0).
+• Over the entropy costs for messages and actions, using values (0.01, 0.03, 0.1).
+For all hyperparameter sweeps, we ran 5 runs, and picked the setting with the highest average final
+reward. For the final sets of hyperparameters, we then ran 50 runs.
+C.2
+
+Treasure Hunt experiments
+
+In our experiments, we use 32 parallel environment copies for the Asynchronous Advantage ActorCritic algorithm [29] with the V-trace correction [7]. The total loss for each agent consists of the
+A3C loss, including entropy regularization, and the biases for positive signalling (Lps ) and positive
+listening, (Lpl and Lce ). The two agents have the same architecture, which consists of:
+• A single convolutional layer, using 6 channels, kernel size of 1 and stride of 1.
+• A multi-layer perceptron with 2 hidden layers of size 64.
+• An LSTM, with hidden size 128.
+• Linear layers mapping to policy logits for the action and message policies, and to the baseline
+value function.
+The message from the other agent is concatenated to the flattened output of the convolutional net
+before the hidden linear layer.
+We used the RMSProp optimizer [13] for gradient descent, with a initial learning rate of 0.001,
+exponentially annealed by a factor of 0.99 every million steps. The other parameters are η = 0.99,
+and  = 10−6 .
+The final hyperparameters used for the 5 settings were:
+In the no communication setting, we performed sweeps:
+• Over the entropy costs for actions, using values (0.001, 0.003, 0.006, 0.01).
+14
+
+Parameter
+Batch size
+Action entropy regularization
+Message entropy regularization
+Target message entropy Htarget
+Weight of Lpl
+Weight of Lce
+Weight of Lps
+λ for Lps
+Weight of Lsi
+
+No comms
+16
+0.006
+N/A
+N/A
+N/A
+N/A
+N/A
+N/A
+N/A
+
+No bias
+16
+0.006
+0.0
+N/A
+N/A
+N/A
+N/A
+N/A
+N/A
+
+PS
+16
+0.006
+0.0
+0.8
+0.003
+N/A
+0.001
+3.0
+N/A
+
+PL
+16
+0.006
+0.0
+N/A
+N/A
+0.01
+0.001
+N/A
+N/A
+
+Both
+16
+0.006
+0.0
+0.8
+0.003
+0.01
+N/A
+3.0
+N/A
+
+SI
+16
+0.006
+0.0
+N/A
+N/A
+0.01
+N/A
+N/A
+0.01
+
+Table 9: Hyperparameters for final Treasure Hunt experiments.
+
+• Over the sizes of the MLP layers, using values (32, 64, 128).
+• Over the sizes of the LSTM hidden size, using values (64, 128).
+We then fixed these parameters for the other settings.
+In the positive listening setting, we performed sweeps:
+• Over the weight of Lpl , using values in (0.001, 0.003, 0.01).
+• Over the weight of Lce , using values of (0.0, 0.001, 0.01).
+In the positive signalling setting, we performed sweeps:
+• Jointly over the weight of Lps and λ, using values in (0.001, 0.003, 0.01) for Lps , and
+(0.001, 0.003, 0.01) for the product λLps .
+• Over the target entropy Ht , using values in (0.4, 0.8, 1.6).
+In the setting with both biases, we ran no additional sweeps, simply combining the hyperparameters
+from the best runs with positive signalling and positive listening.
+In the social influence setting, we performed a sweep over the weighting of the reward for social
+influence to the speaker, using values in (0.01, 0.03, 0.1, 0.3, 1.0).
+For all hyperparameter sweeps, we ran 5 runs, and picked the setting which exceeded the nocommunication baseline most frequently, terminating runs early if the result was clear. For the final
+sets of hyperparameters, we then ran 50 runs.
+
+D
+
+Multi-step CIC ablation
+
+In the positive listening bias for the listener, we use the multiple timestep CIC. Recall that for a listener
+trajectory xt = (o1 , a1 , m1 , . . . , ot−1 , at−1 , mt−1 , ot ), we define x0t = (o1 , a1 , . . . , at−1 , ot ) (this
+is the trajectory xt , with the messages removed). We define the multiple timestep CIC as:
+CIC(xt ) = H(at |x0t ) − H(at |xt ).
+
+(9)
+
+We could also choose to use the single timestep CIC, defined in [15, 25] as the mutual information
+between the speaker and the listener’s actions. Defining x00t = (o1 , a1 , m1 , . . . , at−1 , ot ) – which is
+the trajectory with only the final message removed – this would be:
+CIC(st ) = H(at |x00t ) − H(at |xt ).
+
+(10)
+
+Similarly to in the multiple timestep CIC, we estimate the single timestep CIC by learning the
+i
+distribution πA
+(·|x0t ). We do this by performing a rollout of the agent’s policy network, with the
+actual observations and actions in the trajectory, including all message except the final one, which
+i
+is zeroed out. We fit the resulting function π iA (·|x00t ) to predict πA
+(·|xt ), using a cross-entropy loss
+between these distributions.
+The single-timestep CIC can then be estimated by:
+i
+CIC(xt ) ≈ DKL (πA
+(·|xt )||π iA (·|x00t )).
+
+15
+
+(11)
+
+Figure 5: One step CIC does not lead to better results than no speaker-side bias.
+
+As with the multi-timestep CIC, we used the L1 loss for
+X
+i
+Lpl (xt ) = −
+πA
+(a|xt ) − π iA (a|x0t ) .
+
+(12)
+
+a∈Ai
+
+Using the single timestep CIC, with or without positive signalling, we did not find improvements
+over a baseline with no speaker-side bias – see Figure 5.
+
+E
+
+Statistical methodology
+
+All confidence intervals shown are 95% confidence intervals. For confidence intervals of Bernoulli
+variables – the proportion of runs with reward above a certain threshhold – we use the Wilson
+approximation. For graphs depicting average performance over multiple runs, we first take the mean
+reward per run in 100 time windows over training. The interval shown is the 95% confidence interval
+for this mean.
+
+16
+
+

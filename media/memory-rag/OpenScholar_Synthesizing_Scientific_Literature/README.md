@@ -1,5 +1,5 @@
 # OpenScholar Synthesizing Scientific Literature
-- Paper: [OpenScholar_Synthesizing_Scientific_Literature.pdf](../../../papers/memory-rag/OpenScholar_Synthesizing_Scientific_Literature.pdf)
+- Paper: [OpenScholar_Synthesizing_Scientific_Literature.pdf](../../../reinforcement_learning_papers/09_agentic_rl/OpenScholar_Synthesizing_Scientific_Literature.pdf)
 
 ## Gemini diagrams
 

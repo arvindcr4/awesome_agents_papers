@@ -1,5 +1,5 @@
 # Direct Preference Optimization
-- Paper: [Direct_Preference_Optimization.pdf](../../../papers/rl-finetuning/Direct_Preference_Optimization.pdf)
+- Paper: [Direct_Preference_Optimization.pdf](../../../reinforcement_learning_papers/02_rlhf_alignment/Direct_Preference_Optimization.pdf)
 
 ## Gemini diagrams
 

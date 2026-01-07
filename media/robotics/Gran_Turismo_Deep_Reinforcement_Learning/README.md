@@ -1,5 +1,5 @@
 # Gran Turismo Deep Reinforcement Learning
-- Paper: [Gran_Turismo_Deep_Reinforcement_Learning.pdf](../../../papers/robotics/Gran_Turismo_Deep_Reinforcement_Learning.pdf)
+- Paper: [Gran_Turismo_Deep_Reinforcement_Learning.pdf](../../../reinforcement_learning_papers/16_applied_rl/Gran_Turismo_Deep_Reinforcement_Learning.pdf)
 
 ## Gemini diagrams
 

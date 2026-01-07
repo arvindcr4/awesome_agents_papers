@@ -1,0 +1,3398 @@
+arXiv:2006.04779v3 [cs.LG] 19 Aug 2020
+
+Conservative Q-Learning
+for Offline Reinforcement Learning
+
+Aviral Kumar1 , Aurick Zhou1 , George Tucker2 , Sergey Levine1,2
+1
+UC Berkeley, 2 Google Research, Brain Team
+aviralk@berkeley.edu
+
+Abstract
+Effectively leveraging large, previously collected datasets in reinforcement learning (RL) is a key challenge for large-scale real-world applications. Offline RL
+algorithms promise to learn effective policies from previously-collected, static
+datasets without further interaction. However, in practice, offline RL presents a
+major challenge, and standard off-policy RL methods can fail due to overestimation
+of values induced by the distributional shift between the dataset and the learned
+policy, especially when training on complex and multi-modal data distributions. In
+this paper, we propose conservative Q-learning (CQL), which aims to address these
+limitations by learning a conservative Q-function such that the expected value of a
+policy under this Q-function lower-bounds its true value. We theoretically show
+that CQL produces a lower bound on the value of the current policy and that it
+can be incorporated into a policy learning procedure with theoretical improvement
+guarantees. In practice, CQL augments the standard Bellman error objective with a
+simple Q-value regularizer which is straightforward to implement on top of existing
+deep Q-learning and actor-critic implementations. On both discrete and continuous
+control domains, we show that CQL substantially outperforms existing offline RL
+methods, often learning policies that attain 2-5 times higher final return, especially
+when learning from complex and multi-modal data distributions.
+
+1
+
+Introduction
+
+Recent advances in reinforcement learning (RL), especially when combined with expressive deep network function approximators, have produced promising results in domains ranging from robotics [31]
+to strategy games [4] and recommendation systems [37]. However, applying RL to real-world
+problems consistently poses practical challenges: in contrast to the kinds of data-driven methods
+that have been successful in supervised learning [24, 11], RL is classically regarded as an active
+learning process, where each training run requires active interaction with the environment. Interaction
+with the real world can be costly and dangerous, and the quantities of data that can be gathered
+online are substantially lower than the offline datasets that are used in supervised learning [10],
+which only need to be collected once. Offline RL, also known as batch RL, offers an appealing
+alternative [12, 17, 32, 3, 29, 57, 36]. Offline RL algorithms learn from large, previously collected
+datasets, without interaction. This in principle can make it possible to leverage large datasets, but in
+practice fully offline RL methods pose major technical difficulties, stemming from the distributional
+shift between the policy that collected the data and the learned policy. This has made current results
+fall short of the full promise of such methods.
+Directly utilizing existing value-based off-policy RL algorithms in an offline setting generally results
+in poor performance, due to issues with bootstrapping from out-of-distribution actions [32, 17] and
+overfitting [15, 32, 3]. This typically manifests as erroneously optimistic value function estimates. If
+we can instead learn a conservative estimate of the value function, which provides a lower bound on
+the true values, this overestimation problem could be addressed. In fact, because policy evaluation
+Preprint. Under review.
+
+and improvement typically only use the value of the policy, we can learn a less conservative lower
+bound Q-function, such that only the expected value of Q-function under the policy is lower-bounded,
+as opposed to a point-wise lower bound. We propose a novel method for learning such conservative Qfunctions via a simple modification to standard value-based RL algorithms. The key idea behind our
+method is to minimize values under an appropriately chosen distribution over state-action tuples, and
+then further tighten this bound by also incorporating a maximization term over the data distribution.
+Our primary contribution is an algorithmic framework, which we call conservative Q-learning (CQL),
+for learning conservative, lower-bound estimates of the value function, by regularizing the Q-values
+during training. Our theoretical analysis of CQL shows that only the expected value of this Q-function
+under the policy lower-bounds the true policy value, preventing extra under-estimation that can arise
+with point-wise lower-bounded Q-functions, that have typically been explored in the opposite context
+in exploration literature [48, 28]. We also empirically demonstrate the robustness of our approach
+to Q-function estimation error. Our practical algorithm uses these conservative estimates for policy
+evaluation and offline RL. CQL can be implemented with less than 20 lines of code on top of a
+number of standard, online RL algorithms [21, 9], simply by adding the CQL regularization terms to
+the Q-function update. In our experiments, we demonstrate the efficacy of CQL for offline RL, in
+domains with complex dataset compositions, where prior methods are typically known to perform
+poorly [14] and domains with high-dimensional visual inputs [5, 3]. CQL outperforms prior methods
+by as much as 2-5x on many benchmark tasks, and is the only method that can outperform simple
+behavioral cloning on a number of realistic datasets collected from human interaction.
+
+2
+
+Preliminaries
+
+The goal in reinforcement learning is to learn a policy that maximizes the expected cumulative
+discounted reward in a Markov decision process (MDP), which is defined by a tuple (S, A, T, r, γ).
+S, A represent state and action spaces, T (s0 |s, a) and r(s, a) represent the dynamics and reward
+function, and γ ∈ (0, 1) represents the discount factor. πβ (a|s) represents the behavior policy, D
+is the dataset, and dπβ (s) is the discounted marginal state-distributionPof πβ (a|s). The dataset D
+1[s=s,a=a]
+
+P
+is sampled from dπβ (s)πβ (a|s). On all states s ∈ D, let π̂β (a|s) := s,a∈D
+denote the
+s∈D 1[s=s]
+empirical behavior policy, at that state. We assume that the rewards r satisfy: |r(s, a)| ≤ Rmax .
+
+Off-policy RL algorithms based on dynamic programming maintain a parametric Q-function Qθ (s, a)
+and, optionally, a parametric policy, πφ (a|s). Q-learning methods train the Q-function by iteratively
+applying the Bellman optimality operator B ∗ Q(s, a) = r(s, a) + γEs0 ∼P (s0 |s,a) [maxa0 Q(s0 , a0 )],
+and use exact or an approximate maximization scheme, such as CEM [31] to recover the greedy
+policy. In an actor-critic algorithm, a separate policy is trained to maximize the Q-value. Actorcritic methods alternate between computing Qπ via (partial) policy evaluation, by iterating the
+Bellman operator, B π Q = r + γP π Q, where P π is the transition matrix coupled with the policy:
+P π Q(s, a) = Es0 ∼T (s0 |s,a),a0 ∼π(a0 |s0 ) [Q(s0 , a0 )] , and improving the policy π(a|s) by updating it
+towards actions that maximize the expected Q-value. Since D typically does not contain all possible
+transitions (s, a, s0 ), the policy evaluation step actually uses an empirical Bellman operator that only
+backs up a single sample. We denote this operator B̂ π . Given a dataset D = {(s, a, rs0 )} of tuples
+from trajectories collected under a behavior policy πβ :
+2 
+(r(s, a) + γEa0 ∼π̂k (a0 |s0 ) [Q̂k (s0 , a0 )]) − Q(s, a)
+(policy evaluation)
+Q
+h
+i
+π̂ k+1 ← arg max Es∼D,a∼πk (a|s) Q̂k+1 (s, a) (policy improvement)
+
+Q̂k+1 ← arg min Es,a,s0 ∼D
+
+
+
+π
+
+Offline RL algorithms based on this basic recipe suffer from action distribution shift [32, 62, 29, 36]
+during training, because the target values for Bellman backups in policy evaluation use actions
+sampled from the learned policy, π k , but the Q-function is trained only on actions sampled from the
+behavior policy that produced the dataset D, πβ . Since π is trained to maximize Q-values, it may be
+biased towards out-of-distribution (OOD) actions with erroneously high Q-values. In standard RL,
+such errors can be corrected by attempting an action in the environment and observing its actual value.
+However, the inability to interact with the environment makes it challenging to deal with Q-values
+for OOD actions in offline RL. Typical offline RL methods [32, 29, 62, 57] mitigate this problem by
+constraining the learned policy [36] away from OOD actions. Note that Q-function training in offline
+RL does not suffer from state distribution shift, as the Bellman backup never queries the Q-function
+on out-of-distribution states. However, the policy may suffer from state distribution shift at test time.
+
+2
+
+3
+
+The Conservative Q-Learning (CQL) Framework
+
+In this section, we develop a conservative Q-learning (CQL) algorithm, such that the expected value
+of a policy under the learned Q-function lower-bounds its true value. A lower bound on the Q-value
+prevents the over-estimation that is common in offline RL settings due to OOD actions and function
+approximation error [36, 32]. We use the term CQL to refer broadly to both Q-learning methods
+and actor-critic methods, though the latter also use an explicit policy. We start by focusing on the
+policy evaluation step in CQL, which can be used by itself as an off-policy evaluation procedure, or
+integrated into a complete offline RL algorithm, as we will discuss in Section 3.2.
+3.1
+
+Conservative Off-Policy Evaluation
+
+We aim to estimate the value V π (s) of a target policy π given access to a dataset, D, generated by
+following a behavior policy πβ (a|s). Because we are interested in preventing overestimation of the
+policy value, we learn a conservative, lower-bound Q-function by additionally minimizing Q-values
+alongside a standard Bellman error objective. Our choice of penalty is to minimize the expected Qvalue under a particular distribution of state-action pairs, µ(s, a). Since standard Q-function training
+does not query the Q-function value at unobserved states, but queries the Q-function at unseen actions,
+we restrict µ to match the state-marginal in the dataset, such that µ(s, a) = dπβ (s)µ(a|s). This gives
+rise to the iterative update for training the Q-function, as a function of a tradeoff factor α:
+Q̂k+1 ← arg min α Es∼D,a∼µ(a|s) [Q(s, a)] +
+Q
+
+
+2 
+1
+,
+Es,a∼D Q(s, a) − B̂π Q̂k (s, a)
+2
+
+(1)
+
+In Theorem 3.1, we show that the resulting Q-function, Q̂π := limk→∞ Q̂k , lower-bounds Qπ at
+all (s, a). However, we can substantially tighten this bound if we are only interested in estimating
+V π (s). If we only require that the expected value of the Q̂π under π(a|s) lower-bound V π , we
+can improve the bound by introducing an additional Q-value maximization term under the data
+distribution, πβ (a|s), resulting in the iterative update (changes from Equation 1 in red):
+
+Q̂k+1 ← arg min α · Es∼D,a∼µ(a|s) [Q(s, a)] − Es∼D,a∼π̂β (a|s) [Q(s, a)]
+Q
+
+2 
+1
++ Es,a,s0 ∼D Q(s, a) − B̂ π Q̂k (s, a)
+. (2)
+2
+In Theorem 3.2, we show that, while the resulting Q-value Q̂π may not be a point-wise lowerbound, we have Eπ(a|s) [Q̂π (s, a)] ≤ V π (s) when µ(a|s) = π(a|s). Intuitively, since Equation 2
+maximizes Q-values under the behavior policy π̂β , Q-values for actions that are likely under π̂β
+might be overestimated, and hence Q̂π may not lower-bound Qπ pointwise. While in principle the
+maximization term can utilize other distributions besides π̂β (a|s), we prove in Appendix D.2 that the
+resulting value is not guaranteed to be a lower bound for other distribution besides π̂β (a|s).
+Theoretical analysis. We first note that Equations 1 and 2 use the empirical Bellman operator, B̂ π ,
+instead of the actual Bellman operator, B π . Following [49, 28, 47], we use concentration properties
+of B̂ π to control this error. Formally, for all s, a ∈ D, with probability ≥ 1 − δ, |B̂ π − Bπ |(s, a) ≤
+√Cr,T ,δ , where Cr,T,δ is a constant dependent on the concentration properties (variance) of r(s, a)
+|D(s,a)|
+
+and T (s0 |s, a), and δ ∈ (0, 1) (see Appendix D.3 for more details). For simplicity in the derivation,
+we assume that π̂β (a|s) > 0, ∀a ∈ A , ∀s ∈ D. √1 denotes a vector of size |S||A| containing
+|D|
+
+square root inverse counts for each state-action pair, except when D(s, a) = 0, in which case the
+max
+corresponding entry is a very large but finite value δ ≥ 2R
+1−γ . Now, we show that the conservative
+Q-function learned by iterating Equation 1 lower-bounds the true Q-function. Proofs can be found in
+Appendix C.
+
+Theorem 3.1. For any µ(a|s) with supp µ ⊂ supp π̂β , with probability ≥ 1 − δ, Q̂π (the Q-function
+obtained by iterating Equation 1) satisifies:
+"
+#
+
+
+µ
+C
+R
+r,T,δ
+max
+−1
+p
+∀s ∈ D, a, Q̂π (s, a) ≤ Qπ (s, a)−α (I − γP π )
+(s, a)+ (I − γP π )−1
+(s, a).
+π̂β
+(1 − γ) |D|
+Thus, if α is sufficiently large, then Q̂π (s, a) ≤ Qπ (s, a), ∀s ∈ D, a. When B̂ π = B π , any α > 0
+guarantees Q̂π (s, a) ≤ Qπ (s, a), ∀s ∈ D, a ∈ A.
+3
+
+Next, we show that Equation 2 lower-bounds the expected value under the policy π, when µ = π. We
+also show that Equation 2 does not lower-bound the Q-value estimates pointwise. For this result, we
+abuse notation and assume that √1 refers to a vector of inverse square root of only state counts,
+|D|
+
+with a similar correction as before used to handle the entries of this vector at states with zero counts.
+Theorem 3.2 (Equation 2 results in a tighter lower bound). The value of the policy under the Qfunction from Equation 2, V̂ π (s) = Eπ(a|s) [Q̂π (s, a)], lower-bounds the true value of the policy
+obtained via exact policy evaluation, V π (s) = Eπ(a|s) [Qπ (s, a)], when µ = π, according to:
+"
+#
+
+
+
+π
+π −1 Cr,T,δ Rmax
+π
+π
+π −1
+p
+∀s ∈ D, V̂ (s) ≤ V (s)−α (I − γP ) Eπ
+− 1 (s)+ (I − γP )
+(s).
+π̂β
+(1 − γ) |D|
+hP
+i−1
+C
+R
+π(a|s)
+Thus, if α > r,T1−γmax ·maxs∈D √ 1
+·
+π(a|s)(
+−
+1)
+, ∀s ∈ D, V̂ π (s) ≤ V π (s),
+a
+π̂β (a|s))
+|
+
+|D(s)|
+π
+π
+
+with probability ≥ 1 − δ. When B̂ = B , then any α > 0 guarantees V̂ π (s) ≤ V π (s), ∀s ∈ D.
+The analysis presented above assumes that no function approximation is used in the Q-function,
+meaning that each iterate can be represented exactly. We can further generalize the result in Theorem 3.2 to the case of both linear function approximators and non-linear neural network function
+approximators, where the latter builds on the neural tangent kernel (NTK) framework [27]. Due to
+space constraints, we present these results in Theorem D.1 and Theorem D.2 in Appendix D.1.
+In summary, we showed that the basic CQL evaluation in Equation 1 learns a Q-function that
+lower-bounds the true Q-function Qπ , and the evaluation in Equation 2 provides a tighter lower
+bound on the expected Q-value of the policy π. For suitable α, both bounds hold under sampling
+error and function approximation. We also note that as more data becomes available and |D(s, a)|
+increases, the theoretical value of α that is needed to guarantee a lower bound decreases, which
+indicates that in the limit of infinite data, a lower bound can be obtained by using extremely small
+values of α. Next, we will extend on this result into a complete RL algorithm.
+3.2
+
+Conservative Q-Learning for Offline RL
+
+We now present a general approach for offline policy learning, which we refer to as conservative
+Q-learning (CQL). As discussed in Section 3.1, we can obtain Q-values that lower-bound the value of
+a policy π by solving Equation 2 with µ = π. How should we utilize this for policy optimization?
+We could alternate between performing full off-policy evaluation for each policy iterate, π̂ k , and one
+step of policy improvement. However, this can be computationally expensive. Alternatively, since the
+policy π̂ k is typically derived from the Q-function, we could instead choose µ(a|s) to approximate
+the policy that would maximize the current Q-function iterate, thus giving rise to an online algorithm.
+We can formally capture such online algorithms by defining a family of optimization problems over
+µ(a|s), presented below, with modifications from Equation 2 marked in red. An instance of this
+family is denoted by CQL(R) and is characterized by a particular choice of regularizer R(µ):
+
+min max α Es∼D,a∼µ(a|s) [Q(s, a)] − Es∼D,a∼π̂β (a|s) [Q(s, a)]
+µ
+Q
+
+2 
+1
+πk k
++ R(µ) (CQL(R)) . (3)
++ Es,a,s0 ∼D Q(s, a) − B̂ Q̂ (s, a)
+2
+Variants of CQL. To demonstrate the generality of the CQL family of optimization problems, we
+discuss two specific instances within this family that are of special interest, and we evaluate them
+empirically in Section 6. If we choose R(µ) to be the KL-divergence against a prior distribution,
+ρ(a|s), i.e., R(µ) = −DKL (µ, ρ), then we get µ(a|s) ∝ ρ(a|s) · exp(Q(s, a)) (for a derivation, see
+Appendix A). Frist, if ρ = Unif(a), then the first term in Equation 3 corresponds to a soft-maximum
+of the Q-values at any state s and gives rise to the following variant of Equation 3, called CQL(H):
+"
+min αEs∼D log
+Q
+
+#
+
+
+2 
+1
+exp(Q(s, a))−Ea∼π̂β (a|s) [Q(s, a)] + Es,a,s0 ∼D Q − B̂πk Q̂k
+.
+2
+a
+
+X
+
+(4)
+
+Second, if ρ(a|s) is chosen to be the previous policy π̂ k−1 , the first term in Equation 4 is replaced by
+an exponential weighted average of Q-values of actions from the chosen π̂ k−1 (a|s). Empirically, we
+4
+
+find that this variant can be P
+more stable with high-dimensional action spaces (e.g., Table 2) where it is
+challenging to estimate log a exp via sampling due to high variance. In Appendix A, we discuss an
+additional variant of CQL, drawing connections to distributionally robust optimization [45]. We will
+discuss a practical instantiation of a CQL deep RL algorithm in Section 4. CQL can be instantiated as
+either a Q-learning algorithm (with B ∗ instead of B π in Equations 3, 4) or as an actor-critic algorithm.
+
+Theoretical analysis of CQL. Next, we will theoretically analyze CQL to show that the policy
+updates derived in this way are indeed “conservative”, in the sense that each successive policy iterate
+is optimized against a lower bound on its value. For clarity, we state the results in the absence of finitesample error, in this section, but sampling error can be incorporated in the same way as Theorems 3.1
+and 3.2, and we discuss this in Appendix C. Theorem 3.3 shows that any variant of the CQL family
+learns Q-value estimates that lower-bound the actual Q-function under the action-distribution defined
+by the policy, π k , under mild regularity conditions (slow updates on the policy).
+Theorem 3.3 (CQL learns lower-bounded Q-values). Let πQ̂k (a|s) ∝ exp(Q̂k (s, a)) and assume
+
+that DTV (π̂ k+1 , πQ̂k ) ≤ ε (i.e., π̂ k+1 changes slowly w.r.t to Q̂k ). Then, the policy value under Q̂k ,
+lower-bounds the actual policy value, V̂ k+1 (s) ≤ V k+1 (s)∀s if
+"
+#
+!
+πQ̂k (a|s)
+πQ̂k (a|s)
+EπQ̂k (a|s)
+−1 ≥
+max
+· ε.
+π̂β (a|s)
+π̂β (a|s)
+a s.t. π̂β (a|s)>0
+
+The LHS of this inequality is equal to the amount of conservatism induced in the value, V̂ k+1 in
+iteration k + 1 of the CQL update, if the learned policy were equal to soft-optimal policy for Q̂k , i.e.,
+when π̂ k+1 = πQ̂k . However, as the actual policy, π̂ k+1 , may be different, the RHS is the maximal
+amount of potential overestimation due to this difference. To get a lower bound, we require the
+amount of underestimation to be higher, which is obtained if ε is small, i.e. the policy changes slowly.
+Our final result shows that CQL Q-function update is “gap-expanding”, by which we mean that the
+difference in Q-values at in-distribution actions and over-optimistically erroneous out-of-distribution
+actions is higher than the corresponding difference under the actual Q-function. This implies that
+the policy π k (a|s) ∝ exp(Q̂k (s, a)), is constrained to be closer to the dataset distribution, π̂β (a|s),
+thus the CQL update implicitly prevents the detrimental effects of OOD action and distribution shift,
+which has been a major concern in offline RL settings [32, 36, 17].
+Theorem 3.4 (CQL is gap-expanding). At any iteration k, CQL expands the difference in expected
+Q-values under the behavior policy πβ (a|s) and µk , such that for large enough values of αk , we
+have that ∀s, Eπβ (a|s) [Q̂k (s, a)] − Eµk (a|s) [Q̂k (s, a)] > Eπβ (a|s) [Qk (s, a)] − Eµk (a|s) [Qk (s, a)].
+When function approximation or sampling error makes OOD actions have higher learned Q-values,
+CQL backups are expected to be more robust, in that the policy is updated using Q-values that prefer
+in-distribution actions. As we will empirically show in Appendix B, prior offline RL methods that do
+not explicitly constrain or regularize the Q-function may not enjoy such robustness properties.
+To summarize, we showed that the CQL RL algorithm learns lower-bound Q-values with large
+enough α, meaning that the final policy attains at least the estimated value. We also showed that
+the Q-function is gap-expanding, meaning that it should only ever over-estimate the gap between
+in-distribution and out-of-distribution actions, preventing OOD actions.
+3.3
+
+Safe Policy Improvement Guarantees
+
+In Section 3.1 we proposed novel objectives for Q-function training such that the expected value
+of a policy under the resulting Q-function lower bounds the actual performance of the policy. In
+Section 3.2, we used the learned conservative Q-function for policy improvement. In this section,
+we show that this procedure actually optimizes a well-defined objective and provide a safe policy
+improvement result for CQL, along the lines of Theorems 1 and 2 in Laroche et al. [35].
+To begin with, we define empirical return of any policy π, J(π, M̂ ), which is equal to the discounted
+return of a policy π in the empirical MDP, M̂ , that is induced by the transitions observed in the
+dataset D, i.e. M̂ = {s, a, r, s0 ∈ D}. J(π, M ) refers to the expected discounted return attained by a
+policy π in the actual underlying MDP, M . In Theorem 3.5, we first show that CQL (Equation 2)
+optimizes a well-defined penalized RL empirical objective. All proofs are found in Appendix D.4.
+5
+
+Theorem 3.5. Let Q̂π be the fixed point of Equation 2, then π ∗ (a|s) := arg maxπ Es∼ρ(s) [V̂ π (s)]
+is equivalently obtained by solving:
+π ∗ (a|s) ← arg max J(π, M̂ ) − α
+π
+
+
+
+1
+Es∼dπ (s) DCQL (π, π̂β )(s) ,
+M̂
+1−γ
+
+(5)
+
+
+P
+−
+1
+.
+where DCQL (π, πβ )(s) := a π(a|s) · ππ(a|s)
+β (a|s)
+
+
+Intuitively, Theorem 3.5 says that CQL optimizes the return of a policy in the empirical MDP, M̂ ,
+while also ensuring that the learned policy π is not too different from the behavior policy, π̂β via
+a penalty that depends on DCQL . Note that this penalty is implicitly introduced by virtue by the
+gap-expanding (Theorem 3.4) behavior of CQL. Next, building upon Theorem 3.5 and the analysis of
+CPO [1], we show that CQL provides a ζ-safe policy improvement over π̂β .
+Theorem 3.6. Let π ∗ (a|s) be the policy obtained by optimizing Equation 5. Then, the policy π ∗ (a|s)
+is a ζ-safe policy improvement over π̂β in the actual MDP M , i.e., J(π ∗ , M ) ≥ J(π̂β , M ) − ζ with
+high probability 1 − δ, where ζ is given by,
+" p
+#
+
+
+|A| q
+Cr,δ
+γRmax CT,δ
+∗
+ζ=2
+Es∼dπ∗ (s) p
++
+DCQL (π , π̂β )(s) + 1 −
+M̂
+1−γ
+(1 − γ)2
+|D(s)|
+
+
+J(π ∗ , M̂ ) − J(π̂β , M̂ )
+{z
+}
+|
+
+. (6)
+
+1
+≥α 1−γ
+Es∼dπ∗ (s) [DCQL (π ∗ ,π̂β )(s)]
+M̂
+
+The expression of ζ in Theorem 3.6 consists of two terms: the first term captures the decrease in
+policy performance in M , that occurs due to the mismatch between M̂ and M , also referred to as
+sampling error. The second term captures the increase in policy performance due to CQL in empirical
+MDP, M̂ . The policy π ∗ obtained by optimizing π against the CQL Q-function improves upon the
+behavior policy, π̂β for suitably chosen values of α. When sampling error is small, i.e., |D(s)| is
+large, then smaller values of α are enough to provide an improvement over the behavior policy.
+To summarize, CQL optimizes a well-defined, penalized empirical RL objective, and performs
+high-confidence safe policy improvement over the behavior policy. The extent of improvement is
+negatively influenced by higher sampling error, which decays as more samples are observed.
+
+4
+
+Practical Algorithm and Implementation Details
+
+We now describe two practical offline Algorithm 1 Conservative Q-Learning (both variants)
+deep reinforcement learning methods
+based on CQL: an actor-critic vari- 1: Initialize Q-function, Qθ , and optionally a policy, πφ .
+ant and a Q-learning variant. Pseu- 2: for step t in {1, . . . , N} do
+Train the Q-function using GQ gradient steps on objective
+3:
+docode is shown in Algorithm 1, with
+from Equation 4
+differences from conventional actorθt := θt−1 − ηQ ∇θ CQL(R)(θ)
+critic algorithms (e.g., SAC [21])
+(Use B∗ for Q-learning, Bπφt for actor-critic)
+and deep Q-learning algorithms (e.g., 4: (only with actor-critic) Improve policy πφ via Gπ gradient
+DQN [41]) in red. Our algorithm uses
+steps on φ with SAC-style entropy regularization:
+the CQL(H) (or CQL(R) in general)
+φt := φt−1 + ηπ Es∼D,a∼πφ (·|s) [Qθ (s, a)−log πφ (a|s)]
+objective from the CQL framework 5: end for
+for training the Q-function Qθ , which is parameterized by a neural network with parameters θ. For
+the actor-critic algorithm, a policy πφ is trained as well. Our algorithm modifies the objective for the
+Q-function (swaps out Bellman error with CQL(H)) or CQL(ρ) in a standard actor-critic or Q-learning
+setting, as shown in Line 3. As discussed in Section 3.2, due to the explicit penalty on the Q-function,
+CQL methods do not use a policy constraint, unlike prior offline RL methods [32, 62, 57, 36]. Hence,
+we do not require fitting an additional behavior policy estimator, simplifying our method.
+Implementation details. Our algorithm requires an addition of only 20 lines of code on top of
+standard implementations of soft actor-critic (SAC) [21] for continuous control experiments and
+on top of QR-DQN [9] for the discrete control experiments. The tradeoff factor, α is automatically
+tuned via Lagrangian dual gradient descent for continuous control, and is fixed at constant values
+described in Appendix F for discrete control. We use default hyperparameters from SAC, except that
+the learning rate for the policy is chosen to be 3e-5 (vs 3e-4 or 1e-4 for the Q-function), as dictated
+by Theorem 3.3. Elaborate details are provided in Appendix F.
+6
+
+5
+
+Related Work
+
+We now briefly discuss prior work in offline RL and off-policy evaluation, comparing and contrasting
+these works with our approach. More technical discussion of related work is provided in Appendix E.
+Off-policy evaluation (OPE). Several different paradigms have been used to perform off-policy
+evaluation. Earlier works [53, 51, 54] used per-action importance sampling on Monte-Carlo returns
+to obtain an OPE return estimator. Recent approaches [38, 19, 42, 64] use marginalized importance
+sampling by directly estimating the state-distribution importance ratios via some form of dynamic
+programming [36] and typically exhibit less variance than per-action importance sampling at the
+cost of bias. Because these methods use dynamic programming, they can suffer from OOD actions
+[36, 19, 22, 42]. In contrast, the regularizer in CQL explicitly addresses the impact of OOD actions
+due to its gap-expanding behavior, and obtains conservative value estimates.
+Offline RL. As discussed in Section 2, offline Q-learning methods suffer from issues pertaining to
+OOD actions. Prior works have attempted to solve this problem by constraining the learned policy
+to be “close” to the behavior policy, for example as measured by KL-divergence [29, 62, 50, 57],
+Wasserstein distance [62], or MMD [32], and then only using actions sampled from this constrained
+policy in the Bellman backup or applying a value penalty. SPIBB [35, 43] methods bootstrap using
+the behavior policy in a Q-learning algorithm for unseen actions. Most of these methods require
+a separately estimated model to the behavior policy, πβ (a|s) [17, 32, 62, 29, 57, 58], and are thus
+limited by their ability to accurately estimate the unknown behavior policy [44], which might be
+especially complex in settings where the data is collected from multiple sources [36]. In contrast, CQL
+does not require estimating the behavior policy. Prior work has explored some forms of Q-function
+penalties [25, 61], but only in the standard online RL setting with demonstrations. Luo et al. [40]
+learn a conservatively-extrapolated value function by enforcing a linear extrapolation property over
+the state-space, and a learned dynamics model to obtain policies for goal-reaching tasks. Kakade and
+Langford [30] proposed the CPI algorithm, that improves a policy conservatively in online RL.
+Alternate prior approaches to offline RL estimate some sort of uncertainty to determine the trustworthiness of a Q-value prediction [32, 3, 36], typically using uncertainty estimation techniques
+from exploration in online RL [49, 28, 48, 7]. These methods have not been generally performant
+in offline RL [17, 32, 36] due to the high-fidelity requirements of uncertainty estimates in offline
+RL [36]. Robust MDPs [26, 52, 59, 46] have been a popular theoretical abstraction for offline RL,
+but tend to be highly conservative in policy improvement. We expect CQL to be less conservative
+since CQL does not underestimate Q-values for all state-action tuples. Works on high confidence
+policy improvement [60] provides safety guarantees for improvement but tend to be conservative. The
+gap-expanding property of CQL backups, shown in Theorem 3.4, is related to how gap-increasing
+Bellman backup operators [6, 39] are more robust to estimation error in online RL.
+Theoretical results. Our theoretical results (Theorems 3.5, 3.6) are related to prior work on safe
+policy improvement [35, 52], and a direct comparison to Theorems 1 and 2 in Laroche et al. [35]
+suggests similar quadratic dependence on the horizon and an inverse square-root dependence on the
+counts. Our bounds improve over the ∞-norm bounds in Petrik et al. [52]. Prior analyses have also
+focused on error propagation in approximate dynamic programming [13, 8, 63, 56, 32], and generally
+obtain bounds in terms of concentrability coefficients that capture the effect of distribution shift.
+
+6
+
+Experimental Evaluation
+
+We compare CQL to prior offline RL methods on a range of domains and dataset compositions,
+including continuous and discrete action spaces, state observations of varying dimensionality, and
+high-dimensional image inputs. We first evaluate actor-critic CQL, using CQL(H) from Algorithm 1,
+on continuous control datasets from the D4RL benchmark [14]. We compare to: prior offline RL
+methods that use a policy constraint – BEAR [32] and BRAC [62]; SAC [21], an off-policy actor-critic
+method that we adapt to offline setting; and behavioral cloning (BC).
+Gym domains. Results for the gym domains are shown in Table 1. The results for BEAR, BRAC,
+SAC, and BC are based on numbers reported by Fu et al. [14]. On the datasets generated from a
+single policy, marked as “-random”, “-expert” and “-medium”, CQL roughly matches or exceeds
+the best prior methods, but by a small margin. However, on datasets that combine multiple policies
+(“-mixed”, “-medium-expert” and “-random-expert”), that are more likely to be common in practical
+datasets, CQL outperforms prior methods by large margins, sometimes as much as 2-3x.
+7
+
+Task Name
+halfcheetah-random
+hopper-random
+walker2d-random
+halfcheetah-medium
+walker2d-medium
+hopper-medium
+halfcheetah-expert
+hopper-expert
+walker2d-expert
+halfcheetah-medium-expert
+walker2d-medium-expert
+hopper-medium-expert
+halfcheetah-random-expert
+walker2d-random-expert
+hopper-random-expert
+halfcheetah-mixed
+hopper-mixed
+walker2d-mixed
+
+SAC
+30.5
+11.3
+4.1
+-4.3
+0.9
+0.8
+-1.9
+0.7
+-0.3
+1.8
+1.9
+1.6
+53.0
+0.8
+5.6
+-2.4
+3.5
+1.9
+
+BC
+2.1
+9.8
+1.6
+36.1
+6.6
+29.0
+107.0
+109.0
+125.7
+35.8
+11.3
+111.9
+1.3
+0.7
+10.1
+38.4
+11.8
+11.3
+
+BEAR
+25.5
+9.5
+6.7
+38.6
+33.2
+47.6
+108.2
+110.3
+106.1
+51.7
+10.8
+4.0
+24.6
+1.9
+10.1
+36.2
+25.3
+10.8
+
+BRAC-p
+23.5
+11.1
+0.8
+44.0
+72.7
+31.2
+3.8
+6.6
+-0.2
+43.8
+-0.3
+1.1
+30.2
+0.2
+5.8
+45.6
+0.7
+-0.3
+
+BRAC-v
+28.1
+12.0
+0.5
+45.5
+81.3
+32.3
+-1.1
+3.7
+-0.0
+45.3
+0.9
+0.8
+2.2
+2.7
+11.1
+45.9
+0.8
+0.9
+
+CQL(H)
+35.4
+10.8
+7.0
+44.4
+79.2
+58.0
+104.8
+109.9
+153.9
+62.4
+98.7
+111.0
+92.5
+91.1
+110.5
+46.2
+48.6
+26.7
+
+Table 1: Performance of CQL(H) and prior methods on gym domains from D4RL, on the normalized return
+metric, averaged over 4 seeds. Note that CQL performs similarly or better than the best prior method with
+simple datasets, and greatly outperforms prior methods with complex distributions (“–mixed”, “–random-expert”,
+“–medium-expert”).
+
+Adroit tasks. The more complex Adroit [55] tasks (shown on the right) in D4RL require controlling a 24-DoF robotic hand, using limited data from human demonstrations. These tasks are
+substantially more difficult than the gym tasks in terms of both the dataset composition and high
+dimensionality. Prior offline RL methods generally struggle to learn meaningful behaviors on
+these tasks, and the strongest baseline is BC. As shown in Table 2, CQL variants
+are the only methods that improve over BC, attaining scores that are 2-9x those
+of the next best offline RL method. CQL(ρ) with ρ = π̂ k−1 (the previous
+policy) outperforms CQL(H) on a number of these tasks, due to the higher
+action dimensionality resulting in higher variance for the CQL(H) importance
+weights. Both variants outperform prior methods.
+Domain
+
+AntMaze
+
+Adroit
+
+Kitchen
+
+Task Name
+antmaze-umaze
+antmaze-umaze-diverse
+antmaze-medium-play
+antmaze-medium-diverse
+antmaze-large-play
+antmaze-large-diverse
+pen-human
+hammer-human
+door-human
+relocate-human
+pen-cloned
+hammer-cloned
+door-cloned
+relocate-cloned
+kitchen-complete
+kitchen-partial
+kitchen-undirected
+
+BC
+65.0
+55.0
+0.0
+0.0
+0.0
+0.0
+34.4
+1.5
+0.5
+0.0
+56.9
+0.8
+-0.1
+-0.1
+33.8
+33.8
+47.5
+
+SAC
+0.0
+0.0
+0.0
+0.0
+0.0
+0.0
+6.3
+0.5
+3.9
+0.0
+23.5
+0.2
+0.0
+-0.2
+15.0
+0.0
+2.5
+
+BEAR
+73.0
+61.0
+0.0
+8.0
+0.0
+0.0
+-1.0
+0.3
+-0.3
+-0.3
+26.5
+0.3
+-0.1
+-0.3
+0.0
+13.1
+47.2
+
+BRAC-p
+50.0
+40.0
+0.0
+0.0
+0.0
+0.0
+8.1
+0.3
+-0.3
+-0.3
+1.6
+0.3
+-0.1
+-0.3
+0.0
+0.0
+0.0
+
+BRAC-v
+70.0
+70.0
+0.0
+0.0
+0.0
+0.0
+0.6
+0.2
+-0.3
+-0.3
+-2.5
+0.3
+-0.1
+-0.3
+0.0
+0.0
+0.0
+
+CQL(H)
+74.0
+84.0
+61.2
+53.7
+15.8
+14.9
+37.5
+4.4
+9.9
+0.20
+39.2
+2.1
+0.4
+-0.1
+43.8
+49.8
+51.0
+
+CQL(ρ)
+73.5
+61.0
+4.6
+5.1
+3.2
+2.3
+55.8
+2.1
+9.1
+0.35
+40.3
+5.7
+3.5
+-0.1
+31.3
+50.1
+52.4
+
+Table 2: Normalized scores of all methods on AntMaze, Adroit, and kitchen domains from D4RL, averaged
+across 4 seeds. On the harder mazes, CQL is the only method that attains non-zero returns, and is the only
+method to outperform simple behavioral cloning on Adroit tasks with human demonstrations. We observed that
+the CQL(ρ) variant, which avoids importance weights, trains more stably, with no sudden fluctuations in policy
+performance over the course of training, on the higher-dimensional Adroit tasks.
+
+AntMaze. These D4RL tasks require composing parts of suboptimal trajectories to form more
+optimal policies for reaching goals on a MuJoco Ant robot. Prior methods make some progress on
+the simpler U-maze, but only CQL is able to make meaningful progress on the much harder medium
+and large mazes, outperforming prior methods by a very wide margin.
+Kitchen tasks. Next, we evaluate CQL on the Franka kitchen domain [20]
+from D4RL [16]. The goal is to control a 9-DoF robot to manipulate
+multiple objects (microwave, kettle, etc.) sequentially, in a single episode
+to reach a desired configuration, with only sparse 0-1 completion reward for
+every object that attains the target configuration. These tasks are especially
+challenging, since they require composing parts of trajectories, precise
+long-horizon manipulation, and handling human-provided teleoperation
+8
+
+data. As shown in Table 2, CQL outperforms prior methods in this setting, and is the only method
+that outperforms behavioral cloning, attaining over 40% success rate on all tasks.
+Offline RL on Atari games. Lastly, we evaluate a discrete-action Q-learning variant of CQL
+(Algorithm 1) on offline, image-based Atari games [5]. We compare CQL to REM [3] and QRDQN [9] on the five Atari tasks (Pong, Breakout, Qbert, Seaquest and Asterix) that are evaluated in
+detail by Agarwal et al. [3], using the dataset released by the authors.
+Pong
+
+Breakout
+
+80
+
+0
+5
+
+60
+40
+
+10
+
+QR-DQN
+REM
+CQL
+
+15
+20
+0
+
+20
+
+40
+
+60
+
+Training Iterations
+
+80
+
+100
+
+QR-DQN
+REM
+CQL
+
+1500
+
+QR-DQN
+REM
+CQL
+
+20
+0
+0
+
+20
+
+40
+
+60
+
+Training Iterations
+
+80
+
+4000
+
+1250
+
+3000
+
+1000
+
+Return
+
+100
+
+5
+
+Seaquest
+
+1750
+
+5000
+
+Return
+
+10
+
+Return
+
+Return
+
+Qbert
+
+120
+
+15
+
+2000
+
+0
+
+100
+
+750
+500
+
+QR-DQN
+REM
+CQL
+
+1000
+
+0
+
+20
+
+40
+
+60
+
+Training Iterations
+
+80
+
+100
+
+250
+0
+0
+
+20
+
+40
+
+60
+
+Training Iterations
+
+80
+
+100
+
+Figure 1: Performance of CQL, QR-DQN and REM as a function of training steps (x-axis) in setting (1) when
+provided with only the first 20% of the samples of an online DQN run. Note that CQL is able to learn stably on
+3 out of 4 games, and its performance does not degrade as steeply as QR-DQN on Seaquest∗ .
+
+Following the evaluation protocol of Agarwal et al. [3], we evaluated on two types of datasets, both
+of which were generated from the DQN-replay dataset, released by [3]: (1) a dataset consisting
+of the first 20% of the samples observed by an online DQN agent and (2) datasets consisting of
+only 1% and 10% of all samples observed by an online DQN agent (Figures 6 and 7 in [3]). In
+setting (1), shown in Figure 1, CQL generally achieves similar or better performance throughout as
+QR-DQN and REM. When only using only 1% or 10% of the data, in setting (2) (Table 3), CQL
+substantially outperforms REM and QR-DQN, espe- Task Name QR-DQN
+REM
+CQL(H)
+cially in the harder 1% condition, achieving 36x and 6x
+Pong (1%)
+-13.8
+-6.9
+19.3
+Breakout
+7.9
+11.0
+61.1
+times the return of the best prior method on Q*bert and
+Q*bert
+383.6
+343.4
+14012.0
+Breakout, respectively.
+672.9
+499.8
+779.4
+Seaquest
+166.3
+386.5
+592.4
+Analysis of CQL. Finally, we perform empirical evalu- Asterix
+Pong (10%)
+15.1
+8.9
+18.5
+ation to verify that CQL indeed lower-bounds the value
+151.2
+86.7
+269.3
+Breakout
+function, thus verifying Theorems 3.2, Appendix D.1
+Q*bert
+7091.3
+8624.3
+13855.6
+2984.8
+3936.6
+3674.1
+Seaquest
+empirically. To this end, we estimate the average value
+Asterix
+189.2
+75.1
+156.3
+k
+of the learned policy predicted by CQL, Es∼D [V̂ (s)],
+and report the difference against the actual discounted Table 3: CQL, REM and QR-DQN in setting
+(1) with 1% data (top), and 10% data (bottom).
+return of the policy π k in Table 4. We also estimate CQL drastically outperforms prior methods with
+these values for baselines, including the minimum 1% data, and usually attains better performance
+predicted Q-value under an ensemble [21, 18] of Q- with 10% data.
+functions with varying ensemble sizes, which is a standard technique to prevent overestimed Q-values [18, 21, 23] and BEAR [32], a policy constraint
+method. The results show that CQL learns a lower bound for all three tasks, whereas the baselines
+are prone to overestimation. We also evaluate a variant of CQL that uses Equation 1, and observe that
+the resulting values are lower (that is, underestimate the true values) as compared to CQL(H). This
+provides empirical evidence that CQL(H) attains a tighter lower bound than the point-wise bound in
+Equation 1, as per Theorem 3.2.
+Task Name
+hopper-medium-expert
+hopper-mixed
+hopper-medium
+
+CQL(H)
+-43.20
+-10.93
+-7.48
+
+CQL (Eqn. 1)
+-151.36
+-22.87
+-156.70
+
+Ensemble(2)
+3.71e6
+15.00e6
+26.03e12
+
+Ens.(4)
+2.93e6
+59.93e3
+437.57e6
+
+Ens.(10)
+0.32e6
+8.92e3
+1.12e12
+
+Ens.(20)
+24.05e3
+2.47e3
+885e3
+
+BEAR
+65.93
+1399.46
+4.32
+
+Table 4: Difference between policy values predicted by each algorithm and the true policy value for CQL, a
+variant of CQL that uses Equation 1, the minimum of an ensemble of varying sizes, and BEAR [32] on three
+D4RL datasets. CQL is the only method that lower-bounds the actual return (i.e., has negative differences), and
+CQL(H) is much less conservative than CQL (Eqn. 1).
+
+We also present an empirical analysis to show that Theorem 3.4, that CQL is gap-expanding, holds
+in practice in Appendix B, and present an ablation study on various design choices used in CQL in
+Appendix G.
+
+7
+
+Discussion
+
+We proposed conservative Q-learning (CQL), an algorithmic framework for offline RL that learns a
+lower bound on the policy value. Empirically, we demonstrate that CQL outperforms prior offline RL
+9
+
+methods on a wide range of offline RL benchmark tasks, including complex control tasks and tasks
+with raw image observations. In many cases, the performance of CQL is substantially better than the
+best-performing prior methods, exceeding their final returns by 2-5x. The simplicity and efficacy of
+CQL make it a promising choice for a wide range of real-world offline RL problems. However, a
+number of challenges remain. While we prove that CQL learns lower bounds on the Q-function in
+the tabular, linear, and a subset of non-linear function approximation cases, a rigorous theoretical
+analysis of CQL with deep neural nets, is left for future work. Additionally, offline RL methods are
+liable to suffer from overfitting in the same way as standard supervised methods, so another important
+challenge for future work is to devise simple and effective early stopping methods, analogous to
+validation error in supervised learning.
+
+Acknowledgements
+We thank Mohammad Norouzi, Oleh Rybkin, Anton Raichuk, Vitchyr Pong and anonymous reviewers
+from the Robotic AI and Learning Lab at UC Berkeley for their feedback on an earlier version of this
+paper. We thank Rishabh Agarwal for help with the Atari QR-DQN/REM codebase and for sharing
+baseline results. This research was funded by the DARPA Assured Autonomy program, and compute
+support from Google, Amazon, and NVIDIA.
+
+References
+[1] Joshua Achiam, David Held, Aviv Tamar, and Pieter Abbeel. Constrained policy optimization.
+In Proceedings of the 34th International Conference on Machine Learning-Volume 70, pages
+22–31. JMLR. org, 2017.
+[2] Joshua Achiam, Ethan Knight, and Pieter Abbeel. Towards characterizing divergence in deep
+q-learning. arXiv preprint arXiv:1903.08894, 2019.
+[3] Rishabh Agarwal, Dale Schuurmans, and Mohammad Norouzi. An optimistic perspective on
+offline reinforcement learning. 2019.
+[4] DeepMind AlphaStar. Mastering the real-time strategy game starcraft ii. URL: https://deepmind.
+com/blog/alphastar-mastering-real-time-strategy-game-starcraft-ii.
+[5] Marc G Bellemare, Yavar Naddaf, Joel Veness, and Michael Bowling. The arcade learning
+environment: An evaluation platform for general agents. Journal of Artificial Intelligence
+Research, 47:253–279, 2013.
+[6] Marc G Bellemare, Georg Ostrovski, Arthur Guez, Philip S Thomas, and Rémi Munos. Increasing the action gap: New operators for reinforcement learning. In Thirtieth AAAI Conference on
+Artificial Intelligence, 2016.
+[7] Yuri Burda, Harrison Edwards, Amos Storkey, and Oleg Klimov. Exploration by random
+network distillation. arXiv preprint arXiv:1810.12894, 2018.
+[8] Jinglin Chen and Nan Jiang. Information-theoretic considerations in batch reinforcement
+learning. arXiv preprint arXiv:1905.00360, 2019.
+[9] Will Dabney, Mark Rowland, Marc G Bellemare, and Rémi Munos. Distributional reinforcement
+learning with quantile regression. In Thirty-Second AAAI Conference on Artificial Intelligence,
+2018.
+[10] Jia Deng, Wei Dong, Richard Socher, Li-Jia Li, Kai Li, and Li Fei-Fei. Imagenet: A largescale hierarchical image database. In 2009 IEEE conference on computer vision and pattern
+recognition, pages 248–255. Ieee, 2009.
+[11] Jacob Devlin, Ming-Wei Chang, Kenton Lee, and Kristina Toutanova. Bert: Pre-training of
+deep bidirectional transformers for language understanding. arXiv preprint arXiv:1810.04805,
+2018.
+[12] Damien Ernst, Pierre Geurts, and Louis Wehenkel. Tree-based batch mode reinforcement
+learning. Journal of Machine Learning Research, 6(Apr):503–556, 2005.
+[13] Amir-massoud Farahmand, Csaba Szepesvári, and Rémi Munos. Error propagation for approximate policy and value iteration. In Advances in Neural Information Processing Systems, pages
+568–576, 2010.
+10
+
+[14] J. Fu, A. Kumar, O. Nachum, G. Tucker, and S. Levine. D4rl: Datasets for deep data-driven
+reinforcement learning. In arXiv, 2020. URL https://arxiv.org/pdf/2004.07219.
+[15] Justin Fu, Aviral Kumar, Matthew Soh, and Sergey Levine. Diagnosing bottlenecks in deep
+Q-learning algorithms. arXiv preprint arXiv:1902.10250, 2019.
+[16] Justin Fu, Aviral Kumar, Ofir Nachum, George Tucker, and Sergey Levine. D4rl: Datasets
+for data-driven deep reinforcement learning. https://github.com/rail-berkeley/d4rl/
+wiki/New-Franka-Kitchen-Tasks, 2020. Github repository.
+[17] Scott Fujimoto, David Meger, and Doina Precup. Off-policy deep reinforcement learning
+without exploration. arXiv preprint arXiv:1812.02900, 2018.
+[18] Scott Fujimoto, Herke van Hoof, and David Meger. Addressing function approximation error
+in actor-critic methods. In International Conference on Machine Learning (ICML), pages
+1587–1596, 2018.
+[19] Carles Gelada and Marc G Bellemare. Off-policy deep reinforcement learning by bootstrapping
+the covariate shift. In Proceedings of the AAAI Conference on Artificial Intelligence, volume 33,
+pages 3647–3655, 2019.
+[20] Abhishek Gupta, Vikash Kumar, Corey Lynch, Sergey Levine, and Karol Hausman. Relay
+policy learning: Solving long-horizon tasks via imitation and reinforcement learning. arXiv
+preprint arXiv:1910.11956, 2019.
+[21] T. Haarnoja, H. Tang, P. Abbeel, and S. Levine. Reinforcement learning with deep energy-based
+policies. In International Conference on Machine Learning (ICML), 2017.
+[22] Assaf Hallak and Shie Mannor. Consistent on-line off-policy evaluation. In Proceedings of the
+34th International Conference on Machine Learning-Volume 70, pages 1372–1383. JMLR. org,
+2017.
+[23] Hado V Hasselt. Double q-learning. In Advances in neural information processing systems,
+pages 2613–2621, 2010.
+[24] Kaiming He, Xiangyu Zhang, Shaoqing Ren, and Jian Sun. Deep residual learning for image
+recognition. In Proceedings of the IEEE conference on computer vision and pattern recognition,
+pages 770–778, 2016.
+[25] Todd Hester, Matej Vecerik, Olivier Pietquin, Marc Lanctot, Tom Schaul, Bilal Piot, Dan Horgan,
+John Quan, Andrew Sendonaris, Ian Osband, et al. Deep q-learning from demonstrations. In
+Thirty-Second AAAI Conference on Artificial Intelligence, 2018.
+[26] Garud N Iyengar. Robust dynamic programming. Mathematics of Operations Research, 30(2):
+257–280, 2005.
+[27] Arthur Jacot, Franck Gabriel, and Clement Hongler. Neural tangent kernel: Convergence and
+generalization in neural networks. In Advances in Neural Information Processing Systems 31.
+2018.
+[28] Thomas Jaksch, Ronald Ortner, and Peter Auer. Near-optimal regret bounds for reinforcement
+learning. Journal of Machine Learning Research, 11(Apr):1563–1600, 2010.
+[29] Natasha Jaques, Asma Ghandeharioun, Judy Hanwen Shen, Craig Ferguson, Agata Lapedriza,
+Noah Jones, Shixiang Gu, and Rosalind Picard. Way off-policy batch deep reinforcement
+learning of implicit human preferences in dialog. arXiv preprint arXiv:1907.00456, 2019.
+[30] Sham Kakade and John Langford. Approximately optimal approximate reinforcement learning.
+In International Conference on Machine Learning (ICML), volume 2, 2002.
+[31] Dmitry Kalashnikov, Alex Irpan, Peter Pastor, Julian Ibarz, Alexander Herzog, Eric Jang,
+Deirdre Quillen, Ethan Holly, Mrinal Kalakrishnan, Vincent Vanhoucke, et al. Scalable deep
+reinforcement learning for vision-based robotic manipulation. In Conference on Robot Learning,
+pages 651–673, 2018.
+[32] Aviral Kumar, Justin Fu, Matthew Soh, George Tucker, and Sergey Levine. Stabilizing off-policy
+q-learning via bootstrapping error reduction. In Advances in Neural Information Processing
+Systems, pages 11761–11771, 2019.
+[33] Aviral Kumar, Abhishek Gupta, and Sergey Levine. Discor: Corrective feedback in reinforcement learning via distribution correction. arXiv preprint arXiv:2003.07305, 2020.
+11
+
+[34] Michail G Lagoudakis and Ronald Parr. Least-squares policy iteration. Journal of machine
+learning research, 4(Dec):1107–1149, 2003.
+[35] Romain Laroche, Paul Trichelair, and Rémi Tachet des Combes. Safe policy improvement with
+baseline bootstrapping. arXiv preprint arXiv:1712.06924, 2017.
+[36] Sergey Levine, Aviral Kumar, George Tucker, and Justin Fu. Offline reinforcement learning:
+Tutorial, review, and perspectives on open problems. arXiv preprint arXiv:2005.01643, 2020.
+[37] Lihong Li, Wei Chu, John Langford, and Robert E Schapire. A contextual-bandit approach to
+personalized news article recommendation. In Proceedings of the 19th international conference
+on World wide web, pages 661–670, 2010.
+[38] Qiang Liu, Lihong Li, Ziyang Tang, and Dengyong Zhou. Breaking the curse of horizon:
+Infinite-horizon off-policy estimation. In Advances in Neural Information Processing Systems,
+pages 5356–5366, 2018.
+[39] Yingdong Lu, Mark S Squillante, and Chai Wah Wu. A general family of robust stochastic
+operators for reinforcement learning. arXiv preprint arXiv:1805.08122, 2018.
+[40] Yuping Luo, Huazhe Xu, and Tengyu Ma. Learning self-correctable policies and value functions
+from demonstrations with negative sampling. arXiv preprint arXiv:1907.05634, 2019.
+[41] Volodymyr Mnih, Koray Kavukcuoglu, David Silver, Alex Graves, Ioannis Antonoglou, Daan
+Wierstra, and Martin Riedmiller. Playing atari with deep reinforcement learning. arXiv preprint
+arXiv:1312.5602, 2013.
+[42] Ofir Nachum, Yinlam Chow, Bo Dai, and Lihong Li. Dualdice: Behavior-agnostic estimation
+of discounted stationary distribution corrections. In Advances in Neural Information Processing
+Systems, pages 2315–2325, 2019.
+[43] Kimia Nadjahi, Romain Laroche, and Rémi Tachet des Combes. Safe policy improvement with
+soft baseline bootstrapping. arXiv preprint arXiv:1907.05079, 2019.
+[44] Ashvin Nair, Murtaza Dalal, Abhishek Gupta, and Sergey Levine. Accelerating online reinforcement learning with offline datasets. arXiv preprint arXiv:2006.09359, 2020.
+[45] Hongseok Namkoong and John C Duchi. Variance-based regularization with convex objectives.
+In Advances in neural information processing systems, pages 2971–2980, 2017.
+[46] Arnab Nilim and Laurent El Ghaoui. Robustness in markov decision problems with uncertain
+transition matrices. In Advances in neural information processing systems, pages 839–846,
+2004.
+[47] Brendan O’Donoghue. Variational bayesian reinforcement learning with regret bounds. arXiv
+preprint arXiv:1807.09647, 2018.
+[48] Ian Osband and Benjamin Van Roy. Why is posterior sampling better than optimism for
+reinforcement learning? In Proceedings of the 34th International Conference on Machine
+Learning-Volume 70, pages 2701–2710. JMLR. org, 2017.
+[49] Ian Osband, Charles Blundell, Alexander Pritzel, and Benjamin Van Roy. Deep exploration via
+bootstrapped dqn. In Advances in neural information processing systems, pages 4026–4034,
+2016.
+[50] Xue Bin Peng, Aviral Kumar, Grace Zhang, and Sergey Levine. Advantage-weighted regression:
+Simple and scalable off-policy reinforcement learning. arXiv preprint arXiv:1910.00177, 2019.
+[51] Leonid Peshkin and Christian R Shelton. Learning from scarce experience. arXiv preprint
+cs/0204043, 2002.
+[52] Marek Petrik, Mohammad Ghavamzadeh, and Yinlam Chow. Safe policy improvement by
+minimizing robust baseline regret. In Advances in Neural Information Processing Systems,
+pages 2298–2306, 2016.
+[53] Doina Precup. Eligibility traces for off-policy policy evaluation. Computer Science Department
+Faculty Publication Series, page 80, 2000.
+[54] Doina Precup, Richard S Sutton, and Sanjoy Dasgupta. Off-policy temporal-difference learning
+with function approximation. In ICML, pages 417–424, 2001.
+12
+
+[55] Aravind Rajeswaran, Vikash Kumar, Abhishek Gupta, Giulia Vezzani, John Schulman, Emanuel
+Todorov, and Sergey Levine. Learning complex dexterous manipulation with deep reinforcement
+learning and demonstrations. In Robotics: Science and Systems, 2018.
+[56] Bruno Scherrer. Approximate policy iteration schemes: a comparison. In International
+Conference on Machine Learning, pages 1314–1322, 2014.
+[57] Noah Y Siegel, Jost Tobias Springenberg, Felix Berkenkamp, Abbas Abdolmaleki, Michael
+Neunert, Thomas Lampe, Roland Hafner, and Martin Riedmiller. Keep doing what worked:
+Behavioral modelling priors for offline reinforcement learning. arXiv preprint arXiv:2002.08396,
+2020.
+[58] Thiago D Simão, Romain Laroche, and Rémi Tachet des Combes. Safe policy improvement
+with an estimated baseline policy. arXiv preprint arXiv:1909.05236, 2019.
+[59] Aviv Tamar, Shie Mannor, and Huan Xu. Scaling up robust mdps using function approximation.
+In International Conference on Machine Learning, pages 181–189, 2014.
+[60] Philip Thomas, Georgios Theocharous, and Mohammad Ghavamzadeh. High confidence policy
+improvement. In International Conference on Machine Learning, pages 2380–2388, 2015.
+[61] Mel Vecerik, Todd Hester, Jonathan Scholz, Fumin Wang, Olivier Pietquin, Bilal Piot, Nicolas
+Heess, Thomas Rothörl, Thomas Lampe, and Martin Riedmiller. Leveraging demonstrations
+for deep reinforcement learning on robotics problems with sparse rewards. arXiv preprint
+arXiv:1707.08817, 2017.
+[62] Yifan Wu, George Tucker, and Ofir Nachum. Behavior regularized offline reinforcement
+learning. arXiv preprint arXiv:1911.11361, 2019.
+[63] Tengyang Xie and Nan Jiang. Q* approximation schemes for batch reinforcement learning: A
+eoretical comparison. 2020.
+[64] Ruiyi Zhang, Bo Dai, Lihong Li, and Dale Schuurmans. Gendice: Generalized offline estimation
+of stationary values. In International Conference on Learning Representations, 2020. URL
+https://openreview.net/forum?id=HkxlcnVFwB.
+
+13
+
+Appendices
+A
+
+Discussion of CQL Variants
+
+We derive several variants of CQL in Section 3.2. Here, we discuss these variants on more detail
+and describe their specific properties. We first derive the variants: CQL(H), CQL(ρ), and then
+present another variant of CQL, which we call CQL(var). This third variant has strong connections to
+distributionally robust optimization [45].
+CQL(H). In order to derive CQL(H), we substitute R = H(µ), and solve the optimization over µ in
+closed form for a given Q-function. For an optimization problem of the form:
+X
+max Ex∼µ(x) [f (x)] + H(µ) s.t.
+µ(x) = 1, µ(x) ≥ 0 ∀x,
+µ
+
+x
+
+the optimal solution is equal to µ∗ (x) = Z1 exp(f (x)), where Z is a normalizing factor. Plugging
+this into Equation 3, we exactly obtain Equation 4.
+CQL(ρ). In order to derive CQL(ρ), we follow the above derivation, but our regularizer is a KLdivergence regularizer instead of entropy.
+X
+max Ex∼µ(x) [f (x)] + DKL (µ||ρ) s.t.
+µ(x) = 1, µ(x) ≥ 0 ∀x.
+µ
+
+x
+
+The optimal solution is given by, µ∗ (x) =
+Plugging this back into the CQL family (Equation 3), we obtain the following objective for training
+the Q-function (modulo some normalization terms):
+
+1
+Z ρ(x) exp(f (x)), where Z is a normalizing factor.
+
+
+
+
+
+
+2 
+exp(Q(s, a))
+1
+min αEs∼dπβ (s) Ea∼ρ(a|s) Q(s, a)
+− Ea∼πβ (a|s) [Q(s, a)] + Es,a,s0 ∼D Q − Bπk Q̂k
+.
+Q
+Z
+2
+(7)
+
+CQL(var). Finally, we derive a CQL variant that is inspired from the perspective of distributionally
+robust optimization (DRO) [45]. This version penalizes the variance in the Q-function across actions
+at all states s, under some action-conditional distribution of our choice. In order to derive a canonical
+form of this variant, we invoke an identity from Namkoong and Duchi [45], which helps us simplify
+Equation 3. To start, we define the notion of “robust expectation”: for any function f (x), and any
+empirical distribution P̂ (x) over a dataset {x1 , · · · , xN } of N elements, the “robust” expectation
+defined by:
+δ
+RN (P̂ ) := max Ex∼µ(x) [f (x)] s.t. Df (µ(x), P̂ (x)) ≤ ,
+N
+µ(x)
+can be approximated using the following upper-bound:
+s
+RN (P̂ ) ≤ Ex∼P̂ (x) [f (x)] +
+
+2δ varP̂ (x) (f (x))
+N
+
+,
+
+(8)
+
+where the gap between the two sides of the inequality decays inversely w.r.t. to the dataset size,
+O(1/N ). By using Equation 8 to simplify Equation 3, we obtain an objective for training the
+Q-function that penalizes the variance of Q-function predictions under the distribution P̂ .
+s
+
+
+2 
+var
+(Q(s,
+a))
+1
+P̂ (a|s)
+
+Es,a,s0 ∼D Q − B πk Q̂k
++ αEs∼dπβ (s) 
+min
+Q
+2
+dπβ (s)|D|
+h
+i
++ αEs∼dπβ (s) EP̂ (a|s) [Q(s, a)] − Eπβ (a|s) [Q(s, a)] (9)
+The only remaining decision is the choice of P̂ , which can be chosen to be the inverse of the empirical
+1
+action distribution in the dataset, P̂ (a|s) ∝ D̂(a|s)
+, or even uniform over actions, P̂ (a|s) = Unif(a),
+to obtain this variant of variance-regularized CQL.
+14
+
+B
+
+Discussion of Gap-Expanding Behavior of CQL Backups
+
+In this section, we discuss in detail the consequences of the gap-expanding behavior of CQL backups
+over prior methods based on policy constraints that, as we show in this section, may not exhibit such
+gap-expanding behavior in practice. To recap, Theorem 3.4 shows that the CQL backup operator
+increases the difference between expected Q-value at in-distribution (a ∼ πβ (a|s)) and out-ofdistribution (a s.t. πµβk (a|s)
+(a|s) << 1) actions. We refer to this property as the gap-expanding property of
+the CQL update operator.
+Function approximation may give rise to erroneous Q-values at OOD actions. We start by
+discussing the behavior of prior methods based on policy constraints [32, 17, 29, 62] in the presence
+of function approximation. To recap, because computing the target value requires Eπ [Q̂(s, a)],
+constraining π to be close to πβ will avoid evaluating Q̂ on OOD actions. These methods typically
+do not impose any further form of regularization on the learned Q-function. Even with policy
+constraints, because function approximation used to represent the Q-function, learned Q-values at two
+distinct state-action pairs are coupled together. As prior work has argued and shown [2, 15, 33], the
+“generalization” or the coupling effects of the function approximator may be heavily influenced by the
+properties of the data distribution [15, 33]. For instance, Fu et al. [15] empirically shows that when
+the dataset distribution is narrow (i.e. state-action marginal entropy, H(dπβ (s, a)), is low [15]), the
+coupling effects of the Q-function approximator can give rise to incorrect Q-values at different states,
+though this behavior is absent without function approximation, and is not as severe with high-entropy
+(e.g. Uniform) state-action marginal distributions.
+In offline RL, we will shortly present empirical evidence on high-dimensional MuJoCo tasks showing
+that certain dataset distributions, D, may cause the learned Q-value at an OOD action a at a state
+s, to in fact take on high values than Q-values at in-distribution actions at intermediate iterations of
+learning. This problem persists even when a large number of samples (e.g. 1M ) are provided for
+training, and the agent cannot correct these errors due to no active data collection.
+Since actor-critic methods, including those with policy constraints, use the learned Q-function to
+train the policy, in an iterative online policy evaluation and policy improvement cycle, as discussed in
+Section 2, the errneous Q-function may push the policy towards OOD actions, especially when no
+policy constraints are used. Of course, policy constraints should prevent the policy from choosing
+OOD actions, however, as we will show that in certain cases, policy constraint methods might also
+fail to prevent the effects on the policy due to incorrectly high Q-values at OOD actions.
+How can CQL address this problem? As we show in Theorem 3.4, the difference between expected
+Q-values at in-distribution actions and out-of-distribution actions is expanded by the CQL update.
+This property is a direct consequence of the specific nature of the CQL regularizer – that maximizes
+Q-values under the dataset distribution, and minimizes them otherwise. This difference depends upon
+the choice of αk , which can directly be controlled, since it is a free parameter. Thus, by effectively
+controlling αk , CQL can push down the learned Q-value at out-of-distribution actions as much is
+desired, correcting for the erroneous overestimation error in the process.
+Empirical evidence on high-dimensional benchmarks with neural networks. We next empirically demonstrate the existence of of such Q-function estimation error on high-dimensional MuJoCo
+domains when deep neural network function approximators are used with stochastic optimization
+techniques. In order to measure this error, we plot the difference in expected Q-value under actions sampled from the behavior distribution, a ∼ πβ (a|s), and the maximum Q-value over actions
+sampled from a uniformly random policy, a ∼ Unif(a|s). That is, we plot the quantity
+
+
+k
+0
+k
+ˆ k = Es,a∼D
+∆
+max
+[
+Q̂
+(s,
+a
+)]
+−
+Q̂
+(s,
+a)
+(10)
+0
+0
+0
+a1 ,··· ,aN ∼Unif(a )
+
+over the iterations of training, indexed by k. This quantity, intuitively, represents an estimate of the
+“advantage” of an action a, under the Q-function, with respect to the optimal action maxa0 Q̂k (s, a0 ).
+Since, we cannot perform exact maximization over the learned Q-function in a continuous action
+space to compute ∆, we estimate it via sampling described in Equation 10.
+We present these plots in Figure 2 on two datasets: hopper-expert and hopper-medium. The expert
+dataset is generated from a near-deterministic, expert policy, exhibits a narrow coverage of the
+ˆ k is
+state-action space, and limited to only a few directed trajectories. On this dataset, we find that ∆
+15
+
+hopper-expert-v0
+
+hopper-expert-v0
+
+20
+10
+
+2000
+
+−10
+0.0M
+
+0
+0.1M
+0.2M
+0.3M
+Gradient Steps (k)
+
+0.4M
+
+0.0M
+
+BEAR
+CQL
+
+−2
+
+1000
+
+0
+
+0
+
+BEAR
+CQL
+0.2M 0.4M 0.6M
+Gradient Steps (k)
+
+0.0M
+
+(a) hopper-expert-v0
+
+1500
+1000
+500
+
+−4
+0.8M
+
+BEAR
+CQL
+
+2000
+
+2
+
+Average Return
+
+ˆk
+∆
+
+30
+
+hopper-medium-v0
+2500
+
+3000
+Average Return
+
+40
+
+hopper-medium-v0
+4
+
+BEAR
+CQL
+
+ˆk
+∆
+
+50
+
+0
+0.2M
+0.4M
+0.6M
+Gradient Steps (k)
+
+0.8M
+
+0.0M
+
+0.2M
+0.4M
+0.6M
+Gradient Steps (k)
+
+0.8M
+
+(b) hopper-medium-v0
+
+k
+
+Figure 2: ∆ as a function of training iterations for hopper-expert and hopper-medium datasets. Note
+that CQL (left) generally has negative values of ∆, whereas BEAR (right) generally has positive ∆
+values, which also increase during training with increasing k values.
+always positive for the policy constraint method (Figure 2(a)) and increases during training – note,
+ˆ k values, in the case of the policy-constraint method, shown in Figure 2(a).
+the continuous rise in ∆
+This means that even if the dataset is generated from an expert policy, and policy constraints correct
+target values for OOD actions, incorrect Q-function generalization may make an out-of-distribution
+action appear promising. For the more stochastic hopper-medium dataset, that consists of a more
+ˆ k > 0 for the policy-constraint
+diverse set of trajectories, shown in Figure 2(b), we still observe that ∆
+method, however, the relative magnitude is smaller than hopper-expert.
+ˆ k < 0, as is seen and these values are
+In contrast, Q-functions learned by CQL, generally satisfy ∆
+clearly smaller than those for the policy-constraint method. This provides some empirical evidence
+for Theorem 3.4, in that, the maximum Q-value at a randomly chosen action from the uniform
+distribution the action space is smaller than the Q-value at in-distribution actions.
+On the hopper-expert task, as we show in Figure 2(a) (right), we eventually observe an “unlearning”
+effect, in the policy-constraint method where the policy performance deteriorates after a extra
+iterations in training. This “unlearning” effect is similar to what has been observed when standard
+off-policy Q-learning algorithms without any policy constraint are used in the offline regime [32, 36],
+on the other hand this effect is absent in the case of CQL, even after equally many training steps.
+The performance in the more-stochastic hopper-medium dataset fluctuates, but does not deteriorate
+suddenly.
+To summarize this discussion, we concretely observed the following points via empirical evidence:
+ˆ k values in
+• CQL backups are gap expanding in practice, as justified by the negative ∆
+Figure 2.
+• Policy constraint methods, that do not impose any regularization on the Q-function may
+ˆ k values during training, especially with narrow data distributions,
+observe highly positive ∆
+indicating that gap-expansion may be absent.
+ˆ k values continuously grow during training, the policy might eventually suffer from
+• When ∆
+an unlearning effect [36], as shown in Figure 2(a).
+
+C
+
+Theorem Proofs
+
+In this section, we provide proofs of the theorems in Sections 3.1 and 3.2. We first redefine notation
+for clarity and then provide the proofs of the results in the main paper.
+Notation. Let k ∈ N denote an iteration of policy evaluation (in Section 3.1) or Q-iteration (in
+Section 3.2). In an iteration k, the objective – Equation 2 or Equation 3 – is optimized using the
+previous iterate (i.e. Q̂k−1 ) as the target value in the backup. Qk denotes the true, tabular Q-function
+iterate in the MDP, without any correction. In an iteration, say k + 1, the current tabular Q-function
+iterate, Qk+1 is related to the previous tabular Q-function iterate Qk as: Qk+1 = B π Qk (for policy
+evaluation) or Qk+1 = B πk Qk (for policy learning). Let Q̂k denote the k-th Q-function iterate
+obtained from CQL. Let V̂ k denote the value function, V̂ k := Ea∼π(a|s) [Q̂k (s, a)].
+A note on the value of α. Before proving the theorems, we remark that while the statements of
+Theorems 3.2, 3.1 and D.1 (we discuss this in Appendix D) show that CQL produces lower bounds if
+16
+
+α is larger than some threshold, so as to overcome either sampling error (Theorems 3.2 and 3.1) or
+function approximation error (Theorem D.1). While the optimal αk in some of these cases depends
+on the current Q-value, Q̂k , we can always choose a worst-case value of αk by using the inequality
+Q̂k ≤ 2Rmax /(1 − γ), still guaranteeing a lower bound. If it is unclear why the
+i
+h learned Q-function
+Q̂k should be bounded, we can always clamp the Q-values if they go outside
+
+−2Rmax 2Rmax
+1−γ , 1−γ
+
+.
+
+We first prove Theorem 3.1, which shows that policy evaluation using a simplified version of CQL
+(Equation 1) results in a point-wise lower-bound on the Q-function.
+Proof of Theorem 3.1. In order to start, we first note that the form of the resulting Q-function iterate,
+Q̂k , in the setting without function approximation. By setting the derivative of Equation 1 to 0, we
+obtain the following expression for Q̂k+1 in terms of Q̂k ,
+∀ s, a ∈ D, k, Q̂k+1 (s, a) = B̂ π Q̂k (s, a) − α
+
+µ(a|s)
+.
+π̂β (a|s)
+
+(11)
+
+Now, since, µ(a|s) > 0, α > 0, π̂β (a|s) > 0, we observe that at each iteration we underestimate the
+next Q-value iterate, i.e. Q̂k+1 ≤ B̂ π Q̂k .
+
+Accounting for sampling error. Note that so far we have only shown that the Q-values are upperbounded by the the “empirical Bellman targets” given by, B̂ π Q̂k . In order to relate Q̂k to the true
+Q-value iterate, Qk , we need to relate the empirical Bellman operator, B̂ π to the actual Bellman
+operator, B π . In Appendix D.3, we show that if the reward function r(s, a) and the transition function,
+T (s0 |s, a) satisfy “concentration” properties, meaning that the difference between the observed
+reward sample, r (s, a, r, s0 ) ∈ D) and the actual reward function r(s, a) (and analogously for the
+transition matrix) is bounded with high probability, then overestimation due to the empirical Backup
+operator is bounded. Formally, with high probability (w.h.p.) ≥ 1 − δ, δ ∈ (0, 1),
+∀Q, s, a ∈ D,
+
+B̂ π Q(s, a) − B π Q(s, a) ≤
+
+Cr,T,δ Rmax
+p
+.
+(1 − γ) |D(s, a)|
+
+Hence, the following can be obtained, w.h.p.:
+Q̂k+1 (s, a) = B π Q̂k (s, a) ≤ B π Q̂k (s, a) − α
+
+µ(a|s)
+Cr,T,δ Rmax
+p
++
+.
+π̂β (a|s) (1 − γ) |D(s, a)|
+
+(12)
+
+Now we need to reason about the fixed point of the update procedure in Equation 11. The fixed point
+of Equation 11 is given by:
+#
+"
+C
+R
+µ
+µ(a|s)
+C
+R
+r,T,δ
+max
+r,T,δ
+max
+p
+p
++
+=⇒ Q̂π ≤ (I−γP π )−1 R − α
+Q̂π ≤ B π Q̂π −α
++
+π̂β (a|s) (1 − γ) |D(s, a)|
+π̂β
+1 − γ) |D
+"
+#
+
+ 
+µ
+π
+π
+π −1
+π −1 Cr,T,δ Rmax
+p
+Q̂ (s, a) ≤ Q (s, a) − α (I − γP )
+(s, a) + (I − γP )
+(s, a),
+π̂β
+(1 − γ) |D|
+thus proving the relationship in Theorem 3.1.
+In order to guarantee a lower bound, α can be chosen to cancel any potential overestimation incurred
+C
+R
+by r,T ,δ√max . Note that this choice works, since (I − γP π )−1 is a matrix with all non-negative
+(1−γ)
+
+|D|
+
+entries. The choice of α that guarantees a lower bound is then given by:
+
+
+µ(a|s)
+Cr,T,δ Rmax
+p
+α · min
+≥ max
+s,a
+s,a
+π̂β (a|s)
+(1 − γ) |D(s, a)|
+
+−1
+Cr,T,δ Rmax
+µ(a|s)
+p
+=⇒ α ≥ max
+· max
+.
+s,a
+s,a (1 − γ) |D(s, a)|
+π̂β (a|s)
+
+Note that the theoretically minimum possible value of α decreases as more samples are observed, i.e.,
+C
+R
+when |D(s, a)| is large. Also, note that since, r,T ,δ √max ≈ 0, when B̂ π = B π , any α ≥ 0 guarantees
+(1−γ0
+
+|D|
+
+a lower bound. And so choosing a value of α = 0 is sufficient in this case.
+17
+
+Next, we prove Theorem 3.3 that shows that the additional term that maximizes the expected Q-value
+under the dataset distribution, D(s, a), (or dπβ (s)πβ (a|s), in the absence of sampling error), results
+in a lower-bound on only the expected value of the policy at a state, and not a pointwise lower-bound
+on Q-values at all actions.
+Proof of Theorem 3.2. We first prove this theorem in the absence of sampling error, and then
+incorporate sampling error at the end, using a technique similar to the previous proof. In the tabular
+setting, we can set the derivative of the modified objective in Equation 2, and compute the Q-function
+update induced in the exact, tabular setting (this assumes B̂ π = B π ) and πβ (a|s) = π̂β (a|s)).
+
+
+µ(a|s)
+∀ s, a, k Q̂k+1 (s, a) = B π Q̂k (s, a) − α
+−1 .
+(13)
+πβ (a|s)
+Note that for state-action pairs, (s, a), such that, µ(a|s) < πβ (a|s), we are infact adding a positive
+quantity, 1 − πµ(a|s)
+, to the Q-function obtained, and this we cannot guarantee a point-wise lower
+β (a|s)
+bound, i.e. ∃ s, a, s.t. Q̂k+1 (s, a) ≥ Qk+1 (s, a). To formally prove this, we can construct a
+counter-example three-state, two-action MDP, and choose a specific behavior policy π(a|s), such
+that this is indeed the case.
+The value of the policy, on the other hand, V̂ k+1 is underestimated, since:
+
+
+h
+i
+µ(a|s)
+k+1
+k+1
+π k
+−1 .
+(14)
+V̂
+(s) := Ea∼π(a|s) Q̂
+(s, a) = B V̂ (s) − αEa∼π(a|s)
+πβ (a|s)
+i
+h
+P
+µ(a|s)
+and we can show that DCQL (s) :=
+a π(a|s) πβ (a|s) − 1 is always positive, when π(a|s) =
+µ(a|s). To note this, we present the following derivation:
+
+
+X
+µ(a|s)
+−1
+DCQL (s) :=
+π(a|s)
+πβ (a|s)
+a
+
+
+X
+µ(a|s)
+=
+−1
+(π(a|s) − πβ (a|s) + πβ (a|s))
+πβ (a|s)
+a
+ X
+
+
+
+X
+µ(a|s)
+π(a|s) − πβ (a|s)
++
+πβ (a|s)
+−1
+=
+(π(a|s) − πβ (a|s))
+πβ (a|s
+πβ (a|s)
+a
+a
+"
+#
+X (π(a|s) − πβ (a|s))2
+X
+X
+=
++ 0 since,
+π(a|s) =
+πβ (a|s) = 1.
+πβ (a|s)
+a
+a
+a
+{z
+}
+|
+≥0
+
+Note that the marked term, is positive since both the numerator and denominator are positive, and
+this implies that DCQL (s) ≥ 0. Also, note that DCQL (s) = 0, iff π(a|s) = πβ (a|s). This implies that
+each value iterate incurs some underestimation, V̂ k+1 (s) ≤ B π V̂ k (s).
+Now, we can compute the fixed point of the recursion in Equation 14, and this gives us the following
+estimated policy value:
+
+
+
+
+
+π
+
+
+V̂ π (s) = V π (s) − α  (I − γP π )−1 Eπ
+− 1  (s),
+{z
+}
+πβ
+|
+
+{z
+}
+non-negative entries |
+≥0
+
+thus showing that in the absence of sampling error, Theorem 3.2 gives a lower bound. It is straightforward to note that this expression is tighter than the expression for policy value in Proposition 3.2,
+since, we explicitly subtract 1 in the expression of Q-values (in the exact case) from the previous
+proof.
+Incorporating sampling error. To extend this result to the setting with sampling error, similar to
+C ,δ Rmax
+the previous result, the maximal overestimation at each iteration k, is bounded by r,T1−γ
+. The
+resulting value-function satisfies (w.h.p.), ∀s ∈ D,
+"
+#
+
+
+
+π
+C
+R
+r,T,δ
+max
+−1
+p
+V̂ π (s) ≤ V π (s) − α (I − γP π ) Eπ
+− 1 (s) + (I − γP π )−1
+(s)
+π̂β
+(1 − γ) |D|
+18
+
+thus proving the theorem statement. In this case, the choice of α, that prevents overestimation w.h.p.
+is given by:
+"
+
+#−1
+X
+Cr,T Rmax
+π(a|s)
+p
+α ≥ max
+· max
+.
+π(a|s)
+−1
+s,a∈D (1 − γ) |D(s, a)| s∈D
+π̂β (a|s))
+a
+Similar to Theorem 3.1, note that the theoretically acceptable value of α decays as the number of
+occurrences of a state action pair in the dataset increases. Next we provide a proof for Theorem 3.3.
+Proof of Theorem 3.3. In order to prove this theorem, we compute the difference induced in the
+policy value, V̂ k+1 , derived from the Q-value iterate, Q̂k+1 , with respect to the previous iterate
+B π Q̂k . If this difference is negative at each iteration, then the resulting Q-values are guaranteed to
+lower bound the true policy value.
+"
+#
+h
+i
+π
+k (a|s)
+Q̂
+Eπ̂k+1 (a|s) [Q̂k+1 (s, a)] = Eπ̂k+1 (a|s) B π Q̂k (s, a) − Eπ̂k+1 (a|s)
+−1
+π̂β (a|s)
+#
+"
+h
+i
+πQ̂k (a|s)
+π k
+= Eπ̂k+1 (a|s) B Q̂ (s, a) − EπQ̂k (a|s)
+−1
+π̂β (a|s)
+|
+{z
+}
+underestimation, (a)
+
++
+
+ π k (a|s)
+Q̂
+πQ̂k (a|s) − π̂ k+1 (a|s)
+π̂
+{z
+} β (a|s)
+a |
+
+X
+
+(b), ≤DTV (πQ̂k ,π̂ k+1 )
+
+If (a) has a larger magnitude than (b), then the learned Q-value induces an underestimation in an
+iteration k + 1, and hence, by a recursive argument, the learned Q-value underestimates the optimal
+π
+
+k (a|s)
+
+Q-value. We note that by upper bounding term (b) by DTV (πQ̂k , π̂ k+1 ) · maxa π̂Q̂β (a|s) , and writing
+out (a) > upper-bound on (b), we obtain the desired result.
+Finally, we show that under specific choices of α1 , · · · , αk , the CQL backup is gap-expanding by
+providing a proof for Theorem 3.4
+Proof of Theorem 3.4 (CQL is gap-expanding). For this theorem, we again first present the proof
+in the absence of sampling error, and then incorporate sampling error into the choice of α. We follow
+the strategy of observing the Q-value update in one iteration. Recall that the expression for the
+Q-value iterate at iteration k is given by:
+k
+
+Q̂k+1 (s, a) = B π Q̂k (s, a) − αk
+
+µk (a|s) − πβ (a|s)
+.
+πβ (a|s)
+
+Now, the value of the policy µk (a|s) under Q̂k+1 is given by:
+k
+
+Ea∼µk (a|s) [Q̂k+1 (s, a)] = Ea∼µk (a|s) [B π Q̂k (s, a)] − αk µTk
+|
+
+
+
+
+µk (a|s) − πβ (a|s)
+πβ (a|s)
+{z
+}
+
+ˆ k ,≥0, by proof of Theorem 3.2.
+:=∆
+
+Now, we also note that the expected amount of extra underestimation introduced at iteration k under
+action sampled from the behavior policy πβ (a|s) is 0, as,
+
+
+k
+µk (a|s) − πβ (a|s)
+Ea∼πβ (a|s) [Q̂k+1 (s, a)] = Ea∼πβ (a|s) [B π Q̂k (s, a)] − αk πβ T
+.
+πβ (a|s)
+|
+{z
+}
+=0
+
+where the marked quantity is equal to 0 since it is equal since πβ (a|s) in the numerator cancels with
+the
+P denominator, and the remaining quantity is a sum of difference between two density functions,
+a µk (a|s) − πβ (a|s), which is equal to 0. Thus, we have shown that,
+k
+k
+ˆ k.
+Eπβ (a|s) [Q̂k+1 (s, a)]−Eµk (a|s) [Q̂k+1 (s, a)] = Eπβ (a|s) [B π Q̂k (s, a)]−Eµk (a|s) [B π Q̂k (s, a)]−αk ∆
+
+19
+
+Now subtracting the difference, Eπβ (a|s) [Qk+1 (s, a)] − Eµk (a|s) [Qk+1 (s, a)], computed under the
+tabular Q-function iterate, Qk+1 , from the previous equation, we obtain that
+Ea∼πβ (a|s) [Q̂k+1 (s, a)] − Eπβ (a|s) [Qk+1 (s, a)] = Eµk (a|s) [Q̂k+1 (s, a)] − Eµk (a|s) [Qk+1 (s, a)]
+h k
+
+i
+ˆ k.
++ (µk (a|s) − πβ (a|s))T B π Q̂k − Qk (s, ·) −αk ∆
+|
+{z
+}
+(a)
+
+Now, by choosing αk , such that any positive bias introduced by the quantity (µk (a|s) − πβ (a|s))T (a)
+is cancelled out, we obtain the following gap-expanding relationship:
+Ea∼πβ (a|s) [Q̂k+1 (s, a)] − Eπβ (a|s) [Qk+1 (s, a)] > Eµk (a|s) [Q̂k+1 (s, a)] − Eµk (a|s) [Qk+1 (s, a)]
+for, αk satisfying,
+
+αk > max 
+
+h k
+
+i
+(πβ (a|s) − µk (a|s))T B π Q̂k − Qk (s, ·)
+ˆk
+∆
+
+
+, 0 ,
+
+thus proving the desired result.
+max
+To avoid the dependency on the true Q-value iterate, Qk , we can upper-bound Qk by R1−γ
+, and upperk
+
+max
+bound (πβ (a|s) − µk (a|s))T B π Qk (s, ·) by DTV (πβ , µk ) · R1−γ
+, and use this in the expression for
+αk . While this bound may be loose, it still guarantees the gap-expanding property, and we indeed
+empirically show the existence of this property in practice in Appendix B.
+
+To incorporate sampling error, we can follow a similar strategy as previous proofs: the worst case
+C ,δ Rmax
+overestimation due to sampling error is given by r,T1−γ
+. In this case, we note that, w.h.p.,
+
+
+
+
+k
+k
+2 · Cr,T,δ Rmax
+B̂ π Q̂k − Qk − B π Q̂k − Qk ≤
+.
+1−γ
+2·C
+
+R
+
+r,T ,δ max
+Hence, the presence of sampling error adds DTV (πˆβ , µk ) ·
+to the value of αk , giving
+1−γ
+rise to the following, sufficient condition on αk for the gap-expanding property:
+h k
+
+i
+
+
+(πβ (a|s) − µk (a|s))T B π Q̂k − Qk (s, ·)
+2
+·
+C
+R
+r,T,δ
+max
++ DTV (πˆβ , µk ) ·
+αk > max 
+, 0 ,
+ˆk
+1−γ
+∆
+
+concluding the proof of this theorem.
+
+D
+
+Additional Theoretical Analysis
+
+In this section, we present a theoretical analysis of additional properties of CQL. For ease of
+presentation, we state and prove theorems in Appendices D.1 and D.2 in the absence of sampling
+error, but as discussed extensively in Appendix C, we can extend each of these results by adding extra
+terms induced due to sampling error.
+D.1
+
+CQL with Linear and Non-Linear Function Approximation
+
+Theorem D.1. Assume that the Q-function is represented as a linear function of given state-action
+feature vectors F, i.e., Q(s, a) = wT F(s, a). Let D = diag (dπβ (s)πβ (a|s)) denote the diagonal
+matrix with data density, and assume that FT DF is invertible. Then, the expected value of the
+policy under Q-value from Eqn 2 at iteration k + 1, Edπβ (a) [V̂ k+1 (s)] = Edπβ (s),π(a|s) [Q̂k+1 (s, a)],
+lower-bounds the corresponding tabular value, Edπβ (s) [V k+1 (s)] = Edπβ (s),π(a|s) [Qk+1 (s, a)], if
+h
+i
+ 
+
+−1 T
+DT F FT DF
+F − I (B π Q̂k )(s, a)
+h
+i h
+i , 0 .
+αk ≥ max 
+−1
+π(a|s)−πβ (a|s)
+DT F (FT DF) FT D
+πβ (a|s)
+20
+
+The choice of αk in Theorem D.1 intuitively amounts to compensating for overestimation in value
+induced if the true value function cannot be represented in the chosen linear function class (numerator),
+by the potential decrease in value due to the CQL regularizer (denominator). This implies that if the
+actual value function can be represented in the linear function class, such that the numerator can be
+made 0, then any α > 0 is sufficient to obtain a lower bound. We now prove the theorem.
+Proof. In order to extend the result of Theorem 3.2 to account for function approximation, we follow
+the similar recipe as before. We obtain the optimal solution to the optimization problem below in the
+family of linearly expressible Q-functions, i.e. Q := {Fw|w ∈ Rdim(F) }.
+
+2 
+
+ 1
+π k
+π
+π
+.
+min αk · Ed β (s),µ(a|s) [Q(s, a)] − Ed β (s),πβ (a|s) [Q(s, a)] + ED Q(s, a) − B Q̂ (s, a)
+Q∈Q
+2
+By substituting Q(s, a) = wT F(s, a), and setting the derivative with respect to w to be 0, we obtain,
+
+
+X
+X
+α
+dπβ (s) · (µ(a|s) − πβ (a|s)) F(s, a) +
+dπβ (s)πβ (a|s) Q(s, a) − B π Q̂k (s, a) F(s, a) = 0.
+s,a
+
+s,a
+
+By re-arranging terms, and converting it to vector notation, defining D = diag(dπβ (s)πβ (s)), and
+referring to the parameter w at the k-iteration as wk we obtain:
+
+
+
+FT DF wk+1 = FT D B π Q̂k − αk FT diag [dπβ (s) · (µ(a|s) − πβ (a|s))] .
+{z
+}
+{z
+} |
+|
+underestimation
+LSTD iterate
+
+Now, our task is to show that the term labelled as “underestimation” is indeed negative in expectation
+under µ(a|s) (This is analogous to our result in the tabular setting that shows underestimated values).
+In order to show this, we write out the expression for the value, under the linear weights wk+1 at
+state s, after substituting µ = π,
+V̂ k+1 (s) := π(a|s)T Fwk+1
+(15)
+
+
+
+
+
+
+π(a|s)
+−
+π
+(a|s)
+−1 T
+−1 T
+β
+F D
+= π(a|s)T F FT DF
+F D B π Q̂k −αk π(a|s)T F FT DF
+.
+πβ (a|s)
+{z
+}
+|
+value under LSTD-Q [34]
+
+(16)
+−1
+
+Now, we need to reason about the penalty term. Defining, PF := F FT DF
+FT D as the
+projection matrix onto the subspace
+h of features F,
+i we need to show that the product that appears as a
+π(a|s)−πβ (a|s)
+T
+penalty is positive: π(a|s) PF
+≥ 0. In order to show this, we compute minimum
+πβ (a|s)
+value of this product optimizing over π. If the minimum value is 0, then we are done.
+h
+i
+π(a|s)−πβ (a|s)
+Let’s define f (π) = π(a|s)T PF
+, our goal is to solve for minπ f (π). Setting the
+πβ (a|s)
+derivative ofPf (π) with respect to π to be equal to 0, we obtain (including Lagrange multiplier η that
+guarantees a π(a|s) = 1,
+
+
+ π(a|s)
+T
+= PF~1 + η~1.
+P F + PF
+πβ (a|s)
+By solving for η (using the condition that a density function sums to 1), we obtain that the minimum
+value of f (π) occurs at a π ∗ (a|s), which satisfies the following condition,
+
+
+ π ∗ (a|s)
+
+PF + PFT
+= PF + PFT ~1.
+πβ (a|s)
+Using this relation to compute f , we obtain, f (π ∗ ) = 0, indicating that the minimum value of 0
+occurs when the projected density ratio matches under the matrix (PF + PFT ) is equal to the projection
+of a vector of ones, ~1. Thus,
+
+
+π(a|s) − πβ (a|s)
+∀ π(a|s), f (π) = π(a|s)T PF
+≥ 0.
+πβ (a|s)
+21
+
+k+1
+This means that: ∀ s, V̂ k+1 (s) ≤ V̂LSTD-Q
+(s) given identical previous Q̂k values. This result indicates,
+that if αk ≥ 0, the resulting CQL value estimate with linear function approximation is guaranteed
+to lower-bound the value estimate obtained from a least-squares temporal difference Q-learning
+algorithm (which only minimizes Bellman error assuming a linear Q-function parameterization), such
+as LSTD-Q [34], since at each iteration, CQL induces a lower-bound with respect to the previous
+value iterate, whereas this underestimation is absent in LSTD-Q, and an inductive argument is
+applicable.
+
+So far, we have only shown that the learned value iterate, V̂ k+1 (s) lower-bounds the value iterate
+k+1
+obtained from LSTD-Q, ∀ s, V̂ k+1 (s) ≤ V̂LSTD-Q
+(s). But, our final aim is to prove a stronger result,
+k+1
+that the learned value iterate, V̂
+, lower bounds the exact tabular value function iterate, V k+1 ,
+at each iteration. The reason why our current result does not guarantee this is because function
+approximation may induce overestimation error in the linear approximation of the Q-function.
+In order to account for this change, we make a simple change: we choose αk such that the resulting
+penalty nullifes the effect of any over-estimation caused due to the inability to fit the true value
+function iterate in the linear function class parameterized by F. Formally, this means:
+h
+i
+h
+i
+k+1
+Edπβ (s) V̂ k+1 (s) ≤ Edπβ (s) V̂LSTD-Q
+(s) − αk Edπβ (s) [f (π(a|s))]
+h
+i
+
+
+k+1
+≤ Edπβ (s) V k+1 (s) − Edπβ (s) V̂LSTD-Q
+(s) − V k+1 (s) − αk Edπβ (s) [f (π(a|s))]
+|
+{z
+}
+choose αk to make this negative
+
+
+
+≤ Edπβ (s) V k+1 (s)
+And the choice of αk in that case is given by:
+i 
+h
+
+k+1
+(s) − V k+1 (s)
+Edπβ (s) V̂LSTD-Q
+αk ≥ max 
+, 0
+Edπβ (s) [f (π(a|s))]
+ 
+h
+i
+
+−1 T
+DT F FT DF
+F − I (B π Q̂k )(s, a)
+i , 0 .
+h
+i h
+≥ max 
+−1
+π(a|s)−πβ (a|s)
+DT F (FT DF) FT D
+πβ (a|s)
+Finally, we note that since this choice of αk induces under-estimation in the next iterate, V̂ k+1 with
+respect to the previous iterate, V̂ k , for all k ∈ N, by induction, we can claim that this choice of
+α1 , · · · , αk is sufficient to make V̂ k+1 lower-bound the tabular, exact value-function iterate. V k+1 ,
+for all k, thus completing our proof.
+We can generalize Theorem D.1 to non-linear function approximation, such as neural networks, under
+the standard NTK framework [27], assuming that each iteration k is performed by a single step of
+gradient descent on Equation 2, rather than a complete minimization of this objective. As we show
+in Theorem D.2, CQL learns lower bounds in this case for an appropriate choice of αk . We will
+also empirically show in Appendix G that CQL can learn effective conservative Q-functions with
+multilayer neural networks.
+Theorem D.2 (Extension to non-linear function approximation). Assume that the Q-function is
+represented by a general non-linear function approximator parameterized by θ, Qθ (s, a). let D =
+diag(dπβ (s)πβ (a|s)) denote the matrix with the data density on the diagonal, and assume that
+∇θ QTθ D∇θ Qθ is invertible. Then, the expected value of the policy under the Q-function obtained
+by taking a gradient step on Equation 2, at iteration k + 1 lower-bounds the corresponding tabular
+function iterate if:
+Proof. Our proof strategy is to reduce the non-linear optimization problem into a linear one, with
+features F (in Theorem D.1) replaced with features given by the gradient of the current Q-function
+Q̂kθ with respect to parameters θ, i.e. ∇θ Q̂k . To see, this we start by writing down the expression for
+22
+
+Q̂k+1
+obtained via one step of gradient descent with step size η, on the objective in Equation 2.
+θ
+
+h
+i
+h
+i
+θk+1 = θk − ηαk Edπβ (s),µ(a|s) ∇θ Q̂k (s, a) − Edπβ (s),πβ (a|s) ∇θ Q̂k (s, a)
+
+i
+h
+− ηEdπβ (s),πβ (a|s) Q̂k − B π Q̂k (s, a) · ∇θ Q̂k (s, a) .
+Using the above equation and making an approximation linearization assumption on the non-linear
+Q-function, for small learning rates η << 1, as has been commonly used by prior works on the
+neural tangent kernel (NTK) in deep learning theory [27] in order to explain neural network learning
+dynamics in the infinite-width limit, we can write out the expression for the next Q-function iterate,
+Q̂k+1
+in terms of Q̂kθ as [2, 27]:
+θ
+Q̂k+1
+(s, a) ≈ Q̂kθ (s, a) + θk+1 − θk
+θ
+
+T
+
+∇θ Q̂kθ (s, a) (under NTK assumptions)
+h
+i
+= Q̂kθ (s, a) − ηαk Edπβ (s0 ),µ(a0 |s0 ) ∇θ Q̂k (s0 , a0 )T ∇θ Q̂k (s, a)
+h
+i
++ ηαk Edπβ (s0 ),πβ (a0 |s0 ) ∇θ Q̂k (s0 , a0 )T ∇θ Q̂k (s, a)
+h
+
+i
+− ηEdπβ (s0 ),πβ (a0 |s0 ) Q̂k − B π Q̂k (s0 , a0 ) · ∇θ Q̂k (s0 , a0 )T ∇θ Q̂k (s, a) .
+
+To simplify presentation, we convert into matrix notation, where we define the |S||A| × |S||A| matrix,
+
+T
+Mk = ∇θ Q̂k ∇θ Q̂k , as the neural tangent kernel matrix of the Q-function at iteration k. Then,
+the vectorized Q̂k+1 (with µ = π) is given by,
+
+
+
+
+π(a|s) − πβ (a|s)
+k+1
+k
+k
+Q̂
+= Q̂ − ηαk M D
++ ηMk D B π Q̂k − Q̂k .
+πβ (a|s)
+
+Finally, the value of the policy is given by:
+
+
+
+
+π(a|s) − πβ (a|s)
+.
+V̂ k+1 := π(a|s)T Q̂k (s, a) + ηπ(a|s)Mk D B π Q̂k − Q̂k − ηαk π(a|s)T Mk D
+πβ (a|s)
+{z
+} |
+|
+{z
+}
+(a) unpenalized value
+
+(b) penalty
+
+(17)
+Term marked (b) in the above equation is similar to the penalty term shown in Equation 16, and by
+k+1
+performing a similar analysis, we can show that (b) ≥ 0. Again similar to how V̂LSTD-Q
+appeared in
+Equation 16, we observe that here we obtain the value function corresponding to a regular gradientstep on the Bellman error objective.
+Again similar to before, term (a) can
+ introduce overestimation relative to the tabular counterpart,
+starting at Q̂k : Qk+1 = Q̂k − η B π Q̂k − Q̂k , and we can choose αk to compensate for this
+potential increase as in the proof of Theorem D.1. As the last step, we can recurse this argument to
+obtain our final result, for underestimation.
+D.2
+
+Choice of Distribution to Maximize Expected Q-Value in Equation 2
+
+In Section 3.1, we introduced a term that maximizes Q-values under the dataset dπβ (s)πβ (a|s)
+distribution when modifying Equation 1 to Equation 2. Theorem 3.2 indicates the “sufficiency” of
+maximizing Q-values under the dataset distribution – this guarantees a lower-bound on value. We now
+investigate the neccessity of this assumption: We ask the formal question: For which other choices
+of ν(a|s) for the maximization term, is the value of the policy under the learned Q-value, Q̂k+1
+ν
+guaranteed to be a lower bound on the actual value of the policy?
+To recap and define notation, we restate the objective from Equation 1 below.
+k+1
+
+Q̂
+
+← arg min α Es∼d
+Q
+
+πβ
+
+
+2 
+1
+π k
+Es,a,s0 ∼D Q(s, a) − B Q̂ (s, a)
+.
+(s),a∼µ(a|s) [Q(s, a)] +
+2
+
+23
+
+(18)
+
+We define a general family of objectives from Equation 2, parameterized by a distribution ν which is
+chosen to maximize Q-values as shown below (CQL is a special case, with ν(a|s) = πβ (a|s)):
+
+Q̂k+1
+← arg min α · Es∼dπβ (s),a∼µ(a|s) [Q(s, a)] − Es∼dπβ (s),a∼ν(a|s) [Q(s, a)]
+ν
+Q
+
+2 
+1
+π k
+0
++ Es,a,s ∼D Q(s, a) − B Q̂ (s, a)
+. (ν -CQL) (19)
+2
+In order to answer our question, we prove the following result:
+Theorem D.3 (Necessity of maximizing Q-values under πβ (a|s).). For any policy π(a|s), any α > 0,
+and for all k > 0, the value of the policy., V̂νk+1 under Q-function iterates from ν−CQL, Q̂k+1
+(s, a)
+ν
+is guaranteed to be a lower bound on the exact value iterate, V̂ k+1 , only if ν(a|s) = πβ (a|s).
+Proof. We start by noting the parametric form of the resulting tabular Q-value iterate:
+µ(a|s) − ν(a|s)
+Q̂k+1
+(s, a) = B π Q̂kν (s, a) − αk
+.
+(20)
+ν
+πβ (a|s)
+The value of the policy under this Q-value iterate, when distribution µ is chosen to be the target policy
+π(a|s) i.e. µ(a|s) = π(a|s) is given by:
+V̂νk+1 (s) := Ea∼π(a|s)
+
+h
+
+i
+
+Q̂k+1
+(s, a)
+ν
+
+
+
+h
+i
+π(a|s) − ν(a|s)
+π k
+T
+= Ea∼π(a|s) B Q̂ν (s, a) − αk π(a|s)
+.
+πβ (a|s)
+(21)
+
+We are interested in conditions on ν(a|s) such that the penalty term in the above equation is positive.
+It is clear that choosing ν(a|s) = πβ (a|s) returns a policy that satisfies the requirement, as shown in
+the proof for Theorem 3.2. In order to obtain other choices of ν(a|s) that guarantees a lower bound
+for all possible choices of π(a|s), we solve the following concave-convex maxmin optimization
+problem, that computes a ν(a|s) for which a lower-bound is guaranteed for all choices of µ(a|s):
+
+
+X
+π(a|s) − ν(a|s)
+max min
+π(a|s) ·
+πβ (a|s)
+ν(a|s) π(a|s)
+a
+X
+X
+s.t.
+π(a|s) = 1,
+ν(a|s) = 1, ν(a|s) ≥ 0, π(a|s) ≥ 0.
+a
+
+a
+
+We first solve the inner minimization over π(a|s) for a fixed ν(a|s), by writing out the Lagrangian
+and setting the gradient of the Lagrangian to be 0, we obtain:
+π ∗ (a|s)
+ν(a|s)
+∀a, 2 ·
+−
+− ζ(a|s) + η = 0,
+πβ (a|s) πβ (a|s)
+where ζ(a|s) is the Lagrange dual variable for the positivity constraints on π(a|s), and η is the
+Lagrange dual variable for the normalization constraint on π. If π(a|s) is full support (for example,
+when it is chosen to be a Boltzmann policy), KKT conditions imply that, ζ(a|s) = 0, and computing
+η by summing up over actions, a, the optimal choice of π for the inner minimization is given by:
+1
+1
+(22)
+π ∗ (a|s) = ν(a|s) + πβ (a|s).
+2
+2
+Now, plugging Equation 22 in the original optimization problem, we obtain the following optimization
+over only ν(a|s):
+
+ 
+
+X
+X
+1
+ν(a|s)
+1
+ν(a|s)
+max
+πβ (a|s) ·
+−
+·
++
+s.t.
+ν(a|s) = 1, ν(a|s) ≥ 0. (23)
+2 2πβ (a|s)
+2 2πβ (a|s)
+ν(a|s)
+a
+a
+Solving this optimization, we find that the optimal distribution, ν(a|s) is equal to πβ (a|s). and the
+optimal value of penalty, which is also the objective for the problem above is equal to 0. Since we are
+maximizing over ν, this indicates for other choices of ν 6= πβ , we can find a π so that the penalty
+is negative, and hence a lower-bound is not guaranteed. Therefore, we find that with a worst case
+choice of π(a|s), a lower bound can only be guaranteed only if ν(a|s) = πβ (a|s). This justifies the
+necessity of πβ (a|s) for maximizing Q-values in Equation 2. The above analysis doesn’t take into
+account the effect of function approximation or sampling error. We can, however, generalize this
+result to those settings, by following a similar strategy of appropriately choosing αk , as previously
+utilized in Theorem D.1.
+24
+
+D.3
+
+CQL with Empirical Dataset Distributions
+
+The results in Sections 3.1 and 3.2 account for sampling error due to the finite size of the dataset D.
+In our practical implementation as well, we optimize a sample-based version of Equation 2, as shown
+below:
+!
+X
+X
+k+1
+Q̂
+← arg min α ·
+Ea∼µ(a|s) [Q(s, a)] −
+Ea∼πβ (a|s) [Q(s, a)]
+Q
+
+s∈D
+
+s∈D
+
+1
++
+2|D|
+
+X 
+s,a,s0 ∈D
+
+2 
+Q(s, a) − B̂ Q̂ (s, a)
+, (24)
+π
+
+k
+
+where B̂ π denotes the “empirical” Bellman operator computed using samples in D as follows:
+h
+i
+
+
+X
+T̂ (s0 |s, a)Ea0 ∼π(a0 |s0 ) Q̂k (s0 , a0 ) ,
+(25)
+∀s, a ∈ D, B̂ π Q̂k (s, a) = r + γ
+s0
+
+where r is the empirical average reward obtained in the dataset when executing an action a at state
+P
+1
+0
+s, i.e. r = |D(s,a)|
+si ,ai inD 1si =s,ai =a · r(s, a), and T̂ (s |s, a) is the empirical transition matrix.
+Note that expectation under π(a|s) can be computed exactly, since it does not depend on the dataset.
+The empirical Bellman operator can take higher values as compared to the actual Bellman operator,
+B π , for instance, in an MDP with stochastic dynamics, where D may not contain transitions to all
+possible next-states s0 that can be reached by executing action a at state s, and only contains an
+optimistic transition.
+We next show how the CQL lower bound result (Theorem 3.2) can be modified to guarantee a lower
+bound even in this presence of sampling error. To note this, following prior work [28, 48], we assume
+concentration properties of the reward function and the transition dynamics:
+Assumption D.1. ∀ s, a ∈ D, the following relationships hold with high probability, ≥ 1 − δ
+|r − r(s, a)| ≤ p
+
+Cr,δ
+|D(s, a)|
+
+CT,δ
+, ||T̂ (s0 |s, a) − T (s0 |s, a)||1 ≤ p
+.
+|D(s, a)|
+
+Under this assumption, the difference between the empirical Bellman operator and the actual Bellman
+operator can be bounded:
+
+
+ 
+
+
+h
+i
+X
+B̂ π Q̂k − B π Q̂k = (r − r(s, a)) + γ
+T̂ (s0 |s, a) − T (s0 |s, a) Eπ(a0 |s0 ) Q̂k (s0 , a0 )
+s0
+
+≤ |r − r(s, a)| + γ
+≤
+
+X
+s0
+
+
+h
+i
+T̂ (s0 |s, a) − T (s0 |s, a) Eπ(a0 |s0 ) Q̂k (s0 , a0 )
+
+Cr,δ + γCT,δ 2Rmax /(1 − γ)
+p
+.
+|D(s, a)|
+
+This gives us an expression to bound the potential overestimation that can occur due to sampling
+error, as a function p
+of a constant, Cr,T,δ that can be expressed as a function of Cr,δ and CT,δ , and
+depends on δ via a log(1/δ) dependency. This is similar to how prior works have bounded the
+sampling error due to an empirical Bellman operator [48, 28].
+D.4
+
+Safe Policy Improvement Guarantee for CQL
+
+In this section, we prove a safe policy improvement guarantee for CQL (and this analysis is also
+applicable in general to policy constraint methods with appropriate choices of constraints as we will
+show). We define the empirical MDP, M̂ as the MDP formed by the transitions in the replay buffer,
+M̂ = {s, a, r, s0 ∈ D}, and let J(π, M̂ ) denote the return of a policy π(a|s) in MDP M̂ . Our goal is
+to show that J(π, M ) ≥ J(π̂β , M ) − ε, with high probability, where ε is a small constant. We start
+by proving that CQL optimizes a penalized RL objective in the empirical MDP, M̂ .
+25
+
+Lemma D.3.1. Let Q̂π be the fixed point of Equation 2, then π ∗ (a|s) := arg maxπ Es∼ρ(s) [V̂ π (s)]
+is equivalently obtained by solving:
+1
+Es∼dπ (s) [DCQL (π, π̂β )(s)] ,
+M̂
+1−γ
+
+
+P
+where DCQL (π, π̂β )(s) := a π(a|s) · π̂π(a|s)
+−1 .
+β (a|s)
+π ∗ (a|s) ← arg max J(π, M̂ ) − α
+π
+
+(26)
+
+Proof. Q̂π is obtained by solving a recursive
+Bellman
+h
+i fixed point equation in the empirical MDP
+π(a|s)
+M̂ , with an altered reward, r(s, a) − α π̂β (a|s) − 1 , hence the optimal policy π ∗ (a|s) obtained by
+optimizing the value under the CQL Q-function equivalently is characterized via Equation 26.
+Now, our goal is to relate the performance of π ∗ (a|s) in the actual MDP, M , to the performance of
+the behavior policy, πβ (a|s). To this end, we prove the following theorem:
+Theorem D.4. Let π ∗ (a|s) be the policy obtained by optimizing Equation 26. Then the performance
+of π ∗ (a|s) in the actual MDP M satisfies,
+" p
+#
+
+
+|A| q
+γRmax CT,δ
+Cr,δ
+∗
+∗
++
+J(π , M ) ≥ J(π̂β , M )−2
+Es∼dπ∗ (s) p
+DCQL (π , π̂β )(s) + 1
+M̂
+1−γ
+(1 − γ)2
+|D(s)|
++α
+
+1
+E π∗ [DCQL (π ∗ , π̂β )(s)] . (27)
+1 − γ s∼dM̂ (s)
+
+Proof. The proof for this statement is divided into two parts. The first part involves relating the return
+of π ∗ (a|s) in MDP M̂ with the return of π̂β in MDP M̂ . Since, π ∗ (a|s) optimizes Equation 26, we
+can relate J(π ∗ , M̂ ) and J(π̂β , M̂ ) as:
+J(π ∗ , M̂ ) − αEs∼dπ (s) [DCQL (π ∗ , πβ )(s)] ≥ J(π̂β , M̂ ) − 0 = J(π̂β , M̂ ).
+M̂
+
+The next step involves using concentration inequalities to upper and lower bound J(π ∗ , M̂ ) and
+J(π ∗ , M ) and the corresponding difference for the behavior policy. In order to do so, we prove the
+following lemma, that relates J(π, M ) and J(π, M̂ ) for an arbitrary policy π. We use this lemma to
+then obtain the proof for the above theorem.
+Lemma D.4.1. For any MDP M , an empirical MDP M̂ generated by sampling actions according to
+the behavior policy π̂β (a|s) and a given policy π,
+#
+"p
+
+
+|A| q
+γRmax CT,δ
+Cr,δ
+J(π, M̂ ) − J(π, M ) ≤
++
+Es∼dπ (s)
+DCQL (π, π̂β )(s) + 1 .
+M̂
+1−γ
+(1 − γ)2
+|D(s)|
+Proof. To prove this, we first use the triangle inequality to clearly separate reward and transition
+dynamics contributions in the expected return.
+J(π, M̂ ) − J(π, M ) =
+≤
+
+X
+X
+1
+dπM̂ (s)π(a|s)rM̂ (s, a) −
+dπM (s)π(a|s)rM (s, a)
+1 − γ s,a
+s,a
+
+(28)
+
+X
+X
+
+
+
+1
+1
+dπM̂ (s) π(a|s)(rM̂ (s, a) − rM (s, a) +
+dπM̂ (s) − dπM (s) π(a|s)rM (s, a)
+1 − γ s,a
+1
+−
+γ
+|
+{z
+}
+s,a
+:=∆1 (s)
+
+(29)
+We first use concentration inequalities to upper bound ∆1 (s). Note that under concentration assumptions, and by also using the fact that E[∆1 (s)] = 0 (in the limit of infinite data), we get:
+|∆1 (s)| ≤
+
+X
+a
+
+π(a|s)|rM̂ (s, a) − rM (s, a)| ≤
+
+X
+a
+
+26
+
+π(a|s) p
+
+Cr,δ
+
+Cr,δ X π(a|s)
+p
+=p
+,
+π̂β (a|s)
+|D(s)| · |D(a|s)|
+|D(s)| a
+
+where the last step follows from the fact that |D(s, a)| = |D(s)| · π̂β (a|s).
+
+Next we bound the second term. We first note that if we can bound ||dπM̂ − dπM ||1 , (i.e., the
+
+total variation between the marginal state distributions in M̂ and M , then we are done, since
+|rM (s, a)| ≤ Rmax and π(a|s) ≤ 1, and hence we bound the second term effectively. We use an
+π −1
+analysis similar to Achiam et al. [1] to obtain this total variation bound. Define, G = (I − γPM
+)
+π −1
+π
+π
+and Ḡ = (I − γPM̂ ) and let ∆ = PM − PM̂ . Then, we can write:
+dπM̂ − dπM = (1 − γ)(Ḡ − G)ρ,
+where ρ(s) is the initial state distribution, which is assumed to be the same for both the MDPs. Then,
+using Equation 21 from Achiam et al. [1], we can simplify this to obtain,
+dπM − dπM̂ = (1 − γ)γG∆Ḡµ = γ Ḡ∆dπM̂
+Now, following steps similar to proof of Lemma 3 in Achiam et al. [1] we obtain,
+||∆dπM ||1 =
+
+X X
+
+=
+
+X X
+
+≤
+
+X
+
+≤
+
+X
+
+s0
+
+s,s0
+
+s,a
+
+s
+
+s
+
+a
+
+∆(s0 |s)dπM (s) ≤
+
+X
+s,s0
+
+|∆(s0 |s)| dπM̂
+
+
+PM̂ (s0 |s, a) − PM (s0 |s, a) π(a|s) dπM̂ (s)
+
+||PM̂ (·|s, a) − PM (·|s, a)||1 π(a|s)dπM̂ (s)
+CT,δ X π(a|s)
+p
+dπM̂ (s) p
+.
+π̂β (a|s)
+|D(s)| a
+
+Hence, we can bound the second term by:
+X
+s
+
+X π(a|s)
+
+1
+γCT,δ Rmax X π
+p
+.
+dM̂ (s) p
+dπM̂ (s) − dπM (s) π(a|s)rM (s, a) ≤
+(1 − γ)
+π̂β (a|s)
+|D(s)| a
+s
+
+To finally obtain DCQL (π, πβ )(s) in the bound, let α(s, a) := √π(a|s) . Then, we can write
+π̂β (a|s)
+
+DCQL (π, π̂β )(s) as follows:
+DCQL (s) =
+
+X π(a|s)2
+π̂β (a|s)
+
+a
+
+=⇒ DCQL (s) + 1 =
+
+X
+
+−1
+
+α(s, a)2
+
+a
+
+!2
+=⇒ DCQL (s) + 1 ≤
+
+X
+
+α(s, a)
+
+a
+
+≤ |A| (DCQL (s) + 1) .
+
+Combining these arguments together, we obtain the following upper bound on |J(π, M ) − J(π, M̂ )|,
+" p
+#
+
+
+|A| q
+γRmax CT,δ
+Cr,δ
+J(π, M̂ ) − J(π, M ) ≤
++
+Es∼dπ (s) p
+DCQL (π, π̂β )(s) + 1 .
+M̂
+1−γ
+(1 − γ)2
+|D(s)|
+
+The proof of Theorem D.4 is then completed by using the above Lemma for bounding the sampling
+error for π ∗ and then upper bounding the sampling error for π̂β by the corresponding sampling
+error for π ∗ , hence giving us a factor of 2 on the sampling error term inp
+Theorem D.4. To see why
+this is mathematically correct, note that DCQL (π̂β , π̂β )(s) = 0, hence DCQL (π ∗ , π̂β )(s) + 1 ≥
+p
+DCQL (π̂β , π̂β )(s) + 1, which means the sampling error term for π ∗ pointwise upper bounds the
+sampling error for π̂β , which justifies the factor of 2.
+27
+
+E
+
+Extended Related Work and Connections to Prior Methods
+
+In this section, we discuss related works to supplement Section 5. Specifically, we discuss the
+relationships between CQL and uncertainty estimation and policy-constraint methods.
+Relationship to uncertainty estimation in offline RL. A number of prior approaches to offline
+RL estimate some sort of epistemic uncertainty to determine the trustworthiness of a Q-value
+prediction [32, 17, 3, 36]. The policy is then optimized with respect to lower-confidence estimates
+derived using the uncertainty metric. However, it has been empirically noted that uncertainty-based
+methods are not sufficient to prevent against OOD actions [17, 32] in and of themselves, are often
+augmented with policy constraints due to the inability to estimate tight and calibrated uncertainty sets.
+Such loose or uncalibrated uncertainty sets are still effective in providing exploratory behavior in
+standard, online RL [49, 48], where these methods were originally developed. However, offline RL
+places high demands on the fidelity of such sets [36], making it hard to directly use these methods.
+How does CQL relate to prior uncertainty estimation methods? Typical uncertainty estimation
+methods rely on learning a pointwise upper bound on the Q-function that depends on epistemic
+uncertainty [28, 48] and these upper-confidence bound values are then used for exploration. In the
+context of offline RL, this means learning a pointwise lower-bound on the Q-function. We show in
+Section 3.1 that, with a naïve choice of regularizer (Equation 1), we can learn a uniform lower-bound
+on the Q-function, however, we then showed that we can improve this bound since the value of the
+policy is the primary quantity of interest that needs to be lower-bounded. This implies that CQL
+strengthens the popular practice of point-wise lower-bounds made by uncertainty estimation methods.
+Can we make CQL dependent on uncertainty? We can slightly modify CQL to make it be account
+for epistemic uncertainty under certain statistical concentration assumptions. Typical uncertainty estimation methods in RL [49, 28] assume the applicability of concentration inequalities (for example, by
+making sub-Gaussian assumptions on the reward and dynamics), to obtain upper or lower-confidence
+
+
+1
+bounds and the canonical amount of over- (under-) estimation is usually given by, O √
+,
+n(s,a)
+
+where n(s, a) is the number of times a state-action pair (s, a) is observed in the dataset. We can
+incorporate such behavior in CQL by modifying Equation 3 to update Bellman error weighted by the
+cardinality of the dataset, |D|, which gives rise to the following effective Q-function update in the
+tabular setting, without function approximation:
+Q̂k+1 (s, a) = B π Q̂k (s, a) − α
+
+µ(a|s) − πβ (a|s)
+→ B π Q̂k (s, a) as n(s, a) → ∞.
+n(s, a)
+
+In the limit of infinite data, i.e. n(s, a) → ∞, we find that the amount of underestimation tends to
+0. When only a finite-sized dataset is provided, i.e. n(s, a) < N , for some N , we observe that by
+making certain assumptions, previously used in prior work [28, 49] on the concentration properties
+of the reward value, r(s, a) and the dynamics function, T (s0 |s, a), such as follows:
+||r̂(s, a) − r(s, a)|| ≤ p
+
+Cr
+n(s, a)
+
+and ||T̂ (s0 |s, a) − T (s0 |s, a)|| ≤ p
+
+CT
+n(s, a)
+
+,
+
+where Cr and CT are constants, that depend on the concentration properties of the MDP, and by
+appropriately choosing α, i.e. α = Ω(n(s, a)), such that the learned Q-function still lower-bounds
+the actual Q-function (by nullifying the possible overestimation that appears due to finite samples),
+we are still guaranteed a lower bound.
+
+F
+
+Additional Experimental Setup and Implementation Details
+
+In this section, we discuss some additional implementation details related to our method. As discussed
+in Section 4, CQL can be implemented as either a Q-learning or an actor-critic method. For our
+experiments on D4RL benchmarks [14], we implemented CQL on top of soft actor-critic (SAC) [21],
+and for experiments on discrete-action Atari tasks, we implemented CQL on top of QR-DQN [9]. We
+experimented with two ways of implementing CQL, first with a fixed α, where we chose α = 5.0,
+and second with a varying α chosen via dual gradient-descent. The latter formulation automates the
+28
+
+choice of α by introducing a “budget” parameter, τ , as shown below:
+"
+min max α Es∼dπβ (s) log
+Q
+
+α≥0
+
+#
+
+!
+
+
+2 
+1
+exp(Q(s, a))−Ea∼πβ (a|s) [Q(s, a)] − τ + Es,a,s0 ∼D Q − Bπk Q̂k
+.
+2
+a
+(30)
+
+X
+
+Equation 30 implies that if the expected difference in Q-values is less than the specified threshold τ , α
+will adjust to be close to 0, whereas if the difference in Q-values is higher than the specified threshold,
+τ , then α is likely to take on high values, and thus more aggressively penalize Q-values. We refer to
+this version as CQL-Lagrange, and we found that this version outperforms the version with a fixed α
+on the gym-MuJoCo D4RL benchmarks, and drastically outperforms the fixed α version on the more
+complex AntMazes.
+Choice of α. Our experiments in Section 6 use the Lagrange version to automatically tune α during
+training. For our experiments, across D4RL Gym MuJoCo domains, we choose τ = 10.0. For
+the other D4RL domains (Franka Kitchen and Adroit), we chose τ = 5.0. However, for our Atari
+experiments, we used a fixed penalty, with α = 1.0 chosen uniformly for Table 3 (with 10% data),
+α = 4.0 chosen uniformly for Table 3 (with 1% data), and α = 0.5 for Figure 1.
+P
+Computing log a exp(Q(s, a). CQL(H) uses log-sum-exp in the objective for training the Qfunction (Equation 4). In discrete action domains, we compute the log-sum-exp exactly by invoking
+the standard tf.reduce_logsumexp() (or torch.logsumexp()) functions provided by autodiff
+libraries. In continuous action tasks, CQL(H) uses importance sampling to compute this quantity,
+where in practice, we sampled 10 action samples each at every state s from a uniform-at-random
+Unif(a) and the current policy, π(a|s) and used these alongside importance sampling to compute it
+as follows using N = 10 action samples:
+!
+X
+1X
+1X
+log
+exp(Q(s, a)) = log
+exp(Q(s, a)) +
+exp(Q(s, a))
+2 a
+2 a
+a
+
+
+
+
+
+1
+exp(Q(s, a))
+exp(Q(s, a))
+1
+= log
+Ea∼Unif(a)
++ Ea∼π(a|s)
+2
+Unif(a)
+2
+π(a|s)
+
+
+
+
+
+
+N
+N
+X
+X
+exp(Q(s, ai ))
+1
+exp(Q(s, ai )) 
+1
++
+.
+≈ log 
+2N
+Unif(a)
+2N
+π(ai |s)
+ai ∼Unif(a)
+
+ai ∼π(a|s)
+
+Hyperparameters. For the D4RL tasks, we built CQL on top of the implementation of SAC
+provided at: https://github.com/vitchyr/rlkit/. Our implementation mimicked the RLkit
+SAC algorithm implementation, with the exception of a smaller policy learning rate, which was
+chosen to be 3e-5 or 1e-4 for continuous control tasks. Following the convention set by D4RL [14],
+we report the normalized, smooth average undiscounted return over 4 seeds for in our results in
+Section 6.
+The other hyperparameters we evaluated on during our preliminary experiments, and might be helpful
+guidelines for using CQL are as follows:
+• Q-function learning rate. We tried two learning rate values [1e − 4, 3e − 4] for the Qfunction. We didn’t observe a significant difference in performance across these values.
+3e − 4 which is the SAC default was chosen to be the default for CQL.
+• Policy learning rate. We evaluated CQL with a policy learning rate in the range of [3e −
+5, 1e−4, 3e−4. We found 3e−5 to almost uniformly attain good performance. While 1e−4
+seemed to be better on some of our experiments (such as hopper-medium-v0 and antmazemedium-play-v0), but it performed badly with the real-human demonstration datasets, such
+as the Adroit tasks. We chose 3e − 5 as the default across all environments.
+• Lagrange threshold τ . We ran our preliminary experiments with three values of threshold,
+τ = [2.0, 5.0, 10.0]. However, we found that τ = 2.0, led to a huge increase in the value of α
+(sometimes upto the order of millions), and as a result, highly underestimated Q-functions on
+all domains (sometimes upto the order of -1e6). On the datasets with human demonstrations
+– the Franka Kitchen and Adroit domains, we found that τ = 5.0 obtained lower-bounds on
+Q-values, whereas τ = 10.0 was unable to prevent overestimation in Q-values in a number
+of cases and Q-values diverged to highly positive values (> 1e+6). For the MuJoCo domains,
+29
+
+we observed that τ = 10.0 or τ = 5.0 gave rise to a stable curve of Q-values, and hence
+this threshold was chosen for these experiments. Note that none of these hyperparameter
+selections required any notion of onine evaluation, since these choices were made based on
+the predicted Q-values on dataset state-actions pairs.
+• Number of gradient steps. We evaluated our method on varying number of gradient steps.
+Since CQL uses a reduced policy learning rate (3e-5), we trained CQL methods for 1M
+gradient steps. Due to a lack of a proper valdiation error metric for offline Q-learning
+methods, deciding the number of gradient steps dynamically has been an open problem in
+offline RL. [36]. Different prior methods choose the number of steps differently. For our
+experiments, we used 1M gradient steps for all D4RL domains, and followed the convention
+from Agarwal et al. [3], to report returns after 5X gradient steps of training for the Atari
+results in Table 3.
+• Choice of Backup. Instead of using an actor-critic version of CQL, we can instead also use
+an approximate max-backup for the Q-function in a continuous control setting. Similar to
+prior work [32], we sample 10 actions from the current policy at the next state s0 , called
+a1 , · · · a10 ∼ π(a0 |s0 ) and generate the target values for the backup using the following
+equation: r(s, a) + maxa1 ,··· ,a10 Q(s0 , a0 ). This is different from the standard actor-critic
+backup that performs an expectation of the Q-values Q(s0 , a0 ) at the next state under the
+policy’s distribution π(a0 |s0 ). In certain environments, such as in the Franka Kitchen and
+AntMaze domains using these backups performs better than the reported numbers with
+actor-critic algorithm.
+Other hyperparameters, were kept identical to SAC on the D4RL tasks, including the twin Q-function
+trick, soft-target updates, etc. In the Atari domain, we based our implementation of CQL on top of
+the QR-DQN implementation provided by Agarwal et al. [3]. We did not tune any parameter from
+the QR-DQN implementation released with the official codebase with [3].
+
+G
+
+Ablation Studies
+
+In this section. we describe the experimental findings of some ablations for CQL. Specifically we
+aim to answer the following questions:
+1. How does CQL(H) compare to CQL(ρ), with ρ = π̂ k−1 , the previous policy?
+2. How does the CQL variant which uses Equation 1 compare to CQL(H) variant in Equation 4,
+that results in a tighter lower-bound theoretically?
+3. How do the Lagrange (Equation 30) and non-Lagrange (Equation 4) formulations of CQL(H)
+empirically compare to each other?
+We start with question (1). On three MuJoCo tasks from D4RL, we evaluate the performance of
+both CQL(H) and CQL(ρ), as shown in Table 5. We observe that on these tasks, CQL(H) generally
+performs better than CQL(ρ). However, when a sampled estimate of log-sum-exp of the Q-values
+becomes inaccurate due to high variance importance weights, especially in large action spaces, such
+as in the Adroit environments, we observe in Table 2 that CQL(ρ) tends to perform better.
+Task Name
+halfcheetah-medium-expert
+walker2d-mixed
+hopper-medium
+
+CQL(H)
+7234.5
+1227.2
+1866.1
+
+CQL(ρ)
+3995.6
+812.7
+1166.1
+
+Table 5: Average return obtained by CQL(H), and CQL(ρ) on three D4RL MuJoCo environments. Observe
+that on these environments, CQL(H) generally outperforms CQL(ρ).
+
+Next, we evaluate the answer to question (2). On three MuJoCo tasks from D4RL, as shown in
+Table 6, we evaluate the performance of CQL(H), with and without the dataset maximization term in
+Equation 2. We observe that omitting this term generally seems to decrease performance, especially
+in cases when the dataset distribution is generated from a single policy, for example, hopper-medium.
+Next, we answer question (3). Table 7 shows the performance of CQL and CQL-Lagrange on some
+gym-MuJoCo and AntMaze tasks from D4RL. In all of these tasks, we observe that the Lagrange
+version (Equation 30, which automates the choice of α using dual gradient descent on the CQL
+30
+
+Task Name
+hopper-medium-expert
+hopper-mixed
+hopper-medium
+
+CQL(H)
+3628.4
+1563.2
+1866.1
+
+CQL(H) (w/ Equation 1)
+3610.3
+864.6
+1028.4
+
+Table 6: Average return obtained by CQL(H) and CQL(H) without the dataset average Q-value maximization
+term. The latter formulation corresponds to Equation 1, which is void of the dataset Q-value maximization term.
+We show in Theorem 3.2 that Equation 1 results in a weaker lower-bound. In this experiment, we also observe
+that this approach is generally outperformed by CQL(H).
+
+regularizer, performs better than the non-Lagrange version (Equation 4). In some cases, for example,
+the AntMazes, the difference can be as high as 30% of the maximum achievable performance. On the
+gym MuJoCo tasks, we did not observe a large benefit of using the Lagrange version, however, there
+are some clear benefits, for instance in the setting when learning from hopper-mixed dataset.
+Task Name
+hopper-medium-expert
+hopper-mixed
+walker-mixed
+walker2d-random-expert
+hopper-medium
+antmaze-medium-diverse
+antmaze-large-play
+antmaze-large-diverse
+
+CQL(H) (Lagrange), τ = 10.0
+3628.4
+1866.1
+1227.2
+4183.0
+1866.1
+0.53
+0.15
+0.14
+
+CQL(H), α = 5.0
+3589.4
+1002.8
+1055.7
+3934.5
+1583.4
+0.21
+0.02
+0.05
+
+Table 7: Average return obtained by CQL(H) and CQL(H) with automatic tuning for α by using a Lagrange
+version. Observe that both versions are generally comparable, except in the AntMaze tasks, where an adaptive
+value of α greatly outperforms a single chosen value of α.
+
+31
+
+

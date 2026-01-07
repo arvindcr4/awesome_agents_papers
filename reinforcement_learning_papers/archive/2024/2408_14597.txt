@@ -1,0 +1,5292 @@
+Journal of Artificial Intelligence Research 77 (2023) 295-354
+
+Submitted 11/2022; published 05/2023
+
+On Centralized Critics in Multi-Agent Reinforcement Learning
+
+arXiv:2408.14597v1 [cs.AI] 26 Aug 2024
+
+Xueguang Lyu
+Andrea Baisero
+Yuchen Xiao
+Brett Daley
+Christopher Amato
+
+lu.xue@northeastern.edu
+baisero.a@northeastern.edu
+xiao.yuch@northeastern.edu
+daley.br@northeastern.edu
+c.amato@northeastern.edu
+
+Northeastern University, Khoury College of Computer Sciences,
+360 Huntington Avenue, Boston, MA 02115 USA
+
+Abstract
+Centralized Training for Decentralized Execution, where agents are trained offline in a
+centralized fashion and execute online in a decentralized manner, has become a popular
+approach in Multi-Agent Reinforcement Learning (MARL). In particular, it has become
+popular to develop actor-critic methods that train decentralized actors with a centralized
+critic where the centralized critic is allowed access global information of the entire system,
+including the true system state. Such centralized critics are possible given offline information
+and are not used for online execution. While these methods perform well in a number of
+domains and have become a de facto standard in MARL, using a centralized critic in this
+context has yet to be sufficiently analyzed theoretically or empirically. In this paper, we
+therefore formally analyze centralized and decentralized critic approaches, and analyze the
+effect of using state-based critics in partially observable environments. We derive theories
+contrary to the common intuition: critic centralization is not strictly beneficial, and using
+state values can be harmful. We further prove that, in particular, state-based critics can
+introduce unexpected bias and variance compared to history-based critics. Finally, we
+demonstrate how the theory applies in practice by comparing different forms of critics on
+a wide range of common multi-agent benchmarks. The experiments show practical issues
+such as the difficulty of representation learning with partial observability, which highlights
+why the theoretical problems are often overlooked in the literature.
+
+1. Introduction
+Centralized Training for Decentralized Execution (CTDE) (Oliehoek, Spaan, & Vlassis,
+2008), where agents are trained offline in a centralized manner but execute in a decentralized
+manner with only local information, has been widely adopted in multi-agent reinforcement
+learning (MARL). Compared to independent learning, CTDE has great potential for more
+stable and optimal learning since agents can coordinate offline on how they will behave
+online. Actor-Critic (AC) methods are popular for CTDE because a centralized critic can be
+used to train decentralized actors, exploiting the centralized training paradigm; since the
+critic is only needed to train the actors, it can be discarded once the actors are fully trained
+without hindering decentralized execution. Because the centralized critic is trained offline in a
+simulator, it can be trained on the joint observations from all the agents as well as the system
+state. Using the state is intuitively considered desirable as it is often more concise than the
+history and provides ground-truth information. This technique of exploiting the system state
+has become popular after the pioneering centralized critic works of COMA (Foerster, Assael,
+©2023 2023 The Authors. Published by AI Access Foundation under Creative Commons Attribution License CC BY 4.0.
+
+Lyu, Baisero, Xiao, Daley, & Amato
+
+De Freitas, & Whiteson, 2016) and MADDPG (Lowe, Wu, Tamar, Harb, Pieter Abbeel, &
+Mordatch, 2017).
+The statements made for the effects of centralized critics are almost entirely positive.
+For instance, MADDPG (Lowe et al., 2017) notes that it eases learning and helps to learn
+coordinated behaviors. Later works list similar sentiments, suspecting that critic centralization
+improves performance (Lee & Lee, 2019), reduces variance (Das, Gervet, Romoff, Batra,
+Parikh, Rabbat, & Pineau, 2019), stabilizes training (Li, Wu, Cui, Dong, Fang, & Russell,
+2019) and is more robust (Simões, Lau, & Reis, 2020). It seems reasonable to make these
+assumptions because training a centralized value function would solve the cooperation issues
+(e.g., action shadowing (Claus & Boutilier, 1998)) for a centralized policy, and result in better
+convergence properties. However, as we will show, a centralized critic does not have the same
+effect (in solving those problems) on a set of decentralized policies.
+The exploitation of the system state is considered one of the significant advantages
+of the CTDE paradigm. Using the state has also become a selling point for centralized
+critics (Foerster et al., 2016) since state value functions are usually easier to learn than
+observation-history value functions. While many works use centralized critics, they often
+focus on other issues without carefully examining the foundation of the critic centralization
+techniques that they employ, e.g., improving credit assignment (Wang, Zhang, Kim, & Gu,
+2020a; Du, Han, Fang, Dai, Liu, & Tao, 2019), exploration (Zhou, Liu, Sui, Li, & Chung,
+2020), emergent tool use (Baker, Kanitscheider, Markov, Wu, Powell, McGrew, & Mordatch,
+2020), etc. However, even though centralized critics have become a standard mechanism in
+recent works, they still lack a thorough theoretical and empirical analysis. In this paper,
+we give a comprehensive investigation of these claims and show that most gains with critic
+centralization are questionable, as they often entail hidden trade-offs, both theoretically and
+empirically.
+This paper fills this analytical gap by providing an analysis of critics conditioned on joint
+observations as well as the system state; we show that the common intuitions stated in most
+recent works are usually unsound for both cases. In particular,
+(1) we show that centralized critics are not theoretically beneficial compared to decentralized
+critics,
+(2) we show that state-based critics may result in bias, making them theoretically inferior
+to history-based critics,
+(3) we show that centralized critics (both history and state-based) result in higher variance,
+(4) we advise the use of history-state critics, which use both history and state information
+as a method to incorporate state without introducing bias, and
+(5) we provide an extensive empirical analysis showing the trade-offs of the different critic
+types.
+In our analysis, we prove that critic centralization does not theoretically improve cooperation compared to decentralized critics from a policy learning perspective, even though
+the values themselves may be easier to learn. For history-based critics, we show in theory
+that centralized and decentralized critics have the same expected gradient. This implies that
+2
+
+On Centralized Critics
+
+the centralized critic, like decentralized critics, can be used to train decentralized policies
+in an unbiased way. Yet on the flip side, it also implies that the centralized critic cannot
+ameliorate the cooperation issues seen with decentralized learners. For state-based critics, we
+show that when using only state information, with the commonly seen state-based centralized
+critic, they may incur unbounded bias in the policy gradient compared to their provably
+correct history-based counterparts. The resulting bias voids any asymptotic convergence
+properties. Practically, the bias may hinder learning a reasonable policy in many domains.
+We detail formally and intuitively where the bias originates while analyzing its relationship
+to the environmental observation model, which is highly related to the bias. Based on our
+theory and empirical studies, we suggest not using state-based critics in partially observable
+environments that require active information gathering.
+We also compare the variance of the policy gradient for different types of critics, where,
+again, the theoretical result counters common intuition: we show theoretically that the
+centralized critic adds higher variance to the policy gradient. We also show that even when
+unbiased, using a state-conditioned critic further exacerbates the policy gradient variance
+issue. We note that the stability of learning policies from a critic should be a consideration
+separate from the stability of learning value functions (the critics themselves). We show
+that in practice, factoring in the effect of value function learning, we face a bias-variance
+trade-off. We also recommend the usage of a history-state-based critic (Baisero & Amato,
+2022), although providing policy gradients with even higher variances in theory, they are
+unbiased and it is usually a favorable trade-off in terms of empirical performance.
+Finally, through toy examples and larger empirical studies, we show that using centralized
+critics can be, in many tasks, harmful to the overall performance. We compare decentralized history-based critics, centralized history-based critics, centralized state-based critics,
+and (centralized) history-state-based critics. We also highlight the deficiencies of popular
+benchmarks, in that they often lack partial observability. Our experiments consist of a wide
+range of popular benchmarks, but we do not find significant performance gaps on most tasks.
+We also report performance degradation in environments preferring stable policies, in which
+decentralized critics (with minimal theoretical policy gradient variance) outperform others.
+In addition, we find that less partially observable environments are not sensitive to the biases
+caused by the state-based critics; we point out that those environments are widely used and
+discuss how to identify those tasks. Overall, critic selection should be a conscious decision
+dependent on the task. We give general practical advice on how to make trade-offs based on
+different types of environments.
+This paper combines our work on analyzing centralized history-based critics (Lyu, Xiao,
+Daley, & Amato, 2021) and centralized state-based critics (Lyu, Baisero, Xiao, & Amato,
+2022). We unify previous works’ assumptions and mathematical notations and propose
+discounted visitation probabilities for properly analyzing actor-critic algorithms in cooperative
+multi-agent reinforcement learning, which further formalizes the theoretical results given in
+previous works while moving our assumptions closer to standard practices. We also emphasize
+the critical consideration that some tasks are not readily available for centralized training (e.g.
+when a simulator is not available). In those cases where centralized training is cumbersome
+or impossible, decentralized critics should be the default choice. In addition, we provide bias
+and variance analysis for the recommended alternative, the history-state-based critic.
+3
+
+Lyu, Baisero, Xiao, Daley, & Amato
+
+2. Related Work
+The CTDE training paradigm is used in a number of recent deep MARL approaches. Valuebased CTDE approaches such as QMIX, QPLEX, and others focus on how centralized
+values can be reasonably factorized into decentralized ones, and have shown promising
+results (Son, Kim, Kang, Hostallero, & Yi, 2019; Mahajan, Rashid, Samvelyan, & Whiteson,
+2019; Wang, Dong, & Victor Lesser, 2020b; Rashid, Farquhar, Peng, & Whiteson, 2020; Peng,
+Rashid, Schroeder de Witt, Kamienny, Torr, Böhmer, & Whiteson, 2021; de Witt, Peng,
+Kamienny, Torr, Böhmer, & Whiteson, 2020; Xiao, Hoffman, Xia, & Amato, 2020; Wang,
+Wang, Zheng, & Zhang, 2020c; Rashid, Samvelyan, de Witt, Farquhar, Foerster, & Whiteson,
+2018; Sunehag, Lever, Gruslys, Czarnecki, Zambaldi, Jaderberg, Lanctot, Sonnerat, Leibo,
+Tuyls, et al., 2018). On the other hand, CTDE policy gradient methods are almost entirely
+based on centralized critics.
+One of the first methods featuring a centralized critic was COMA (Foerster, Farquhar,
+Afouras, Nardelli, & Whiteson, 2018). COMA adopted a centralized state-based critic with
+a counterfactual baseline; the state-based critic then became the standard in many other
+approaches. Regarding convergence properties, COMA claims that the overall effect of a
+centralized critic on the decentralized policy gradient may be reduced to a single-agent actorcritic approach, which ensures convergence under similar assumptions (Konda & Tsitsiklis,
+2000); however, the assumption only holds in fully-observable environments and is incorrect
+for partially observable environments. In this paper, we clarify and expand on the theory of
+centralized critics by developing the convergence properties and a bias/variance analysis for
+centralized and decentralized critics, and their respective policies. Due to their theoretical
+properties, we provide separate discussions for state-based and history-based critics.
+Concurrently with COMA, MADDPG (Lowe et al., 2017) proposed to use a dedicated
+centralized critic for each agent in semi-competitive domains, demonstrating compelling
+empirical results in continuous action environments.
+Many other agents extend the ideas of COMA and MADDPG. We discuss some of them
+but many more have been developed. M3DDPG (Li et al., 2019) focuses on the competitive
+case and extends MADDPG to learn robust policies against altering adversarial policies by
+optimizing a minimax objective. On the cooperative side, SQDDPG (Wang et al., 2020a)
+borrows the counterfactual baseline idea from COMA and extends MADDPG to achieve credit
+assignment in fully cooperative domains by reasoning over each agent’s marginal contribution.
+Other researchers also use critic centralization for emergent communication with decentralized
+execution in TarMAC (Das et al., 2019) and ATOC (Jiang & Lu, 2018). There are also efforts
+utilizing an attention mechanism addressing scalability problems in MAAC (Iqbal & Sha,
+2019). Also, teacher-student style transfer learning LeCTR (Omidshafiei, Kim, Liu, Tesauro,
+Riemer, Amato, Campbell, & How, 2019) builds on top of centralized critics, which does not
+assume expert teachers. Other work includes multi-agent credit assignment and exploration in
+LIIR and LICA (Du et al., 2019; Zhou et al., 2020), goal-conditioned policies with CM3 (Yang,
+Nakhaei, Isele, Fujimura, & Zha, 2020), and for temporally abstracted policies (Chakravorty,
+Ward, Roy, Chevalier-Boisvert, Basu, Lupu, & Precup, 2020). Extensive tests based on a
+centralized critic in a more realistic environment using self-play for hide-and-seek (Baker
+et al., 2020) have demonstrated impressive results showing emergent tool use. Note that
+impressive results also use a state-based critic, which is a common practice and used in works
+4
+
+On Centralized Critics
+
+such as SQDDPG (Wang et al., 2020a), LIIR (Du et al., 2019), LICA (Zhou et al., 2020),
+VDAC-mix (Su, Adams, & Beling, 2021), DOP (Wang, Han, Wang, Dong, & Zhang, 2021)
+and MACKRL (Schroeder de Witt, Foerster, Farquhar, Torr, Boehmer, & Whiteson, 2019).
+As mentioned above, these state-of-the-art works use centralized critics, but they do not
+specifically focus on the effectiveness of centralized critics, which is the main focus of this
+paper.
+
+3. Background
+This section introduces the formal problem definition of cooperative MARL with decentralized
+execution and partial observability. We introduce various forms of value functions and
+formalize a set of commonly accepted on-policy history (and state) distributions. We also
+introduce multi-agent actor-critic methods in which the value functions, both centralized
+and decentralized, are approximated by critic models. In the coming definitions and the rest
+of this document, we use ∆X to denote the set of probability distributions over a set X .
+3.1 Dec-POMDPs
+Decentralized partially observable Markov decision processes (Dec-POMDPs) (Oliehoek
+& Amato, 2016) are multi-agent cooperative sequential decision making problems. A
+Dec-POMDP is a tuple ⟨I, S, A, Ω, T , O, R, γ⟩, composed of a set of agents I, a state
+.
+space S, with initial state s0 ∈ S, a joint action space A = ×i∈I Ai , one per agent, a
+.
+joint observation space Ω = ×i∈I Ωi , one per agent, a stochastic state transition function
+T : S × A → ∆S that determines state transitions Pr(s′ | s, a), a stochastic joint observation
+function O : A × S → ∆Ω that determines observation emissions Pr(o | a, s), a joint reward
+function R : S × A → R that is shared by all agents, and a discount factor γ ∈ [0, 1).
+Control in Dec-POMDPs is performed by a set of decentralized agent policies π =
+⟨π1 , . . . , π|I| ⟩, each representing a (stochastic) mapping from each agents’ individual actionobservation history to its next action, πi : Hi → ∆Ai , where Hi is the set of action-observation
+histories for agent i. For instance, agent i’s history at timestep t is the sequence of all previous
+actions and observations hi,t = ⟨oi,0 , ai,0 , oi,1 , . . . , ai,t−1 , oi,t ⟩. A joint history is the set of all
+agent histories ht = ⟨h1,t , . . . , h|I|,t ⟩. The set of actions chosen by each agent forms the joint
+action at = ⟨a1,t , ..., a|I|,t ⟩. As feedback from the system, a scalar reward R(st , at ) is shared
+by all agents, and each agent receives a local observation ⟨o1,t , . . . , o|I|,t ⟩ ∼ O(at−1 , st ).
+The objective of all agents is to maximize
+the total performance, i.e., the expected
+. P∞ t 
+discounted sum of future rewards J = E
+t=0 γ rt .
+3.2 Discounted Visitations: Counts and Distributions
+The pairing of a Dec-POMDP with a set of agent policies π fully determines the (stochastic)
+behavior of the system, i.e., the marginal, joint, and conditional probability of the defined
+random variables (e.g., states and histories). However, before defining core RL concepts
+like value functions and describing policy gradient variants, it is helpful to define a set of
+functions related to the likelihood of occurrences of certain states or histories.
+5
+
+Lyu, Baisero, Xiao, Daley, & Amato
+
+3.2.1 Discounted Visitation Counts
+First, we define the discounted visitation counts function η, which represents a discounted
+notion of the expected number of times that the system variables take some given value. In
+the case of the discounted state visitations (also defined in a different but equivalent form
+for single-agent fully observable control in (Sutton & Barto, 2018)), we define
+∞
+
+. X t
+η(s) =
+γ Pr(St = s) .
+
+(1)
+
+t=0
+
+Note that η is formally a function of the joint policies π, and should technically be
+denoted as η π ; however, given the lack of ambiguity, we omit the suffix to simplify notation.
+The discount factor γ guarantees that η is well-defined and finite for any Dec-POMDP,
+even those that never terminate or keep visiting the same states ad infinitum—hence the
+importance of this discounted notion of visitations.
+We will also use η for the number of times a (joint) history or (joint) history-state pairs
+are visited. We use the same overloaded symbol η due to similarity with the state visitation
+counts; the distinction is immediately clear from the inputs and context. In the case of
+history visitations and history-state visitations, we define
+∞
+
+. X t
+η(h) =
+γ Pr(Ht = h) ,
+
+∞
+
+. X t
+η(h, s) =
+γ Pr(Ht = h, St = s) ,
+
+t=0
+
+(2)
+
+t=0
+
+We note some relevant properties
+that either relatePor are shared by η(s), η(h), and η(h).
+P
+First, we note that η(s) = h η(h, s) and η(h) = s η(h, s). Then, we note that all of
+these discounted counts ultimately add up toPthe same P
+value, as a direct
+consequence of the
+P
+geometric series component based on γ, i.e., s η(s) = h η(h) = h,s η(h, s) = (1 − γ)−1 .
+In the case of η(h) and η(h, s), we also note that the sum over timesteps t is technically
+superfluous, since there is only one timestep where the joint history h can possibly be
+collectively seen by the agents; therefore, η(h) and η(h, s) are equivalently written as
+η(h) = γ t Pr(Ht = h) t=|h| ,
+
+η(h, s) = γ t Pr(Ht = h, St = s) t=|h| .
+
+(3)
+
+Finally, we further consider visitation variants that include action counts,
+∞
+
+. X t
+η(s, a) =
+γ Pr(St = s, At = a) ,
+.
+η(h, a) =
+.
+η(h, s, a) =
+
+t=0
+∞
+X
+t=0
+∞
+X
+
+(4)
+
+γ t Pr(Ht = h, At = a) ,
+
+(5)
+
+γ t Pr(Ht = h, St = s, At = a) ,
+
+(6)
+
+t=0
+
+which share similar properties to their action-less counterparts. Importantly, counts η(h, a)
+and η(h, s, a) are respectively related to η(h) and η(h, s) by the policy, according to
+η(h, a) = η(h)π(a; h) and η(h, s, a) = η(h, s)π(a; h).
+6
+
+On Centralized Critics
+
+3.2.2 Discounted Visitation Probabilities
+Next, we define the discounted visitation probability functions ρ as normalized versions of the
+corresponding counts η. Given that η adds up to (1 − γ)−1 , this results in
+.
+.
+.
+ρ(s) = (1 − γ)η(s) ,
+ρ(h) = (1 − γ)η(h) ,
+ρ(h, s) = (1 − γ)η(h, s) ,
+.
+.
+.
+ρ(s, a) = (1 − γ)η(s, a) , ρ(h, a) = (1 − γ)η(h, a) , ρ(h, s, a) = (1 − γ)η(h, s, a) . (7)
+Each ρ now represents a probability distribution over
+P the space of its inputs.
+P Further,
+common marginalization properties hold, e.g., ρ(s) = h ρ(h, s), and ρ(h) = s ρ(h, s).
+We can also further overload ρ to encompass a notion of conditional probability, e.g.,
+. η(h, s)
+ρ(s | h) =
+,
+η(h)
+. η(h, a)
+,
+ρ(a | h) =
+η(h)
+
+. η(h, s)
+ρ(h | s) =
+,
+η(s)
+. η(s, a)
+ρ(a | s) =
+,
+η(s)
+
+(8)
+
+for which common conditional properties also hold, e.g., ρ(s | h) = ρ(h, s) / ρ(h), ρ(h |
+s) = ρ(h, s) / ρ(s), ρ(a | h) = ρ(h, a) / ρ(h), and ρ(a | s) = ρ(s, a) / ρ(s). We also note
+that ρ(a | h) = ρ(a | h, s) = π(a; h). Finally, we note that some of these ρ-function
+outputs are equivalent to direct probabilities induced by the Dec-POMDP’s graphical model.
+Most notably, ρ(s | h) is equivalent to the conditional state probability given the joint
+history Pr(s | h). For others, however, there is no such corresponding probability, e.g.,
+ρ(h | s) is mathematically well-defined, while Pr(h | s) is ill-defined without assuming a
+particular timestep for h (Baisero & Amato, 2022). We use ρ to primarily simplify the
+notation associated with policy gradients (Section 3.4), although we will also exploit the
+conditional-ρ functions to resolve a formal issue that appears in our definition of a specific
+form of centralized value function (Section 3.3.3).
+3.3 Value Functions
+In this section, we formally define various types of value functions that are used in different
+forms of multi-agent policy gradient: the joint history value function Qπ (h, a), the individualπ
+history value function Qπ
+i (h, a), the state value function Q (s, a), and the joint history-state
+π
+value function Q (h, s, a). These value functions all represent some notion of expected
+(discounted) performance obtained by the entire team of agents, that is given and indicated
+as a suffix (even for the individual history case Qπ
+i ), and they differ exclusively in terms of
+the information that is available to determine the expected team performance.
+3.3.1 Joint History Value Function Qπ (h, a)
+The joint history value function Qπ (h, a) is a form of centralized value function, and the
+unique solution to the following joint history Bellman equality,
+"
+#
+X
+π(a′ ; hao)Qπ (hao, a′ ) ,
+(9)
+Qπ (h, a) = R(h, a) + γ Eo|h,a
+a′
+
+.
+where R(h, a) = Es|h [R(s, a)] is the joint history reward function. Qπ (h, a) is the expected
+long-term performance of the team of agents when each individual agent policy πi has
+observed the individual history hi and has opted to perform a first action ai .
+7
+
+Lyu, Baisero, Xiao, Daley, & Amato
+
+3.3.2 Individual History Value Function Qπ
+i (h, a)
+The individual history value function Qπ
+i (h, a) is a form of decentralized value function from
+the singular perspective of the i-th agent, and the unique solution to the following individual
+history Bellman equality,
+"
+#
+X
+π
+π
+′
+π
+′
+Qi (h, a) = Ri (h, a) + γ Eo|h,a
+π i (a ; hao)Qi (hao, a ) ,
+(10)
+a′
+
+.
+where Riπ (h, a) = Es,a\i |hi =h [R(s, a)] is the individual history reward function, which integrates out the behavior of all other agents and the resulting state. Qπ
+i (h, a) is the expected
+long-term performance of the team of agents when the i-th agent policy πi has observed the
+individual history h and has opted to perform a first action a.
+3.3.3 State Value Function Qπ (s, a)
+The state value function Qπ (s, a) is a form of centralized value function that attempts to
+measure the expected long-term performance of the team of agents when the system state
+happens to be s, and each individual agent policy πi has opted to perform a first action ai .
+A straightforward (but naïve, as we will see) formalization of this notion is based on defining
+the state value function as the unique solution to the following state Bellman equality,
+"
+#
+X
+π
+′
+′
+π ′
+′
+(11)
+Q (s, a) = R(s, a) + γ Es′ |s,a
+Pr(a | s )Q (s , a ) .
+a′
+
+Although this notion of state value seems reasonable at the surface level, it suffers from
+a subtle formality issue that causes Pr(a | s), and consequently Qπ (s, a) itself, to be not
+guaranteeably well-defined for generic control problems and teams of agents; this is an issue
+intrinsic to partial observability that was already analyzed for the single-agent control case
+in (Baisero & Amato, 2022), and for the multi-agent control case in (Lyu et al., 2022).
+To keep this introductory section brief and compact, we redirect a more thorough
+discussion on the issues with Pr(a | s) and Equation (11) to Appendix A. Broadly speaking,
+the issue is related to the fact that Pr(a | s) denotes a time-invariant relationship between
+variables that is conventionally time-variant, and is therefore undefined when a time index is
+not available. In fact, we note that there is no issue with a timed variant of the state value
+function Qπ
+t (s, a) defined as the solution to the following Bellman equality
+"
+#
+X
+π
+′
+′
+π
+′
+′
+Qt (s, a) = R(s, a) + γ Es′ |s,a
+Pr(At+1 = a | St+1 = s )Qt+1 (s , a ) .
+(12)
+a′
+
+However, employing timed value functions is an unsatisfactory solution as they do not
+generalize well across different (and potentially many) timesteps, and is not a common
+practice in mainstream RL. We thus consider the following untimed alternative definition for
+state values Qπ (s, a) as the unique solution to the following state Bellman equality,
+"
+#
+X
+Qπ (s, a) = R(s, a) + γ Es′ |s,a
+ρ(a′ | s′ )Qπ (s′ , a′ ) .
+(13)
+a′
+
+8
+
+On Centralized Critics
+
+where Pr(a′ | s′ ) has been replaced with the discounted visitation conditional probability
+ρ(a′ | s′ ) defined in Section 3.2.2. We note that ρ(a′ | s′ ) is inherently defined in terms of
+geometric series of timed probabilities, and therefore does not suffer from the same issue
+as Pr(a′ | s′ ). For more details on why we employ ρ rather than other possible notions of
+the conditional
+P relationship between s and a, see Appendix A. Finally, we also note that
+ρ(a | s) = h ρ(h | s)π(a; h) satisfies the sum-product rule, which solidifies an intuitive
+understanding of ρ as a reasonable concrete substitute for the concept of Pr(a | s).
+3.3.4 Joint History-State Value Function Qπ (h, s, a)
+The joint history-state value function Qπ (h, s, a) is a form of centralized value function.
+Qπ (h, s, a) is the expected long-term performance of the team of agents when the unobserved
+environment state happens to be s, each individual policy agent πi has observed the individual
+history hi , and has opted to perform a first action ai . It is the unique solution to the following
+joint history-state Bellman equation,
+"
+Qπ (h, s, a) = R(s, a) + γ Es′ ,o|s,a
+
+#
+X
+
+π(a′ ; hao)Qπ (hao, s′ , a′ ) .
+
+(14)
+
+a′
+
+Because this history-state value function has access to both history and state information,
+it does not suffer from the same issue as the state-only value function; Pr(a′ | hao, s′ )
+is not only well defined, but can also be trivially reduced to the joint policy probability
+Pr(a′ | hao, s′ ) = Pr(a′ | hao) = π(a′ ; hao) due to the conditional independence between
+actions and states given histories,
+3.4 Multi-Agent Actor-Critic Methods
+Actor-Critic methods (AC) (Konda & Tsitsiklis, 2000; Sutton, McAllester, Singh, & Mansour,
+2000) are variants of Policy Gradient (PG) approaches that involve the training of policy and
+critic models. In this section, we define a number of standard centralized and decentralized
+methods. We primarily consider centralized training of decentralized policies (Lowe et al.,
+2017; Bono, Dibangoye, Matignon, Pereyron, & Simonin, 2018; Lyu et al., 2021), where there
+is one policy model per agent (each separately parameterized by θi ), and a single centralized
+critic model (parameterized by ϕ). We will omit the model parameterization when clear
+from the context. To clearly distinguish critic models from the value functions that they are
+trained to model, we denote them with a hat, e.g., V̂ is a critic model trained to model V π .
+Policy gradients are typically expressed in a form that depends on one of the previously
+defined action-value functions Qπ (or the respective advantage function Aπ ). Such values
+can be estimated in a number of ways; in actor-critic, it is common to use one-step returns
+and the critic model to estimate Qπ (h, a) as r + γ V̂ (hao), and Qπ (s, a) as r + γ V̂ (s′ ). In
+advantage actor-critic, the critic model is further used as a baseline for variance reduction,
+.
+Aπ (h, a) = Qπ (h, a) − V π (h) ≈ r + γ V̂ (hao) − V̂ (h) ,
+.
+Aπ (s, a) = Qπ (s, a) − V π (s) ≈ r + γ V̂ (s′ ) − V̂ (s) .
+9
+
+(15)
+(16)
+
+Lyu, Baisero, Xiao, Daley, & Amato
+
+3.4.1 Centralized Policy
+In our evaluation, we also consider the case of a fully centralized policy,
+i.e., a policy that
+Q
+does not necessarily satisfy conditional independence π(a; h) ̸= i π i (ai ; hi ), and that
+fundamentally treats all agents as a single entity that shares all observations and actions.
+Although this represents a profoundly different control setting from decentralized control, it
+is a relevant and essential baseline that also represents an upper bound on the performance
+achievable by decentralized control. The fully centralized policy case is formalized as Joint
+Actor-Critic (JAC) (Bono et al., 2018; Wang, Hao, Wang, & Taylor, 2019), which employs a
+centralized history critic Q̂(h, a; ϕ) modeled after Qπ (h, a) to update the fully centralized
+policy π jointly parameterized by θ. The gradient associated with JAC is
+∇θ J = (1 − γ) Eh,a∼ρ(h,a) [Qπ (h, a)∇θ log π(a; h, θ)] .
+
+(17)
+
+3.4.2 Decentralized Policy and Critic
+Independent Actor-Critic (IAC) Among the decentralized policy gradient variants, we
+first consider Independent Actor-Critic (IAC) (Peshkin, Kim, Meuleau, & Kaelbling, 2000;
+Foerster et al., 2018), which trains decentralized policy π i (a; h) and critic Qπ
+i (h, a) models
+for each agent. Pseudocode for IAC is given in Algorithm 1. In IAC, the gradient associated
+with the policy parameters θi can be derived as
+∇θi J = (1 − γ) Eh,a∼ρ(h,a) [Qπ
+i (hi , ai )∇θi log πi (ai ; hi , θi )] .
+
+(18)
+
+3.4.3 Decentralized Policy and Centralized Critic
+Next, we consider gradient approximations that make use of centralized values and critics,
+which is the focus of this work; in some cases, the approximations will be perfect and
+equivalent to ∇θi J(θi ), while in others they will differ. To distinguish them more clearly
+from the formally correct gradient ∇θi J(θi ), we use g to denote these approximations.
+Independent Actor with Centralized History Critic (IACC-H) IACC-H is a class
+of centralized critic methods where the joint history critic Q̂(h, a; ϕ) modeled after Qπ (h, a)
+is used to update each decentralized policy π i (Foerster et al., 2018; Bono et al., 2018).
+Pseudocode for IACC-H is given in Algorithm 2. The gradient approximation associated
+with IACC-H is
+.
+gh = (1 − γ) Eh,a∼ρ(h,a) [Qπ (h, a)∇θi log πi (ai ; hi , θi )] .
+(19)
+The IACC-H approach can be found as one of the variants of COMA (Foerster et al., 2018),
+which also employs a variance reduction baseline.
+Independent Actor with Centralized State Critic (IACC-S) IACC-S employs a
+centralized state-based critic Q̂(s, a; ϕ) modeled after Qπ (s, a) to update each decentralized
+policy π i . Pseudocode for IACC-S is given in Algorithm 3. The gradient approximation
+associated with IACC-S is
+.
+gs = (1 − γ) Eh,s,a∼ρ(h,s,a) [Qπ (s, a)∇θi log πi (ai ; hi , θi )] .
+(20)
+The IACC-S approach can be found both as a variant of COMA (Foerster et al., 2018) and
+in MADDPG (Lowe et al., 2017).
+10
+
+On Centralized Critics
+
+Abbreviation
+JAC
+IAC
+IACC-H
+IACC-S
+IACC-HS
+
+Actor
+Joint Actors
+Independent Actors
+Independent Actors
+Independent Actors
+Independent Actors
+
+Critic
+Joint Critic Qπ (h, a)
+Decentralized Critics Qπ
+i (hi , ai )
+Centralized Critic, history-based Qπ (h, a)
+Centralized Critic, state-based Qπ (s, a)
+Centralized Critic, history-state-based Qπ (h, s, a)
+
+Table 1: Summary of methods.
+Independent Actor with Centralized History-State Critic (IACC-HS) IACC-HS
+employs a centralized history-state-based critic Q̂(h, s, a; ϕ) modeled after Qπ (h, s, a) to
+update each decentralized policy π i . Pseudocode for IACC-HS is given in Algorithm 3. The
+gradient approximation associated with IACC-HS is
+.
+gh,s = (1 − γ) Eh,s,a∼ρ(h,s,a) [Qπ (h, s, a)∇θi log πi (ai ; hi , θi )] .
+
+(21)
+
+The IACC-HS approach has been used in some value decomposition methods such as VDACmix (Su et al., 2021).
+In this work, we show that ∇θi J, gh , and gh,s are all equivalent in expectation (i.e.,
+unbiased), while gs differs in expectation (i.e., biased). We further show they all have
+different variance properties. We analyze these gradients via their single-sample Monte Carlo
+estimates,
+.
+ĝi (h, a) = (1 − γ)Qπ
+i (hi , ai )∇θi log πi (ai ; hi , θi ) ,
+.
+π
+ĝh (h, a) = (1 − γ)Q (h, a)∇θi log πi (ai ; hi , θi ) ,
+.
+ĝs (h, s, a) = (1 − γ)Qπ (s, a)∇θi log πi (ai ; hi , θi ) ,
+.
+ĝh,s (h, s, a) = (1 − γ)Qπ (h, s, a)∇θi log πi (ai ; hi , θi ) ,
+
+(22)
+(23)
+(24)
+(25)
+
+such that
+∇θi J = Eh,a∼ρ(h,a) [ĝi (h, a)] ,
+
+(26)
+
+gh = Eh,a∼ρ(h,a) [ĝh (h, a)] ,
+
+(27)
+
+gs = Eh,s,a∼ρ(h,s,a) [ĝs (h, s, a)] ,
+
+(28)
+
+gh,s = Eh,s,a∼ρ(h,s,a) [ĝh,s (h, s, a)] .
+
+(29)
+
+To simplify notation, we will occasionally refer to these sample gradients simply as ĝi ĝh , ĝs ,
+and ĝh,s , with their inputs omitted and implicitly sampled from the appropriate distributions.
+Finally, all the methods described above are summarized in Table 1 for convenience.
+Notes on Implementation Details We briefly note that most practical implementations
+of policy gradients deviate from these theoretical gradient derivations in two ways: firstly,
+the factor (1 − γ) can be ignored in practice because optimization practices primarily care
+about the gradient direction rather than the gradient scale. Modern optimizers also tend to
+have adaptive step-size mechanisms that in some ways make the scaling factor irrelevant.
+Secondly, practical implementations estimate the gradient expectations using empirical onpolicy experience that does not exactly represent a sample from ρ, since it does not take
+11
+
+Lyu, Baisero, Xiao, Daley, & Amato
+
+into account the discount factor present in the definition of ρ. In practice, this leads to some
+bias. However, it is likely to be a minor bias for most control problems. In this work, we
+are interested in analyzing the theoretical properties of the correct gradient definitions. We
+will therefore consider the discrepancies between the formally correct gradients and common
+practices as implementation details to be ignored in the theoretical analysis.
+Note on Value Function Assumption Our following theories are based on the mathematical definitions of value functions rather than direct application of critic models; this is
+equivalent to assuming that the critic models have been trained sufficiently and accurately
+until optimal convergence.
+Assumption (Accurate Critics). We assume critic models that are trained to accurately
+represent the respective values, i.e.,
+Q̂(h, a) = Qπ (h, a) ,
+
+(30)
+
+Q̂ i (hi , ai ) = Qπ (hi , ai ) ,
+
+(31)
+
+Q̂(s, a) = Q (s, a) ,
+
+(32)
+
+Q̂(h, s, a) = Qπ (h, s, a) .
+
+(33)
+
+π
+
+This assumption often exists in the form of infinitesimal step sizes for the actors (Konda
+& Tsitsiklis, 2000; Singh, Kearns, & Mansour, 2000; Zhang & Lesser, 2010; Bowling &
+Veloso, 2001; Foerster et al., 2018) for convergence arguments of AC, since the critics are
+on-policy return estimates and the actors need an unbiased and up-to-date critic. Although
+this assumption is in line with previous theoretical works, it is nevertheless unrealistic; we
+discuss the practical implications of relaxing this assumption in Section 7.4.
+
+4. Bias and Variance of History-Based Critics
+In this section, we establish the convergence of the two history-based critic methods: Independent Actor-Critic (IAC) and Independent Actor with Centralized History Critic (IACC-H).
+We prove that the decentralized policies receive the same expected gradient from the centralized critic and decentralized critics. We thus prove that the centralized critic provides
+unbiased and correct on-policy return estimates, but at the same time, makes the agents
+suffer from the same action shadowing problem (Matignon, Laurent, & Le Fort-Piat, 2012)
+seen in decentralized learning. It is reassuring that the centralized critic will not encourage a
+decentralized policy to pursue a centralized policy that is only achievable in a centralized
+manner but also calls into question the benefits of a centralized critic.
+4.1 Bias Analysis of Individual History-Based Gradients
+We now show that the gradient updates for the decentralized policies in IAC and IACC-H
+are the same in expectation. Our work can be thought to extend an early (but perhaps
+underappreciated) analysis, the difference is that we consider more types of value functions
+and we use the AC framework and investigate on-policy return values (potentially learned by
+a critic), rather than Monte Carlo returns;
+We now establish a relationship between the values learned by centralized and decentralized critics.
+12
+
+On Centralized Critics
+
+agent 1
+
+agent 2
+
+u1
+
+u2
+
+u3
+
+u1
+
+11
+
+-30
+
+0
+
+u2
+
+-30
+
+7
+
+6
+
+u3
+
+0
+
+0
+
+5
+
+Table 2: Return values for Climb Game (Claus & Boutilier, 1998).
+π
+Lemma 1. Value functions Qπ
+i (hi , ai ) and Q (h, a) are related by
+π
+Qπ
+i (hi , ai ) = Eh,a|hi ,ai [Q (h, a)] .
+
+(34)
+
+(Proof in Appendix B.2). Lemma 1 implies that after the critics have converged to their
+respective on-policy values, the policy gradients for IACC-H and IAC are equal in expectation
+(and hence mutually unbiased).
+Theorem 1. The IACC-H sample gradient is an unbiased estimate of the IAC sample
+gradient, i.e., gh = E [ĝh ] = E [ĝi ] = ∇θi J.
+Proof. From Lemma 1, the decentralized value function becomes a marginal expectation of
+the centralized value function after convergence. Under the expectation over joint histories
+and joint actions conditioned on (hi , ai ), these two fixed points are identically equal. Thus,
+when we invoke Equation (34) in the definition of gh in Equation (19), we exactly recover
+the definition of ∇θi J in Equation (18):
+gh = (1 − γ) Eh,a [Qπ (h, a)∇θi log πi (ai ; hi , θi )]
+
+
+= (1 − γ) Ehi ,ai Eh,a|hi ,ai [Qπ (h, a)] ∇θi log πi (ai ; hi , θi )
+= (1 − γ) Ehi ,ai [Qπ (hi , ai )∇θi log πi (ai ; hi , θi )]
+(35)
+
+= ∇θi J .
+
+Theorem 1 establishes the equivalence between the policy gradients given by centralized
+and decentralized history-based critics. Intuitively, the proof suggests that the marginalization
+of other agents’ histories Eh,a|hi ,ai [Qπ (h, a)] occurs in different forms with both centralized
+and decentralized critics. For decentralized critics, the marginalization is already done
+implicitly during value learning, as shown in Lemma 1 (Equation (34)). For centralized critics,
+this marginalization happens explicitly at the policy gradient step, as shown in Equation (35).
+The implication is significant but may be counter-intuitive. That is, since the expected
+gradients given by both centralized and decentralized critics are equal, we must conclude that
+a centralized critic does not lead to better coordination and cooperation in policy learning. In
+other words, in theory, we cannot expect to obtain a better policy with critic centralization.
+13
+
+Lyu, Baisero, Xiao, Daley, & Amato
+
+4.1.1 Climb Game Example
+We use the Climb Game (Claus & Boutilier, 1998), a classic matrix game, to intuitively
+highlight that IAC and IACC-H give the same policy gradient in expectation. We use a to
+represent an agent’s action variable, and u to represent the concrete values that it can take,
+e.g., a1 is the first agent’s action, while u1 is the first action in the action set. The Climb
+Game is a state-less matrix game (see Table 2) in which agents must cooperate to achieve
+the optimal reward of 11 by taking the joint action ⟨a1 = u1 , a2 = u1 ⟩, while overcoming the
+risk of being punished by worse rewards (−30 or 0) when the agents fail to coordinate. It
+is notoriously difficult for independent learners to converge to the optimal actions due to
+the low expected return an agent will receive when the other agent’s policy is not already
+choosing the optimal action.
+This cooperation issue arises when a potentially good action u has low on-policy values
+and high returns are conditional on other agents’ policies. In that case, both agents would
+have to take the lower-valued action (multiple times) to learn to choose it. This creates a
+dilemma where agents are less prone to take the optimal action u, locking themselves into
+other local optima. In the Climb Game, the value of u1 is shadowed because it does not
+produce a satisfactory return unless the other agent also takes u1 frequently enough. This
+commonly occurring multi-agent local optimum is called a shadowed equilibrium (Fulda &
+Ventura, 2007; Panait, Tuyls, & Luke, 2008), a known difficulty in independent learning
+which usually requires an additional coordination mechanism.
+Consider solving the Climb Game with IAC, assuming the agents start with uniformly
+random policies. The independent value function Qπ
+i used in IAC results in action values,
+
+19
+11 − 30
+=− ,
+3
+3
+11 − 30
+19
+π
+Q2 (u1 ) =
+=− ,
+3
+3
+
+Qπ
+1 (u1 ) =
+
+−30 + 7
+23
+=− ,
+3
+3
+−30 + 7 + 6
+17
+π
+Q2 (u2 ) =
+=− ,
+3
+3
+Qπ
+1 (u2 ) =
+
+6+5
+11
+=
+,
+3
+3
+5
+Qπ
+,
+2 (u3 ) =
+3
+
+Qπ
+1 (u3 ) =
+
+making u3 the most attractive action to both agents. Note that we only compare the
+action values Qπ to determine which one is favored, because in all cases the gradient
+term ∇θi log πi (ai ) is the same (Equation (18)). In this case, both agents will update
+towards favoring u3 , leading them to never favor u1 and never converge to the optimal value
+Q∗i (u1 ) = 11.
+Consider instead solving the Climb Game with IACC-H, again assuming the agents
+start with uniformly random policies. In this case, the centralized value function Qπ (a) is
+fully capable of representing the individual joint values, mirroring the full reward matrix
+from Table 2. However, despite this, the policy gradients are still computed with respect
+to individual agents, and averaged over other agents, therefore suffering from the same
+14
+
+On Centralized Critics
+
+Returns
+
+10
+5
+0
+
+JAC
+IAC
+IACC-H
+
+5
+0
+
+1000
+
+2000
+
+Steps
+
+3000
+
+4000
+
+Figure 1: Climb Game empirical returns showing both decentralized and centralized critic
+methods succumb to the shadowed equilibrium problem (showing mean and standard deviation
+over 50 runs per method).
+shadowing issue, which we show next for agent 1,
+gh = (1 − γ) Ea1 ,a2 [Qπ (a1 , a2 )∇θi log π 1 (a1 )]
+1
+= (1 − γ) (Qπ (u1 , u1 ) + Qπ (u1 , u2 ) + Qπ (u1 , u3 )) ∇θi log π 1 (u1 )
+9
+1
++ (1 − γ) (Qπ (u2 , u1 ) + Qπ (u2 , u2 ) + Qπ (u2 , u3 )) ∇θi log π 1 (u2 )
+9
+1
++ (1 − γ) (Qπ (u3 , u1 ) + Qπ (u3 , u2 ) + Qπ (u3 , u3 )) ∇θi log π 1 (u3 )
+ 9
+
+19
+23
+11
+= (1 − γ) − ∇θi log π 1 (u1 ) − ∇θi log π 1 (u2 ) + ∇θi log π 1 (u3 ) ,
+9
+9
+9
+
+(36)
+
+which overall still ends up preferring and promoting the sub-optimal action u3 over the
+others. In fact, this should be of no surprise considering that the IAC and AICC-H gradients
+are the same in expectation, according to Theorem 1, and are therefore subject to the same
+theoretical cooperation issues in expectation.
+Empirical evaluation on the Climb Game (shown in Figure 1) confirms our analysis,
+showing both methods converge to the suboptimal solution ⟨u3 , u3 ⟩. At the same time, also
+unsurprisingly, a centralized controller always gives the optimal solution ⟨u1 , u1 ⟩. In general,
+we observe that the centralized critic has the information of the optimal solution, information
+that is only obtainable in a centralized fashion and is valuable for agents to break out of
+their cooperative local optima. However, this information is unable to be effectively utilized
+by the individual actors to form a cooperative policy. Therefore, contrary to the common
+intuition, in its current form, the centralized critic is unable to foster cooperative behavior
+more easily than the decentralized critics.
+4.2 Variance Analysis of Individual History-Based Gradients
+In this section, we first show that with true on-policy value functions, the centralized critic
+formulation can increase policy gradient variance. More precisely, we prove that the policy
+gradient variance using a centralized critic is at least as large as the policy gradient variance
+with decentralized critics. We again assume that the critics have converged under fixed
+15
+
+Lyu, Baisero, Xiao, Daley, & Amato
+
+policies, thus ignoring the variance due to value function learning; we discuss the relaxation
+of this assumption in Section 7.4. We begin by comparing the policy gradient variance
+between centralized and decentralized critics.
+Theorem 2. The IACC-H sample gradient has variance greater or equal than that of the
+IAC sample gradient, i.e., Var [ĝh ] ≥ Var [ĝi ].
+Proof. Let µ = E [ĝh ] = E [ĝi ] denote the equal expectation of the IAC-HS and IAC gradients
+(Theorem 1), and S = ∇θi log π i (ai ; hi )∇θi log π i (ai ; hi )⊤ denote the outer product of the
+policy’s score-function vector with itself. Next, we compare the covariance matrices of the
+two sample gradients,
+Cov [ĝh ] − Cov [ĝi ]
+h
+i
+ h
+i
+
+= E ĝh ĝh⊤ − µµ⊤ − E ĝi ĝi⊤ − µµ⊤
+h
+i
+h
+i
+= E ĝh ĝh⊤ − E ĝi ĝi⊤
+
+
+
+
+2
+= (1 − γ) Eh,a Qπ (h, a)2 S − (1 − γ) Ehi ,ai Qπ
+i (hi , ai ) S
+h
+i
+
+
+ 
+= (1 − γ) Ehi ,ai Eh,a|hi ,ai Qπ (h, a)2 S − (1 − γ) Ehi ,ai Eh,a|hi ,ai [Qπ (h, a)]2 S
+h
+ i
+
+
+= (1 − γ) Ehi ,ai Eh,a|hi ,ai Qπ (h, a)2 − Eh,a|hi ,ai [Qπ (h, a)]2 S
+
+
+= (1 − γ) Ehi ,ai Varh,a|hi ,ai [Qπ (h, a)] S .
+(37)
+Because S is positive semi-definite and the variance of any quantity is non-negative, it follows
+that the matrix in Equation (37) has non-negative diagonal components, which in turn means
+that diag (Cov [ĝh ]) ⪰ diag (Cov [ĝi ]) element-wise. Further, Var [ĝh ] = trace (Cov [ĝh ]) ≥
+trace (Cov [ĝi ]) = Var [ĝi ]. So, not only is the total variance of ĝh greater than that of ĝi ,
+but the individual variances in any of their dimensions also have the same relationship.
+From the perspective of an agent i trained using IACC-H, the value associated with
+taking action ai in history hi is a random variable taking values Qπ (h, a) depending on other
+agents’ histories h\i and actions a\i . The variance of this random variable is dictated by
+how such values change depending on the other agents’ histories and actions, as determined
+by Pr(h, a | hi , ai ). In the following subsections, we analyze this total variance increase by
+examining two sources: The “Multi-Action Variance” (MAV) induced by the other agents’
+policies, and the “Multi-Observation Variance” (MOV) induced by uncertainty over the other
+agents’ histories. In essence, MAV is influenced by the uncertainty over a\i , while MOV by
+the uncertainty over h\i in Lemma 1.
+4.2.1 Multi-Action Variance (MAV)
+The Multi-Action Variance is a component of the total value variance dictated by how other
+agents choose their own actions, according to their own (stochastic) policies, which randomly
+influences the values experienced by other agents, contributing only to their value variance
+Qπ (h, a), but to the variance of the IACC-H sample gradient ĝh variance as well. In contrast,
+this variance does not exist for the IAC sample gradient ĝi , because its associated value
+function Qπ
+i (hi , ai ) intrinsically integrates out other agents’ actions, per Lemma 1.
+16
+
+On Centralized Critics
+
+agent 1
+
+agent 2
+
+pickles
+
+cereal
+
+vodka
+
+1
+
+0
+
+milk
+
+0
+
+3
+
+Table 3: Return values for the Morning Game.
+
+Morning Game Example The Morning Game shown in Table 3 is a matrix game
+inspired by previous work (Peshkin et al., 2000) and consists of two agents collaborating to
+make breakfast by choosing liquid and solid ingredients, of which the best combination is
+⟨cereal, milk⟩.
+A common misleading intuition is that the centralized critic results in lower learning
+variance. This could be often justified by two separate reasoning: first, the value learning
+is more stable for a centralized critic; second, the centralized critic have more information
+and therefore is able to provide a more accurate and specific value estimate. We agree with
+the former reasoning, due to the lack of environmental stochasticity in this example, the
+centralized critic can robustly learn accurate values after a few samples, while decentralized
+critics need more training to correctly average learned values over the unobserved teammate
+actions. However, when we move on from critic-learning to policy-learning, assume learned
+or matured (or simply assuming the value function is used) to learn policies, we find the
+second argument is in fact misleading. In support of this misleading intuitive argument of
+precise estimates translates to less variance, one might reason that for a centralized critic
+Q̂(a), the joint action cereal with milk always returns an environmental reward of 3, while
+cereal with vodka always returns an environmental reward of 0. On the other hand, for the
+decentralized critic Q̂ 1 (a1 ), action a1 = cereal returns an environmental reward of 3 or 0
+stochastically, depending on the second agent’s action, making it a harder learning task with
+higher variance.
+Contrary to the above intuition, a centralized critic actually results in higher variance for the learning agent. What the intuition is missing, is the fact that at the moment when the critic models are used to inform the policy gradients, they may result
+in additional variance intrinsic to the random variables that are given as input. Suppose agents employ uniform random policies. Then, the IAC value is deterministically
+π
+π
+Qπ
+1 (cereal) = π2 (milk)Q (cereal, milk) + π2 (vodka)Q (cereal, vodka) = 1.5 for π 1 (cereal) upπ
+π
+dates, and Q1 (pickles) = π2 (milk)Q (pickles, milk) + π2 (vodka)Qπ (pickles, vodka) = 0.5 for
+π 1 (pickles) updates. In each case, the value associated with the agent’s action is deterministic.
+On the other hand, the IACC-H value is either Qπ (cereal, milk) = 3 or Qπ (cereal, vodka) = 0
+for π1 (cereal) updates, and Qπ (pickles, milk) = 0 or Qπ (pickles, vodka) = 1 for π1 (pickles)
+updates, depending on the actual value of the second agent’s random action. In essence,
+decentralized values already represent the expectation over other agents’ actions, therefore
+removing the MAV. Therefore, under both methods, π1 updates towards cereal, but the
+decentralized-critic updates have less variance and result in a more deterministic improvement
+in favor of cereal.
+17
+
+Lyu, Baisero, Xiao, Daley, & Amato
+
+Morning Game
+
+Morning Game
+3
+
+Q value
+
+Q value
+
+3
+2
+1
+
+2
+1
+IAC
+
+IAC
+
+0
+
+IACC-H
+
+0
+
+20000
+
+Step
+
+IACC-H
+
+0
+
+40000
+
+0
+
+(a) Individual runs, showing 40 runs per method.
+
+20000
+
+Step
+
+40000
+
+(b) Mean and standard deviation.
+
+Figure 2: Q value for updating π(cereal) over time. Showing a larger variance in the values
+for IACC-H than for IAC, which does not reduce in the long term.
+Empirically, Figures 2a and 2b show how the Q-values evolve for the optimal action a2 in
+both methods for the Morning Game. First, observe that both types of critics converge to the
+correct value, around 3, which confirms our convergence analysis for both methods and that
+the resulting gradients are unbiased. Second, the two methods’ Q-value variance appears to
+differ significantly. Notice that both types of value variances exhibit approximation errors
+across different seeds, which are also viewed as error bands in the figure. This type of variance
+caused by approximation error is the only source of variance for decentralized critics. On the
+other hand, centralized critics have the additional variance that comes from joint actions
+involving the action-in-question and potentially different actions from other agents, e.g.,
+producing a high value when a teammate chooses milk and a low value when a teammate
+chooses vodka. Having to average over teammate actions is, therefore, the essence of MAV.
+4.2.2 Multi-Observation Variance (MOV)
+For history-based critics in the partially observable case, another source of variance in local
+value Varh,a|hi ,ai [Qπ (h, a)] comes from factored observations. More concretely, for an agent
+having observed a particular local trajectory hi , other agents’ trajectories h\i may vary, and
+the decentralized critic must average over this observation variance and provide a single
+expected value for each local trajectory Qπ
+i (hi , ai ). The centralized critic, on the other
+hand, is able to distinguish each combination of trajectories hi and h\i , but when used for a
+decentralized policy at hi , teammate history h\i is effectively a random variable sampled
+from Pr(h\i | hi ), and we expect the mean estimated return during the update process to be
+Eh|hi [Qπ (h, a)].
+Guess Game Example Consider a one-step two-agent task with binary uniform random
+observations and binary actions. The agents are rewarded with 10 if both their actions
+match the other agent’s observation, −10 if neither does, and 0 otherwise. In practice, each
+agent can only guess randomly which action will lead to the positive reward. More broadly,
+18
+
+On Centralized Critics
+
+10
+JAC
+
+Returns
+
+8
+
+IAC
+IACC-H
+
+6
+4
+2
+0
+
+100k
+
+200k
+
+300k
+
+Steps
+
+Figure 3: Performance (mean test return) comparison in Guess Game, plotting mean and
+standard deviation aggregating 40 runs per method; showing centralized critic cannot bias
+the actors towards the global optimum in the simplest situation.
+the decentralized value function takes a value of Qπ
+i (hi , ai ) = 0 with zero variance for any
+combination of agent policies. On the other hand, a centralized value function with global
+scope can distinguish between the various returns, but will return different values depending
+on the stochastic values of h and a, and hence estimates Qπ (h, a) = 10 with probability 25%,
+Qπ (h, a) = −10 with probability 25%, and Qπ (h, a) = 0 with probability 50%, resulting in
+a total variance of 12 102 = 50. In this example, a centralized critic produces returns estimates
+with higher variance when agents have varying observations.
+
+5. Bias and Variance of State-Based Critics
+Having established the convergence of IAC and IACC-H, we will use them as a basis to
+analyze the convergence of the two state-based critic methods: IACC-S and IACC-HS. We
+provide a theoretical bias analysis complemented by simple intuitive examples. In this
+section, we extend the above analysis to commonly used state-based critics, which are often
+assumed to be strictly beneficial. However, we emphasize that using a state-based critic
+to train history-based policies is theoretically incorrect, as we show that it may result in
+bias in the policy gradient. Even with CTDE, where we may access the states during
+training, we are still aiming to solve a Dec-POMDP problem where the desired output is
+history-based policies (that can execute independently using local information); that is,
+state information is not available during execution. Therefore, history-based policies would
+need to infer, directly or indirectly, the underlying state distribution based on the observed
+histories. For example, the state distribution may be high in entropy when little information
+can be derived from observations; hence in some tasks, agents ought to collect information
+to gain insight into the state distribution before making important decisions. Intuitively,
+providing the underlying state to the history-based policies during offline training can hinder
+the policies’ ability to reason about uncertainty because when the state is known, efforts
+such as information collection are unnecessary. This information mismatch between critic
+(state-based) and actor (history-based) is, thus, intuitively where the bias we discuss in this
+19
+
+Lyu, Baisero, Xiao, Daley, & Amato
+
+section originates. In this section, we show that the state-based critic may introduce bias
+into the policy gradient compared to the provably convergent history-based critics. That is,
+the gradient given by the history-based critics ∇θi J (and gh ) leads to convergence to a local
+optimum, which is guaranteed to be a Nash equilibrium (Peshkin et al., 2000); however, as
+we will show next, the gradient given by the state-based critic is biased, so the policy is not
+guaranteed to also converge to the same local solution. Since we have shown (centralized
+and decentralized) history-based critics give the same expected policy gradient, we will use
+centralized history-based critics for the comparison below.
+5.1 Bias Analysis of State-Based Gradients
+The gradient from a state-based critic is given by:
+gs = (1 − γ) Eh,s∼ρ(h,s),a∼π(h) [Qπ (s, a)∇θi log π i (ai ; hi )]
+
+
+= (1 − γ) Eh∼ρ(h),a∼π(h) Es∼ρ(s|h) [Qπ (s, a)] ∇θi log π i (ai ; hi ) .
+
+(38)
+
+Using the history-based gradient (Equation (19)), we see the state-value-based-gradient gs is
+also unbiased iff
+Qπ (h, a) = Es∼ρ(s|h) [Qπ (s, a)] .
+
+(39)
+
+Therefore, the bias of gs can be analyzed indirectly through Qπ (s, a). We adopt the
+methodology employed by prior work for the single-agent control case (Baisero & Amato,
+2022), and will treat Qπ (s, a) as an estimator of Qπ (h, a). Consequently, if Qπ (s, a) is
+unbiased, then gs is also unbiased.
+We emphasize that expectation over state values cannot be assumed to have the information necessary to produce the correct history values. Essentially, we highlight that
+history values is an expectation of values over different histories-state pairs, Qπ (h, a) =
+Es∼ρ(s|h) [Qπ (h, s, a)], which is different to Equation (39). Of course, when Qπ (h, s, a) =
+Qπ (s, a) for all h and s, we can justify Equation (39), yet this equality cannot assume to hold
+in partially observable settings. We illustrate this point in more detail by comparing history
+and state value tables and their marginalizations, as well as more intuition and example, in
+the following paragraphs.
+Consider the tabular form of the history-state function under a specific action a, Qπ
+a ∈
+|S|×|H|
+π (h , s , a) where i and j are used to
+R
+, such that Q table is noted as Qπ
+=
+Q
+i
+j
+a,ij
+index the joint history h and a state s (we will use this convention for the remainder of this
+section); if both the state and observation spaces are finite, Qπ
+a will be a finite matrix. Also
+consider the tabular form of the normalized discounted visitations P π ∈ [0, 1]|S|×|H| , such
+that Pijπ = ρ(h, s). Note that recovering ρ(h | s) and ρ(s | h) from P π requires renormalizing
+the values in a specific row or column,
+Pijπ
+ρ(h, s)
+P
+=
+π ,
+′
+s′ ρ(s , h)
+j ′ Pij ′
+
+(40)
+
+Pijπ
+ρ(h, s)
+P
+=
+π .
+′
+h′ ρ(h, s )
+i′ P i′ j
+
+(41)
+
+ρ(h | s) = P
+ρ(s | h) = P
+
+20
+
+On Centralized Critics
+
+π
+The matrices Qπ
+a and P contain the necessary information to determine all marginal history
+π
+Q (h, a) and state values Qπ (s, a) as normalized dot products:
+π
+
+Q (h, a) =
+
+X
+
+X
+
+π
+
+ρ(s | h)Q (h, s, a) =
+
+j′
+
+s
+π
+
+Q (s, a) =
+
+X
+
+P π′
+P ij π Qπ
+a,ij ′ ,
+j ′ Pij ′
+Piπ′ j
+
+X
+
+π
+
+ρ(h | s)Q (h, s, a) =
+
+π
+π Qa,i′ j .
+i′′ Pi′′ j
+
+P
+i′
+
+h
+
+(42)
+(43)
+
+On the other hand, the correct expected state value as listed in Equation (39) is
+Es∼ρ(s|h) [Qπ (s, a)] =
+
+X
+
+=
+
+X
+
+=
+
+X
+
+ρ(s | h)Qπ (s, a)
+
+s
+
+ρ(s | h)
+
+X
+
+ρ(h′ | s)Qπ (h′ , s, a)
+
+h′
+
+s
+
+Pijπ′
+
+X
+
+π
+j ′′ Pij ′′
+
+i′
+
+P
+j′
+
+P π′ ′
+P i j π Qπ
+a,i′ j ′ .
+i′′ Pi′′ j ′
+
+(44)
+
+Note that Qπ (h, a) in Equation (42) only involves the elements on a specific row of both
+
+π
+Qπ
+a and P , while the expected state value in Equation (44) involves all elements of both
+π
+Qπ
+a and P . While this provides an intuitive reason for the fact that the two values are not
+π
+necessarily the same, the inequality proof is still incomplete; in fact, the values in Qπ
+a and P
+
+are not arbitrary, but are related by problem dynamics, policies, and history-state Bellman
+equations, which may still result in Equations (42) and (44) being numerically equivalent.
+However, we prove that this is not the case.
+Theorem 3. Qπ (s, a) may be a biased estimate of Qπ (h, a), i.e., the equality
+Qπ (h, a) = Es|h [Qπ (s, a)]
+
+(45)
+
+cannot be assumed to hold.
+Proof. We prove Theorem 3 with an argument analogous to that made in (Baisero &
+Amato, 2022), which is applicable to our novel always-well-defined state value function
+Qπ (s, a). For a generic environment, consider an arbitrary joint action a, and two different
+joint histories hA =
+̸ hB associated with the same discounted conditional state visitations
+distribution ρ(s | hA ) = ρ(s | hB ) (a reasonably common occurrence in partially observable
+environments). Because the joint histories are different, there are many history-based policies
+π which result in different future behaviors starting from hA and hB , which results in
+different history values,
+Qπ (hA , a) ̸= Qπ (hB , a) .
+(46)
+On the other hand, the conditional state distributions ρ(s | hA ) = ρ(s | hB ) are equal,
+which implies that the expected state values are also equal,
+Es|hA [Qπ (s, a)] = Es|hB [Qπ (s, a)] .
+21
+
+(47)
+
+Lyu, Baisero, Xiao, Daley, & Amato
+
+Assuming that the equality Qπ (h, a) = Es|h [Qπ (s, a)] holds leads to a contradiction
+with Equations (46) and (47),
+Es|hA [Qπ (s, a)] = Qπ (hA , a) ̸= Qπ (hB , a) = Es|hB [Qπ (s, a)] .
+
+(48)
+
+Therefore, Qπ (h, a) = Es|h [Qπ (s, a)] cannot assume to hold in general.
+Intuitively, recall that the state values alias over all the histories that visit the state. It
+is often the case that state spaces are considerably more compact than the history space.
+As a result, the aliasing compresses values over history spaces into values over state spaces
+in a way that loses important information regarding uncertainty. For a particular state,
+agents may or may not have gathered information through their observations, and this
+information usually determines their optimal next step and expected returns. Unfortunately,
+those distinctions cannot be captured by the state value, hence the expected state value is
+biased for history-based policies. Compared to history values, which are already established
+to provide the correct gradient, state values become questionable as they are not equivalent
+to history values in expectation, as suggested by the above Theorem 3. Indeed, as we will
+show in the next section, the biased expected values for state-based critics will lead to biased
+policy gradients. We now use an example to illustrate this issue intuitively.
+5.1.1 Dec-Tiger Example
+This example also serves as alternative proof for Theorem 3. Dec-Tiger (Nair, Tambe, Yokoo,
+Pynadath, & Marsella, 2003) is a classic Dec-POMDP domain where two agents face a left
+door and a right door, behind one of which lies a tiger. The agents can individually listen,
+open-left or open-right. The listen action is used to detect the tiger location and results
+in a reward of −2, and observations hear-left or hear-right which indicate the correct tiger
+location with probability 85%. Opening doors terminate the episode immediately and result
+in rewards of −50 if both agents open the tiger door, 20 if both agents open the non-tiger
+door, −100 if the agents open different doors, −101 if only one agent opens a door, and it is
+the tiger’s door, and 9 if only one agent opens a door, and it is not the tiger’s door.
+Consider the pair of agent policies that will listen in the first two timesteps, and open the
+most promising door in any other timestep based on their individual observations (opening
+randomly if neither door is more promising than the other), i.e.,
+
+
+δlisten
+if |hi | < 2 ,
+
+
+
+δ
+if hi contains more hear-right than hear-left ,
+open-left
+π i (hi ) ∼
+(49)
+
+δopen-right
+if hi contains mroe hear-left than hear-right ,
+
+
+
+U(open-left, open-right) otherwise
+In Appendix C, we compute many values associated with these agent policies, including discounted counts, probabilities, state values, history-state values, and history values. Among those, we have computed the state values associated with the listen actions
+Qπ (s, (listen, listen)) = −18.175, and the history value associated with the empty history
+Qπ (h = ϵ, (listen, listen)) = −16.175. Note that state values associated with the joint
+listening action are invariant to the particular state, meaning that history value can never be
+22
+
+On Centralized Critics
+
+recovered from the state value. That is, any weighted average over possible states results in
+the same value,
+1
+Es|h=ϵ [Qπ (s, (listen, listen))] = Qπ (tiger-left, (listen, listen))
+2
+1
++ Qπ (tiger-right, (listen, listen))
+2
+= −18.175 ,
+
+(50)
+
+which is clearly different from Qπ (h = ϵ, (listen, listen) = −16.175. In this case, the two
+values are different but still fairly similar. However, this need not be the case in general, and
+large differences may also exist, as we show next.
+Consider the joint history value associated with both agents hearing the tiger on the left
+twice, denoted as hL = ((hear-left, hear-left), (hear-left, hear-left)), and joint listening action
+(listen, listen). Even though the policies on their own would not listen on that history, this is
+still a well-defined counterfactual value. Note that the policies will inevitably choose openright next, regardless of which new observation is received. Therefore, Qπ (hL , (listen, listen))
+is the expected reward obtained when opening the right door,
+Qπ (hL , (listen, listen)) = Es|hL [R(s, (open-right, open-right))]
+= 0.999 · 20 + 0.001 · (−50)
+= 19.93 .
+
+(51)
+
+On the other hand, as mentioned previously, any weighted average of Qπ (s, (listen, listen))
+over state probabilities results in the same value,
+Es|hL [Qπ (s, (listen, listen))] = 0.001Qπ (tiger-left, (listen, listen))
++ 0.999Qπ (tiger-right, (listen, listen))
+= −18.175 ,
+
+(52)
+
+a much more substantial difference in expected values, and in turn, as we will show next,
+in expected gradient. Practically, state values can lead to incorrect estimations of the
+(history-based) policy values and then poor policy learning.
+5.1.2 Biased Gradient
+We note that state values Qπ (s, a) being biased estimates of history values Qπ (h, a) (per
+Theorem 3) does not formally imply that state gradients ĝs are biased estimates of history
+gradients ĝh ; because an average of biased estimates could technically result in an unbiased
+estimate, it is still technically possible for the state gradients to be unbiased after all. Here,
+we provide a definitive proof that this is not the case.
+Theorem 4. The IACC-S and IACC-H gradients may differ, gs ̸= gh .
+Proof. See Appendix B.3.
+To summarize the proof, it uses the fact that state values cannot always be used to obtain history values as in Theorem 3, and for at least some environments and policy parameterizations,
+this bias in value translates to bias in the policy gradient.
+23
+
+Lyu, Baisero, Xiao, Daley, & Amato
+
+The implication of Theorem 4 is that state-based critics are inherently flawed in training
+history-based policies, for which history values are established to be correct. This may lead
+to arbitrarily worse performance for state-based critics; as shown in the Dec-Tiger example
+above, the state-based critic provides no information as to how the policy should be updated—
+both states have the same state value, causing all actions to be updated equally. This is very
+different from history values where observed information affects the values and aids policy
+changes accordingly. However, states can be compact representations or potentially ease
+learning. After discussing the variance in the state-based cased, we analyze the case of using
+both state and history as an alternative that is both unbiased and potentially easy to learn.
+5.2 Variance Analysis of State-Based Gradients
+In this subsection, we discuss the effect of state values Qπ (s, a) on the variance of the policy
+gradient estimate ĝs . Like our bias analysis, we discuss the oracle values Qπ instead of its
+estimated counterpart Q̂. The policy gradient theorem for Dec-POMDPs explicitly requires
+the history value Qπ (h, a) to be the value used to weigh the policy’s score function (Lyu
+et al., 2021; Bono et al., 2018). In that capacity, Qπ (h, a) is a specific scalar associated
+with the history and has no variance. On the other hand, using state value Qπ (s, a) as
+an estimator of Qπ (h, a) introduces variance, as s is sampled from the history’s associated
+belief b(h). However, it does not necessarily imply that the corresponding gradient ĝs also
+has a higher variance than ĝh in general. Instead, we show that if Qπ (s, a) is unbiased for a
+given policy and a Dec-POMDP, then ĝs has a variance greater than or equal to that of ĝh .
+Theorem 5. In the special cases where state values Qπ (s, a) are unbiased, the IACC-S
+sample gradient has variance greater or equal than that of the IACC-H sample gradient, i.e.,
+Qπ (h, a) = Es∼ρ(s|h) [Qπ (s, a)] =⇒ Var [ĝs ] ≥ Var [ĝh ] .
+
+(53)
+
+Proof. We prove the theorem by assuming that the value equality Qπ (h, a) = Es|h [Qπ (s, a)]
+holds and showing that the variance inequality also holds. Let µ = E [ĝs ] = E [ĝh ]
+denote the assumed equal expectation of the IACC-S and the IACC-H gradients, and
+S = ∇θi log π i (ai ; hi )∇θi log π i (ai ; hi )⊤ denote the outer product of the policy’s score-function
+vector with itself. Next, we compare the covariance matrices of the two sample gradients,
+Cov [ĝs ] − Cov [ĝh ]
+h
+i
+ h
+i
+
+= E ĝs ĝs⊤ − µµ⊤ − E ĝh ĝh⊤ − µµ⊤
+h
+i
+h
+i
+= E ĝs ĝs⊤ − E ĝh ĝh⊤
+
+
+
+
+= (1 − γ) Eh,s,a Qπ (s, a)2 S − (1 − γ) Eh,a Qπ (h, a)2 S
+h
+i
+
+
+ 
+= (1 − γ) Eh,a Es|h Qπ (s, a)2 S − (1 − γ) Eh,a Es|h [Qπ (s, a)]2 S
+ i
+h
+
+
+= (1 − γ) Eh,a Es|h Qπ (s, a)2 − Es|h [Qπ (s, a)]2 S
+
+
+= (1 − γ) Eh,a Vars|h [Qπ (s, a)] S .
+
+(54)
+
+Because S is positive semi-definite and the variance of any quantity is non-negative, it follows
+that the matrix in Equation (54) has non-negative diagonal components, which in turn means
+24
+
+On Centralized Critics
+
+that diag (Cov [ĝs ]) ⪰ diag (Cov [ĝh ]) element-wise. Further, Var [ĝs ] = trace (Cov [ĝs ]) ≥
+trace (Cov [ĝh ]) = Var [ĝh ]. So, when also unbiased, not only is the total variance of ĝs
+greater than that of ĝh , but the individual variances in any of their dimensions also have the
+same relationship.
+Although Theorem 5 alone contains a result that is conditional to an equality which does
+not necessarily hold for a generic Dec-POMDP, combining Theorems 3 and 5 results in a
+broader statement about the overall quality of state-based policy gradient estimates.
+Corollary 5.1. IACC-S never has strictly better bias/variance properties than IACC-H, i.e.,
+either its bias is higher (or equal), or its variance is higher (or equal), or neither is lower (or
+equal).
+Proof. Follows directly from Theorems 4 and 5.
+Beverage Example Consider a (single-agent) beverage domain, in which the agent is a
+barista who serves coffee or tea to a client. The client, who prefers coffee or tea, represents
+the randomly sampled initial state. The agent does not observe the client’s preference (we
+denote this as h = ε) and receives a reward of 1 if it chooses to serve the correct beverage
+and −1 if it chooses the wrong beverage. In either case, the episode ends. Suppose the agent
+chooses to serve tea. Then,
+Qπ (s = coffee, a = tea) = −1 ,
+π
+
+Q (s = tea, a = tea) = 1 ,
+π
+
+Q (h = ε, a = tea) = 0 .
+
+(55)
+(56)
+(57)
+
+While Qπ (h = ε, a = tea) is a constant with zero variance, the random variable Qπ (s, a = tea)
+conditioned on h = ε has strictly positive variance,
+
+
+Vars|h=ε [Qπ (s, a = tea)] = Es|h=ε Qπ (s, a = tea)2 − Es|h=ε [Qπ (s, a = tea)]2
+= Es|h=ε [1] − 02
+(58)
+
+= 1.
+
+Therefore, the policy gradient estimates have a higher variance with the state-based critic.
+
+6. Bias and Variance of History-State-Based Critics
+In order to avoid the potential bias issue of state-based critics yet also use the centralized state
+information, we analyze the History-State-based Critic seen in the Unbiased Asymmetric
+Actor-Critic method for the single agent case (Baisero & Amato, 2022), which we term IACCHS. Many CTDE works use some form of history-state value function, such as QMIX (Rashid
+et al., 2018) and its following works, in which the states are used for constructing the mixing
+hypernetwork; as well as seen in MAPPO (Yu, Velu, Vinitsky, Gao, Wang, Bayen, & Wu,
+2022), where the value estimation as a whole takes both history and state as input.
+25
+
+Lyu, Baisero, Xiao, Daley, & Amato
+
+6.1 Bias Analysis of History-State-Based Gradients
+As in the single-agent case, history-state values are unbiased estimators of history values,
+i.e., they are in expectation equivalent.
+Lemma 2. Qπ (h, s, a) is an unbiased estimate of Qπ (h, a), i.e., the equality
+Qπ (h, a) = Es|h [Qπ (h, s, a)]
+
+(59)
+
+holds.
+Proof. See Appendix B.2.
+We conclude that the joint history-state gradient gh,s as a whole is unbiased, i.e., equivalent
+in expectation to the individual history gradient gh .
+Theorem 6. The IACC-HS and IACC-H gradients are equal, gh,s = gh .
+Proof.
+gh,s = (1 − γ) Eh,s,a [Qπ (h, s, a)∇ log π i (ai ; hi )]
+
+
+= (1 − γ) Eh,a Es|h [Qπ (h, s, a)] ∇ log π i (ai ; hi )
+= (1 − γ) Eh,a [Qπ (h, a)∇ log π i (ai ; hi )]
+(60)
+
+= gh .
+
+The equivalence in expected gradients follows directly from the equivalence in expected
+value functions (Lemma 2). Therefore, unlike state-based critics, a history-state-based critic
+provides a policy gradient with similar convergence guarantees as a history-based critic.
+6.2 Variance Analysis of History-State-Based Gradients
+History-state-based critics give policy gradients with equal or more variance than historybased critics (IACC-H) because, for the same joint observation history, the system could
+be in a range of different states which may exhibit different history-state values. Since
+history-state-based critics are not biased, the variance analysis is analogous to Theorem 2.
+Theorem 7. The IACC-HS sample gradient has variance greater or equal to that of the
+IACC-H sample gradient, i.e., Var [ĝh,s ] ≥ Var [ĝh ].
+Proof. Let µ = E [ĝh,s ] = E [ĝh ] denote the equal expectation of the IACC-HS and the
+IACC-H gradients (Theorem 6), and S = ∇θi log π i (ai ; hi )∇θi log π i (ai ; hi )⊤ denote the outer
+product of the policy’s score-function vector with itself. Next, we compare the covariance
+26
+
+On Centralized Critics
+
+matrices of the two sample gradients,
+Cov [ĝh,s ] − Cov [ĝh ]
+h
+i
+ h
+i
+
+⊤
+= E ĝh,s ĝh,s
+− µµ⊤ − E ĝh ĝh⊤ − µµ⊤
+h
+i
+h
+i
+⊤
+= E ĝh,s ĝh,s
+− E ĝh ĝh⊤
+
+
+
+
+= (1 − γ) Eh,s,a Qπ (h, s, a)2 S − (1 − γ) Eh,a Qπ (h, a)2 S
+h
+i
+
+
+ 
+= (1 − γ) Eh,a Es|h Qπ (h, s, a)2 S − (1 − γ) Eh,a Es|h [Qπ (h, s, a)]2 S
+h
+ i
+ π
+
+2
+2
+π
+= (1 − γ) Eh,a Es|h Q (h, s, a) − Es|h [Q (h, s, a)] S
+
+
+= (1 − γ) Eh,a Vars|h [Qπ (h, s, a)] S .
+
+(61)
+
+Because S is positive semi-definite and the variance of any quantity is non-negative, it
+follows that the matrix in Equation (61) has non-negative diagonal components, which
+in turn means that diag (Cov [ĝh,s ]) ⪰ diag (Cov [ĝh ]) element-wise. Further, Var [ĝh,s ] =
+trace (Cov [ĝh,s ]) ≥ trace (Cov [ĝh ]) = Var [ĝh ]. So, not only is the total variance of ĝh,s
+greater than that of ĝh , but the individual variances in any of their dimensions also have the
+same relationship.
+Theorem 7 reports higher policy gradient variance when using a history-state-based critic
+compared to a history-based critic. This is because, for a particular history, the underlying
+states may vary; hence for updating that particular history, different corresponding historystate pairs are used, for which the history-state value function can learn different values.
+Combined with Theorem 2, we get the following corollary relating the variances of the three
+history-based methods.
+Corollary 7.1. The IACC-HS, IACC-H, and IAC sample gradients have non-monotonically
+decreasing variance, i.e., Var [ĝh,s ] ≥ Var [ĝh ] ≥ Var [ĝi ].
+The history-state-based critic is associated with the largest policy gradient variance,
+whereas the decentralized history-based critic is associated with the lowest policy gradient
+variance. Loosely speaking, the more aligned a critic is to the policy, the less variance
+there is to its policy gradient. This theoretical result may be counter-intuitive since a
+history-state-based critic value function describes a more specific situation, which usually
+varies less. However, because the policies are decentralized-history-based, using more specific
+value functions only increases the variation of values when considering a particular local
+history. However, as we shall see in the next section, our theory only tells half of the story.
+The three theoretically unbiased critics exhibit different levels of approximation error, where
+history-state-based critics are often preferable, despite the most policy gradient variance in
+theory.
+
+7. Empirical Findings and Discussions
+In this section, we present experimental results comparing different types of critics. We test on
+a variety of popular research domains including, but not limited to, classical matrix games, the
+27
+
+Lyu, Baisero, Xiao, Daley, & Amato
+
+10
+
+100
+
+IAC
+
+40
+
+10
+20
+IAC
+
+30
+
+IACC-H
+
+0.0
+
+0.5
+
+Steps
+
+(a) Dec-Tiger.
+
+1.0
+
+1e6
+
+80
+
+IACC-H
+
+35
+
+Returns
+
+Returns
+
+Returns
+
+0
+
+30
+
+60
+40
+20
+
+25
+
+IAC
+IACC-H
+
+0
+
+0.0
+
+0.5
+
+Steps
+
+1.0
+
+1.5
+
+1e7
+
+(b) Cleaner
+
+0
+
+2
+
+4
+
+Steps
+
+6
+
+8
+1e6
+
+(c) Find Treasure.
+
+Figure 4: Performances of IAC and IACC-H in different domains (showing mean and standard
+deviation over 20 runs per method).
+StarCraft Multi-Agent Challenge (SMAC) (Samvelyan, Rashid, de Witt, Farquhar, Nardelli,
+Rudner, Hung, Torr, Foerster, & Whiteson, 2019), the Multi-agent Particle Environments
+(MPE) (Mordatch & Abbeel, 2018), and the MARL Environments Compilation (Jiang,
+2019). We provide open-source implementations1 used for our experiments. We first discuss,
+for history-based critics, how higher policy gradient variance in centralized critics affects
+performance. We identify several problems caused by the higher policy gradient variance,
+including exploration and scalability issues. Second, we show empirical evidence that
+the unbiased centralized history-based critic is subject to the same independent learning
+pathologies seen with decentralized critics. Third, we highlight the bias and some practical
+issues with state-based critics. We also discuss insufficiencies of popular benchmarks, which
+we identify as a sub-class of Dec-POMDPs.
+Finally, we report overall preferable performance for history-state-based critics. From
+Corollary 7.1, we have seen that the history-state-based critic has the most variance. However,
+in the following experiments, we will see that the approach performs exceptionally well due to
+its unbiased nature (compared to state-based critics) and low approximation error compared
+to the history-based critic. We consider the approximation error as an approximation bias,
+which will become an essential practical trade-off we discuss in this section. We explain why
+despite having the highest theoretical policy gradient variance, the history-state-based critic
+may often be favorable due to being unbiased and typically having low approximation bias
+in practice. In other words, a state-history-based critic is not only theoretically sound but
+also potentially easier to learn than other critics.
+7.1 Policy Gradient Variance May Affect Performance
+We first discuss the empirical performance issues of history-based centralized critics (IACC-H)
+caused by higher policy gradient variance by comparing their performance to decentralized
+history-based critics (IAC). Although their performance is often identical in most environments, the higher variance in policy learning signal could lead to unstable policies, which
+may hinder policy learning for one particular agent, or also affect its teammates as shifts in
+policy cause non-stationarity of the environment from a local perspective. In this section, we
+1. https://github.com/lyu-xg/on-centralized-critics-in-marl
+
+28
+
+On Centralized Critics
+
+100
+
+100
+
+0.6
+0.4
+0.2
+
+IAC
+IACC-H
+
+0.0
+0
+
+2
+
+4
+
+6
+
+Episode (k)
+
+(a) SMAC 3m.
+
+8
+
+10
+
+150
+
+Returns
+
+0.8
+
+Returns
+
+Mean Test Return
+
+1.0
+
+200
+IAC
+
+250
+
+IACC-H
+
+0
+
+2m
+
+Steps
+
+4m
+
+(b) Cross.
+
+6m
+
+200
+300
+IAC
+
+400
+
+IACC-H
+
+0
+
+2m
+
+4m
+
+6m
+
+Steps
+
+(c) Antipodal.
+
+Figure 5: Performance comparison in SMAC 3m domain and cooperative navigation domains.
+In these domains, agents navigate to designated target locations for reward, and are penalized
+for collisions (showing mean and standard deviation over 20 runs per method).
+discuss, with real benchmark examples, some of those impacts on performance and how the
+policy could become unstable due to additional policy gradient variance.
+We report that IAC (independent actor-critic) and IACC-H (an independent actor with
+centralized history-based critic) usually perform identically on most tasks (Lyu et al., 2021),
+including Go Together (Jiang, 2019), Merge (Yang et al., 2020), Predator and Prey (Lowe
+et al., 2017), Capture Target (Omidshafiei, Pazis, Amato, How, & Vian, 2017; Xiao, Hoffman,
+& Amato, 2019), Small Box Pushing and SMAC (Samvelyan et al., 2019) tasks. IACC-H
+(with a centralized history-based critic) is less stable in only a few domains shown in Figures 4
+and 5. Since the performance of the two history-based critics is similar in most results,
+we expect that it is because both are unbiased asymptotically (Theorem 1). We observe
+that, although decentralized critics might be more biased when considering finite training,
+it does not affect real-world performance in a significant fashion in these domains. Recent
+investigations of independent learners such as IPPO (Yu et al., 2022) also suggest similar
+results where decentralized critics show strong performance.
+In cooperative navigation domains Antipodal, Cross (Mordatch & Abbeel, 2018; Yang
+et al., 2020), and Find Treasure (Jiang, 2019), we observe a slightly more pronounced
+performance difference among runs. These cooperative navigation domains, shown in Figure 5,
+have no suboptimal equilibria that trap the agents, and on most of the timesteps, the optimal
+action aligns with the locally greedy action. Those tasks only require agents to coordinate
+their actions for a few timesteps to avoid collisions. Those tasks appear easy to solve, but the
+observation space is continuous, thus causing large MOV (observation-based variance) in the
+gradient updates for IACC-H. Observe that some IACC-H runs struggle to reach the optimal
+solution robustly while IAC robustly converges, conforming to our scalability discussion
+regarding large MOV. A centralized critic induces higher variance for policy updates, where
+the shifting policies can drag on the value estimates, which, in turn, hinders improving the
+policies themselves.
+We observe similar policy degradation, more specifically the lazy-agent problem, in the
+Cleaner domain (Jiang, 2019), a grid-world maze in which agents are rewarded for stepping
+onto novel locations in the maze. The performance is shown in Figure 4b. The optimal
+policy is to have the agents split up and cover as much ground as possible. The maze has
+29
+
+Lyu, Baisero, Xiao, Daley, & Amato
+
+two non-colliding paths so that as soon as the agents split up, they can follow a locally
+greedy policy to get an optimal return. However, with a centralized critic (IACC-H), both
+agents start to take the longer path with more locations to “clean.” When policy-shifting
+agents are not completely locally greedy, the issue is that they cannot “clean” enough ground
+in their paths. Subsequently, they discover that having both agents go for the longer path
+(the lower path) yields a better return, converging to a suboptimal solution. Again, we see
+that in IACC-H with a centralized critic, due to the high variance, which we will discuss in
+Section 7.1.2, the safer option is favored, resulting in both agents completely ignoring the
+other path (performance shown in Figure 4b). Overall, high variance in the policy gradient
+(in the case of the centralized critic) makes the policy more volatile and can indeed result in
+poor coordination performance in environments that require coordinated series of actions
+to discover the optimal solution. The same phenomenon is seen in IPPO (Yu et al., 2022)
+where centralized critics hinder decentralized policy learning.
+7.1.1 Hindering Exploration
+We test on the classic yet challenging domain Dec-Tiger (Nair et al., 2003). Recall that in
+Dec-Tiger, to end an episode, each agent has a high-reward action (opening a door with
+treasure inside) and a high-punishment action (opening a door with a tiger inside). The
+treasure and tiger are randomly initialized in each episode, hence, a third action (listen)
+gathers noisy information regarding which of the two doors is the rewarding one. The
+multi-agent extension of Tiger requires two agents to open the correct door simultaneously to
+gain maximum return. Conversely, for simultaneous undesirable actions, the agents take less
+punishment. Note that any fast-changing decentralized policies are less likely to coordinate
+the simultaneous actions with high probability, thus lowering return estimates for the critic
+and hindering joint policy improvement. As expected, we see in Figure 4a that IACC-H (with
+a centralized critic and higher policy gradient variance) does not perform as well as IAC. In
+the end, the IACC-H agent learns to avoid high punishment (agents simultaneously open
+different doors, −100) by not gathering any information (listen) and opening an agreed-upon
+door on the first timestep. That is, IACC-H gives up completely on high returns (where both
+agents listen for some timesteps and open the correct door at the same time, +20) because
+the unstable policies make coordinating a high return of +20 extremely unlikely. IAC, on
+the other hand, has comparatively reduced variance in policy learning, so the environment
+(including other agents) from the local perspective is more stable, and the agent can thus
+find a good response policy for adequate performance and cooperation.
+7.1.2 Scalability
+Another critical consideration for critic design is the scale of the task. A centralized historybased critic’s feature representation needs to scale linearly (in the best case) or exponentially
+(in the worse case) with the number of agents. In contrast, decentralized history-based critics’
+features can remain constant, and in homogeneous-agent systems, decentralized history-based
+critics can even share parameters to leverage the problem symmetry. Also, some environments
+may only require an agent to reason a small amount about the other agents. For example, in
+environments where agents’ decisions rarely depend on other agents’ trajectories, the gain of
+30
+
+On Centralized Critics
+
+learning joint value functions is likely minimal. Therefore, we expect decentralized critics to
+perform better while having better sample efficiency in those domains.
+To empirically test our hypothesis, we find environments where we can artificially increase
+the observation space to highlight the scalability issue. In Capture Target (Lyu & Amato,
+2020) where agents are rewarded by simultaneously catching a moving target in a grid world
+(Figure 6), by increasing the grid size from 6 × 6 to 12 × 12, we see a notable comparative
+drop in overall performance for the centralized critic approach, IACC-H (Figure 6). Since an
+increase in observation space leads to an increase in Multi-Observation Variance (MOV), it
+indicates that here the policies of IACC-H do not handle MOV as well as the decentralized
+critics in IAC. The result may generalize that, for large environments with neural networks,
+decentralized critics scale better in the face of MOV because they do not involve MOV in
+policy learning.
+The impact of variance will also change as the number of agents increases. In particular,
+when learning stochastic policies with a centralized critic in IACC-H, the potential variance
+in the policy gradient also scales with the number of agents combined with exponentially
+growing action and observation spaces. On the other hand, IAC’s decentralized critics
+potentially have less stable learning targets in critic bootstrapping as the number of agents
+increases, but the policy updates still have low variance. Therefore, scalability remains an
+issue for history-based critics, and the actual performance is likely to depend on the domain,
+function approximation setup, and other factors. Therefore, IAC should be a better starting
+point due to more stable policy updates and potentially shared parameters. For state-based
+critics, although without an explosive feature space, the variance issue similar to that of
+IACC-H remains (and the issue of bias may cause additional problems as discussed below).
+7.2 Cooperation Pathologies
+We now investigate how cooperation problems arise with different critic choices. We point
+out that centralized history-based critic is subjected to the same cooperation issues as their
+decentralized counterparts.
+Move Box (Jiang, 2019) is another commonly used domain where grid-world agents are
+rewarded by pushing a heavy box (requiring both agents) onto any of two target locations.
+The farther destination gives a +100 reward while the nearer destination gives +10. Naturally,
+the optimal policy is for both agents to go for +100, but if either of the agents is unwilling
+to do so, this optimal option is “shadowed”, and both agents will have to go for +10. We
+see in Figure 9(d) that both methods (IAC and IACC-H) fall for the shadowed equilibrium
+(mentioned in Section 4.1.1), favoring the safe but less rewarding option.
+Analogous to the Climb Game, even if the centralized critic is able to learn the optimal
+values due to its unbiased on-policy nature, the on-policy return of the optimal option is
+inadequate due to an uncooperative teammate policy; thus, the optimal actions are rarely
+sampled when updating the policies. The same applies to both agents, so the system reaches
+a suboptimal equilibrium, even though IACC-H is trained in a centralized manner. As a
+result, same as in Climb Game, Cleaner, and Dec-Tiger, we would not expect centralized
+critics to help in learning cooperative policies; this connects with Theorem 1 where IAC and
+IACC-H have the same expected policy gradient.
+31
+
+Lyu, Baisero, Xiao, Daley, & Amato
+
+1.0
+
+Mean Test Return
+
+Mean Test Return
+
+1.0
+0.8
+0.6
+0.4
+0.2
+
+IAC
+IACC-H
+
+0.0
+0
+
+35
+
+70
+
+Episode (k)
+
+105
+
+0.8
+0.6
+0.4
+0.2
+
+IAC
+IACC-H
+
+0.0
+0
+
+140
+
+(a) Size 6x6.
+
+140
+
+Episode (k)
+
+210
+
+280
+
+(b) Size 8x8.
+
+1.0
+
+1.0
+
+IAC
+IACC-H
+
+0.8
+0.6
+0.4
+0.2
+
+Mean Test Return
+
+Mean Test Return
+
+70
+
+0.0
+
+IAC
+IACC-H
+
+0.8
+0.6
+0.4
+0.2
+0.0
+
+0
+
+105
+
+210
+
+Episode (k)
+
+315
+
+420
+
+(c) Size 10x10.
+
+0
+
+140
+
+280
+
+Episode (k)
+
+420
+
+560
+
+(d) Size 12x12.
+
+Figure 6: Evaluation on Capture Target domain of IAC and IACC-H (showing mean and
+standard deviation over 20 runs per method).
+
+7.3 Analysis of State-Based Critics
+We now discuss how the bias introduced by state-based critics does not, as one may hope,
+bias the policies toward a higher-quality solution but often pushes the policies toward
+suboptimality with limited examples of improved performance.
+We show that it cannot facilitate cooperative behavior any better than IAC in our
+experiments. For example, we consider a multi-agent recycling task with results shown
+in Figure 9. In the multi-agent recycling task, we expect the agents to work together while
+maintaining battery levels. The task contains recyclable small and large targets, and the large
+ones require two agents to act simultaneously. The agents only observe their own battery
+levels. For policies that recycle large targets to be competitive against small-target-policies
+(reactive), agents must estimate their teammate’s battery level based on their observation
+history (non-reactive).
+Figure 9 shows performance for Recycling agents with various critics, in which none
+of the methods learns to recycle large targets. Note that a reactive policy cannot achieve
+optimal performance, which suggests that the methods all fail to cooperate (more discussion
+in Section 7.3.1). Learning to cooperate in this case is especially difficult because the agents
+32
+
+On Centralized Critics
+
+120
+
+90
+
+60
+
+90
+
+60
+
+30
+
+30
+
+0
+
+120
+IACC-S
+IACC-H
+IACC-HS
+IACC-O
+
+Mean Test Return
+
+IACC-S
+IACC-H
+IACC-HS
+IACC-O
+
+Mean Test Return
+
+Mean Test Return
+
+120
+
+0
+
+1000
+
+2000
+
+3000
+4000
+Evaluation
+
+5000
+
+(a) Observation radius 4.
+
+6000
+
+0
+
+IACC-S
+IACC-H
+IACC-HS
+IACC-O
+
+90
+
+60
+
+30
+
+0
+
+1000
+
+2000
+
+3000
+4000
+Evaluation
+
+5000
+
+(b) Observation radius 8.
+
+6000
+
+0
+
+0
+
+1000
+
+2000
+
+3000
+4000
+Evaluation
+
+5000
+
+6000
+
+(c) Observation radius 16.
+
+Figure 7: Performance comparison in Predator and Prey, showing higher performance of
+history-state-based critic; that is, highlighting deficiencies of using only state or history-based
+critic. The results also suggest that the state-based critic can be asymptotically biased thus
+hindering the convergence of decentralized policies (showing mean and standard deviation
+over 20 runs per method).
+suffer the problem of shadowed equilibrium (Matignon et al., 2012) despite the usage of a
+centralized critic (as we mentioned in the previous subsection and in Section 4.1.1). Therefore,
+we observe that state-based critics cannot bias policies in a significant and specific way such
+that it learns to cooperate. As a result, using state-based critic methods are still subjected
+to shadowed equilibrium and other cooperation issues.
+Interestingly, in the Move Box domain (Figure 9), the state-based critic, being potentially
+biased, managed to escape the action shadowing Nash equilibrium and managed to obtain
+higher rewards by moving the box to the farther destination (Pareto optimal). It suggests
+that in practice, bias and variance may, in special cases, lead to improved performance, such
+as helping in breaking out of suboptimal local solutions.
+7.3.1 Special Cases of Dec-POMDPs
+We now investigate the usage of state-based critics, which can be biased in theory (Section 5)
+in a sub-class of Dec-POMDPs. In particular, we identify a special sub-class of Dec-POMDPs,
+which is surprisingly common in practice, in which the state-based critic is not critically (or
+at all) biased. Some environments give partial yet “sufficient” local information, in other
+words, a decent policy does not depend on the entire history and is not required to retain
+information gathered from the past. In that case, the observation value and history values
+are mostly (or exactly) value-equivalent. That is, more information from the full observation
+history does not add to the value expectation over using just the last observation; in some
+tasks, reactive policies (policies that only condition on the last observation) can achieve
+optimal performance (see reactive policies’ performance in Figure 9). For example, in the
+Meeting-in-a-Grid domains (Bernstein, Hansen, & Zilberstein, 2005; Amato, Dibangoye, &
+Zilberstein, 2009), agents observe their own location but not the teammate while trying
+to meet in a grid-world. Optimally, agents would navigate to a predetermined spot (e.g.,
+the center) and wait. Another example is Find Treasure (Jiang, 2019) in which one agent
+has to step onto a trigger location to open a door while the other agent goes through the
+door to find treasure. Again, even though the task is clearly partially observable, and the
+33
+
+Lyu, Baisero, Xiao, Daley, & Amato
+
+IACC-S
+IACC-H
+IACC-HS
+Mean Test Won %
+
+Mean Test Won %
+
+80
+60
+40
+20
+0
+
+100
+
+100
+
+80
+
+80
+Mean Test Won %
+
+100
+
+60
+40
+
+IACC-S
+IACC-H
+IACC-HS
+
+20
+
+0
+
+200
+
+400
+600
+Evaluation
+
+800
+
+1000
+
+0
+
+0
+
+(a) SMAC 2s_vs_1sc.
+
+200
+
+400
+600
+Evaluation
+
+IACC-S
+IACC-H
+IACC-HS
+
+20
+0
+
+0
+
+200
+
+400
+600
+Evaluation
+
+800
+
+1000
+
+(c) SMAC 2s3z.
+IACC-S
+IACC-H
+IACC-HS
+
+80
+Mean Test Won %
+
+Mean Test Won %
+
+40
+
+100
+
+60
+40
+20
+0
+
+1000
+
+60
+
+(b) SMAC 3m.
+
+100
+80
+
+800
+
+IACC-S
+IACC-H
+IACC-HS
+
+60
+40
+20
+
+0
+
+200
+
+400
+600
+Evaluation
+
+800
+
+1000
+
+(d) SMAC 1c3s5z.
+
+0
+
+0
+
+200
+
+400
+600
+Evaluation
+
+800
+
+1000
+
+(e) SMAC bane_vs_bane.
+
+Figure 8: Performance comparison of COMA with different critics in multiple SMAC scenarios
+(showing mean and standard deviation over 20 runs per variant).
+agents only observe local information, the optimal policy does not require remembering
+history information because policies do not benefit (in expected returns) from the additional
+observation history. In these environments, one may safely assume that a given state will
+produce similar return distributions with different histories because the history information
+does not meaningfully affect the policy and the return distributions since the policy conditions
+on the last observation, which is produced by the state. However, we note that in harder
+and more partially-observable tasks, we expect that the optimal policies are not reactive.
+Environments that require more than a reactive policy require the agent to collect information
+and retain information over time. If such information gathering is needed, then we can
+conclude that the state-based critics are, in theory, biased, even assuming no approximation
+error.
+A Subclass of Observation Models Depending on the type of observation model in
+the task, we also identify acceptable or preferred tasks to use state-based critics, which we
+call an Agent-Centered Observation Model (ACOM). ACOM can usually indicate where
+reactive policies may be optimal or near-optimal, thus making state-based critics unbiased or
+nearly unbiased. Therefore, we also see tasks where it is acceptable or even preferred to use
+state-based critics. A typical example is the (version 1) StarCraft Multi-Agent Challenge
+(SMAC) benchmark (Samvelyan et al., 2019). As seen in Figure 8, most scenarios show that
+state-based critics exhibit the best overall performance. In SMAC, each agent controls a
+combat unit to engage enemy units, and the state includes the status of friendly agents and
+opponent units. In contrast, the observations for a given agent are the status of itself and
+the units whose distances are within a specific range. It uses a deterministic observation
+model, and in some SMAC tasks, we find that information about far-away units rarely
+34
+
+On Centralized Critics
+
+affects an agent’s decisions (in a value-equivalent sense). In other words, the occluded
+information contributes little to the expected values. Thus, the history values associated
+with a state are usually value-equivalent; as a result, using a state-based critic does not
+introduce significant bias in this case. In specific scenarios of SMAC, shown in Figure 8,
+we report that state-based critics perform better than history-based ones. Since both the
+state and the observation have similar and concise representations, while the history will
+contain redundant information, it is reasonable to expect that state-based critics may give
+a more reliable estimate for policy training. In theory, the agents will learn to ignore the
+redundant history information, which may be time-consuming or difficult to do in practice.
+Figure 8 uses the original COMA (Foerster et al., 2018) paired with a different type of critics;
+the high-performing state-based critic shows why subsequent centralized critics literature
+tends to inherit state-based critics from COMA. Compared to COMA, vanilla multi-agent
+actor-critic methods also show similar trends (Lyu et al., 2021).
+We note that using reactive policies is insufficient to make state-based critics unbiased in
+the general case because at any time step, the observation produced by the state may still
+cause the policy to behave differently (Equation (46)). However, if the environment is almost
+fully observable, where reactive policies can achieve high performance, then the bias from
+state-based critic would likely be minimal. It is precisely why MADDPG is not biased in
+their particle environments (Lowe et al., 2017). This situation is also not uncommon, which
+we see in numerous benchmarks, including the classic task Recycling and environments with
+radius-based observation models such as SMAC. We hence note that the benchmarks used in
+recent state-of-the-art works usually have the aforementioned deterministic observation model
+with limited partial observability, which is, in fact, a special case of imperfect information.
+7.4 The Empirical Bias-Variance Trade-Off
+Recall that our theoretical analysis is based on the assumption of real value functions, or
+converged and accurate critic models, and the theory does not strictly hold for learned
+critics, as those models may inherently carry arbitrary bias, which we call approximation
+bias. However, we still expect the theorems to provide valuable insights that broadly apply
+to learned critics as well. In those cases, the approximation bias associated with the real-life
+learned critics should be considered an additional form of bias on top of the biases (if any)
+already discussed for the pure value functions in our theories. In practice, as we have seen,
+value functions are difficult to learn. It is generally more difficult to learn history value
+functions, especially decentralized history value functions, compared to state or history-state
+value functions. Therefore, we come to an important observation that, the methods that are
+more preferable for policy learning in theory have more approximation bias. For example,
+IAC enjoys the best theoretical policy gradient properties but its decentralized history-based
+values are the most difficult to learn. This is why some of our theories may seem counterintuitive, and it is a necessary trade-off to consider when designing and selecting an algorithm
+for different tasks.
+In MARL, the on-policy value is non-stationary since the return distributions depend
+heavily on the current set of policies. When policies update and change, the learned critic
+becomes at least partially (if not entirely) obsolete, and biased toward the historical policyinduced return distribution. Bootstrapping from outdated values creates additional bias on
+35
+
+Lyu, Baisero, Xiao, Daley, & Amato
+
+100
+90
+
+80
+Evaluation Return
+
+Evaluation Return
+
+90
+
+70
+60
+
+80
+70
+
+IACC-S
+IACC-H
+IACC-HS
+Reactive
+
+50
+40
+0
+
+100
+
+200
+300
+Evaluation
+
+IACC-S
+IACC-H
+IACC-HS
+Reactive
+
+60
+50
+
+400
+
+0
+
+(a) Meeting-in-a-Grid (Amato et al., 2009).
+
+200
+300
+Evaluation
+
+400
+
+(b) Find Treasure (Jiang, 2019).
+
+300
+
+IACC-S
+IACC-H
+IACC-HS
+
+50
+
+280
+
+Evaluation Return
+
+Evaluation Return
+
+100
+
+40
+
+260
+
+30
+
+240
+
+IACC-S
+IACC-H
+IACC-HS
+Reactive
+
+220
+200
+0
+
+100
+
+200
+300
+Evaluation
+
+400
+
+20
+10
+
+500
+
+(c) Recycling (Amato et al., 2007).
+
+0
+
+100
+
+200
+300
+Evaluation
+
+400
+
+(d) Move Box (Jiang, 2019).
+
+Figure 9: Performance comparison of IACC-S, IACC-H and IACC-HS in cooperative DecPOMDPs (showing mean and standard deviation over 20 runs per method).
+top of the modeling bias inherent to the model itself. Compounding biases may lead to the
+divergence of the decentralized policies depending on the learning rate and how drastically
+the policy changes.
+These non-stationarity issues affect all critic approaches since they are all on-policy
+estimates. However, centralized value function learning is generally better equipped, and
+state values are generally easier to learn due to their commonly simple representations
+(compared to histories). Therefore, bootstrapping can be more stable in the case of a
+centralized critic, especially a centralized state-based critic. As a result, in a cooperative
+environment with a moderate number of agents, we expect a centralized critic would learn
+more stably and be less biased (in the actual policy gradient), perhaps counteracting the
+effect of having a larger variance in the policy gradient, or the case state-based critics, some
+inherent bias.
+Combining our discussions of the variance problems from Section 7.1, we conclude that
+whether to use critic centralization can be essentially considered a bias-variance trade-off
+decision. More specifically, it is a trade-off between the variance of policy updates and the
+bias of the critic model: a centralized history critic should have a lower bias because it will
+36
+
+On Centralized Critics
+
+have more stable values that can be updated straightforwardly when policies change, but
+higher variance because the policy updates need to be averaged over (potentially many)
+other agents; an easy-to-learn state-based critic may have even less practical bias, especially
+in certain ACOM environments; a history-state-based critic can further reduce the policy
+gradient bias in practice but at the cost of higher policy gradient variance (Corollary 7.1).
+In short, the more policy gradient bias we reduce in practice, the more we pay in variance.
+Regardless, we note that the centralized critic likely faces more severe scalability issues in
+not only critic learning but also in policy gradient variance. As a result, we cannot expect
+one method will always dominate the other in terms of performance.
+We also identify scalability issues with both centralized and decentralized critics. We
+observe that the exponential action and history spaces that come with a scaling set of agents
+significantly increase the centralized critics’ policy gradient variance, not to mention that
+larger models are needed for the factorized spaces. The latter problem can be mitigated
+by learning a state-based critic if, as identified earlier, we can avoid its bias for the given
+environment. On the other hand, for decentralized critics, a larger set of agents adds difficulty
+in value learning due to larger learning target variance for the decentralized critics themselves,
+a trade-off requiring consideration for each task.
+7.4.1 The Safe Option: History-State-Based Critics
+We test IACC-HS by concatenating the state and history without changing other aspects of
+implementation. Unlike IACC-S, IACC-HS is unbiased (Theorem 6) even with large amounts
+of partial observability. However, IACC-HS is an extreme on the bias-variance trade-off
+scale in the sense that it should have the least policy gradient bias in practice but the most
+variance (Corollary 7.1) in theory. We report that for most environments, we obtain similar
+performance compared to simple history or state-based critics, but for tasks that are more
+complicated or partially observable, IACC-HS usually outperforms others. Therefore, it
+is the critic option most widely adaptable to different environments and ought to be the
+default choice for a task whose nature is unclear. For example, in the Predator and Prey
+domain in Figure 7, we see that the history-state-based critics have a clear advantage over
+critics that use state or history information alone, especially in the later stages of training.
+It suggests that there exist situations where the history-state-based critic can benefit from
+the advantages of both the state as well as the history as discussed in Section 7.3.1. In
+general, both Box Pushing and Cleaner are grid-world tasks with observations local to the
+cells around the agent. However, the agent needs to estimate their teammates’ locations or
+paths to act optimally; this makes a purely state-based critic biased as it cannot encourage
+information gathering. On the other hand, by incorporating histories, the history-state-based
+critic is not biased while still having the state to help with value learning.
+
+8. Conclusions
+This paper summarizes, standardizes, and analyzes an exhaustive set of centralized critics in
+multi-agent reinforcement learning. We provide a theoretical basis with bias and variance
+analysis for each critic variant. Specifically, we prove convergence and policy gradient
+equivalence between centralized and decentralized history-based critics. We show that historybased centralized critics have higher policy gradient variance in theory than their decentralized
+37
+
+Lyu, Baisero, Xiao, Daley, & Amato
+
+counterparts. The implication of this theoretical result is crucial in understanding that the
+centralized critics not only cannot meaningfully mitigate cooperation issues but also may
+harm performance due to its higher policy gradient variance.
+For the commonly used state-based critic, we prove that it may produce biased policy
+gradients compared to the history-based critics. As a result, state-based critics are not
+theoretically sound and may lead to poor performance. We also give an analysis of specific
+environment features, which may remove or reduce said biases and explains impressive
+performance on certain benchmark domains.
+We also provide comprehensive practical insights and advice on top of the theoretical
+results. We argue that the most prominent trade-off is between policy gradient bias and
+variance; specifically, the higher the policy gradient variance, the less policy gradient bias
+occurs practically during training, making none of the methods a clear winner on all tasks.
+However, in general, we recommend the robust IACC-HS (history-state-based critic) as the
+first choice for a generic or unfamiliar task. The history-state-based critic has the highest
+theoretical policy gradient variance but often yields favorable performance due to its ease of
+value learning and unbiased policy gradient.
+
+9. Acknowledgements
+This research is supported by the U.S. Office of Naval Research award N00014-19-1-2131,
+Army Research Office award W911NF20-1-0265 and NSF awards 1816382 and 2044993.
+
+Appendix A. Problems and Solutions of Pr(a | s) and Qπ (s, a)
+In Section 3.3.3, we showed a tentative definition for the state value function Qπ (s, a) as the
+solution to a Bellman equality which we repeat here for clarity,
+"
+#
+X
+π
+′
+′
+π ′
+′
+Q (s, a) = R(s, a) + γ Es′ |s,a
+Pr(a | s )Q (s , a ) ,
+(62)
+a′
+
+and then argued that this definition is improper due to issues with the definition of the
+Pr(a | s) term, which conceptually represents the statistical dependency of the actions
+taken from the system state, but is actually subtly ill-defined. In this section, we first
+provide a deeper explanation of the problems with Pr(a | s) and why it is not generally
+well-defined. The issue is often overlooked by practical methods and implementations that
+attempt to learn centralized state value functions in the form of critic models, but was
+recently identified and exposed for the single-agent control case (Baisero & Amato, 2022)
+and for the finite-horizon multi-agent control case (Lyu et al., 2022); here, we extend this
+prior work to the infinite-horizon multi-agent control case. We then consider a few options
+to “patch” the issue, providing an alternative definition for Qπ (s, a) which is mathematically
+sound.
+A.1 Problems
+At a high level, the issue with the naive definition of state values Qπ (s, a) is that it relies
+upon a time-invariant notion of conditional probabilities Pr(a | s), which turns out to be
+38
+
+On Centralized Critics
+
+generally ill-defined because probabilities Pr(At = a | St = s) are actually time-variant.
+More formally, the issue is that the term Pr(a | s) is ambiguous and does not adequately
+identify the random variables A and S onto which the values a and s are assigned. The
+graphical model associated with the Dec-POMDP defines a joint distribution over timed
+random variables (S0 , S1 , S2 , . . ., A0 , A1 , A2 , . . ., and others), but not over time-less random
+variables (S, A), so probabilities are formally defined only for the timed variables. This issue
+is explained in more detail for the single-agent control case in (Baisero & Amato, 2022).
+A.2 Solutions
+Having determined this fundamental flaw in the tentative definition of Qπ (s, a), we must
+either resign to the idea that state values are an intrinsically flawed concept, or we can try
+to determine a different viable definition for state values. In this section, we explore a few
+ways to fix the issue with the definition of Qπ (s, a) by replacing Pr(a | s) with a separate
+expression p(a | s). We identify 3 candidates (although more can also be formulated), of
+which only one is viable.
+A.2.1 Limiting Distribution
+The limiting distribution pL is defined as the limit for t → ∞ of the timed distribution,
+.
+pL (s) = lim Pr(St = s) ,
+t→∞
+.
+pL (s, a) = lim Pr(St = s, At = a) ,
+
+(63)
+
+. pL (s, a)
+pL (a | s) =
+.
+pL (s)
+
+(65)
+
+t→∞
+
+(64)
+
+However, the theory of Markov chains tells us that limiting distributions are not guaranteed
+to converge. Since we are looking for a notion of value function which is well-defined for all
+possible Dec-POMDPs and policies, the limiting distribution does not satisfy our needs.
+A.2.2 Total Visitations Distribution
+Another option is the total visitation distribution pT V , defined as the limit for N → ∞ of
+the average distribution over the first N timesteps,
+N −1
+
+1 X
+.
+Pr(St = s) ,
+pT V (s) = lim
+N →∞ N
+1
+.
+pT V (s, a) = lim
+N →∞ N
+
+t=0
+N
+−1
+X
+
+Pr(St = s, At = a) ,
+
+(66)
+(67)
+
+t=0
+
+. pT V (s, a)
+pT V (a | s) =
+.
+pT V (s)
+
+(68)
+
+Unfortunately, this limit is also not guaranteed to exist for all Dec-POMDPs and policies,
+and therefore inadequate to satisfy our needs. We show this with a simple counter-example.
+39
+
+Lyu, Baisero, Xiao, Daley, & Amato
+
+Counter-Example of Total Visitations Distribution Consider a Dec-POMDP with
+a singleton state space S = {ζ}, binary actions Ai = {0, 1}, and a singleton observation
+space Oi = {ω}. We note that the agent policies are intrinsically time-variant due to their
+dependence on their respective history and history lengths; therefore, even though each agent
+can only ever receive the same observation over and over, the behaviors of the agents can
+vary arbitrarily with time. Further, policies in Dec-POMDP are exclusively dependent on
+time π i (a; t), and deterministic policies can be represented directly as sequences of actions
+taken at each timestep, e.g., π i ≡ (0, 1, 0, 1, . . .) denotes a policy that takes first action 0,
+second action 1, third action 0, fourth action 1, and so on.
+Consider the deterministic agent policies π i ≡ (0, 1, 0, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, . . .),
+which alternates the emission of actions in sequences of ever-increasing length (i.e., one 0,
+one 1, one 0, one 1, two 0s, two 1s, four 0s, four 1s, eight 0s, eight 1s, sixteen 0s, sixteen
+1s, etc). In this case, the average
+P −1 in Equation (67) as a1function of time oscillates forever,
+never converging, e.g., N1 N
+t=0 Pr(St = ζ, At = 1) = 2 when N = 2, 4, 8, 16, 32, . . ., and
+1 PN −1
+1
+t=0 Pr(St = ζ, At = 1) = 3 when N = 3, 6, 12, 24, 48, . . .. Interestingly, since the
+N
+counter-example uses a singleton state space, the issue with pT V is not even related to state
+uncertainty, but rather to the general notion of computing non-discounted action counts for
+time-indefinite horizon sequences of actions produced by time-variant policies.
+A.2.3 Discounted Visitations Distribution
+Finally, consider the discounted visitation distribution pDV , defined as the average discounted
+distribution over all timesteps,
+∞
+
+X
+.
+pDV (s) = (1 − γ)
+γ t Pr(St = s) ,
+.
+pDV (s, a) = (1 − γ)
+
+t=0
+∞
+X
+
+γ t Pr(St = s, At = a) ,
+
+(69)
+(70)
+
+t=0
+
+. pDV (s, a)
+pDV (a | s) =
+.
+pDV (s)
+
+(71)
+
+In this case, the geometric factor γ t guarantees convergence in all cases, even in the above
+counter-example. This is a notion closely related to actual visitation counts, albeit slightly
+“warped” by the weighting, which makes later visitations count less than earlier visitations.
+The effect of this “warping” is obviously larger for larger discounting (smaller γ), and smaller
+for smaller discounting (large γ). Despite this warping, we have finally achieve a somewhat
+reasonable notion of state-conditioned action distribution, with which to define the state
+value function as the unique solution to the following state Bellman equality,
+"
+#
+X
+Qπ (s, a) = R(s, a) + γ Es′ |s,a
+pDV (a′ | s′ )Qπ (s′ , a′ ) .
+(72)
+a′
+
+Final Notes about Notation and Consistency We conclude by noting that pDV is the
+same as the ρ defined in Section 3.2.2, which is the preferred notation in all other sections
+of this paper. Finally, we note that this “patch” is in some sense still consistent with the
+40
+
+On Centralized Critics
+
+definitions of the other value functions, because in the cases where the conditional action
+distribution also takes some history into account, then ρ(a | ·) is equivalent to π(a | ·), e.g.,
+ρ(a | h) = π(a; h) and ρ(a | h, s) = π(a; h).
+
+Appendix B. Proofs
+B.1 Uniqueness of Bellman Equation Solutions
+Here, we prove that the Bellman equations in Equations (9), (10), (13) and (14) each have a
+unique solution. To simplify the following analysis, we represent Q-functions and the reward
+function as vectors, which allows us to prove the uniqueness of the solution for a wide class
+of Bellman-like equations simultaneously.
+Let Q ∈ Rn be an arbitrary Q-function and let R ∈ Rm be a reward function. Equations (9), (10), (13) and (14) can be written in the general form
+(73)
+
+Q = P0 R + γP1 Q ,
+
+where P0 ∈ Rn×m and P1 ∈ Rn×n are stochastic matrices. (To see why, notice that each
+element of P0 R and P1 Q is an expectation over the values of R or Q, since the rows of P0
+and P1 represent probability distributions.) Consequently, we have 0 ≤ Pk ≤ 1 elementwise
+and Pk e = e, ∀ k ∈ {0, 1}, where e is the vector of ones with appropriate dimensions.
+Proposition 1. Define the mapping B : Q 7→ P0 R + γP1 Q. When γ < 1, the equation
+(74)
+
+Q = BQ
+. P
+k
+has a unique solution Q∗ = ∞
+k=0 (γP1 ) P0 R.
+
+Proof. Let ∥Q∥ denote the maximum norm of Q. Since the infinity norm is submultiplicative
+(and coincides with the maximum norm for vectors), then for every Q, Q′ ∈ Rn ,
+BQ − BQ′ = P0 R + γP1 Q − P0 R − γP1 Q′
+= γP1 (Q − Q′ )
+≤ γ ∥P1 ∥∞ Q − Q′ .
+
+(75)
+
+The facts that P1 ≥ 0 and P1 e = e imply that ∥P1 ∥∞ = 1. Therefore,
+(76)
+
+∥BQ1 − BQ2 ∥ ≤ γ ∥Q1 − Q2 ∥ ,
+
+and B is a contraction mapping with respect to the maximum norm. We conclude that
+B admits a unique fixed point Q∗ ; if B had two distinct fixed points Q∗1 ̸= Q∗2 , then
+∥BQ∗1 − BQ∗2 ∥ = ∥Q∗1 − Q∗2 ∥, which would contradict Equation (76) for γ < 1.
+To complete the proof, we must identify Q∗ . Expanding Equation (74) gives
+Q = P0 R + γP1 Q ,
+and rearranging the terms yields the solution
+Q = (I − γP1 )−1 P0 R .
+From P
+the infinite geometric series, we have (I − γP1 )−1 =
+∗
+k
+Q = ∞
+k=0 (γP1 ) P0 R.
+41
+
+P∞
+
+k
+k=0 (γP1 ) , and therefore
+
+Lyu, Baisero, Xiao, Daley, & Amato
+
+B.2 Value Function Identities
+π
+Lemma 1. Value functions Qπ
+i (hi , ai ) and Q (h, a) are related by
+
+(34)
+
+π
+Qπ
+i (hi , ai ) = Eh,a|hi ,ai [Q (h, a)] .
+
+Proof. Qπ
+i (hi , ai ) is defined as the unique solution to Equation (10). Next, we show that
+Eh,a|hi ,ai [Qπ (h, a)] (as a function of hi and ai ) is also a solution to Equation (10); since
+the solution is unique by Proposition 1, the two functions must be identically equal and
+Equation (34) must hold.
+We first relate the two history-based reward functions:
+Ri (hi , ai ) = Es,a\i |hi [R(s, a)]
+= Es,a|hi ,ai [R(s, a)]
+= Eh,s,a|hi ,ai [R(s, a)]
+
+
+= Eh,a|hi ,ai Es|h [R(s, a)]
+(77)
+
+= Eh,a|hi ,ai [R(h, a)] .
+Next, we show the following identity:
+
+
+X
+
+
+Eoi |hi ,ai 
+π i (a′i ; hi ai oi ) Ehao,a′ |hi ai oi ,a′i Qπ (hao, a′ ) 
+a′i
+
+h
+h
+
+ii
+= Eoi |hi ,ai Ea′i |hi ai oi Ehao,a′ |hi ai oi ,a′i Qπ (hao, a′ )
+
+
+= Eh,a,o,a′ |hi ,ai Qπ (hao, a′ )
+
+
+
+
+= Eh,a|hi ,ai Eo|h,a Ea′ |hao Qπ (hao, a′ )
+"
+"
+##
+X
+′
+π
+′
+= Eh,a|hi ,ai Eo|h,a
+π(a ; hao)Q (hao, a ) .
+
+(78)
+
+a′
+
+Therefore, when we substitute Ehao,a′ |hi ai oi ,a′i [Qπ (hao, a′ )] (analogous to Eh,a|hi ,ai [Qπ (h, a)])
+into Equation (10), we obtain
+
+
+X
+
+
+Ri (hi , ai ) + γ Eoi |hi ,ai 
+π i (a′i ; hi ai oi ) Ehao,a′ |hi ai oi ,a′i Qπ (hao, a′ ) 
+a′i
+
+"
+= Eh,a|hi ,ai R(h, a) + γ Eo|h,a
+
+"
+X
+
+##
+π(a′ ; hao)Qπ (hao, a′ )
+
+a′
+
+(79)
+
+π
+
+= Eh,a|hi ,ai [Q (h, a)] ,
+
+where the final equality follows from Equation (9). Because the original quantity Eh,a|hi ,ai [Qπ (h, a)]
+is unchanged after the substitution into Equation (10), we conclude that it must be the unique
+π
+fixed point guaranteed by Proposition 1, and hence Qπ
+i (hi , ai ) = Eh,a|hi ,ai [Q (h, a)].
+42
+
+On Centralized Critics
+
+Lemma 2. Qπ (h, s, a) is an unbiased estimate of Qπ (h, a), i.e., the equality
+(59)
+
+Qπ (h, a) = Es|h [Qπ (h, s, a)]
+holds.
+
+Proof. Qπ (h, a) is defined as the unique solution to Equation (9). Next, we show that
+Es|h,a [Qπ (h, s, a)] (as a function of h and a) is also a solution to Equation (9); since
+the solution is unique by Proposition 1, the two functions must be identically equal and
+Equation (59) must hold. We first recall the definition of the joint history reward function,
+.
+R(h, a) = Es|h [R(s, a)]. Next, we show the following identity:
+"
+#
+X
+ π
+
+′
+′
+′
+Eo|h,a
+π(a ; hao) Es′ |hao Q (hao, s , a )
+a′
+
+
+
+
+= Eo|h,a Ea′ |hao Es′ |hao Qπ (hao, s′ , a′ )
+
+
+= Eo,s′ ,a′ |h,a Qπ (hao, s′ , a′ )
+
+
+= Es,o,s′ ,a′ |h,a Qπ (hao, s′ , a′ )
+"
+"
+##
+X
+
+
+π(a′ ; hao) Es′ |hao Qπ (hao, s′ , a′ )
+.
+= Es|h Es′ ,o|s,a
+
+
+(80)
+
+a′
+
+Therefore, when we substitute Es′ |hao [Qπ (hao, s′ , a′ )] (analogous to Es|h [Qπ (h, s, a)])
+into Equation (9), we obtain
+"
+#
+X
+
+
+R(h, a) + γ Eo|ha
+π(a′ ; hao) Es′ |hao Qπ (hao, s′ , a′ )
+a′
+
+"
+
+##
+
+"
+
+= Es|h R(s, a) + γ Es′ ,o|s,a
+
+X
+
+′
+
+π
+
+′
+
+′
+
+π(a ; hao)Q (hao, s , a )
+
+a′
+
+(81)
+
+= Es|h [Qπ (h, s, a)] ,
+
+where the final equality follows from Equation (14). Because the original quantity Es|h [Qπ (h, s, a)]
+is unchanged after the substitution into Equation (9), we conclude that it must be the unique
+fixed point guaranteed by Proposition 1, and hence Qπ (h, a) = Es|h [Qπ (h, s, a)].
+
+B.3 Biased State-Based Critic
+Lemma 3. Qπ (s, a) may be a biased estimate of Qπ
+i (hi , ai ), i.e., the equality
+π
+Qπ
+i (hi , ai ) = Es,a|hi ,ai [Q (s, a)]
+
+(82)
+
+does not necessarily hold.
+Proof. We note that Theorem 3 does not imply this theorem, however, we prove this theorem
+using an analogous argument by contradiction, which is applicable to our novel always-welldefined state value function Qπ (s, a). For a generic environment, consider an arbitrary action
+43
+
+Lyu, Baisero, Xiao, Daley, & Amato
+
+ai , and two different individual histories h(i,A) ̸= h(i,B) associated with the same state and
+joint action distributions ρ(s, a | h(i,A) , ai ) = ρ(s, a | h(i,B) , ai ) (a plausible occurrence in
+partially observable environments). Because the individual histories are different, there are
+many history-based policies π i which result in different future behaviors starting from h(i,A)
+and h(i,B) , which result in different history values,
+π
+Qπ
+i (h(i,A) , ai ) ̸= Qi (h(i,B) , ai ) .
+
+(83)
+
+On the other hand, the conditional state and joint action distributions ρ(s, a | h(i,A) , a) =
+ρ(s, a | h(i,B) , a) are equal, which implies that the expected state values are also equal,
+Es,a|h(i,A) ,ai [Qπ (s, a)] = Es,a|h(i,B) ,ai [Qπ (s, a)] .
+
+(84)
+
+π
+Assuming that the equality Qπ
+i (hi , ai ) = Es,a|hi ,ai [Q (s, a)] holds leads to a contradiction
+with Equations (83) and (84),
+π
+π
+Es,a|h(i,A) ,ai [Qπ (s, a)] = Qπ
+i (h(i,A) , ai ) ̸= Qi (h(i,B) , ai ) = Es,a|h(i,B) ,ai [Q (s, a)] .
+
+(85)
+
+π
+Therefore, Qπ
+i (hi , ai ) = Es,a|hi ,ai [Q (s, a)] does not hold in general.
+
+Theorem 4. The IACC-S and IACC-H gradients may differ, gs ̸= gh .
+Proof. To cover different angles and intuitions, we provide two proofs; one by contradiction,
+and one by example. Both proofs are based on a simple policy parameterization for which
+the statements of this theorem and Theorem 3 imply each other. Since Theorem 3 is already
+proven to hold in a way that is invariant to the policy parameterization, then this theorem
+must also hold. The policy parameterization is the tabular one where π i (a; h) = θi,h,a , which
+can likewise be written as a linear model π i (a; h) = θi⊤ 1h,a where 1h,a is an indicator vector
+of 0s with a 1 only in the dimension
+P associated with the h, a pair; this parameterization
+requires constraints θi,h,a ≥ 0 and a θi,h,a = 1, but this does not influence the conclusion.
+Proof by Contradiction For tabular policies, we have
+gs = (1 − γ) Eh,s,a [Qπ (s, a)∇θi log π i (ai ; hi )]
+
+
+= (1 − γ) Ehi ,ai Eh,s,a|hi ,ai [Qπ (s, a)∇θi log π i (ai ; hi )]
+
+
+1hi ,ai
+π
+= (1 − γ) Ehi ,ai Es,a|hi ,ai [Q (s, a)]
+π i (ai ; hi )
+X
+1hi ,ai
+= (1 − γ)
+ρ(hi , ai ) Es,a|hi ,ai [Qπ (s, a)]
+,
+π i (ai ; hi )
+
+(86)
+
+hi ,ai
+
+gh = (1 − γ) Eh,a [Qπ (h, a)∇θi log π i (ai ; hi )]
+
+
+= (1 − γ) Ehi ,ai Eh,a|hi ,ai [Qπ (h, a)∇θi log π i (ai ; hi )]
+
+
+1hi ,ai
+π
+= (1 − γ) Ehi ,ai Qi (hi , ai )
+π i (ai ; hi )
+X
+1hi ,ai
+.
+= (1 − γ)
+ρ(hi , ai )Qπ
+i (hi , ai )
+π i (ai ; hi )
+hi ,ai
+
+44
+
+(87)
+
+On Centralized Critics
+
+More specifically, the dimensions of gs and gh associated with hi , ai take on values
+
+[gs ]hi ,ai = (1 − γ)ρ(hi , ai ) Es,a|hi ,ai [Qπ (s, a)]
+[gh ]hi ,ai = (1 − γ)ρ(hi , ai )Qπ
+i (hi , ai )
+
+1
+,
+π i (ai ; hi )
+
+1
+,
+π i (ai ; hi )
+
+(88)
+(89)
+
+π
+which are equal if and only if Qπ
+i (ai , hi ) = Es,a|hi ,ai [Q (s, a)]. Lemma 3 generally disproves
+such an equality. Therefore, the gradient equality gs = gh does not necessarily hold.
+
+Proof by Example Continuing from the Dec-Tiger example in Section 5.1, we compare the IACC-H and IACC-S gradients gh and gs for agent 1 at one specific dimension and show that they are different. We focus on the values associated with h1 =
+(listen, hear-left, listen, hear-left), which is intrinsically associated with action a1 = open-right.
+We denote this dimension of the two gradient as [gh ]h1 ,a1 and [gs ]h1 ,a1 . To compute these
+values, we need to reference all the joint histories that are compatible with the individual
+history h1 ; we denote these using labels that reference the second agent’s observations,
+
+hLL = ((listen, listen), (hear-left, hear-left), (listen, listen), (hear-left, hear-left)) ,
+
+(90)
+
+hLR = ((listen, listen), (hear-left, hear-left), (listen, listen), (hear-left, hear-right)) ,
+
+(91)
+
+hRL = ((listen, listen), (hear-left, hear-right), (listen, listen), (hear-left, hear-left)) ,
+
+(92)
+
+hRR = ((listen, listen), (hear-left, hear-right), (listen, listen), (hear-left, hear-right)) .
+
+(93)
+
+We also need to reference all the joint actions that are compatible with the individual
+action a1 ; we denote these using labels that reference the second agent’s action, aL =
+(open-right, open-left) and aR = (open-right, open-right). We do not consider other joint
+histories and actions because they do not contribute to [gh ]h1 ,a1 or [gs ]h1 ,a1 . Given the details
+of the Dec-Tiger problem, we can compute the conditional probabilities of these joint histories
+and actions Pr(h, a | h1 , a1 ), contained in Table 7. To start, we have
+
+ρ(h1 , a1 ) = ρ(h1 )π 1 (a1 ; h1 )
+X
+=
+ρ(h1 | s)ρ(s)π 1 (a1 ; h1 )
+s
+
+= 0.852 ·
+
+1
+1
+· 1 + 0.152 · · 1
+2
+2
+
+= 0.373 .
+45
+
+(94)
+
+Lyu, Baisero, Xiao, Daley, & Amato
+
+Then, using probabilities from Tables 7 and 8 and values from Appendix C,
+
+[gh ]h1 ,a1 = (1 − γ)ρ(h1 , a1 ) Eh,a|h1 ,a1 [Qπ (h, a)]
+= (1 − γ) · 0.373 · (−0.854) ·
+
+1
+π 1 (a1 ; h1 )
+
+1
+1
+(95)
+
+= −0.319(1 − γ) .
+[gs ]h1 ,a1 = (1 − γ)ρ(h1 , a1 ) Es,a|h1 ,a1 [Qπ (s, a)]
+= (1 − γ) · 0.373 · (4.465) ·
+
+1
+π 1 (a1 ; h1 )
+
+1
+1
+(96)
+
+= 1.665(1 − γ) .
+
+Comparing values, we have [gs ]h1 ,a1 ̸= [gh ]h1 ,a1 , and therefore gs ̸= gh .
+
+Appendix C. Dec-Tiger Values and Gradients
+Here, we manually calculate the state values Qπ (s, a) for the Dec-Tiger problem. We consider
+the case of two agents who always listen twice, then open the most promising door: left
+door, if the tiger has been heard more on the right; right door, if the tiger has been heard
+more on the right; otherwise, randomly. We proceed by progressively computing all values of
+η(s), η(s, a), ρ(a | s), and Qπ (s, a) for state L and the viable joint actions; by symmetry,
+analogous calculations can be made for state R.
+To simplify notation, we denote state tiger-left as L, state tiger-right as R, observation
+hear-left as L, observation hear-right as R, action listen as Li, action open-left as L, and
+action open-right as R.
+C.1 Discounted Counts and Probabilities
+We start by programmatically computing relevant probabilities, in Tables 4 to 8 2 . Because
+Dec-Tiger is episodic, and our policies guarantee that the episode terminates after timestep
+3, we get the discounted state counts
+
+η(s = L) = Pr(S0 = L) + γ Pr(S1 = L) + γ 2 Pr(S2 = L)
+=
+
+1 + γ + γ2
+.
+2
+
+(97)
+
+2. See https://github.com/lyu-xg/on-centralized-critics-in-marl/tree/main/dectiger
+
+46
+
+On Centralized Critics
+
+Table 4: Pr(A2 = a | H2 = h) = π(a; h). In this table, a joint observation h =
+((A, B), (C, D)) means that the two agents have received observations A and B on the first
+timestep, and C and D on the second timestep.
+a
+
+(L, L)
+
+(L, R)
+
+(R, L)
+
+(R, R)
+
+h
+((L, L), (L, L))
+((L, L), (L, R))
+((L, L), (R, L))
+((L, L), (R, R))
+((L, R), (L, L))
+((L, R), (L, R))
+((L, R), (R, L))
+((L, R), (R, R))
+((R, L), (L, L))
+((R, L), (L, R))
+((R, L), (R, L))
+((R, L), (R, R))
+((R, R), (L, L))
+((R, R), (L, R))
+((R, R), (R, L))
+((R, R), (R, R))
+
+0.25
+0.25
+0.5
+0.25
+0.5
+0.25
+0.5
+0.5
+1.0
+
+0.5
+0.25
+0.25
+0.5
+0.25
+1.0
+0.5
+0.25
+0.5
+
+0.5
+0.25
+0.5
+1.0
+0.25
+0.5
+0.25
+0.25
+0.5
+
+1.0
+0.5
+0.5
+0.25
+0.5
+0.25
+0.5
+0.25
+0.25
+
+Similarly, we get the discounted state-action counts
+η(s = L, a = (Li, Li)) = Pr(S0 = L, A0 = (Li, Li))
++ γ Pr(S1 = L, A1 = (Li, Li))
++ γ 2 Pr(S2 = L, A2 = (Li, Li))
+1+γ
+=
+,
+2
+η(s = L, a = (L, L)) = γ 2 Pr(S2 = L, A2 = (L, L))
+
+(98)
+
+= γ 2 Pr(S2 = L) Pr(A2 = (L, L) | S2 = L)
+1
+= γ 2 0.0225 ,
+2
+2
+η(s = L, a = (L, R)) = γ Pr(S2 = L, A2 = (L, R))
+
+(99)
+
+= γ 2 Pr(S2 = L) Pr(A2 = (L, R) | S2 = L)
+1
+= γ 2 0.1275 ,
+2
+η(s = L, a = (R, L)) = γ 2 Pr(S2 = L, A2 = (R, L))
+
+(100)
+
+= γ 2 Pr(S2 = L) Pr(A2 = (R, L) | S2 = L)
+1
+= γ 2 0.1275 ,
+2
+η(s = L, a = (R, R)) = γ 2 Pr(S2 = L, A2 = (R, R))
+
+(101)
+
+= γ 2 Pr(S2 = L) Pr(A2 = (R, R) | S2 = L)
+1 47
+= γ 2 0.7225 ,
+2
+
+(102)
+
+Lyu, Baisero, Xiao, Daley, & Amato
+
+Table 5: Pr(H2 = h | S2 = s) = 0.85n · 0.152−n , where n is the number of times the tiger
+was heard through the correct door. In this table, a joint observation h = ((A, B), (C, D))
+means that the two agents have received observations A and B on the first timestep, and C
+and D on the second timestep.
+s
+
+L
+
+R
+
+0.522
+0.092
+0.092
+0.016
+0.092
+0.016
+0.016
+0.003
+0.092
+0.016
+0.016
+0.003
+0.016
+0.003
+0.003
+0.001
+
+0.001
+0.003
+0.003
+0.016
+0.003
+0.016
+0.016
+0.092
+0.003
+0.016
+0.016
+0.092
+0.016
+0.092
+0.092
+0.552
+
+h
+((L, L), (L, L))
+((L, L), (L, R))
+((L, L), (R, L))
+((L, L), (R, R))
+((L, R), (L, L))
+((L, R), (L, R))
+((L, R), (R, L))
+((L, R), (R, R))
+((R, L), (L, L))
+((R, L), (L, R))
+((R, L), (R, L))
+((R, L), (R, R))
+((R, R), (L, L))
+((R, R), (L, R))
+((R, R), (R, L))
+((R, R), (R, R))
+Table 6: Pr(A2 = a | S2 = s) =
+
+P
+
+h Pr(A2 = a | H2 = h) Pr(H2 = h | S2 = s).
+
+s
+
+L
+
+R
+
+0.0225
+0.1275
+0.1275
+0.7225
+
+0.7225
+0.1275
+0.1275
+0.0225
+
+a
+(L, L)
+(L, R)
+(R, L)
+(R, R)
+
+Table 7: Pr(h, a | h1 , a1 ). In this table, a joint observation h = ((A, B), (C, D)) means that
+the two agents have received observations A and B on the first timestep, and C and D on
+the second timestep.
+a
+
+(R, L)
+
+(R, R)
+
+0.0
+0.0638
+0.0638
+0.0436
+
+0.7014
+0.0638
+0.0638
+0.0
+
+h
+((L, L), (L, L))
+((L, L), (L, R))
+((L, R), (L, L))
+((L, R), (L, R))
+
+48
+
+On Centralized Critics
+
+Table 8: Pr(s, a | h1 , a1 ).
+s
+
+a
+
+Pr(s, a | h1 , a1 )
+
+L
+L
+R
+R
+
+(R, L)
+(R, R)
+(R, L)
+(R, R)
+
+0.145
+0.824
+0.026
+0.005
+
+and the discounted distributions
+
+1+γ
+1 + γ + γ2
+0.0225γ 2
+ρ(a = (L, L) | s = L) =
+1 + γ + γ2
+0.1275γ 2
+ρ(a = (L, R) | s = L) =
+1 + γ + γ2
+0.1275γ 2
+ρ(a = (R, L) | s = L) =
+1 + γ + γ2
+0.7225γ 2
+ρ(a = (R, R) | s = L) =
+1 + γ + γ2
+
+ρ(a = (Li, Li) | s = L) =
+
+(103)
+(104)
+(105)
+(106)
+(107)
+
+C.2 State Values
+The state values of actions L and R are straightforward due to the episode terminating
+immediately, and are simply the respective rewards,
+
+Qπ (s = L, a = (L, L)) = −50 ,
+
+(108)
+
+π
+
+(109)
+
+π
+
+(110)
+
+π
+
+(111)
+
+Q (s = L, a = (L, R)) = −100 ,
+Q (s = L, a = (R, L)) = −100 ,
+Q (s = L, a = (R, R)) = 20 .
+49
+
+Lyu, Baisero, Xiao, Daley, & Amato
+
+On the other hand, the state value associated with both agents listening is obtained using all
+of the previously calculated probabilities, and a recursive relation,
+Qπ (s = L, a = (Li, Li)) = −2 + γ
+
+X
+
+ρ(a′ | s′ = L)Qπ (s′ = L, a′ )
+
+a′
+
+0.0225γ 3 (−50) 0.1275γ 3 (−100)
++
+1 + γ + γ2
+1 + γ + γ2
+0.1275γ 3 (−100) 0.7225γ 3 (20)
++
++
+1 + γ + γ2
+1 + γ + γ2
+2
+γ+γ
++
+Qπ (s = L, a = (Li, Li))
+1 + γ + γ2
+γ3
+= −2 − 12.175
+1 + γ + γ2
+2
+γ+γ
++
+Qπ (s = L, a = (Li, Li)) ,
+1 + γ + γ2
+
+= −2 +
+
+(112)
+
+then, fixing γ = 1.0,
+Qπ (s = L, a = (Li, Li)) = −
+
+18.175 2 π
++ Q (s = L, a = (Li, Li)) ,
+3
+3
+
+(113)
+
+which results in
+Qπ (s = L, a = (Li, Li)) = −18.175 .
+
+(114)
+
+By the symmetries of the Dec-Tiger problem and the given policies, we similarly get
+Qπ (s = R, a = (L, L)) = 20 ,
+
+(115)
+
+π
+
+(116)
+
+π
+
+(117)
+
+π
+
+Q (s = R, a = (R, R)) = −50 .
+
+(118)
+
+π
+
+(119)
+
+Q (s = R, a = (L, R)) = −100 ,
+Q (s = R, a = (R, L)) = −100 ,
+Q (s = R, a = (Li, Li)) = −18.175 .
+C.3 History-State Values
+
+Here, we compute the history-state values Qπ (h, s, a) for some relevant combinations of
+history, state and actions. We begin by noting that, because all door-opening combinations
+lead to the episode terminating, then each respective value is invariant to the given history,
+and simply equal to the respective reward,
+Qπ (h, s, a) = R(s, a)
+
+∀a ∈ {(L, L), (L, R), (R, L), (R, R)} .
+
+(120)
+
+Then, we compute the values associated with the beginning of the episode, i.e., with the
+empty joint history h = ϵ. Because the second action for both agents will be to listen again,
+and since the state will not change, we can quickly compute the initial history-state values
+50
+
+On Centralized Critics
+
+as,
+Qπ (h = ϵ, s = L, a = (Li, Li))
+X
+X
+Pr(A2 = a | H2 = h)Qπ (h, s = L, a = a)
+= −2 − 2γ + γ 2
+Pr(H2 = h | S2 = L)
+a
+
+h
+
+= −2 − 2γ + γ
+
+2
+
+X
+
+Pr(A2 = a | S2 = L)R(s = L, a = a)
+
+a
+
+= −2 − 2γ + γ 2 (0.0225 · (−50) + 0.1275 · (−100) + 0.1275 · (−100) + 0.7225 · 20)
+(121)
+
+= −2 − 2γ − 12.175γ 2 ,
+then, fixing γ = 1.0,
+
+(122)
+
+= −16.175 .
+
+By the symmetries of the Dec-Tiger problem and the given policies, we similarly get
+Qπ (h = ϵ, s = R, a = (Li, Li)) = −16.175 .
+
+(123)
+
+C.4 History Values
+Finally, we use the equivalence from Lemma 2 to compute history values Qπ (h, a). For
+door-opening actions, we obtain
+Qπ (h, a) = Es|h [Qπ (h, s, a)] ,
+= Es|h [R(s, a)]
+
+∀a ∈ {(L, L), (L, R), (R, L), (R, R)} .
+
+(124)
+
+The state probabilities Pr(s | h) are computed and shown in Table 9, and the respective
+history values are shown in Table 10. Finally, we also compute the history value associated
+with the beginning of the episode, i.e., with the empty joint history h = ϵ, for which trivially
+Pr(s | h = ϵ) = 12 ,
+Qπ (h = ϵ, a = (Li, Li) =
+
+1 X
+Qπ (h = ϵ, s, a = (Li, Li))
+2
+s∈{L,R}
+
+= −16.175 .
+
+51
+
+(125)
+
+Lyu, Baisero, Xiao, Daley, & Amato
+
+Table 9: Pr(s | h) ∝ Pr(h | s) Pr(s), which can be calculated from the values in Table 5. In
+this table, a joint observation h = ((A, B), (C, D)) means that the two agents have received
+observations A and B on the first timestep, and C and D on the second timestep.
+s
+
+L
+
+R
+
+0.999
+0.970
+0.970
+0.500
+0.970
+0.500
+0.500
+0.030
+0.970
+0.500
+0.500
+0.030
+0.500
+0.030
+0.030
+0.001
+
+0.001
+0.030
+0.030
+0.500
+0.030
+0.500
+0.500
+0.970
+0.030
+0.500
+0.500
+0.970
+0.500
+0.970
+0.970
+0.999
+
+h
+((L, L), (L, L))
+((L, L), (L, R))
+((L, L), (R, L))
+((L, L), (R, R))
+((L, R), (L, L))
+((L, R), (L, R))
+((L, R), (R, L))
+((L, R), (R, R))
+((R, L), (L, L))
+((R, L), (L, R))
+((R, L), (R, L))
+((R, L), (R, R))
+((R, R), (L, L))
+((R, R), (L, R))
+((R, R), (R, L))
+((R, R), (R, R))
+
+52
+
+On Centralized Critics
+
+Table 10: Qπ (h, a) = Es|h [R(s, a)]
+∀a ∈ {(L, L), (L, R), (R, L), (R, R)}. In this table, a
+joint observation h = ((A, B), (C, D)) means that the two agents have received observations
+A and B on the first timestep, and C and D on the second timestep.
+a
+
+(L, L)
+
+(L, R)
+
+(R, L)
+
+(R, R)
+
+-49.93
+-47.89
+-47.89
+-15.00
+-47.89
+-15.00
+-15.00
+17.89
+-47.89
+-15.00
+-15.00
+17.89
+-15.00
+17.89
+17.89
+19.93
+
+-100.00
+-100.00
+-100.00
+-100.00
+-100.00
+-100.00
+-100.00
+-100.00
+-100.00
+-100.00
+-100.00
+-100.00
+-100.00
+-100.00
+-100.00
+-100.00
+
+-100.00
+-100.00
+-100.00
+-100.00
+-100.00
+-100.00
+-100.00
+-100.00
+-100.00
+-100.00
+-100.00
+-100.00
+-100.00
+-100.00
+-100.00
+-100.00
+
+19.93
+17.89
+17.89
+-15.00
+17.89
+-15.00
+-15.00
+-47.89
+17.89
+-15.00
+-15.00
+-47.89
+-15.00
+-47.89
+-47.89
+-49.93
+
+h
+((L, L), (L, L))
+((L, L), (L, R))
+((L, L), (R, L))
+((L, L), (R, R))
+((L, R), (L, L))
+((L, R), (L, R))
+((L, R), (R, L))
+((L, R), (R, R))
+((R, L), (L, L))
+((R, L), (L, R))
+((R, L), (R, L))
+((R, L), (R, R))
+((R, R), (L, L))
+((R, R), (L, R))
+((R, R), (R, L))
+((R, R), (R, R))
+
+53
+
+Lyu, Baisero, Xiao, Daley, & Amato
+
+Appendix D. Pseudocode
+We note that practical implementations of Actor-Critic methods do not model the Q-values
+Qπ directly using a Q-model Q̂, but rather using a bootstrapped V-model V̂ , e.g., using
+1-step returns Q̂ t ≈ rt + γ V̂ t+1 (other generalizations like n-step returns or lambda-returns
+are also common). Hence, although the theory of Actor-Critic is based on Q-values and
+models, the pseudocode shown in this section employs V-values and models.
+Algorithm 1 IAC
+Require: Individual actor models π i (a; h), parameterized by θi
+Require: Individual critic models V̂ i (h), parameterized by ϑi
+1: loop
+2:
+Sample environment episode (o0 , a0 , r0 , o1 , a1 , r1 , . . . , oT −1 , aT −1 , rT −1 )
+3:
+Denote individual observed histories as hi,t ← (oi,0 , ai,0 , . . . oi,t−1 , ai,t−1 , oi,t ) , ∀i, t
+4:
+for each agent i do
+5:
+Compute individual advantage estimates δi,t ← rt + γ V̂ i (hi,t+1 ) − V̂ i (hi,t ) , ∀t
+P −1 t
+γ δi,t ∇ log π i (ai,t ; hi,t )
+6:
+Compute actor gradient estimate Tt=0
+7:
+Update actor parameters θi using gradient
+P −1 estimate
+8:
+Compute critic gradient estimate T1 Tt=0
+δi,t ∇V̂ i (hi,t )
+9:
+Update critic parameters ϑi using gradient estimate
+10:
+end for
+11: end loop
+
+Algorithm 2 IACC-H
+Require: Individual actor models π i (a; h), parameterized by θi
+Require: Centralized critic model V̂ (h), parameterized by ϑ
+1: loop
+2:
+Sample environment episode (o0 , a0 , r0 , o1 , a1 , r1 , . . . , oT −1 , aT −1 , rT −1 )
+3:
+Denote joint observed histories as ht ← (o0 , a0 , . . . ot−1 , at−1 , ot ) , ∀t
+4:
+Denote individual observed histories as hi,t ← (oi,0 , ai,0 , . . . oi,t−1 , ai,t−1 , oi,t ) , ∀i, t
+5:
+Compute centralized advantage estimates δt ← rt + γ V̂ (ht+1 ) − V̂ (ht ) , ∀t
+6:
+for each agent i do
+P −1 t
+7:
+Compute actor gradient estimate Tt=0
+γ δt ∇ log π i (ai,t ; hi,t )
+8:
+Update actor parameters θi using gradient estimate
+9:
+end for
+P −1
+10:
+Compute critic gradient estimate T1 Tt=0
+δt ∇V̂ (ht )
+11:
+Update critic parameters ϑ using gradient estimate
+12: end loop
+
+Appendix E. Convergence Properties of IAC and IACC Variants
+In this section, we analyze the convergence properties of basic gradient-based optimization
+algorithms when using the expected gradients ∇θi J, gh , and gh,s , and the sample gradients
+54
+
+On Centralized Critics
+
+Algorithm 3 IACC-S
+Require: Individual actor models π i (a; h), parameterized by θi
+Require: Centralized critic model V̂ (s), parameterized by ϑ
+1: loop
+2:
+Sample environment episode (s0 , o0 , a0 , r0 , s1 , o1 , a1 , r1 , . . . , sT −1 , oT −1 , aT −1 , rT −1 )
+3:
+Denote individual observed histories as hi,t ← (oi,0 , ai,0 , . . . oi,t−1 , ai,t−1 , oi,t ) , ∀i, t
+4:
+Compute centralized advantage estimates δt ← rt + γ V̂ (st+1 ) − V̂ (st ) , ∀t
+5:
+for each agent i do
+P −1 t
+6:
+Compute actor gradient estimate Tt=0
+γ δt ∇ log π i (ai,t ; hi,t )
+7:
+Update actor parameters θi using gradient estimate
+8:
+end for
+P −1
+9:
+Compute critic gradient estimate T1 Tt=0
+δt ∇V̂ (st )
+10:
+Update critic parameters ϑ using gradient estimate
+11: end loop
+
+Algorithm 4 IACC-HS
+Require: Individual actor models π i (a; h), parameterized by θi
+Require: Centralized critic model V̂ (h, s), parameterized by ϑ
+1: loop
+2:
+Sample environment episode (s0 , o0 , a0 , r0 , s1 , o1 , a1 , r1 , . . . , sT −1 , oT −1 , aT −1 , rT −1 )
+3:
+Denote joint observed histories as ht ← (o0 , a0 , . . . ot−1 , at−1 , ot ) , ∀t
+4:
+Denote individual observed histories as hi,t ← (oi,0 , ai,0 , . . . oi,t−1 , ai,t−1 , oi,t ) , ∀i, t
+5:
+Compute centralized advantage estimates δt ← rt + γ V̂ (ht+1 , st+1 ) − V̂ (ht , st ) , ∀t
+6:
+for each agent i do
+P −1 t
+7:
+Compute actor gradient estimate Tt=0
+γ δt ∇ log π i (ai,t ; hi,t )
+8:
+Update actor parameters θi using gradient estimate
+9:
+end for
+P −1
+10:
+Compute critic gradient estimate T1 Tt=0
+δt ∇V̂ (ht , st )
+11:
+Update critic parameters ϑ using gradient estimate
+12: end loop
+
+55
+
+Lyu, Baisero, Xiao, Daley, & Amato
+
+ĝi , ĝh , and ĝh,s . We first fully derive Equations (18), (19) and (21) as the gradient of the
+episodic return objective J, which in itself serves as an auxiliary proof that the expected
+gradients ∇θi J = gh = gh,s are equal to each other. Then, we consider vanilla gradient
+descent based on the expected gradients and show that, under mild conditions, it converges to
+the same local optimum when using either type of gradient from the same starting conditions.
+Finally, we consider stochastic gradient descent based on the sample gradients and show
+that, under the same mild conditions, it still converges to a local optimum when using any
+of the sample gradients from the same starting conditions, although the local optimum may
+differ depending on which sample gradient is used.
+Notation. We employ t ad k to denote time indices, τ = (s0 , o0 , a0 , s1 , o1 , a1 , . . .) to
+denote a full episodic trajectory (including all states, observations, and actions), xi,t to
+denote a variable associated with agent i at timestep t, and x(t:) to denote a subsequence of
+variables starting from timestep t (included) onwards.
+E.1 Derivations of Gradients
+In this section, we show the derivations of Equations (18), (19) and (21), for which it is
+necessary to consider the following lemma.
+Lemma 4. For timesteps t < k, E [∇θi log π i (ai,k ; hi,k )R(st , at )] = 0.
+Proof.
+E [∇θi log π i (ai,k ; hi,k )R(st , at )]
+= Ehi,k ,ai,k ,st ,at [∇θi log π i (ai,k ; hi,k )R(st , at )]
+h
+i
+= Ehi,k ,st ,at Eai,k |hi,k ,st ,at [∇θi log π i (ai,k ; hi,k )] R(st , at )
+(conditional independence valid when t < k)
+h
+i
+= Ehi,k ,st ,at Eai,k |hi,k [∇θi log π i (ai,k ; hi,k )] R(st , at )
+(expectation of score function is zero)
+(126)
+
+= 0.
+
+P
+Theorem 8 (IAC Policy Gradient). The gradient of J = E [ t R(st , at )] with respect to
+agent i’s parameters θi is
+"
+#
+X
+∇θi J = E
+γ t Qπ
+i (hi,t , ai,t )∇θi log π(ai,t ; hi,t )
+t
+
+= (1 − γ) Eh,a∼ρ(h,a) [Qπ
+i (hi , ai )∇θi log π i (ai ; hi , θi )] .
+Proof.
+"
+∇θi J = ∇θi Eτ
+
+#
+X
+
+γ t R(st , at )
+
+t
+
+56
+
+(127)
+
+On Centralized Critics
+
+"
+
+#
+
+= Eτ ∇θi log Pr(τ )
+
+X
+
+γ t R(st , at )
+
+t
+
+(note two independent time indices k and t)
+"
+#
+X
+X
+t
+= Eτ
+∇θi log π i (ai,k ; hi,k )
+γ R(st , at )
+t
+
+k
+
+(see Lemma 4)
+X
+=
+γ t Eτ [∇θi log π i (ai,k ; hi,k )R(st , at )]
+k,t
+
+=
+=
+
+((((
+
+X
+
+(
+()R(s
+(;(
+γ t Eτ [∇θi log(π(
+hi,k
+(i,k
+i (a
+t , at )] +
+
+((
+k,t<k
+((((
+(
+(
+X
+
+X
+
+γ t Eτ [∇θi log π i (ai,k ; hi,k )R(st , at )]
+
+k,t≥k
+
+γ k γ t−k Eτ [∇θi log π i (ai,k ; hi,k )R(st , at )]
+
+k,t≥k
+
+
+
+
+=
+
+X
+
+γ k Eτ ∇θi log π i (ai,k ; hi,k )
+
+X
+
+γ t−k R(st , at )
+
+t≥k
+
+k
+
+
+
+
+=
+
+X
+
+γ k Ehi,k ,ai,k ,s(k:) ,a(k:) ∇θi log π i (ai,k ; hi,k )
+
+X
+
+γ t−k R(st , at )
+
+t≥k
+
+k
+
+
+=
+
+X
+
+=
+
+X
+
+=
+
+X
+
+γ k Ehi,k ,ai,k ∇θi log π i (ai,k ; hi,k ) Es(k:) ,a(k:) |hi,k ,ai,k
+
+k
+
+
+
+X
+
+γ t−k R(st , at )
+t≥k
+
+γ k Ehi,k ,ai,k [∇θi log π i (ai,k ; hi,k )Qπ
+i (hi,k , ai,k )]
+
+k
+
+γ k Eτ [∇θi log π i (ai,k ; hi,k )Qπ
+i (hi,k , ai,k )]
+
+k
+
+#
+
+"
+=E
+
+X
+
+γ k ∇θi log π i (ai,k ; hi,k )Qπ
+i (hi,k , ai,k )
+
+k
+
+(change of variable k → t)
+"
+#
+X
+t π
+=E
+γ Qi (hi,t , ai,t )∇θi log π i (ai,t ; hi,t )
+t
+
+= (1 − γ) Eh,a∼ρ(h,a) [Qπ
+i (hi , ai )∇θi log π i (ai ; hi )] .
+
+(128)
+
+P
+Theorem 9 (IACC-H Policy Gradient). The gradient of J = E [ t R(st , at )] with respect to
+agent i’s parameters θi is
+"
+#
+X
+t π
+gh = E
+γ Q (ht , at )∇θi log π(ai,t ; hi,t )
+t
+
+= (1 − γ) Eh,a∼ρ(h,a) [Qπ (h, a)∇θi log π i (ai ; hi , θi )] .
+57
+
+(129)
+
+Lyu, Baisero, Xiao, Daley, & Amato
+
+Proof.
+"
+
+#
+X
+
+gh = ∇θi Eτ
+
+t
+
+γ R(st , at )
+
+t
+
+"
+
+#
+
+= Eτ ∇θi log Pr(τ )
+
+X
+
+t
+
+γ R(st , at )
+
+t
+
+(note two independent time indices k and t)
+"
+#
+X
+X
+t
+= Eτ
+∇θi log π i (ai,k ; hi,k )
+γ R(st , at )
+t
+
+k
+
+(see Lemma 4)
+X
+=
+γ t Eτ [∇θi log π i (ai,k ; hi,k )R(st , at )]
+k,t
+
+=
+
+((((
+
+X
+
+(
+()R(s
+(;(
+hi,k
+γ t Eτ [∇θi log(π(
+(i,k
+i (a
+t , at )] +
+
+(((
+k,t<k
+((((
+(
+
+=
+
+X
+
+k t−k
+
+γ γ
+
+X
+
+γ t Eτ [∇θi log π i (ai,k ; hi,k )R(st , at )]
+
+k,t≥k
+
+Eτ [∇θi log π i (ai,k ; hi,k )R(st , at )]
+
+k,t≥k
+
+
+
+
+=
+
+X
+
+γ k Eτ ∇θi log π i (ai,k ; hi,k )
+
+X
+
+γ t−k R(st , at )
+
+t≥k
+
+k
+
+
+
+
+=
+
+X
+
+γ k Ehk ,ak ,s(k:) ,a(k:) ∇θi log π i (ai,k ; hi,k )
+
+X
+t≥k
+
+k
+
+
+=
+
+γ t−k R(st , at )
+
+X
+
+γ k Ehk ,ak ∇θi log π i (ai,k ; hi,k ) Es(k:) ,a(k:)
+
+
+
+X
+
+γ t−k R(st , at )
+|h ,a
+k
+
+k
+
+=
+
+k
+
+t≥k
+
+X
+
+π
+
+k
+
+γ Ehk ,ak [∇θi log π i (ai,k ; hi,k )Q (hk , ak )]
+
+k
+
+=
+
+X
+
+γ k Eτ [∇θi log π i (ai,k ; hi,k )Qπ (hk , ak )]
+
+k
+
+"
+=E
+
+#
+X
+
+k
+
+π
+
+γ ∇θi log π i (ai,k ; hi,k )Q (hk , ak )
+
+k
+
+(change of variable k → t)
+"
+#
+X
+t π
+=E
+γ Q (ht , at )∇θi log π i (ai,t ; hi,t )
+t
+
+= (1 − γ) Eh,a∼ρ(h,a) [Qπ (h, a)∇θi log π i (ai ; hi )] .
+
+58
+
+(130)
+
+On Centralized Critics
+
+P
+Theorem 10 (IACC-HS Policy Gradient). The gradient of J = E [ t R(st , at )] with respect
+to agent i’s parameters θi is
+"
+
+#
+X
+
+gh,s = E
+
+t
+
+π
+
+γ Q (ht , st , at )∇θi log π(ai,t ; hi,t )
+
+t
+
+= (1 − γ) Eh,s,a∼ρ(h,s,a) [Qπ (h, s, a)∇θi log π i (ai ; hi , θi )] .
+
+(131)
+
+Proof.
+"
+
+#
+X
+
+gh,s = ∇θi Eτ
+
+t
+
+γ R(st , at )
+
+t
+
+"
+
+#
+
+= Eτ ∇θi log Pr(τ )
+
+X
+
+t
+
+γ R(st , at )
+
+t
+
+(note two independent time indices k and t)
+"
+#
+X
+X
+= Eτ
+∇θi log π i (ai,k ; hi,k )
+γ t R(st , at )
+t
+
+k
+
+(see Lemma 4)
+X
+=
+γ t Eτ [∇θi log π i (ai,k ; hi,k )R(st , at )]
+k,t
+
+=
+=
+
+((((
+
+X
+
+(
+()R(s
+(;(
+hi,k
+γ t Eτ [∇θi log(π(
+(i,k
+i (a
+t , at )] +
+
+(((
+k,t<k
+((((
+(
+X
+k t−k
+
+γ γ
+
+X
+
+γ t Eτ [∇θi log π i (ai,k ; hi,k )R(st , at )]
+
+k,t≥k
+
+Eτ [∇θi log π i (ai,k ; hi,k )R(st , at )]
+
+k,t≥k
+
+
+
+
+=
+
+X
+
+γ k Eτ ∇θi log π i (ai,k ; hi,k )
+
+X
+
+γ t−k R(st , at )
+
+t≥k
+
+k
+
+
+
+
+=
+
+X
+
+γ k Ehk ,sk ,ak ,s(k:) ,a(k:) ∇θi log π i (ai,k ; hi,k )
+
+k
+
+X
+t≥k
+
+
+=
+
+γ t−k R(st , at )
+
+X
+
+γ k Ehk ,sk ,ak ∇θi log π i (ai,k ; hi,k ) Es(k:) ,a(k:)
+
+
+
+X
+
+γ t−k R(st , at )
+|h ,s ,a
+k
+
+k
+
+k
+
+t≥k
+
+=
+
+X
+
+=
+
+X
+
+π
+
+k
+
+γ Ehk ,sk ,ak [∇θi log π i (ai,k ; hi,k )Q (hk , sk , ak )]
+
+k
+
+γ k Eτ [∇θi log π i (ai,k ; hi,k )Qπ (hk , sk , ak )]
+
+k
+
+"
+=E
+
+k
+
+#
+X
+
+k
+
+π
+
+γ ∇θi log π i (ai,k ; hi,k )Q (hk , sk , ak )
+
+k
+
+(change of variable k → t)
+59
+
+Lyu, Baisero, Xiao, Daley, & Amato
+
+=E
+
+"
+X
+
+#
+γ t Qπ (ht , st , at )∇θi log π i (ai,t ; hi,t )
+
+t
+
+= (1 − γ) Eh,s,a∼ρ(h,s,a) [Qπ (h, s, a)∇θi log π i (ai ; hi )] .
+
+(132)
+
+We note that, though Theorems 8 to 10 are framed in the infinite-horizon control setting,
+they are equally applicable to the finite-horizon and the indefinite-horizon (a.k.a. episodic)
+control settings due to (a) history policies and history values being intrinsically timed
+policies and values, and (b) being able to reframe finite-horizon and indefinite-horizon control
+problems into the infinite-horizon case via sink states.
+E.2 Convergence Properties
+In the rest of this section, we address the convergence properties of gradient descent algorithms
+that employ either the expected or the sample versions of the IAC, IAC-H, and IAC-HS
+gradients, and show that they converge to local optima in policy space under the following
+assumptions:
+• Independently parameterized policy models π i with no parameter sharing, i.e., parameters θi exclusively determine the behavior of policy π i and do not affect the behavior of
+other policies π j where j ̸= i (this assumption is not strictly necessary given appropriate
+adjustments to the optimization algorithms, though it does simplify the discussion).
+• Parameterized policy models π i that are smooth and differetiable everywhere.
+• Identical starting conditions and parameter initialization.
+• A synchronous optimization setting, i.e., all policy gradients are computed/estimated
+first (using the same sample data, if applicable), and then updated at the same time.
+For stochastic gradient descent based on sample gradients, we make the following additional
+assumption:
+• For stochastic gradient descent, properly seeded random processes to avoid stochasticity
+being the cause of differing convergence values.
+Algorithms 5 and 6 represent the optimization processes associated with the expected
+and sample gradients, respectively. Note the synchronous optimization process that strictly
+alternates between a gradient computation/estimation phase, and a gradient update phase.
+The synchronous optimization assumption is necessary to avoid non-stationary issues that may
+arise if the agents were to update their own policies at different and/or non-predetermined
+times. With that assumption in place, we can view the optimization processes of all agents
+as a single optimization process over the joint parameter space of all agents (as also discussed
+in (Peshkin et al., 2000)), which is sufficient to associate to the policy gradient algorithms
+the same convergence guarantees of (stochastic) gradient descent when used to optimize a
+generic non-convex function.
+The (stochastic) gradient descent applied to a generic non-convex function does not
+have the same strict theoretical convergence guarantees as when applied to a generic convex
+60
+
+On Centralized Critics
+
+function due to the existence of multiple stationary points (saddle points, local maxima, and
+local minima) (Dauphin, Pascanu, Gulcehre, Cho, Ganguli, & Bengio, 2014; Choromanska,
+Henaff, Mathieu, Ben Arous, & LeCun, 2015; Ge, Huang, Jin, & Yuan, 2015). Despite
+this notable theoretical difference between the convex and non-convex case, in practice,
+(stochastic) gradient descent is often able to avoid saddle points and to find sufficiently
+performative local minima (Choromanska et al., 2015; Goodfellow, Bengio, & Courville, 2016;
+Robbins & Monro, 1951; Kiefer & Wolfowitz, 1952).
+Finally, we note that gradient descent with expected gradients (Algorithm 5) will naturally
+result in convergence to the same final policies for all gradient types, provided identical
+starting conditions and parameter initialization, simply due to the nature of all gradients
+being equal in expectation. On the other hand, stochastic gradient descent with sample
+gradients (Algorithm 6) may result in convergence to different final policies for each gradient
+type, even provided identical starting conditions and parameter initialization. Although the
+sample gradients ĝi , ĝh , and ĝh,s are all unbiased and identical in expectation, each has a
+π
+π
+different variance profile, and the respective values Qπ
+i (hi , ai ), Q (h, a), and Q (h, s, a)
+intrinsically integrate (or not) over different variables according to Lemmas 1 and 2.
+E.3 Related Work on the Convergence of Actor-Critic Methods
+Previous work on the convergence of actor-critic methods have shown convergence in both
+single-agent and multi-agent settings under the average-reward setting, as opposed to the
+finite-horizon or episodic setting; in addition, most works assume fully observability, which is
+considerably simpler compared to partial observability.
+For the single agent case, early work (Sutton et al., 2000; Konda & Tsitsiklis, 2000)
+showed that under average-reward setting, policy gradient methods converge to a local
+optimum with function approximation and linear models under mild assumptions. However,
+convergence is not shown for the finite-horizon or episodic case, non-linear models, and
+partial observability. More recent work (Wu, Zhang, Xu, & Gu, 2020; Tian, Olshevsky, &
+Paschalidis, 2024) extend the convergence result of actor-critic methods to non-linear deep
+neural networks (under some common mild assumptions) with a single training time scale
+(where critic and actor models are trained with the same frequency), whereas previous works
+assume two separate training time scales (with the critic moel being trained more frequently
+than the actor model). Again, their convergence results also ignore the episodic setting and
+assume full observability. Shen, Zhang, Hong, and Chen (2023) established a finite-time
+local convergence of A3C for the general policy approximation and global convergence for
+softmax policy parameterization under i.i.d. sampling; they assume critics with bounded
+error, linear features, Lipschitz continuous and bounded policy gradient, as well as irreducible
+and aperiodic Markov chains under the average-reward setting. Once again, the partially
+observable setting is not yet examined in this work. In summary, to the best of our knowledge,
+the single-agent AC convergence results apply only in the fully observable MDP setting
+and are focused on average-reward formulation. Those fully observable single-agent results
+do not extend directly into our problem formulation since we cannot leverage a stationary
+state distribution since we use action-observation histories rather than states, and histories
+cannot be revisited. To derive the history distribution and the state distribution under
+61
+
+Lyu, Baisero, Xiao, Daley, & Amato
+
+Algorithm 5 Gradient Descent
+Require: Individual actor models π i (a; h), parameterized by θi
+Require: Gradient function gi (θi ) for agent i (∇θi J, gh , or gh,s )
+Require: Stepsize schedule ηk
+1: for k ← 1, 2, 3, . . . do
+2:
+for each agent i do
+3:
+dθi ← gi (θi )
+{Compute expected gradient}
+4:
+end for
+5:
+for each agent i do
+6:
+θi ← θi − ηk · dθi
+{Update parameters}
+7:
+end for
+8: end for
+partial observability, we give the solution in Appendix A.2 where we formally define the state
+distribution for Dec-POMDPs.
+As for the multi-agent literature, Arrow and Hurwicz (1960) show that for non-cooperative
+n-person games, under certain convexity assumptions on the shape of payoff functions, the
+gradient-descent process converges to an equilibrium point. This work provides theoretical
+insight, but does not consider the reinforcement learning setting. Peshkin et al. (2000) imply
+that a gradient descent policy search algorithm converges to a local optimum with certain
+policy classes; however, they did not provide an accompanying proof of convergence in detail.
+It should be noted that Peshkin et al. do assume partial observability and history-based local
+policies (through finite-state controllers), which is in line with our Dec-POMDP framework.
+In this sense, our derivation of convergence follows directly after their work, by looking at the
+Actor-Critic framework specifically and providing the convergence result in greater detail.
+More recent MARL research efforts propose IACC methods with a factorized centralized
+critic with convergence guarantees, such as DOP (Wang, Han, Wang, Dong, & Zhang,
+2020). It is shown that DOP is able to achieve policy improvement with their linear value
+decomposition architecture; however, they do not explicitly show convergence, though it is
+implied by the policy improvement result. We thus provide a convergence result for a set of
+generic Actor-Critic methods in greater detail.
+In summary, convergence in the setting of average reward was regularly investigated in
+the literature of single-agent control; however, finite-horizon and episodic setting are often
+glossed over. In the multi-agent literature, convergence of policy gradient is often assumed
+or implied but not shown. Our work filled the gap of convergence properties of actor-critic
+methods in both multi-agent finite-horizon and episodic settings, extending convergence
+results to generic policies.
+
+62
+
+On Centralized Critics
+
+Algorithm 6 Stochastic Gradient Descent
+Require: Individual actor models π i (a; h), parameterized by θi
+Require: Sample gradient function gi (θi ; τ ) for agent i (ĝi , ĝh , or ĝh,s )
+Require: Stepsize schedule ηk
+1: for k ← 1, 2, 3, . . . do
+2:
+τ ← (s0 , o0 , a0 , r0 , s1 , o1 , a1 , r1 , . . . , sT −1 , oT −1 , aT −1 , rT −1 )
+{Sample episode}
+3:
+for each agent i do
+4:
+dθi ← gi (θi ; τ )
+{Compute sample gradient}
+5:
+end for
+6:
+for each agent i do
+7:
+θi ← θi − ηk · dθi
+{Update parameters}
+8:
+end for
+9: end for
+
+63
+
+Lyu, Baisero, Xiao, Daley, & Amato
+
+References
+Amato, C., Dibangoye, J. S., & Zilberstein, S. (2009). Incremental policy generation for finitehorizon DEC-POMDPs. In Proceedings of the International Conference on Automated
+Planning and Scheduling, pp. 2–9. AAAI Press.
+Amato, C., Bernstein, D. S., & Zilberstein, S. (2007). Optimizing memory-bounded controllers
+for decentralized POMDPs. In Proceedings of the Conference on Uncertainty in Artificial
+Intelligence.
+Arrow, K. J., & Hurwicz, L. (1960). Stability of the gradient process in n-person games.
+Journal of the Society for Industrial and Applied Mathematics, 8 (2), 280–294.
+Baisero, A., & Amato, C. (2022). Unbiased asymmetric reinforcement learning under partial
+observability. In Proceedings of the International Conference on Autonomous Agents
+and Multiagent Systems.
+Baker, B., Kanitscheider, I., Markov, T., Wu, Y., Powell, G., McGrew, B., & Mordatch, I.
+(2020). Emergent tool use from multi-agent autocurricula. In International Conference
+on Learning Representations.
+Bernstein, D. S., Hansen, E. A., & Zilberstein, S. (2005). Bounded policy iteration for
+decentralized POMDPs. In Proceedings of the International Joint Conference on
+Artificial Intelligence, pp. 52–57.
+Bono, G., Dibangoye, J. S., Matignon, L., Pereyron, F., & Simonin, O. (2018). Cooperative multi-agent policy gradient. In European Conference on Machine Learning and
+Knowledge Discovery in Databases, pp. 459–476. Springer.
+Bowling, M., & Veloso, M. (2001). Convergence of gradient dynamics with a variable learning
+rate. In Proceedings of the International Conference on Machine Learning, pp. 27–34.
+Chakravorty, J., Ward, P. N., Roy, J., Chevalier-Boisvert, M., Basu, S., Lupu, A., & Precup,
+D. (2020). Option-critic in cooperative multi-agent systems. In Proceedings of the
+International Conference on Autonomous Agents and Multiagent Systems, pp. 1792–
+1794.
+Choromanska, A., Henaff, M., Mathieu, M., Ben Arous, G., & LeCun, Y. (2015). The Loss
+Surfaces of Multilayer Networks. In Lebanon, G., & Vishwanathan, S. V. N. (Eds.),
+Proceedings of the Eighteenth International Conference on Artificial Intelligence and
+Statistics, Vol. 38 of Proceedings of Machine Learning Research, pp. 192–204, San Diego,
+California, USA. PMLR.
+Claus, C., & Boutilier, C. (1998). The dynamics of reinforcement learning in cooperative
+multiagent systems. In Proceedings of the AAAI Conference on Artificial Intelligence,
+pp. 746–752.
+Das, A., Gervet, T., Romoff, J., Batra, D., Parikh, D., Rabbat, M., & Pineau, J. (2019).
+TarMAC: Targeted multi-agent communication. In Proceedings of the International
+Conference on Machine Learning, pp. 1538–1546.
+Dauphin, Y. N., Pascanu, R., Gulcehre, C., Cho, K., Ganguli, S., & Bengio, Y. (2014).
+Identifying and attacking the saddle point problem in high-dimensional non-convex optimization. In Ghahramani, Z., Welling, M., Cortes, C., Lawrence, N., & Weinberger, K.
+64
+
+On Centralized Critics
+
+(Eds.), Advances in Neural Information Processing Systems, Vol. 27. Curran Associates,
+Inc.
+de Witt, C. S., Peng, B., Kamienny, P.-A., Torr, P., Böhmer, W., & Whiteson, S. (2020). Deep
+multi-agent reinforcement learning for decentralized continuous cooperative control.
+arXiv preprint arXiv:2003.06709, 19.
+Du, Y., Han, L., Fang, M., Dai, T., Liu, J., & Tao, D. (2019). LIIR: Learning individual intrinsic reward in multi-agent reinforcement learning. In Advances in Neural Information
+Processing Systems.
+Foerster, J., Assael, I. A., De Freitas, N., & Whiteson, S. (2016). Learning to communicate
+with deep multi-agent reinforcement learning. In Advances in Neural Information
+Processing Systems, pp. 2137–2145.
+Foerster, J., Farquhar, G., Afouras, T., Nardelli, N., & Whiteson, S. (2018). Counterfactual
+multi-agent policy gradients. In Proceedings of the AAAI Conference on Artificial
+Intelligence.
+Fulda, N., & Ventura, D. (2007). Predicting and preventing coordination problems in
+cooperative Q-learning systems. In Proceedings of the International Joint Conference
+on Artificial Intelligence, pp. 780–785.
+Ge, R., Huang, F., Jin, C., & Yuan, Y. (2015). Escaping from saddle points — online
+stochastic gradient for tensor decomposition. In Grünwald, P., Hazan, E., & Kale, S.
+(Eds.), Proceedings of The 28th Conference on Learning Theory, Vol. 40 of Proceedings
+of Machine Learning Research, pp. 797–842, Paris, France. PMLR.
+Goodfellow, I., Bengio, Y., & Courville, A. (2016). Deep Learning. MIT Press. http:
+//www.deeplearningbook.org.
+Iqbal, S., & Sha, F. (2019). Actor-attention-critic for multi-agent reinforcement learning.
+In Proceedings of the International Conference on Machine Learning, Vol. 97, pp.
+2961–2970.
+Jiang, J., & Lu, Z. (2018). Learning attentional communication for multi-agent cooperation.
+In Advances in Neural Information Processing Systems, pp. 7254–7264.
+Jiang, S. (2019). Multi-agent reinforcement learning environments compilation. https:
+//github.com/Bigpig4396/Multi-Agent-Reinforcement-Learning-Environment.
+Kiefer, J., & Wolfowitz, J. (1952). Stochastic estimation of the maximum of a regression
+function. The Annals of Mathematical Statistics, 462–466.
+Konda, V. R., & Tsitsiklis, J. N. (2000). Actor-critic algorithms. In Advances in Neural
+Information Processing Systems, pp. 1008–1014.
+Lee, H.-R., & Lee, T. (2019). Improved cooperative multi-agent reinforcement learning
+algorithm augmented by mixing demonstrations from centralized policy. In Proceedings
+of the International Conference on Autonomous Agents and Multiagent Systems, pp.
+1089–1098.
+Li, S., Wu, Y., Cui, X., Dong, H., Fang, F., & Russell, S. (2019). Robust multi-agent
+reinforcement learning via minimax deep deterministic policy gradient. In Proceedings
+of the AAAI Conference on Artificial Intelligence, Vol. 33, pp. 4213–4220.
+65
+
+Lyu, Baisero, Xiao, Daley, & Amato
+
+Lowe, R., Wu, Y. I., Tamar, A., Harb, J., Pieter Abbeel, O., & Mordatch, I. (2017). Multiagent actor-critic for mixed cooperative-competitive environments. In Advances in
+Neural Information Processing Systems, Vol. 30.
+Lyu, X., & Amato, C. (2020). Likelihood quantile networks for coordinating multi-agent
+reinforcement learning. In Proceedings of the International Conference on Autonomous
+Agents and Multiagent Systems, pp. 798–806.
+Lyu, X., Baisero, A., Xiao, Y., & Amato, C. (2022). A deeper understanding of state-based
+critics in multi-agent reinforcement learning. In Proceedings of the AAAI Conference
+on Artificial Intelligence, Vol. 36, pp. 9396–9404.
+Lyu, X., Xiao, Y., Daley, B., & Amato, C. (2021). Contrasting centralized and decentralized
+critics in multi-agent reinforcement learning. In Proceedings of the International
+Conference on Autonomous Agents and Multiagent Systems, pp. 844–852.
+Mahajan, A., Rashid, T., Samvelyan, M., & Whiteson, S. (2019). MAVEN: Multi-agent
+variational exploration. In Advances in Neural Information Processing Systems.
+Matignon, L., Laurent, G. J., & Le Fort-Piat, N. (2012). Independent reinforcement learners in
+cooperative Markov games: a survey regarding coordination problems. The Knowledge
+Engineering Review, 27 (1), 1–31.
+Mordatch, I., & Abbeel, P. (2018). Emergence of grounded compositional language in multiagent populations. In Proceedings of the Thirty-Second AAAI Conference on Artificial
+Intelligence, pp. 1495–1502. AAAI Press.
+Nair, R., Tambe, M., Yokoo, M., Pynadath, D., & Marsella, S. (2003). Taming decentralized
+POMDPs: Towards efficient policy computation for multiagent settings. In Proceedings
+of the International Joint Conference on Artificial Intelligence, Vol. 3, pp. 705–711.
+Oliehoek, F. A., & Amato, C. (2016). A Concise Introduction to Decentralized POMDPs.
+Springer.
+Oliehoek, F. A., Spaan, M. T., & Vlassis, N. (2008). Optimal and approximate Q-value
+functions for decentralized POMDPs. Journal of Artificial Intelligence Research, 32,
+289–353.
+Omidshafiei, S., Kim, D.-K., Liu, M., Tesauro, G., Riemer, M., Amato, C., Campbell, M., &
+How, J. P. (2019). Learning to teach in cooperative multiagent reinforcement learning.
+In Proceedings of the AAAI Conference on Artificial Intelligence, Vol. 33, pp. 6128–6136.
+Omidshafiei, S., Pazis, J., Amato, C., How, J. P., & Vian, J. (2017). Deep decentralized
+multi-task multi-agent reinforcement learning under partial observability. In Proceedings
+of the International Conference on Machine Learning, pp. 2681–2690.
+Panait, L., Tuyls, K., & Luke, S. (2008). Theoretical advantages of lenient Q-learners:
+An evolutionary game theoretic perspective. Journal of Machine Learning Research,
+9 (Mar), 423–457.
+Peng, B., Rashid, T., Schroeder de Witt, C., Kamienny, P.-A., Torr, P., Böhmer, W., &
+Whiteson, S. (2021). Facmac: Factored multi-agent centralised policy gradients. In
+Advances in Neural Information Processing Systems, pp. 12208–12221.
+66
+
+On Centralized Critics
+
+Peshkin, L., Kim, K.-E., Meuleau, N., & Kaelbling, L. P. (2000). Learning to cooperate via
+policy search. In Proceedings of the Conference on Uncertainty in Artificial Intelligence,
+pp. 489–496.
+Rashid, T., Farquhar, G., Peng, B., & Whiteson, S. (2020). Weighted QMIX: Expanding
+monotonic value function factorisation. In Advances in Neural Information Processing
+Systems.
+Rashid, T., Samvelyan, M., de Witt, C. S., Farquhar, G., Foerster, J., & Whiteson, S. (2018).
+QMIX: Monotonic value function factorisation for deep multi-agent reinforcement
+learning. In Proceedings of the International Conference on Machine Learning.
+Robbins, H., & Monro, S. (1951). A stochastic approximation method. The annals of
+mathematical statistics, 400–407.
+Samvelyan, M., Rashid, T., de Witt, C. S., Farquhar, G., Nardelli, N., Rudner, T. G. J., Hung,
+C.-M., Torr, P. H. S., Foerster, J., & Whiteson, S. (2019). The StarCraft multi-agent
+challenge. In Proceedings of the International Conference on Autonomous Agents and
+Multiagent Systems, pp. 2148–2150.
+Schroeder de Witt, C., Foerster, J., Farquhar, G., Torr, P., Boehmer, W., & Whiteson, S.
+(2019). Multi-agent common knowledge reinforcement learning. In Advances in Neural
+Information Processing Systems, Vol. 32, pp. 9927–9939.
+Shen, H., Zhang, K., Hong, M., & Chen, T. (2023). Towards understanding asynchronous
+advantage actor-critic: Convergence and linear speedup. IEEE Transactions on Signal
+Processing.
+Simões, D., Lau, N., & Reis, L. P. (2020). Multi-agent actor centralized-critic with communication. Neurocomputing, 390, 40–56.
+Singh, S. P., Kearns, M. J., & Mansour, Y. (2000). Nash convergence of gradient dynamics
+in general-sum games. In Proceedings of the Conference on Uncertainty in Artificial
+Intelligence, pp. 541–548.
+Son, K., Kim, D., Kang, W. J., Hostallero, D. E., & Yi, Y. (2019). QTRAN: Learning to
+factorize with transformation for cooperative multi-agent reinforcement learning. In
+Proceedings of the International Conference on Machine Learning, Vol. 97 of Proceedings
+of Machine Learning Research, pp. 5887–5896. PMLR.
+Su, J., Adams, S., & Beling, P. A. (2021). Value-decomposition multi-agent actor-critics. In
+Proceedings of the AAAI Conference on Artificial Intelligence.
+Sunehag, P., Lever, G., Gruslys, A., Czarnecki, W. M., Zambaldi, V., Jaderberg, M., Lanctot,
+M., Sonnerat, N., Leibo, J. Z., Tuyls, K., et al. (2018). Value-decomposition networks
+for cooperative multi-agent learning based on team reward. In Proceedings of the
+International Conference on Autonomous Agents and Multiagent Systems, pp. 2085–
+2087.
+Sutton, R. S., & Barto, A. G. (2018). Reinforcement Learning: An Introduction (Second
+edition). The MIT Press.
+Sutton, R. S., McAllester, D. A., Singh, S. P., & Mansour, Y. (2000). Policy gradient
+methods for reinforcement learning with function approximation. In Advances in
+Neural Information Processing Systems, pp. 1057–1063.
+67
+
+Lyu, Baisero, Xiao, Daley, & Amato
+
+Tian, H., Olshevsky, A., & Paschalidis, Y. (2024). Convergence of actor-critic with multi-layer
+neural networks. Advances in Neural Information Processing Systems, 36.
+Wang, J., Zhang, Y., Kim, T.-K., & Gu, Y. (2020a). Shapley Q-value: A local reward
+approach to solve global reward games. In Proceedings of the AAAI Conference on
+Artificial Intelligence, Vol. 34, p. 7285–7292.
+Wang, T., Dong, H., & Victor Lesser, C. Z. (2020b). ROMA: Multi-agent reinforcement
+learning with emergent roles. In Proceedings of the International Conference on Machine
+Learning.
+Wang, T., Wang, J., Zheng, C., & Zhang, C. (2020c). Learning nearly decomposable value
+functions via communication minimization. In International Conference on Learning
+Representations.
+Wang, W., Hao, J., Wang, Y., & Taylor, M. (2019). Achieving cooperation through deep
+multiagent reinforcement learning in sequential prisoner’s dilemmas. In Proceedings of
+the International Conference on Distributed Artificial Intelligence, pp. 1–7.
+Wang, Y., Han, B., Wang, T., Dong, H., & Zhang, C. (2020). Dop: Off-policy multi-agent
+decomposed policy gradients. In International conference on learning representations.
+Wang, Y., Han, B., Wang, T., Dong, H., & Zhang, C. (2021). Off-policy multi-agent
+decomposed policy gradients. In International Conference on Learning Representations.
+Wu, Y. F., Zhang, W., Xu, P., & Gu, Q. (2020). A finite-time analysis of two time-scale
+actor-critic methods. Advances in Neural Information Processing Systems, 33, 17617–
+17628.
+Xiao, Y., Hoffman, J., & Amato, C. (2019). Macro-action-based deep multi-agent reinforcement learning. In Conference on Robot Learning.
+Xiao, Y., Hoffman, J., Xia, T., & Amato, C. (2020). Learning multi-robot decentralized
+macro-action-based policies via a centralized Q-net. In Proceedings of the International
+Conference on Robotics and Automation.
+Yang, J., Nakhaei, A., Isele, D., Fujimura, K., & Zha, H. (2020). CM3: Cooperative multigoal multi-stage multi-agent reinforcement learning. In International Conference on
+Learning Representations.
+Yu, C., Velu, A., Vinitsky, E., Gao, J., Wang, Y., Bayen, A., & Wu, Y. (2022). The
+surprising effectiveness of PPO in cooperative multi-agent games. In Advances in
+Neural Information Processing Systems, Vol. 35, pp. 24611–24624.
+Zhang, C., & Lesser, V. (2010). Multi-agent learning with policy prediction. In Proceedings
+of the AAAI Conference on Artificial Intelligence, Vol. 24.
+Zhang, T., Li, Y., Wang, C., Xie, G., & Lu, Z. (2021). Fop: Factorizing optimal joint policy
+of maximum-entropy multi-agent reinforcement learning. In International conference
+on machine learning, pp. 12491–12500. PMLR.
+Zhou, M., Liu, Z., Sui, P., Li, Y., & Chung, Y. Y. (2020). Learning implicit credit assignment
+for cooperative multi-agent reinforcement learning. In Advances in Neural Information
+Processing Systems.
+
+68
+
+

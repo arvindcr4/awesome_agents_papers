@@ -1,0 +1,3903 @@
+
+--- Page 1 ---
+Deep Q-Learning with Gradient Target Tracking
+Bumgeun Park∗
+Electrical Engineering, KAIST
+j4t123@kaist.ac.kr
+Taeho Lee ∗
+Electrical Engineering, KAIST
+eho0228@kaist.ac.kr
+Donghwan Lee
+Electrical Engineering, KAIST
+donghwan@kaist.ac.kr
+Abstract
+This paper introduces Q-learning with gradient target tracking, a novel reinforce-
+ment learning framework that provides a learned continuous target update mecha-
+nism as an alternative to the conventional hard update paradigm. In the standard
+deep Q-network (DQN), the target network is a copy of the online network’s
+weights, held fixed for a number of iterations before being periodically replaced via
+a hard update. While this stabilizes training by providing consistent targets, it intro-
+duces a new challenge: the hard update period must be carefully tuned to achieve
+optimal performance. To address this issue, we propose two gradient-based target
+update methods: DQN with asymmetric gradient target tracking (AGT2-DQN)
+and DQN with symmetric gradient target tracking (SGT2-DQN). These methods
+replace the conventional hard target updates with continuous and structured updates
+using gradient descent, which effectively eliminates the need for manual tuning.
+We provide a theoretical analysis proving the convergence of these methods in
+tabular settings. Additionally, empirical evaluations demonstrate their advantages
+over standard DQN baselines, which suggest that gradient-based target updates
+can serve as an effective alternative to conventional target update mechanisms in
+Q-learning.
+1 Introduction
+Recently, reinforcement learning (RL) [27] has seen remarkable success in solving sequential decision-
+making problems [21, 18, 25, 24, 7, 8, 28, 30, 1]. In particular, deep Q-network (DQN) algorithm [21]
+is a widely used approach for value-based RL, and has demonstrated human-level performance in
+various complex tasks, such as playing Atari games. However, standard DQN suffers from tuning
+challenges due to the periodic hard update of the target network. Specifically, the target Q-network is
+updated only periodically via a hard update, where every few thousand iterations, the target network’s
+weights are replaced by those of the online network. This strategy stabilizes learning but introduces a
+new challenge: the hard update period must be carefully tuned to achieve optimal performance. An
+alternative to hard updates is incremental updates, where the target network is updated gradually at
+each step. Lillicrap et al. [18] popularized this approach in deep RL, using a soft update (or Polyak
+averaging), where the target parameters move toward the online parameters with a small learning rate.
+While this method mitigates instability, it still requires careful tuning of the averaging weight.
+To address these challenges, we introduce a novel gradient-based target update framework for Q-
+learning. Our approach replaces the standard hard target update with gradient-based target learning
+approach, which continuously updates the target Q-function using gradient descent. In particular,
+∗Equal contribution.
+39th Conference on Neural Information Processing Systems (NeurIPS 2025).
+arXiv:2503.16700v3  [cs.LG]  18 Jul 2025
+--- Page 2 ---
+we develop DQN with asymmetric gradient target tracking (AGT2-DQN) and DQN with symmetric
+gradient target tracking (SGT2-DQN). AGT2-DQN replaces the hard update with a continuous,
+gradient-based update for the target network. Instead of copying weights infrequently, the target
+network’s parameters are treated as learnable, and they are adjusted at every step using gradient
+descent on a mean squared loss between the target Q-network and online Q-network. SGT2-DQN
+also uses continuous gradient-based target updates, but with a symmetric coupling between the online
+and target networks. Both networks are updated with loss terms that drive them toward each other’s
+predictions. Morever, SGT2-DQN adds an extra regularization term to the loss functions of both
+networks that penalizes the difference between the online Q-value and target Q-value for the same
+state-action. This means the online and target networks influence each other’s updates, which enforces
+a more balanced interaction (each network “knows” about the other’s objective).
+Unlike standard DQN, where the target network is updated only periodically, our methods ensure
+continuous adaptation of the target function through gradient-based learning. The advantages of our
+approach are supported by experiments on benchmark reinforcement learning tasks, which show that
+AGT2-DQN and SGT2-DQN achieve learning performance comparable to standard DQN without
+significant tuning steps.
+Finally, we provide theoretical analysis, which shows that both the asymmetric and symmetric
+algorithms converge to the optimal Q-values in the tabular setting. In fact, for the tabular versions
+of AGT2-DQN/SGT2-DQN, called Q-learning with asymmetric gradient tracking (AGT2-QL) and
+Q-learning with symmetric gradient tracking (SGT2-QL), we prove that under standard assumptions,
+the online and target Q estimates will converge to Q∗ (the true optimal Q-function) with probability
+one.
+2 Related works
+In the original DQN [21], the target network is a copy of the online network’s weights that is held
+fixed for a number of iterations and then replaced (“hard updated”) periodically. Researchers have
+looked into several alternatives to this hard update mechanism: soft (Polyak) updates have been
+introduced in [18]. Instead of copying the network every few thousand steps, an incremental update
+can be done every step that updates the target parameters with a small learning rate towards the online
+parameters. In [14, 15], the effect of the soft updates has been theoretically investigated for tabular
+TD-learning and tabular Q-learning respectively.
+DeepMellow [12] removes the target network entirely by modifying the Bellman update and achieves
+faster learning without the target network. They replace the conventional max operator with a
+Mellowmax operator, a smooth approximation of max that prevents over-optimistic value estimates.
+Similarly, in [22], the authors propose adding a functional regularization (FR) therm to the DQN loss
+and removing the target network, which is calle FR-DQN. In their FR-DQN algorithm, the Q-network
+is trained with an extra loss term that measures the difference between the current Q-values and
+those of a prior network (which is a periodically updated snapshot of the online network). This acts
+similarly to a target network, but instead of using the prior network’s values as fixed targets, it uses
+them as a reference to restrain the current network’s updates.
+In summary, several strategies have been explored as alternatives to hard target updates. All these
+methods share the goal of providing stability to Q-learning without the downsides of an abruptly
+updated target. The new gradient target tracking approaches proposed in this paper contribute to this
+landscape by offering a learned, continuous target update mechanism as yet another alternative to the
+hard update paradigm.
+3 Preliminaries
+3.1 Markov decision problem
+We consider the infinite-horizon discounted Markov decision problem and Markov decision process,
+where the agent sequentially takes actions to maximize cumulative discounted rewards. In a Markov
+decision process with the state-space S := {1, 2, . . . ,|S|} and action-space A := {1, 2, . . . ,|A|},
+the decision maker selects an action a ∈ Aat the current state s ∈ S, then the state transits to the
+next state s′ ∈ Swith probability P(s′|s, a), and the transition incurs a rewardr(s, a, s′) ∈ R, where
+2
+--- Page 3 ---
+P(s′|s, a) is the state transition probability from the current state s ∈ Sto the next state s′ ∈ Sunder
+action a ∈ A, and r(s, a, s′) is the reward function. Moreover, |S| and |A| denotes cardinalities of S
+and A, respectively. For convenience, we consider a deterministic reward function and simply write
+r(sk, ak, sk+1) =: rk+1, k∈ {0, 1, . . .}. A policy π maps a state s ∈ Sto an action distribution
+π : S →∆A, where ∆A denotes the set of all probability distributions over the action space A. The
+objective of the Markov decision problem is to find an optimal policy,π∗, such that the cumulative
+discounted rewards over infinite time horizons is maximized, i.e.,
+π∗ := arg max
+π∈Θ
+E
+" ∞X
+k=0
+γkrk+1
+π
+#
+,
+where γ ∈ [0, 1) is the discount factor, Θ is the set of all policies, (s0, a0, s1, a1, . . .) is a state-action
+trajectory generated by the Markov chain under policy π, and E[·|π] is an expectation conditioned on
+the policy π. Moreover, Q-function under policy π is defined as
+Qπ(s, a) = E
+" ∞X
+k=0
+γkrk+1
+s0 = s, a0 = a, π
+#
+, (s, a) ∈ S × A,
+and the optimal Q-function is defined as Q∗(s, a) = Qπ∗
+(s, a) for all (s, a) ∈ S × A. Once Q∗ is
+known, then an optimal policy can be retrieved by the greedy policy π∗(s) = arg maxa∈A Q∗(s, a).
+Throughout, we assume that the Markov decision process is ergodic so that the stationary state
+distribution exists.
+4 Deep Q-learning with gradient target tracking
+Before introducing the main results, we first briefly review the standard DQN in [21]. DQN considers
+the two optimal Q-function estimates, Qθ called the online Q-network, and Qθ′ called the target
+Q-network. Here, θ and θ′ are called the online and target parameters, respectively. To update these
+parameters, the following loss function is considered:
+L(θ; B) := 1
+2
+1
+|B|
+X
+(s,a,r,s′)∈B
+(y − Qθ(s, a))2
+where B is the mini-batch uniformly sampled from the replay buffer D, |B| denotes the size of the
+mini-batch, and y, fixed as a constant, is called the target, which is defined as
+y = r + 1(s′)γmax
+a∈A
+Qθ′(s′, a)
+Here, 1(s′) is an indicator function defined as
+1(s) :=
+
+0 if s = terminal state
+1 else
+The online Q-network Qθ is then updated through the gradient descent step
+θ ← θ − α∇L(θ; B)
+where the target parameter θ′ is fixed as a constant. Then, the target Q-network Qθ′ is updated
+periodically by the online parameter with period C >0
+θ′ ← θ
+Figure 1 shows the learning curves of DQN for different C ∈ {1, 10, 100, 200, 500} in Cartpole
+environment (Open AI gym). The results show that C = 10 gives the best learning performance
+among the other choices of C. As the results indicate, achieving better learning performance requires
+careful selection of C, which demands extensive trials and time.
+In this paper, we propose two gradient-based target learning methods for DQN: the first algorithm
+is called DQN with asymmetric gradient target tracking (AGT2-DQN), and the second is DQN
+with symmetric gradient target tracking (SGT2-DQN). In AGT2-DQN, we employ two distinct Q-
+networks, Qθ1 and Qθ2 , referred to as the online and target Q-networks, respectively. The parameters
+θ1 and θ2 are called the online and target parameters, respectively. The corresponding loss functions
+are defined as
+L1(θ1; B) := 1
+2
+1
+|B|
+X
+(s,a,r,s′)∈B
+(y1 − Qθ1 (s, a))2
+3
+--- Page 4 ---
+Figure 1: Comparison of reward curves of DQN with different C in Cartpole environment.
+and
+L2(θ2; B) := β
+2
+1
+|B|
+X
+(s,a,r,s′)∈B
+(y2 − Qθ2 (s, a))2
+where β >0 is a constant weight, y1 and y2 are targets defined as
+y1 = r + 1(s′)γmax
+a∈A
+Qθ2 (s′, a), y 2 = Qθ1 (s, a)
+Both θ1 and θ2 are updated through the gradient descent steps
+θ1 ← θ1 − α∇θ1 L1(θ1; B), θ 2 ← θ2 − α∇θ2 L2(θ2; B),
+where α >0 is the step-size. The overall algorithm is summarized in Appendix A. Note that the
+online parameter update is identical to that in the standard DQN. The primary distinction arises from
+the target parameter update, which employs the following gradient descent step for the loss function
+L2:
+θ2 ← θ2 − α∇θ2 L2(θ2; B) = θ2 + α 1
+|B|
+X
+(s,a,r,s′)∈B
+(Qθ1 (s, a) − Qθ2 (s, a))∇θ2 Qθ2 (s, a)
+The above update treats the target network in DQN as a learnable parameter updated via gradient
+descent, rather than updating it only periodically [ 21] or by polyak averaging [ 18]. This yields a
+form of continuous update where the target slowly learns to predict the online Q-values (or some
+combination thereof), instead of being replaced outright.
+(a) AGT2-DQN
+ (b) SGT2-DQN
+Figure 2: Comparison of reward curves of AGT2-DQN and SGT2-DQN with different β. Cartpole
+environment in OpenAI Gym is used here.
+4
+--- Page 5 ---
+Figure 3: Comparison of reward curves of DQN with C = 10, AGT2-DQN and SGT2-DQN with
+β = 50. Cartpole environment in OpenAI Gym is used here.
+As noted in the previous section, the updates for the online and target parameters are asymmetric.
+This asymmetry might lead to inefficiencies in finding the optimal solution since each update plays a
+distinct role and does not consider the influence of the other.
+The algorithm can be conceptualized as a two-player game, where the first player (online parameter
+update) strives to solve the Bellman equation, while the second player (target parameter update)
+aims to track the first player’s actions. In this setup, the utility functions of the two players are
+asymmetric and do not consider the objectives of each other. This mismatch can lead to instability
+and inefficiencies during the learning process. A potential alternative would be to design a game
+where each player’s utility function explicitly incorporates the other player’s goal, leading to a more
+balanced interaction. In such a framework, the utility functions would be symmetric, which could
+potentially enhance the stability and efficiency of the algorithm.
+Motivated by the previous discussions, we propose the second algorithm, referred to as SGT2-
+DQN. Similar to AGT2-DQN, this algorithm also employs two Q-networks Qθ1 and Qθ2 , which are
+called the online and target Q-networks, respectively. However, SGT2-DQN introduces a symmetric
+approach to updating these networks, that aims to harmonize the interaction between them. In
+particular, SGT2-DQN employs the following loss functions:
+L1(θ1; B) := 1
+2
+1
+|B|
+X
+(s,a,r,s′)∈B
+[(y1 − Qθ1 (s, a))2 + β(Qθ2 (s, a) − Qθ1 (s, a))2]
+and
+L2(θ2; B) := 1
+2
+1
+|B|
+X
+(s,a,r,s′)∈B
+[(y2 − Qθ2 (s, a))2 + β(Qθ1 (s, a) − Qθ2 (s, a))2].
+where β >0 is a constant weight representing the regularization weight, and the targets y1 and y2
+are defined as
+y1 = r + 1(s′)γ max
+a∈A
+Qθ2 (s′, a), y 2 = r + 1(s′)γmax
+a∈A
+Qθ1 (s′, a).
+Next, both θ1 and θ2 are updated through the gradient descent steps
+θ1 ← θ1 − α∇θ1 L1(θ1; B), θ 2 ← θ2 − α∇θ2 L2(θ2; B),
+where α >0 is the step-size. The overall algorithm is summarized in Appendix B. In SGT2-DQN,
+both the online and target networks interact and adjust towards each other using gradient steps.
+Moreover, this algorithm echoes the idea of double Q-learning in a gradient setting. Double Q-
+learning maintains two estimates that learn from each other’s predictions [9]. SGT2-DQN similarly
+lets two function approximators co-evolve and correct one another.
+Figure 2 illustrates the learning curves of AGT2-DQN and SGT2-DQN for different β ∈
+{0.01, 0.1, 1, 10, 50, 100} in Cartpole environment. The results demonstrate that their learning
+efficiency is comparable to DQN. However, one can observe that they are less sensitive to the
+hyperparameter β.
+5
+--- Page 6 ---
+Figure 3 illustrates the learning curves of DQN with C = 10, AGT2-DQN and SGT2-DQN with
+β = 50, where the hyperparameter for each method has been selected to achieve approximately the
+best performance among the tested grid points.
+The results show that while DQN exhibits slightly better learning efficiency than the proposed methods
+in this environment. However, as mentioned before, the latter require less efforts for hyperparameter
+tuning in this case.
+We conducted similar experiments across multiple environments, and the results varied depending on
+the environment. For instance, comparisons of learning curves are presented in Figure 4, where the
+hyperparameters were roughly tuned to achieve optimal learning performance for each method.
+As shown in Figure 4(a), DQN with C = 50, AGT2-DQN with β = 0.1, and SGT2-DQN with β = 1
+demonstrate comparable performance in the Acrobot environment. In contrast, Figure 4(b) illustrates
+that AGT2-DQN with β = 0.1 and SGT2-DQN with β = 0.1 exhibit better learning efficiency than
+DQN with C = 500. A full comparison of results, including those with different hyperparameter
+settings, is provided in the Appendix J. Moreover, Appendix J also includes comparisons in other
+environments, which exhibit similar trends.
+Overall, DQN, AGT2-DQN, and SGT2-DQN exhibited comparable learning performance on average.
+In some environments, DQN outperformed the other two methods, while in others, AGT2-DQN and
+SGT2-DQN achieved better learning performance than DQN. However, we observed that AGT2-DQN
+and SGT2-DQN were slightly less sensitive to hyperparameters than DQN on average. Therefore, it
+is difficult to conclude that the proposed AGT2-DQN and SGT2-DQN outperform DQN. However,
+we argue that they offer interesting alternatives to the hard update paradigm in DQN.
+(a) Acrobot: DQN with C = 50, AGT2-DQN
+with β = 0.1, and SGT2-DQN with β = 1.
+(b) Pendulum: DQN with C = 500, AGT2-
+DQN with β = 0.1, and SGT2-DQN with β =
+0.1.
+Figure 4: Comparison of simulated reward curves of AGT2-DQN,SGT2-DQN, DQN
+Beyond the tuning issue, our experience suggests that AGT2-DQN and SGT2-DQN achieve faster
+learning speeds than DQN during the early learning phase. However, they frequently encounter
+performance collapse after this phase. Similar to policy gradient methods, this collapse appears to
+result from overshooting in the gradient target update, a phenomenon that may not occur in standard
+DQN. We believe this issue can be mitigated by incorporating stabilization techniques, such as
+clipping the loss function, similar to the approach used in proximal policy optimization (PPO) in [24].
+5 Analysis of optimality
+The proposed AGT2-DQN and SGT2-DQN aim to minimize their respective loss functions through
+gradient descent steps. However, it is not currently clear how minimizing these errors in the loss
+functions ensures that the computed Q-estimates are closer to the optimal Q-function. Therefore,
+further investigation is required to establish a more definitive link between the reduction of loss
+function errors and the accuracy of the Q-estimates in approximating the optimal Q-function. This
+6
+--- Page 7 ---
+issue is the main goal of this section and will be critical for validating the effectiveness of the proposed
+methods.
+To simplify the analysis, let us assume that by minimizing the loss functions of AGT2-DQN, we can
+approximately minimize the following expected loss functions:
+L1(θ1) =E(s,a)∼U(S×A),s′∼P(·|s,a)
+h
+(r(s, a, s′) + γmaxa∈AQθ2 (s′, a) − Qθ1 (s, a))2i
+L2(θ2) =E(s,a)∼U(S×A),s′∼P(·|s,a)
+β
+2 (Qθ1 (s, a) − Qθ2 (s, a))2
+
+where U(S ×A) means the uniform distribution over the setS ×A. Note that we employ the uniform
+distribution over S × Ato simplify the analysis. In practice, this would correspond to the average
+distribution of S × Ain the replay buffer.
+Next, suppose that the loss functions are minimized with
+L1(θ1) ≤ ε, L 2(θ2) ≤ ε,
+where ε >0 is a small number representing the maximum error of the two loss functions. Then, we
+can derive the following error bounds on the corresponding solution:
+Theorem 1. Suppose that the loss functions are minimized with
+L1(θ1) ≤ ε, L 2(θ2) ≤ ε.
+For the expected loss functions of AGT2-DQN, we have
+∥Qθ1 − Q∗∥∞ ≤
+p
+ε|S||A|
+1 − γ + γ
+1 − γ
+s
+2ε|S||A|
+β
+∥Qθ2 − Q∗∥∞ ≤2
+p
+ε|S||A|
+1 − γ + γ
+1 − γ
+s
+2ε|S||A|
+β
+Its proof can be found in Appendix H. We can observe that the error converges to 0 as ε → 0.
+Moreover, the errors also depend on β >0 and as β → ∞the error tends to be reduced.
+Similarly, let us assume that by minimizing the loss functions of SGT2-DQN, we can approximately
+minimize the following expected loss function:
+L1(θ1) =E(s,a)∼U(S×A),s′∼P(·|s,a)
+"
+r(s, a, s′) + γmax
+a∈A
+Qθ2 (s′, a) − Qθ1 (s, a)
+2
++β
+2 (Qθ2 (s, a) − Qθ1 (s, a))2
+
+,
+L2(θ2) =E(s,a)∼U(S×A),s′∼P(·|s,a)
+"
+r(s, a, s′) + γ max
+a∈A
+Qθ1 (s′, a) − Qθ2 (s, a)
+2
++β
+2 (Qθ1 (s, a) − Qθ2 (s, a))2
+
+where U(S × A) means the uniform distribution over the set S × A. Then, we can establish the
+following error bounds on the corresponding solution:
+Theorem 2. Suppose that the loss functions are minimized with
+L1(θ1) ≤ ε, L 2(θ2) ≤ ε
+For the expected loss functions of SGT2-DQN, we have
+∥Qθ1 − Q∗∥∞, ∥Qθ2 − Q∗∥∞ ≤
+p
+ε|S||A|
+1 − γ + γ
+1 − γ
+s
+2ε|S||A|
+β
+Its proof can be found in Appendix I. As in the AGT2-DQN case, the error vanishes as ε → 0.
+7
+--- Page 8 ---
+6 Convergence analysis for tabular case
+In this section, we provide theoretical convergence analysis of AGT2-DQN and SGT2-DQN in tabular
+cases for conceptual investigations, where the tabular versions of AGT2-DQN and SGT2-DQN are
+called Q-learning with asymmetric gradient tracking (AGT2-QL) and Q-learning with symmetric
+gradient tracking (SGT2-QL), respectively. Let us first consider the following update of AGT2-QL:
+QA
+k+1(sk, ak) = QA
+k (sk, ak) + αk
+
+rk+1 + 1(s′
+k)γ max
+a∈A
+QB
+k (s′
+k, a) − QA
+k (sk, ak)
+
+,
+QB
+k+1(sk, ak) = QB
+k (sk, ak) + αkβ(QA
+k (sk, ak) − QB
+k (sk, ak)).
+where αk > 0 is the learning rate, β > 0 is a constant weight, and s′
+k can be interpreted in the
+following two ways: 1) in the Markovian observation model, s′
+k = sk+1, i.e., the next state and 2) in
+the i.i.d. observation model, s′
+k is the next state sampled at the current time, while it is not identical
+to sk+1. In the second i.i.d. observation model, s′
+k is sampled independently from some distribution
+d. In this paper, we consider the i.i.d. observation model for our convergence analysis to simplify the
+overall analysis. However, we note that the analysis presented in this paper for the i.i.d. observation
+model can be extended to the Markovian observation model with some modifications [19]. We also
+acknowledge that such more sophisticated analyses are not the main focus in this paper. The main
+goal of the convergence analysis in this section is to provide conceptual insights into the convergence
+of the proposed algorithms. We also note that simulation results are provided in the Appendix G to
+demonstrate the validity and convergence of AGT2-QL. Empirically, the results show that AGT2-QL
+tends to converge faster for larger values ofβ >0.
+We note that this algorithm is similar to the so-called averaging Q-learning developed in [15], which
+can be seen as a precursor. The averaging Q-learning in [ 15] maintains two separate estimates,
+the target estimate QB
+k and the online estimate QA
+k : the online estimate QA
+k is for approximating
+Q-function and updated through an online manner, whereas the target estimate QB
+k is for computing
+the target values and updated through taking Polyak’s averaging. Only the difference is the update
+rule for QB
+k which depends on the transition (sk, ak).
+AGT2-QL can be seen as a tabular version of AGT2-DQN due to the following insights: if we
+consider the two loss functions
+lA(QA) := 1
+2(y1 − QA(sk, ak))2, l B(QB) := β
+2 (y2 − QB(sk, ak))2
+with
+y1 = rk+1 + 1(s′
+k)γ max
+a∈A
+QB
+k (sk+1, a), y 2 = QA
+k (sk, ak)
+then each update in AGT2-QL can be interpreted as the gradient descent steps
+QA
+k+1(sk, ak) = QA
+k (sk, ak) − αk
+∂lA(QA)
+∂QA(sk, ak) (1)
+and
+QB
+k+1(sk, ak) = QB
+k (sk, ak) − αk
+∂lB(QB)
+∂QB(sk, ak), (2)
+In other words, AGT2-QL can be seen as an tabular and online implementation of AGT2-DQN,
+whose convergence can be established as follows:
+Theorem 3. Let us consider AGT2-QL and assume that the step-size satisfies
+0 ≤ αk ≤ 1,
+∞X
+k=0
+αk = ∞,
+∞X
+k=0
+α2
+k < ∞. (3)
+Assume that (sk, ak, s′
+k) are i.i.d. samples, where ak is sampled from the fixed behavior policy b and
+sk is sampled from a fixed state distribution d. Then for any β >0, QA
+k → Q∗ and QB
+k → Q∗ with
+probability one.
+The corresponding convergence analysis is given in Appendix E. In AGT2-QL, the update for the
+target estimate QB
+k and the online estimate QA
+k are different, resulting in asymmetric updates for the
+two values. We can extend the idea in AGT2-QL by symmetrizing the update rule. In particular, by
+adding the two targets y1 and y2 and switching the roles of the target and online estimates, one can
+8
+--- Page 9 ---
+construct the following loss functions:
+lA(QA) := 1
+2(y1 − QA(sk, ak))2 + β
+2 (QB(sk, ak) − QA(sk, ak))2
+and
+lB(QB) := 1
+2(y2 − QB(sk, ak))2 + β
+2 (QA(sk, ak) − QB(sk, ak))2
+with the targets
+y1 = rk+1 + 1(s′
+k)γmax
+a∈A
+QB
+k (s′
+k, a), y 2 = rk+1 + 1(s′
+k)γmax
+a∈A
+QA
+k (s′
+k, a)
+where β >0 is a constant representing the regularization weight. Applying the gradient steps in (1)
+and (2) results in the following SGT2-QL:
+QA
+k+1(sk, ak) =QA
+k (sk, ak) + αk{rk+1 + 1(s′
+k)γ max
+a∈A
+QB
+k (s′
+k, a) − QA
+k (sk, ak)
++ β(QB
+k (sk, ak) − QA
+k (sk, ak))}
+QB
+k+1(sk, ak) =QB
+k (sk, ak) + αk{rk+1 + 1(s′
+k)γ max
+a∈A
+QA
+k (s′
+k, a) − QB
+k (sk, ak)
++ β(QA
+k (sk, ak) − QB
+k (sk, ak))}
+which can be seen as a tabular counterpart of SGT2-DQN.
+We can observe that now the updates for the online and target estimatesQB
+k and QA
+k are symmetric.
+We also note that this variant can be seen as a Q-learning counterpart of the double TD-learning
+developed in [14]. In this paper, we establish its convergence as follows:
+Theorem 4. Let us consider SGT2-QL and assume that the step-size satisfies (3). Assume that
+(sk, ak, s′
+k) are i.i.d. samples, where ak is sampled from the fixed behavior policyb and sk is sampled
+from a fixed state distribution d. Then for any β >0, QA
+k → Q∗ and QB
+k → Q∗ with probability one.
+The proof is provided in the Appendix F. We note that the convergence of SGT2-QL and its analysis
+have not yet been investigated in the literature. Additionally, empirical results demonstrating the
+convergence of this algorithm are included in the Appendix G. These results show that SGT2-QL
+generally converges faster than AGT2-QL. Moreover, they indicate that the convergence speed of
+SGT2-QL is less sensitive to the weight β >0 compared to AGT2-QL.
+7 Conclusion
+This paper introduces gradient target tracking frameworks as alternatives to the hard target update in
+DQN. By replacing the periodic target updates with a continuous gradient-based tracking mechanism,
+the proposed approach mitigates tuning challenges. Theoretical analysis establishes the convergence
+of the proposed methods in tabular settings. These findings suggest that the gradient-based target
+tracking is a promising alternative to conventional target update mechanisms in reinforcement
+learning.
+References
+[1] Oron Anschel, Nir Baram, and Nahum Shimkin. Averaged-dqn: Variance reduction and
+stabilization for deep reinforcement learning. In International conference on machine learning,
+pages 176–185, 2017.
+[2] Carolyn L Beck and Rayadurgam Srikant. Error bounds for constant step-size Q-learning.
+Systems & Control letters, 61(12):1203–1208, 2012.
+[3] Shalabh Bhatnagar, H. L. Prasad, and L. A. Prashanth. Stochastic recursive algorithms for
+optimization: simultaneous perturbation methods, volume 434. Springer, 2012.
+[4] Vivek S Borkar and Sean P Meyn. The ode method for convergence of stochastic approximation
+and reinforcement learning. SIAM Journal on Control and Optimization, 38(2):447–469, 2000.
+[5] Zaiwei Chen, Siva T Maguluri, Sanjay Shakkottai, and Karthikeyan Shanmugam. A lya-
+punov theory for finite-sample guarantees of markovian stochastic approximation. Operations
+Research, 72(4):1352–1367, 2024.
+9
+--- Page 10 ---
+[6] Eyal Even-Dar and Yishay Mansour. Learning rates for Q-learning.Journal of machine learning
+Research, 5(Dec):1–25, 2003.
+[7] Scott Fujimoto, Herke Hoof, and David Meger. Addressing function approximation error in
+actor-critic methods. In International conference on machine learning, pages 1587–1596, 2018.
+[8] Tuomas Haarnoja, Aurick Zhou, Pieter Abbeel, and Sergey Levine. Soft actor-critic: Off-
+policy maximum entropy deep reinforcement learning with a stochastic actor. In International
+conference on machine learning, pages 1861–1870, 2018.
+[9] Hado V Hasselt. Double Q-learning. In Advances in Neural Information Processing Systems,
+pages 2613–2621, 2010.
+[10] Morris W Hirsch and Hal Smith. Monotone dynamical systems. In Handbook of differential
+equations: ordinary differential equations, volume 2, pages 239–357. Elsevier, 2006.
+[11] Hassan K Khalil. Nonlinear systems. Upper Saddle River, 2002.
+[12] Seungchan Kim, Kavosh Asadi, Michael Littman, and George Konidaris. Deepmellow: re-
+moving the need for a target network in deep q-learning. In Proceedings of the twenty eighth
+international joint conference on artificial intelligence, 2019.
+[13] Harold Kushner and G. George Yin. Stochastic approximation and recursive algorithms and
+applications, volume 35. Springer Science & Business Media, 2003.
+[14] Donghwan Lee and Niao He. Target-based temporal-difference learning. In International
+Conference on Machine Learning, pages 3713–3722, 2019.
+[15] Donghwan Lee and Niao He. A unified switching system perspective and convergence analysis
+of q-learning algorithms. Advances in Neural Information Processing Systems, 33:15556–15567,
+2020.
+[16] Gen Li, Yuting Wei, Yuejie Chi, Yuantao Gu, and Yuxin Chen. Sample complexity of asyn-
+chronous q-learning: Sharper analysis and variance reduction. IEEE Transactions on Informa-
+tion Theory, 68(1):448–473, 2021.
+[17] Daniel Liberzon. Switching in systems and control. Springer Science & Business Media, 2003.
+[18] Timothy P Lillicrap, Jonathan J Hunt, Alexander Pritzel, Nicolas Heess, Tom Erez, Yuval Tassa,
+David Silver, and Daan Wierstra. Continuous control with deep reinforcement learning. arXiv
+preprint arXiv:1509.02971, 2015.
+[19] Han-Dong Lim and Donghwan Lee. Finite-time analysis of asynchronous q-learning under
+diminishing step-size from control-theoretic view. IEEE Access, 2024.
+[20] Hai Lin and Panos J Antsaklis. Stability and stabilizability of switched linear systems: a survey
+of recent results. IEEE Transactions on Automatic control, 54(2):308–322, 2009.
+[21] V olodymyr Mnih, Koray Kavukcuoglu, David Silver, Andrei A Rusu, Joel Veness, Marc G
+Bellemare, Alex Graves, Martin Riedmiller, Andreas K. Fidjeland, Georg Ostrovski, et al.
+Human-level control through deep reinforcement learning. Nature, 518(7540):529, 2015.
+[22] Alexandre Piché, Joseph Marino, Gian Maria Marconi, Christopher Pal, and Moham-
+mad Emtiyaz Khan. Beyond target networks: Improving deep q-learning with functional
+regularization.
+[23] André Platzer. Vector barrier certificates and comparison systems. In Formal Methods: 22nd
+International Symposium, FM 2018, Held as Part of the Federated Logic Conference, FloC
+2018, Oxford, UK, July 15-17, 2018, Proceedings, volume 10951, page 418, 2018.
+[24] John Schulman, Filip Wolski, Prafulla Dhariwal, Alec Radford, and Oleg Klimov. Proximal
+policy optimization algorithms. arXiv preprint arXiv:1707.06347, 2017.
+10
+--- Page 11 ---
+[25] David Silver, Aja Huang, Chris J Maddison, Arthur Guez, Laurent Sifre, George Van Den Driess-
+che, Julian Schrittwieser, Ioannis Antonoglou, Veda Panneershelvam, Marc Lanctot, et al. Mas-
+tering the game of go with deep neural networks and tree search. nature, 529(7587):484–489,
+2016.
+[26] Richard S. Sutton. Learning to predict by the methods of temporal differences. Machine
+learning, 3(1):9–44, 1988.
+[27] Richard S. Sutton and Andrew G. Barto. Reinforcement learning: An introduction. MIT Press,
+1998.
+[28] Hado Van Hasselt, Arthur Guez, and David Silver. Deep reinforcement learning with double
+q-learning. In Proceedings of the AAAI conference on artificial intelligence, volume 30, 2016.
+[29] Wolfgang Walter. Ordinary differential equations (graduate texts in mathematics). Springer,
+1998.
+[30] Ziyu Wang, Tom Schaul, Matteo Hessel, Hado Hasselt, Marc Lanctot, and Nando Freitas.
+Dueling network architectures for deep reinforcement learning. In International conference on
+machine learning, pages 1995–2003, 2016.
+11
+--- Page 12 ---
+A Deep Q-learning with asymmetric gradient target tracking
+A detailed pseudo code of the proposed AGT2-DQN is given in Algorithm 1.
+Algorithm 1 Deep Q-learning with asymmetric gradient target tracking (AGT2-DQN)
+1: Initialize replay memory D to capacity |D|
+2: Randomly initialize the online parameter θ1 ∈ Rm
+3: Set θ2 = θ1
+4: Set k = 0
+5: for Episode i ∈ {1, 2, . . .} do
+6: Observe s0
+7: for t ∈ {0, 1, . . . , τ− 1} do
+8: Take an action at according to
+at =
+
+arg maxa∈A Qθ1 (st, a) with probability 1 − ε
+a ∼ uniform(A) with probability ε
+9: Observe rt+1, st+1
+10: Store the transition (st, at, rt+1, st+1) in D
+11: Sample uniformly a random mini-batch B of transitions (s, a, r, s′) from D
+12: Set
+L1(θ1; B) := 1
+2
+1
+|B|
+X
+(s,a,r,s′)∈B
+(y1 − Qθ1 (s, a))2
+and
+L2(θ2; B) := 1
+2
+1
+|B|
+X
+(s,a,r,s′)∈B
+(y2 − Qθ2 (s, a))2
+where
+y1 = r + 1(s′)γ max
+a∈A
+Qθ2 (s′, a) − Qθ1 (s, a)
+and
+y2 = Qθ1 (s, a)
+13: Perform a gradient descent step
+θ1 ← θ1 − α∇θ1 L1(θ1; B), θ 2 ← θ2 − α∇θ2 L2(θ2; B)
+14: Set k ← k + 1
+15: end for
+16: end for
+12
+--- Page 13 ---
+B Deep Q-learning with symmetric gradient target tracking
+A detailed pseudo code of the proposed SGT2-DQN is given in Algorithm 2.
+Algorithm 2 Deep Q-learning with symmetric gradient target tracking (SGT2-DQN)
+1: Initialize replay memory D to capacity |D|
+2: Randomly initialize the online parameter θ1 ∈ Rm
+3: Set θ2 = θ1
+4: Set k = 0
+5: for Episode i ∈ {1, 2, . . .} do
+6: Observe s0
+7: for t ∈ {0, 1, . . . , τ− 1} do
+8: Take an action at according to
+at =
+
+arg maxa∈A Qθ1 (st, a) with probability 1 − ε
+a ∼ uniform(A) with probability ε
+9: Observe rt+1, st+1
+10: Store the transition (st, at, rt+1, st+1) in D
+11: Sample uniformly a random mini-batch B of transitions (s, a, r, s′) from D
+12: Set
+L1(θ1; B) := 1
+2
+1
+|B|
+X
+(s,a,r,s′)∈B
+[(y1 − Qθ1 (s, a))2 + β(Qθ2 (s, a) − Qθ1 (s, a))2]
+and
+L2(θ2; B) := 1
+2
+1
+|B|
+X
+(s,a,r,s′)∈B
+[(y2 − Qθ2 (s, a))2 + β(Qθ1 (s, a) − Qθ2 (s, a))2]
+where
+y1 = r + 1(s′)γ max
+a∈A
+Qθ2 (s′, a) − Qθ1 (s, a)
+and
+y2 = r + 1(s′)γ max
+a∈A
+Qθ1 (s′, a) − Qθ2 (s, a)
+13: Perform a gradient descent step
+θ1 ← θ1 − α∇θ1 L1(θ1; B), θ 2 ← θ2 − α∇θ2 L2(θ2; B)
+14: Set k ← k + 1
+15: end for
+16: end for
+13
+--- Page 14 ---
+C Convergence analysis with ODE model
+C.1 Basics of nonlinear system theory
+Let us consider the nonlinear system
+d
+dtxt = f(xt), x 0 = z, t ∈ R+, (4)
+where xt ∈ Rn is the state, f : Rn → Rn is a nonlinear mapping, and R+ denotes the set of
+nonnegative real numbers. For simplicity, we assume that the solution to (4) exists and is unique. In
+fact, this holds true so long as the mapping f is globally Lipschitz continuous.
+Lemma 1 ([11, Theorem 3.2]). Let us consider the nonlinear system(4) and assume that f is globally
+Lipschitz continuous, i.e.,
+∥f(x) − f(y)∥ ≤L∥x − y∥, ∀x, y∈ Rn, (5)
+for some L >0 and norm ∥ · ∥, then it has a unique solution x(t) for all t ≥ 0 and x(0) ∈ Rn.
+An important concept in dealing with the nonlinear system is the equilibrium point. A point x = xe
+in the state space is said to be an equilibrium point of (4) if it has the property that whenever the
+state of the system starts at xe, it will remain at xe [11]. For (4), the equilibrium points are the
+real roots of the equation f(x) = 0. The equilibrium point xe is said to be globally asymptotically
+stable if for any initial state x0 ∈ Rn, xt → xe as t → ∞. Now, we provide a vector comparison
+principle [29, 10, 23] for multi-dimensional O.D.E., which will play a central role in the analysis
+below. We first introduce the quasi-monotone increasing function, which is a necessary prerequisite
+for the comparison principle.
+Definition 1 (Quasi-monotone function) . A vector-valued function f : Rn → Rn with f :=
+[f1 f2 ··· fn]T is said to be quasi-monotone increasing if fi(x) ≤ fi(y) holds for all i ∈
+{1, 2, . . . , n} and x, y∈ Rn such that xi = yi and xj ≤ yj for all j ̸= i.
+An example of a quasi-monotone increasing function f is f(x) = Ax where A is a Metzler matrix,
+which implies the off-diagonal elements ofA are nonnegative. Now, we introduce a vector comparison
+principle. For completeness, we provide a simple proof tailored to our interests.
+Lemma 2 (Vector comparison principle [10, Theorem 3.2]) . Suppose that f and f are globally
+Lipschitz continuous. Let vt be a solution of the system
+d
+dtxt = f(xt), x 0 ∈ Rn, ∀ t ≥ 0,
+assume that f is quasi-monotone increasing, and let vt be a solution of the system
+d
+dtvt = f(vt), v 0 < x0, ∀t ≥ 0, (6)
+where f(v) ≤ f(v) holds for any v ∈ Rn. Then, vt ≤ xt for all t ≥ 0.
+Proof. Instead of (6), first consider
+d
+dtvε(t) = f(vε(t)) − ε1n, v ε(0) < x(0), ∀t ≥ 0
+where ε >0 is a sufficiently small real number and 1n is a vector where all elements are ones, where
+we use a different notation for the time index for convenience. Suppose that the statement is not true,
+and let
+t∗ := inf{t ≥ 0 : ∃i such that vε,i(t) > xi(t)} < ∞,
+and let i be such index. By the definition of t∗, we have that vε,i(t∗) = xi(t∗) and vε,j(t∗) ≤ xj(t∗)
+for any j ̸= i. Then, since f is quasi-monotone increasing, we have
+fi(vε(t∗)) ≤ fi(x(t∗)). (7)
+On the other hand, by the definition of t∗, there exists a small δ >0 such that
+vε,i(t∗ + ∆t) > xi(t∗ + ∆t)
+for all 0 < ∆t < δ. Dividing both sides by ∆t and taking the limit ∆t → 0, we have
+˙vε,i(t∗) ≥ ˙xi(t∗) = fi(x(t∗)). (8)
+14
+--- Page 15 ---
+By the hypothesis, it holds that
+d
+dtvε(t) = f(vε(t)) − ε1n < f(vε(t)) ≤ f(vε(t))
+holds for all t ≥ 0. The inequality implies ˙vε,i(t) < fi(vε(t)), which in combination with (8) leads
+to fi(vε(t∗)) > fi(x(t∗)). However, it contradicts with (7). Therefore, vε(t) ≤ x(t) holds for all
+t ≥ 0. Since the solution vε(t) continuously depends on ε >0 [29, Chap. 13], taking the limit ε → 0,
+we conclude v0(t) ≤ x(t) holds for all t ≥ 0. This completes the proof.
+C.2 Switching system theory
+Let us consider the particular nonlinear system, the switched linear system,
+d
+dtxt = Aσtxt, x 0 = z ∈ Rn, t ∈ R+, (9)
+where xt ∈ Rn is the state, σ ∈ M:= {1, 2, . . . , M} is called the mode, σt ∈ Mis called the
+switching signal, and {Aσ, σ∈ M}are called the subsystem matrices. The switching signal can be
+either arbitrary or controlled by the user under a certain switching policy. Especially, a state-feedback
+switching policy is denoted by σ(xt). To prove the global asymptotic stability of the switching
+system, we will use a fundamental algebraic stability condition of switching systems reported in [20].
+More comprehensive surveys of stability of switching systems can be found in [20] and [17].
+Lemma 3 ([20, Theorem 8]). The origin of the linear switching system (9) is the unique globally
+asymptotically stable equilibrium point under arbitrary switchings, σt, if and only if there exist a full
+column rank matrix , L ∈ Rm×n, m ≥ n, and a family of matrices, ¯Aσ ∈ Rm×n, σ∈ M, with the
+so-called strictly negative row dominating diagonal condition, i.e., for each ¯Aσ, σ∈ M, its elements
+satisfying
+[ ¯Aσ]ii +
+X
+j∈{1,2,...,n}\{i}
+|[ ¯Aσ]ij| < 0, ∀i ∈ {1, 2, . . . , m},
+where [·]ij is the (i, j)-element of a matrix (·), such that the matrix relations
+LAσ = ¯AσL, ∀σ ∈ M,
+are satisfied.
+A more general class of systems is the affine switching system
+d
+dtxt = Aσtxt + bσt, x 0 = z ∈ Rn, t ∈ R+, (10)
+where bσt ∈ Rn is the additional input vector. Due to the additional input bσk , its stabilization
+becomes much more challenging.
+C.3 ODE-based stochastic approximation
+Due to its generality, the convergence analyses of many RL algorithms rely on the ODE (ordinary
+differential equation) approach [3, 13]. It analyzes convergence of general stochastic recursions by
+examining stability of the associated ODE model based on the fact that the stochastic recursions with
+diminishing step-sizes approximate the corresponding ODEs in the limit. One of the most popular
+approach is based on the Borkar and Meyn theorem [4]. We now briefly introduce the Borkar and
+Meyn’s ODE approach for analyzing convergence of the general stochastic recursions
+θk+1 = θk + αk(f(θk) + εk+1) (11)
+where f : Rn → Rn is a nonlinear mapping. Basic technical assumptions are given below.
+Assumption 1.
+1. The mapping f : Rn → Rn is globally Lipschitz continuous and there exists a function
+f∞ : Rn → Rn such that
+lim
+c→∞
+f(cx)
+c = f∞(x), ∀x ∈ Rn.
+2. The origin in Rn is an asymptotically stable equilibrium for the ODE ˙xt = f∞(xt).
+15
+--- Page 16 ---
+3. There exists a unique globally asymptotically stable equilibrium θe ∈ Rn for the ODE
+˙xt = f(xt), i.e., xt → θe as t → ∞.
+4. The sequence {εk, Gk, k≥ 1} with Gk = σ(θi, εi, i≤ k) is a Martingale difference
+sequence. In addition, there exists a constant C0 < ∞ such that for any initial θ0 ∈ Rn, we
+have E[∥εk+1∥2|Gk] ≤ C0(1 + ∥θk∥2), ∀k ≥ 0.
+5. The step-sizes satisfy αk > 0, P∞
+k=0 αk = ∞, P∞
+k=0 α2
+k < ∞.
+Lemma 4 ([4, Borkar and Meyn theorem]) . Suppose that Assumption 1 holds. For any initial
+θ0 ∈ Rn, supk≥0 ∥θk∥ < ∞ with probability one. In addition, θk → θe as k → ∞with probability
+one.
+The Borkar and Meyn theorem states that under Assumption 1, the stochastic process (θk)∞
+k=0
+generated by (11) is bounded and converges to θe almost surely.
+D Assumptions and definitions
+In this paper, we focus on the following setting: {(sk, ak, s′
+k)}∞
+k=0 are i.i.d. samples under the
+behavior policy β, where the time-invariant behavior policy is the policy by which the RL agent
+actually behaves to collect experiences. Note that the notation s′
+k implies the next state sampled at
+the time step k, which is used instead of sk+1 in order to distinguish s′
+k from sk+1. In this paper, the
+notation sk+1 indicate the current state at the iteration step k + 1, while it does not depend on sk.
+For simplicity, we assume that the state at each time is sampled from the stationary state distribution
+p, and in this case, the state-action distribution at each time is identically given by
+d(s, a) = p(s)b(a|s), (s, a) ∈ S × A.
+In this paper, we assume that the behavior policy b is time-invariant, and this scenario excludes the
+common method of using the ε-greedy behavior policy with ε >0 because the ε-greedy behavior
+policy depends on the current Q-iterate, and hence is time-varying. Moreover, the proposed analysis
+cannot be easily extended to the analysis of Q-learning with the ε-greedy behavior policy. However,
+we note that this assumption is common in the ODE approaches for Q-learning and TD-learning [26].
+This assumption can be relaxed by considering a time-varying distribution. However, this direction
+will not be addressed in this paper to simplify the presentation of the proofs.
+Throughout, we make the following assumption for convenience.
+Assumption 2. d(s, a) > 0 holds for all (s, a) ∈ S × A.
+This assumption ensures that every state-action pair is visited infinitely often for sufficient exploration.
+It is applied when the state-action occupation frequency is given and has also been considered in [16]
+and [5]. The work in [2] introduces an alternative exploration condition, known as the cover time
+condition, which states that within a certain time period, every state-action pair is expected to be
+visited at least once. Slightly different variations of the cover time condition have been used in [6]
+and [16] for convergence rate analysis.
+Throughout the paper, we will use the following matrix notations for compact dynamical system
+representations:
+P :=
+
+
+P1
+...
+P|A|
+
+, R:=
+
+
+R1
+...
+R|A|
+
+, Q:=
+
+
+Q(·, 1)
+...
+Q(·, |A|)
+
+,
+Da :=
+
+
+d(1, a)
+...
+d(|S|, a)
+
+, D:=
+
+
+D1
+...
+D|A|
+
+,
+where Pa = P(·, a,·) ∈ R|S|×|S| , Q(·, a) ∈ R|S|, a∈ Aand Ra(s) := E[r(s, a, s′)|s, a]. Note that
+P ∈ R|S×A|×|S| , R ∈ R|S×A|, Q ∈ R|S×A|, and D ∈ R|S×A|×|S×A| . In this notation, Q-function
+is encoded as a single vector Q ∈ R|S×A|, which enumerates Q(s, a) for all s ∈ Sand a ∈ A. In
+particular, the single value Q(s, a) can be written as
+Q(s, a) = (ea ⊗ es)T Q,
+16
+--- Page 17 ---
+where es ∈ R|S| and ea ∈ R|A| are s-th basis vector (all components are 0 except for the s-th
+component which is 1) and a-th basis vector, respectively. Note also that under Assumption 2, D is a
+nonsingular diagonal matrix with strictly positive diagonal elements.
+For any stochastic policy, π : S →∆A, where ∆A is the set of all probability distributions over A,
+we define the corresponding action transition matrix as
+Ππ :=
+
+
+π(1)T ⊗ eT
+1
+π(2)T ⊗ eT
+2
+...
+π(|S|)T ⊗ eT
+|S|
+
+ ∈ R|S|×|S×A| , (12)
+where es ∈ R|S|. Then, it is well known that PΠπ ∈ R|S×A|×|S×A| is the transition probability
+matrix of the state-action pair under policy π. If we consider a deterministic policy, π : S → A, the
+stochastic policy can be replaced with the corresponding one-hot encoding vector ⃗ π(s) := eπ(s) ∈
+∆A, where ea ∈ R|A|, and the corresponding action transition matrix is identical to (12) with
+π replaced with ⃗ π. For any given Q ∈ R|S×A|, denote the greedy policy w.r.t. Q as πQ(s) :=
+arg maxa∈A Q(s, a) ∈ A. We will use the following shorthand frequently: ΠQ := ΠπQ.
+E Convergence of AGT2-QL
+In this section, we study convergence of AGT2-QL. The full algorithm is described in Algorithm 3.
+We now analyze the convergence of AGT2-QL using the same switching system approach [15].
+Algorithm 3 AGT2-QL
+1: Initialize QA
+0 and QB
+0 randomly.
+2: for iteration k = 0, 1, . . .do
+3: Sample (s, a)
+4: Sample s′ ∼ P(·|s, a) and r(s, a, s′)
+5: Update QA
+k+1(s, a) = QA
+k (s, a) + αk{r(s, a, s′) + γ maxa∈A QB
+k (s′, a) − QA
+k (s, a)}
+6: Update QB
+k+1(s, a) = QB
+k (s, a) + αkβ(QA
+k (s, a) − QB
+k (s, a))
+7: end for
+In particular, the main theoretical tool is the Borkar and Meyn theorem [4]. To apply this framework,
+it is crucial to study the corresponding ODE model and its asymptotic stability. Therefore, in the next
+subsection, we first derive the ODE model for AGT2-QL.
+E.1 Original system
+Using the notation introduced in Appendix D, the update of can be rewritten as
+QA
+k+1 =QA
+k + αk
+n
+(ea ⊗ es)(ea ⊗ es)T R
++γ(ea ⊗ es)(es′)T max
+a∈A
+QB
+k (·, a) − (ea ⊗ es)(ea ⊗ es)T QA
+k
+
+QB
+k+1 =QB
+k + αkβ
+n
+(ea ⊗ es)(ea ⊗ es)T QA
+k − (ea ⊗ es)(ea ⊗ es)T QB
+k
+o
+where es ∈ R|S| and ea ∈ R|A| are s-th basis vector (all components are 0 except for the s-th
+component which is 1) and a-th basis vector, respectively. The above update can be further expressed
+as
+QA
+k+1 =QA
+k + αk{DR + γDP ΠQB
+k
+QB
+k − DQA
+k + εA
+k+1}
+QB
+k+1 =QB
+k + αk{βDQA
+k − βDQB
+k + εB
+k+1}
+where
+εA
+k+1 =(ea ⊗ es)(ea ⊗ es)T R + γ(ea ⊗ es)(es′)T ΠQB
+k
+QB
+k
+− (ea ⊗ es)(ea ⊗ es)T QA
+k − (DR + γDP ΠQB
+k
+QB
+k − DQA
+k )
+17
+--- Page 18 ---
+εB
+k+1 =(ea ⊗ es)(ea ⊗ es)T βQA
+k − (ea ⊗ es)(ea ⊗ es)T βQB
+k − β(DQA
+k − DQB
+k )
+As discussed in Appendix C.3, the convergence of AGT3-QL can be analyzed by evaluating the
+stability of the corresponding continuous-time ODE
+d
+dt
+
+QA
+t
+QB
+t
+
+=
+ −D γDP ΠQB
+t
+βD −βD
+
+QA
+t
+QB
+t
+
++
+
+DR
+0
+
+,
+
+QA
+0
+QB
+0
+
+∈ R2|S||A|, , (13)
+Using the Bellman equation (γDP ΠQ∗ − D)Q∗ + DR = 0, the above expressions can be rewritten
+by
+d
+dt
+
+QA
+t − Q∗
+QB
+t − Q∗
+
+=
+ −D γDP ΠQB
+t
+βD −βD
+
+QA
+t − Q∗
+QB
+t − Q∗
+
++
+ γDP (ΠQB
+t
+− ΠQ∗)Q∗
+0
+
+,
+
+QA
+0 − Q∗
+QB
+0 − Q∗
+
+=z ∈ R2|S||A|. (14)
+The above system is a linear switching system discussed in Appendix C.2. More precisely, let Θ be
+the set of all deterministic policies, let us define a one-to-one mapping φ : Θ → {1, 2, . . . ,|Θ × Θ|}
+from two deterministic policies (πA, πB) ∈ Θ × Θ to an integer in {1, 2, . . . ,|Θ × Θ|}, and define
+Ai =
+
+−D γDP ΠπB
+βD −βD
+
+∈ R2|S×A|×2|S×A|, b i =
+
+γDP (ΠπB − Ππ∗
+)Q∗
+0
+
+∈ R2|S×A|
+for all i = φ(πA, πB) and (πA, πB) ∈ Θ × Θ. Then, the above ODE can be written by the affine
+switching system
+d
+dtxt = Aσ(xt)xt + bσ(xt), x 0 = z ∈ R|S||A|,
+where
+xt :=
+
+QA
+t − Q∗
+QB
+t − Q∗
+
+is the state, σ : R|S||A| → {1, 2, . . . ,|Θ × Θ|} is a state-feedback switching policy defined by
+σ(xt) := ψ(πQA
+t
+, πQB
+t
+), and πQ(s) = arg maxa∈A Q(s, a).
+Until now, we have derived an ODE model of AGT2-QL. The next goal is to prove its asymptotic
+stability which is essential step to apply the Borkar and Meyn theorem [4]. Notably, proving the global
+asymptotic stability of the above switching system without the affine term is relatively straightforward
+using Lemma 3. However, existing theories do not support switching systems that include affine
+terms.
+To address this issue, we construct two comparison systems by leveraging the special structure of the
+switching system and the greedy policy, and we establish their global asymptotic stability. Building
+on the vector comparison principle introduced in Lemma 2, we then prove the asymptotic stability of
+the desired affine switching system. We note that this approach was first proposed in [15], and we
+follow its framework with modifications tailored to the proposed algorithms.
+To proceed, defining the vector functions
+f(x1, x2) :=
+
+f1(x1, x2)
+f2(x1, x2)
+
+:=
+
+−D γDP Πx2+Q∗
+βD −βD
+
+x1
+x2
+
++
+
+γDP (Πx2+Q∗ − ΠQ∗)Q∗
+0
+
+,
+(14) can be written by the systems
+d
+dt
+
+xt,1
+xt,2
+
+=
+
+f1(xt,1, xt,2)
+f2(xt,1, xt,2)
+
+, z 0 =
+
+QA
+0 − Q∗
+QB
+0 − Q∗
+
+, ∀t ≥ 0 (15)
+with 
+xt,1
+xt,2
+
+=
+
+QA
+t − Q∗
+QB
+t − Q∗
+
+In the following, we present several lemmas to support the main analysis results.
+Lemma 5. We have
+f(x1, x2) =
+
+−Dx1 + γDP Πx2+Q∗(x2 + Q∗) − γDP ΠQ∗Q∗
+βDx1 − βDx2
+
+18
+--- Page 19 ---
+Proof. It can be proved through
+f(x1, x2) =
+
+−D γDP Πx2+Q∗
+βD −βD
+
+x1
+x2
+
++
+
+γDP (Πx2+Q∗ − ΠQ∗)Q∗
+0
+
+=
+
+−Dx1 + γDP Πx2+Q∗x2 + γDP (Πx2+Q∗ − ΠQ∗)Q∗
+βDx1 − βDx2
+
+=
+
+−Dx1 + γDP Πx2+Q∗(x2 + Q∗) − γDP ΠQ∗Q∗
+βDx1 − βDx2
+
+,
+which completes the proof.
+Lemma 6. f is quasi-monotone increasing.
+Proof. We will check the condition of the quasi-monotone increasing function forf1 and f2, sepa-
+rately. Assume that ∆x1 ∈ R|S|||A| and ∆x2 ∈ R|S|||A| are nonnegative vectors, and anithe element
+of ∆x1 is zero. For f1, using Lemma 5, we have
+eT
+i f1(x1 + ∆x1, x2 + ∆x2)
+= − eT
+i D(x1 + ∆x1) + γeT
+i DP Πx2+∆x2+Q∗(x2 + ∆x2 + Q∗) − γeT
+i DP ΠQ∗Q∗
+= − eT
+i Dx1 + γeT
+i DP Πx2+∆x2+Q∗(x2 + ∆x2 + Q∗) − γeT
+i DP ΠQ∗Q∗
+≥ −eT
+i Dx1 + γeT
+i DP Πx2+Q∗(x2 + Q∗) − γeT
+i DP ΠQ∗Q∗
+=eT
+i f1(x1, x2),
+where the second line is due to −eT
+i D∆x1 = 0 . Similarly, assuming that ∆x1 ∈ R|S|||A| and
+∆x2 ∈ R|S|||A| are nonnegative vectors, and an ithe element of ∆x2 is zero, we get
+eT
+i f2(x1 + ∆x1, x2 + ∆x2) =βeT
+i D(x1 + ∆x1) − βeT
+i D(x2 + ∆x2)
+=βeT
+i D(x1 + ∆x1) − βeT
+i Dx2
+≥βeT
+i Dx1 − βeT
+i Dx2
+=eT
+i f2(x1, x2),
+where the second line is due to eT
+i D∆x2 = 0. Therefore, f is quasi-monotone increasing.
+Lemma 7. f is globally Lipshcitz continuous.
+Proof. From Lemma 5, one gets
+f(x1, x2) =
+
+−D 0
+βD −βD
+
+x1
+x2
+
++
+
+γDP Πx2+Q∗(x2 + Q∗)
+0
+
++
+
+−γDP ΠQ∗Q∗
+0
+
+Therefore, we have the inequalities
+∥f(x1, x2) − f(y1, y2)∥∞
+≤
+
+
+−D 0
+βD −βD
+
+x1
+x2
+
+−
+
+−D 0
+βD −βD
+
+y1
+y2
+
+∞
++ ∥γDP Πx2+Q∗(x2 + Q∗) − γDP Πy2+Q∗(y2 + Q∗)∥∞
+≤
+
+
+−D 0
+βD −βD
+
+∞
+
+
+x1
+x2
+
+−
+
+y1
+y2
+
+∞
++ ∥γDP ∥∞∥Πx2+Q∗(x2 + Q∗) − Πy2+Q∗(y2 + Q∗)∥∞
+≤
+
+
+−D 0
+βD −βD
+
+∞
+
+
+x1
+x2
+
+−
+
+y1
+y2
+
+∞
++ ∥γDP ∥∞
+
+
+x1
+x2
+
+−
+
+y1
+y2
+
+∞
+indicating that f is globally Lipschitz continuous with respect to the ∥ · ∥∞ norm. This completes the
+proof.
+Our main goal here is to establish the asymptotic stability of the system given in (14). To this end,
+we will apply the tools introduced in Appendix C.2. In particular, we will derive the upper and lower
+comparison systems as discussed before.
+19
+--- Page 20 ---
+E.2 Upper comparison system
+We consider the following system which is called the upper comparison system:
+d
+dt
+
+QA,u
+t − Q∗
+QB,u
+t − Q∗
+
+=
+−D γDP ΠQB,u
+t −Q∗
+βD −βD
+
+QA,u
+t − Q∗
+QB,u
+t − Q∗
+
+,
+
+QA,u
+0 − Q∗
+QB,u
+0 − Q∗
+
+>
+
+QA
+0 − Q∗
+QB
+0 − Q∗
+
+∈ R2|S||A|,
+(16)
+where ‘>’ in the above equation implies the element-wise inequality.
+Defining the vector functions
+h(x1, x2) :=
+
+h1(x1, x2)
+h2(x1, x2)
+
+:=
+
+−D γDP Πx2
+βD −βD
+
+x1
+x2
+
+the upper comparison system can be written by the system
+d
+dt
+
+xt,1
+xt,2
+
+=
+
+h1(xt,1, xt,2)
+h2(xt,1, xt,2)
+
+, x 0 >
+
+QA
+0 − Q∗
+QB
+0 − Q∗
+
+, ∀t ≥ 0
+with 
+xt,1
+xt,2
+
+=
+
+QA,u
+t − Q∗
+QB,u
+t − Q∗
+
+.
+In the following lemmas, we establish key properties of the upper comparison system.
+Lemma 8. h is quasi-monotone increasing.
+Proof. We will check the condition of the quasi-monotone increasing function for h1 and h2, sepa-
+rately. Assume that ∆x1 ∈ R|S|||A| and ∆x2 ∈ R|S|||A| are nonnegative vectors, and anithe element
+of ∆x1 is zero. For h1, we have
+eT
+i h1(x1 + ∆x1, x2 + ∆x2) = − eT
+i D(x1 + ∆x1) + γeT
+i DP Πx2+∆x2 (x2 + ∆x2)
+= − eT
+i Dx1 + γeT
+i DP Πx2+∆x2 (x2 + ∆x2)
+≥ −eT
+i Dy1 + γeT
+i DP Πx2 x2
+=eT
+i h1(x1, x2),
+where the second line is due to −eT
+i D∆x1 = 0 . Similarly, assuming that ∆x1 ∈ R|S|||A| and
+∆x2 ∈ R|S|||A| are nonnegative vectors, and an ithe element of ∆x2 is zero, we get
+eT
+i h2(x1 + ∆x1, x2 + ∆x2) =βeT
+i D(x1 + ∆x1) − βeT
+i D(x2 + ∆x2)
+=βeT
+i D(x1 + ∆x1) − βeT
+i Dx2
+≥βeT
+i Dx1 − βeT
+i Dx2
+=eT
+i h2(x1, x2),
+where the second line is due to eT
+i D∆x2 = 0. Therefore, h is quasi-monotone increasing.
+Lemma 9. h is globally Lipshcitz continuous.
+Proof. We complete the proof through the inequalities
+∥h(x1, x2) − h(y1, y2)∥∞
+=
+
+
+−D γDP Πx2
+βD −βD
+
+x1
+x2
+
+−
+
+−D γDP Πy2
+βD −βD
+
+y1
+y2
+
+∞
+≤
+
+
+−D 0
+βD −βD
+
+x1
+x2
+
+−
+
+−D 0
+βD −βD
+
+y1
+y2
+
+∞
++ ∥γDP Πx2 x1 − γDP Πy2 y2∥∞
+≤
+
+
+−D 0
+βD −βD
+
+∞
+
+
+x1
+x2
+
+−
+
+y1
+y2
+
+∞
++ ∥γDP ∥∞∥x1 − y2∥∞
+≤
+
+
+−D 0
+βD −βD
+
+∞
+
+
+x1
+x2
+
+−
+
+y1
+y2
+
+∞
++ ∥γDP ∥∞
+
+
+x1
+x2
+
+−
+
+y1
+y2
+
+∞
+indicating that h is globally Lipschitz continuous with respect to the ∥ · ∥∞ norm. This completes the
+proof.
+20
+--- Page 21 ---
+Lemma 10. h(x1, x2) ≥ f(x1, x2) for all (x1, x2) ∈ R|S||A| × R|S||A|, where ‘≥’ denotes the
+element-wise inequality.
+Proof. Using γDP (Πx2 − ΠQ∗)Q∗ ≤ 0 for all x2 ∈ R|S||A|, we obtain
+f(x1, x2) =
+
+−D γDP Πx2+Q∗
+βD −βD
+
+x1
+x2
+
++
+
+γDP (Πx2+Q∗ − ΠQ∗)Q∗
+0
+
+≤
+
+−D γDP Πx2+Q∗
+βD −βD
+
+x1
+x2
+
+≤
+
+−D γDP Πx2
+βD −βD
+
+x1
+x2
+
+=h(x1, x2)
+for all (x1, x2) ∈ R|S||A| × R|S||A|. This completes the proof.
+Based on the previous lemmas, we are now ready to prove that the solution of the upper comparison
+system indeed upper-bounds the solution of the original system, which is the reason why (16) is
+named as such.
+Lemma 11. We have 
+QA,u
+t − Q∗
+QB,u
+t − Q∗
+
+≥
+
+QA
+t − Q∗
+QB
+t − Q∗
+
+, ∀t ≥ 0,
+where ‘≥’ denotes the element-wise inequality
+Proof. The desired conclusion is obtained by Lemma 2 with Lemmas 7 to 10.
+Next, we prove that the upper comparison system (16) is globally asymptotically stable at the origin.
+Notably, the proof is simpler than that of the original system, as the upper comparison system does
+not include the affine term.
+Lemma 12. For any β >0, the origin is the unique globally asymptotically stable equilibrium point
+of the upper comparison system (16).
+Proof. For notational convenience, we define Πσ, σ ∈ Mas ΠQB
+t
+such that σ = ψ(πQB
+t
+). Then, for
+the upper comparison switching system, we apply Lemma 3 with
+Aσ =
+
+−D γDP Πσ
+βD −βD
+
+and
+L =
+I 0
+0 γ1/2I
+
+,
+which satisfies
+LAσ =
+ I 0
+0 γ1/2I
+
+−D γDP Πσ
+βD −βD
+
+=
+ −D γDP Πσ
+γ1/2βD −γ1/2βD
+
+= ¯Aσ
+ I 0
+0 γ1/2I
+
+with
+¯Aσ =
+
+−D γ 1/2DP Πσ
+γ1/2βD −βD
+
+.
+To check the strictly negative row dominating diagonal condition, fori ∈ {1, 2, . . . ,|S||A|}, we have
+[ ¯Aσ]ii +
+X
+j∈{1,2,...,n}\{i}
+|[ ¯Aσ]ij| =[−D]ii + γ1/2[D]ii
+X
+j∈{1,2,...,n}\{i}
+|[PΠσ]ij|
+≤[−D]ii + γ1/2[D]ii
+≤(−1 + γ1/2)[D]ii < 0.
+21
+--- Page 22 ---
+For i ∈ {|S||A|+ 1, |S||A| + 2, . . . ,2|S||A|}, we also have
+[ ¯Aσ]ii +
+X
+j∈{1,2,...,n}\{i}
+|[ ¯Aσ]ij| ≤ −[D]iiβ + [D]iiβγ1/2 = [D]iiβ(−1 + γ1/2) < 0
+for any β > 0. Therefore, the strictly negative row dominating diagonal condition is satisfied.
+By Lemma 3, the origin of the upper comparison system is globally asymptotically stable.
+E.3 Lower comparison system
+Let us consider the so-called lower comparison system
+d
+dt
+
+QA,l
+t − Q∗
+QB,l
+t − Q∗
+
+=
+
+−D γDP ΠπQ∗
+βD −βD
+
+QA,l
+t − Q∗
+QB,l
+t − Q∗
+
+,
+
+QA,l
+0 − Q∗
+QB,l
+0 − Q∗
+
+<
+
+QA
+0 − Q∗
+QB
+0 − Q∗
+
+∈ R2|S||A|,
+(17)
+where ‘<’ in the above equation implies the element-wise inequality. Here, we note that the lower
+comparison system is simply a linear system. Therefore, its analysis is much simpler than the upper
+and original system. Defining the vector functions
+g(x1, x2) :=
+
+g1(x1, x2)
+g2(x1, x2)
+
+=
+
+−D γDP ΠπQ∗
+βD −βD
+
+x1
+x2
+
+,
+the lower comparison system can be written by
+d
+dt
+
+xt,1
+xt,2
+
+=
+
+g1(xt,1, xt,2)
+g2(xt,1, xt,2)
+
+, x 0 <
+
+QA
+0 − Q∗
+QB
+0 − Q∗
+
+,
+for all t ≥ 0.
+In the sequel, we present key properties of the lower comparison system.
+Lemma 13. g is globally Lipschitz continuous.
+Proof. It is straightforward from the linearity. In particular, we complete the proof through the
+inequalities
+∥g(x1, x2) − g(y1, y2)∥∞ =
+
+
+−D γDP ΠQ∗
+βD −βD
+
+x1
+x2
+
+−
+
+−D γDP ΠQ∗
+βD −βD
+
+y1
+y2
+
+∞
+≤
+
+
+−D γDP ΠQ∗
+βD −βD
+
+∞
+
+
+x1
+x2
+
+−
+
+y1
+y2
+
+∞
+indicating that g is globally Lipschitz continuous with respect to the ∥ · ∥∞ norm. This completes the
+proof.
+Lemma 14. f(x1, x2) ≥ g(x1, x2) for all (x1, x2) ∈ R|S||A| × R|S||A|, where ‘≥’ denotes the
+element-wise inequality.
+Proof. We obtain
+f(x1, x2) =
+
+−D γDP Πx2+Q∗
+βD −βD
+
+x1
+x2
+
++
+
+γDP (Πx2+Q∗ − ΠQ∗)Q∗
+0
+
+=
+
+−Dx1 + γDP Πx2+Q∗x2 + γDP (Πx2+Q∗ − ΠQ∗)Q∗
+βDx1 − βDx2
+
+=
+
+−Dx1 + γDP Πx2+Q∗(x2 + Q∗) − γDP ΠQ∗Q∗
+βDx1 − βDx2
+
+≥
+
+−Dx1 + γDP ΠQ∗(x2 + Q∗) − γDP ΠQ∗Q∗
+βDx1 − βDx2
+
+=
+
+−Dx1 + γDP ΠQ∗x2
+βDx1 − βDx2
+
+=
+
+−D γDP ΠQ∗
+βD −βD
+
+x1
+x2
+
+=g(x1, x2)
+22
+--- Page 23 ---
+for all (x1, x2) ∈ R|S||A| × R|S||A|. This completes the proof.
+Similar to the upper comparison system, we prove that the solution of the lower comparison system
+indeed provides a lower bound for the solution of the original system.
+Lemma 15. We have 
+QA
+t − Q∗
+QB
+t − Q∗
+
+≥
+
+QA,l
+t − Q∗
+QB,l
+t − Q∗
+
+, ∀t ≥ 0,
+where ‘≥’ denotes the element-wise inequality.
+Proof. The desired conclusion is obtained by Lemma 2with Lemmas 6, 7, 13 and 14.
+Moreover, the next lemma proves that the lower comparison system is also globally asymptotically
+stable at the origin.
+Lemma 16. For any β >0, the origin is the unique globally asymptotically stable equilibrium point
+of the lower comparison system (17).
+Proof. The proof follows the same procedure as that of the upper comparison system. Therefore, the
+detailed proof is omitted here to avoid repetition.
+So far, we have established several key properties of the upper and lower comparison systems,
+including their global asymptotic stability. In the next subsection, we prove the global asymptotic
+stability of the original system based on these results.
+E.4 Stability of the original system
+We establish the global asymptotic stability of (14).
+Theorem 5. For any β > 0, the origin is the unique globally asymptotically stable equilibrium
+point of the original system (14). Equivalently,
+
+Q∗
+Q∗
+
+is the unique globally asymptotically stable
+equilibrium point of the original system (13).
+Proof. By Lemmas 11 and 15, we have
+QA,u
+t − Q∗
+QB,u
+t − Q∗
+
+≥
+
+QA
+t − Q∗
+QB
+t − Q∗
+
+≥
+
+QA,l
+t − Q∗
+QB,l
+t − Q∗
+
+, ∀t ≥ 0
+Moreover, by Lemma 16 and Lemma 12, we have
+QA,u
+t − Q∗
+QB,u
+t − Q∗
+
+→ 0,
+
+QA,l
+t − Q∗
+QB,l
+t − Q∗
+
+→ 0
+as t → ∞. Therefore, the state of the original system also asymptotically converges to the origin.
+This completes the proof.
+E.5 Numerical example
+In this subsection, we present a simple example to illustrate the validity of the properties of the upper
+and lower comparison systems established in the previous sections. To this end, let us consider an
+MDP with S = {1, 2}, A = {1, 2}, γ = 0.9,
+P1 =
+
+0.2 0 .8
+0.3 0 .7
+
+, P 2 =
+
+0.5 0 .5
+0.7 0 .3
+
+,
+a behavior policy β such that
+P[a = 1|s = 1] = 0.2, P[a = 2|s = 1] = 0.8,
+P[a = 1|s = 2] = 0.7, P[a = 2|s = 2] = 0.3,
+and
+R1 =
+
+3
+1
+
+, R 2 =
+
+2
+1
+
+23
+--- Page 24 ---
+Simulated trajectories of the ODE model of AGT2-QL including the upper and lower comparison
+systems are depicted in Figure 5 for QA
+t part and Figure 6 for QB
+t part. The results empirically prove
+that the ODE model associated with AGT2-QL is asymptotically stable. Moreover, they illustrate that
+the solutions of the upper and lower comparison systems bound the solution of the original system,
+as established by the theory.
+Figure 5: Trajectories of the O.D.E. model of AGT2-QL and the corresponding upper and lower
+comparison systems ( QA
+t part). The solution of the ODE model (black line) is upper and lower
+bounded by the upper and lower comparison systems, respectively (red and blue lines, respectively).
+This result provides numerical evidence that the bounding rules hold.
+E.6 Convergence of AGT2-QL
+We can now apply the Borkar and Meyn theorem, Lemma 4, to prove Theorem 3. First of all, note
+that the system in (15) corresponds to the ODE model in Assumption 1. The proof is completed by
+examining all the statements in Assumption 1:
+E.6.1 Step 1:
+AGT2-QL can be expressed as the stochastic recursion in (11) with
+f
+
+θ1
+θ2
+
+:=
+
+−D γDP Πθ2
+βD −βD
+
+θ1
+θ2
+
++
+
+DR
+0
+
+.
+Moreover, f is globally Lipschitz continuous according to Lemma 7.
+To prove the first statement of Assumption 1, we note that
+f∞
+
+θ1
+θ2
+
+= lim
+c→∞
+f
+
+cθ1
+cθ2
+
+c
+24
+--- Page 25 ---
+Figure 6: Trajectories of the original O.D.E. model of AGT2-QL and the corresponding upper and
+lower comparison systems (QB
+t part). The solution of the ODE model (black line) is upper and lower
+bounded by the upper and lower comparison systems, respectively (red and blue lines, respectively).
+This result provides numerical evidence that the bounding rules hold.
+= lim
+c→∞
+
+−D γDP Πcθ2
+βD −βD
+
+cθ1
+cθ2
+
++
+
+DR
+0
+
+c
+= lim
+c→∞
+
+−D γDP Πcθ2
+βD −βD
+
+θ1
+θ2
+
+=
+
+−D γDP Πθ2
+βD −βD
+
+θ1
+θ2
+
+where the last equality is due to the homogeneity of the policy, πcθ2 (s) = arg maxa∈A cθ2(s, a) =
+arg maxa∈Aθ2(s, a), where θ2(s, a) denotes the entry in the parameter vector θ2 corresponding to
+the state-action pair (s, a) ∈ S × A.
+E.6.2 Step 2:
+Let us consider the system
+d
+dt
+
+θ1,t
+θ2,t
+
+= f∞
+
+θ1,t
+θ2,t
+
+=
+
+−D γDP Πθ2,t
+βD −βD
+
+θ1,t
+θ2,t
+
+.
+Its global asymptotic stability around the origin can be easily proved following similar lines as in the
+proof of the upper comparison system in Lemma 12.
+E.6.3 Step 3:
+According to Theorem 5, the ODE model of AGT2-QL is globally asymptotically stable around the
+optimal solution
+
+θ1
+θ2
+
+=
+
+Q∗
+Q∗
+
+.
+25
+--- Page 26 ---
+E.6.4 Step 4:
+Next, we prove the remaining parts. Recall that AGT2-QL is expressed as
+¯Qk+1 = ¯Qk + αk{f( ¯Qk) + εk+1}
+where ¯Qk :=
+
+QA
+k
+QB
+k
+
+and
+εk+1 :=
+
+−(es ⊗ ea)(es ⊗ ea)T γ(es ⊗ ea)eT
+s′ΠQB
+β(es ⊗ ea)(es ⊗ ea)T −β(es ⊗ ea)(es ⊗ ea)T
+
+QA
+QB
+
++
+
+(es ⊗ ea)r(s, a, r′)
+0
+
+−
+
+−D γDP ΠQB
+βD −βD
+
+QA
+QB
+
+−
+
+R
+0
+
+and
+f
+
+QA
+QB
+
+:=
+
+−D γDP ΠQB
+βD −βD
+
+QA
+QB
+
++
+
+DR
+0
+
+,
+To proceed, let us define the history
+Gk := (¯εk, ¯εk−1, . . . ,¯ε1, ¯Qk, ¯Qk−1, . . . ,¯Q0)
+Moreover, let us define the corresponding process (Mk)∞
+k=0 with Mk := Pk
+i=1 εi. Then, we can
+prove that (Mk)∞
+k=0 is Martingale. To do so, we can easily prove E[εk+1|Gk] = 0 by
+E[εk+1|Gk] =E
+ −(es ⊗ ea)(es ⊗ ea)T γ − (es ⊗ ea)eT
+s′ΠQB
+β(es ⊗ ea)(es ⊗ ea)T −β(es ⊗ ea)(es ⊗ ea)T
+
+QA
+QB
+Gk
+
+−
+
+−D γDP ΠQB
+βD −βD
+
+QA
+QB
+
+=0
+Using this identity, we have
+E[Mk+1|Gk] =E
+"k+1X
+i=1
+εi
+Gk
+#
+= E[εk+1|Gk] + E
+" kX
+i=1
+εi
+Gk
+#
+=E
+" kX
+i=1
+εi
+Gk
+#
+=
+kX
+i=1
+εi = Mk.
+Therefore, (Mk)∞
+k=0 is a Martingale sequence, and εk+1 = Mk+1 − Mk is a Martingale difference.
+Moreover, it can be easily proved that the fourth condition of Assumption 1 is satisfied by algebraic
+calculations. Therefore, the fourth condition is met.
+F Convergence of SGT2-QL
+In this section, we study convergence of SGT2-QL. The full algorithm is described in Algorithm 4.
+Similar to ATG2-GL, we analyze the convergence of SGT2-QL based on the same switching system
+Algorithm 4 SGT2-QL
+1: Initialize QA
+0 and QB
+0 randomly.
+2: for iteration k = 0, 1, . . .do
+3: Sample (s, a)
+4: Sample s′ ∼ P(·|s, a) and r(s, a, s′)
+5: Update QA
+k+1(s, a) = QA
+k (s, a) + αk{r(s, a, s′) + γ maxa∈A QB
+k (s′, a) − QA
+k (s, a)} +
+αkβ(QB(s, a)k − QA
+k (s, a))
+6: Update QB
+k+1(s, a) = QB
+k (s, a) + αk{r(s, a, s′) + γ maxa∈A QA
+k (s′, a) − QB
+k (s, a)} +
+αkβ(QA(s, a)k − QB
+k (s, a))
+7: end for
+approach [15].
+26
+--- Page 27 ---
+F.1 Original system
+As before, our first goal is to derive an ODE model of SGT2-QL to apply the Borkar and Meyn
+theorem Lemma 4. To begin with, the update rule of SGT2-QL in Algorithm 4 can be rewritten as
+follows:
+QA
+k+1 =QA
+k + αk
+n
+(ea ⊗ es)(ea ⊗ es)T R
++ γ(ea ⊗ es)(es′)T max
+a∈A
+QB
+k (·, a) − (ea ⊗ es)(ea ⊗ es)T QA
+k
++β((ea ⊗ es)(ea ⊗ es)T QB
+k − (ea ⊗ es)(ea ⊗ es)T QA
+k )
+o
+,
+QB
+k+1 =QB
+k + αk
+n
+(ea ⊗ es)(ea ⊗ es)T R
++ γ(ea ⊗ es)(es′)T max
+a∈A
+QA
+k (·, a) − (ea ⊗ es)(ea ⊗ es)T QB
+k
++β((ea ⊗ es)(ea ⊗ es)T QA
+k − (ea ⊗ es)(ea ⊗ es)T QB
+k )
+o
+,
+where es ∈ R|S| and ea ∈ R|A| are s-th basis vector (all components are 0 except for the s-th
+component which is 1) and a-th basis vector, respectively. The above update can be further expressed
+as
+QA
+k+1 = QA
+k + αk{DR + γDP ΠQB
+k
+QB
+k − DQA
+k + β(QB
+k − QA
+k ) + εA
+k+1}
+QB
+k+1 = QB
+k + αk{DR + γDP ΠQB
+k
+QA
+k − DQB
+k + β(QA
+k − QB
+k ) + εB
+k+1}
+where
+εA
+k+1 =(ea ⊗ es)(ea ⊗ es)T R + γ(ea ⊗ es)(es′)T ΠQB
+k
+QB
+k
+− (ea ⊗ es)(ea ⊗ es)T QA
+k + (ea ⊗ es)(ea ⊗ es)T β(QB
+k − QB
+k )
+− (DR + γDP ΠQB
+k
+QB
+k − DQA
+k + β(QB
+k − Qa
+k))
+εA
+k+1 =(ea ⊗ es)(ea ⊗ es)T R + γ(ea ⊗ es)(es′)T ΠQB
+k
+QB
+k
+− (ea ⊗ es)(ea ⊗ es)T QA
+k + (ea ⊗ es)(ea ⊗ es)T β(QB
+k − QB
+k )
+− (DR + γDP ΠQB
+k
+QB
+k − DQA
+k + β(QB
+k − Qa
+k))
+As discussed in Appendix C.3, the convergence of SGT3-QL can be analyzed by evaluating the
+stability of the corresponding continuous-time ODE model
+d
+dt
+
+QA
+t
+QB
+t
+
+=
+ −(1 + β)D γDP ΠQB
+t
++ βD
+γDP ΠQA
+t
++ βD −(1 + β)D
+
+QA
+t
+QB
+t
+
++
+
+DR
+DR
+
+,
+
+QA
+0
+QB
+0
+
+∈ R2|S||A|.
+(18)
+Using the Bellman equation (γDP ΠQ∗ − D)Q∗ + DR = 0, the above expressions can be rewritten
+by
+d
+dt
+
+QA
+t − Q∗
+QB
+t − Q∗
+
+=
+ −(1 + β)D γDP ΠQB
+t
++ βD
+γDP ΠQA
+t
++ βD −(1 + β)D
+
+QA
+t − Q∗
+QB
+t − Q∗
+
++
+ γDP (ΠQB
+t
+− ΠQ∗)Q∗
+γDP (ΠQA
+t
+− ΠQ∗)Q∗
+
+,
+
+QA
+0 − Q∗
+QB
+0 − Q∗
+
+= z ∈ R2|S||A|. (19)
+The above system is a linear switching system. More precisely, let Θ be the set of all deterministic
+policies, let us define a one-to-one mapping φ : Θ → {1, 2, . . . ,|Θ × Θ|} from two deterministic
+policies (πA, πB) ∈ Θ × Θ to an integer in {1, 2, . . . ,|Θ × Θ|}, and define
+Ai =
+
+−(1 + β)D γDP ΠπB + βD
+γDP ΠπA + βD −(1 + β)D
+
+∈ R2|S×A|×2|S×A|,
+bi =
+
+γDP (ΠπB − Ππ∗
+)Q∗
+γDP (ΠπA − Ππ∗
+)Q∗
+
+∈ R2|S×A|
+27
+--- Page 28 ---
+for all i = φ(πA, πB) and (πA, πB) ∈ Θ × Θ. Then, the above ODE can be written by the affine
+switching system
+d
+dtxt = Aσ(xt)xt + bσ(xt), x 0 = z ∈ R|S||A|,
+where
+xt :=
+
+QA
+t − Q∗
+QB
+t − Q∗
+
+is the state, σ : R|S||A| → {1, 2, . . . ,|Θ × Θ|} is a state-feedback switching policy defined by
+σ(xt) := ψ(πQA
+t
+, πQB
+t
+), and πQ(s) = arg maxa∈A Q(s, a).
+For convenience of analysis, let us define the following vector functions:
+f(x1, x2) :=
+
+f1(x1, x2)
+f2(x1, x2)
+
+:=
+
+−(1 + β)D γDP Πx2+Q∗ + βD
+γDP Πx1+Q∗ + βD −(1 + β)D
+
+x1
+x2
+
++
+
+γDP (Πx2+Q∗ − ΠQ∗)Q∗
+γDP (Πx1+Q∗ − ΠQ∗)Q∗
+
+.
+Then, (19) can be written by the system
+d
+dt
+
+xt,1
+xt,2
+
+=
+
+f1(xt,1, xt,2)
+f2(xt,1, xt,2)
+
+, z 0 =
+
+QA
+0 − Q∗
+QB
+0 − Q∗
+
+, ∀t ≥ 0,
+where 
+xt,1
+xt,2
+
+=
+
+QA
+t − Q∗
+QB
+t − Q∗
+
+is the state vector. Next, we present several useful lemmas that aid in the analysis of the ODE model.
+Lemma 17. The function f can be represented by
+f(x1, x2) =
+
+−(1 + β)Dx1 + βDx2 + γDP Πx2+Q∗(x2 + Q∗) − γDP ΠQ∗Q∗
+−(1 + β)Dx2 + βDx1 + γDP Πx1+Q∗(x1 + Q∗) − γDP ΠQ∗Q∗
+
+.
+Proof. The proof follows from the following algebraic manipulations:
+f(x1, x2) =
+
+−(1 + β)D γDP Πx2+Q∗ + βD
+γDP Πx1+Q∗ + βD −(1 + β)D
+
+x1
+x2
+
++
+
+γDP (Πx2+Q∗ − ΠQ∗)Q∗
+γDP (Πx1+Q∗ − ΠQ∗)Q∗
+
+=
+
+−(1 + β)Dx1 + βDx2 + γDP Πx2+Q∗x2 + γDP (Πx2+Q∗ − ΠQ∗)Q∗
+−(1 + β)Dx2 + βDx1 + γDP Πx1+Q∗x1 + γDP (Πx1+Q∗ − ΠQ∗)Q∗
+
+=
+
+−(1 + β)Dx1 + βDx2 + γDP Πx2+Q∗(x2 + Q∗) − γDP ΠQ∗Q∗
+−(1 + β)Dx2 + βDx1 + γDP Πx1+Q∗(x1 + Q∗) − γDP ΠQ∗Q∗
+
+.
+This completes the proof.
+Lemma 18. f is quasi-monotone increasing.
+Proof. We will check the condition of the quasi-monotone increasing function forf1 and f2, sepa-
+rately. Assume that ∆x1 ∈ R|S|||A| and ∆x2 ∈ R|S|||A| are nonnegative vectors, and anithe element
+of ∆x1 is zero. For f1, using Lemma 17, we have
+eT
+i f1(x1 + ∆x1, x2 + ∆x2)
+= − (1 + β)eT
+i D(x1 + ∆x1) + βD(x2 + ∆x2)
++ γeT
+i DP Πx2+∆x2+Q∗(x2 + ∆x2 + Q∗) − γeT
+i DP ΠQ∗Q∗
+= − (1 + β)eT
+i Dx1 + βD(x2 + ∆x2) + γeT
+i DP Πx2+∆x2+Q∗(x2 + ∆x2 + Q∗) − γeT
+i DP ΠQ∗Q∗
+≥ −(1 + β)eT
+i Dx1 + βDx2 + γeT
+i DP Πx2+Q∗(x2 + Q∗) − γeT
+i DP ΠQ∗Q∗
+=eT
+i f1(x1, x2),
+where the second line is due to −(1 + β)eT
+i D∆x1 = 0. Similarly, assuming that ∆x1 ∈ R|S|||A|
+and ∆x2 ∈ R|S|||A| are nonnegative vectors, and an ithe element of ∆x2 is zero, we get
+eT
+i f2(x1 + ∆x1, x2 + ∆x2) ≥ eT
+i f2(x1, x2),
+by symmetry. Therefore, h is quasi-monotone increasing.
+28
+--- Page 29 ---
+Lemma 19. f is globally Lipshcitz continuous.
+Proof. From Lemma 17, one has
+f(x1, x2) =
+
+−(1 + β)D βD
+βD −(1 + β)D
+
+x1
+x2
+
++
+
+γDP Πx2+Q∗(x2 + Q∗)
+γDP Πx1+Q∗(x1 + Q∗)
+
++
+
+−γDP ΠQ∗Q∗
+−γDP ΠQ∗Q∗
+
+.
+sing this relation, we derive the following sequence of inequalities:
+∥f(x1, x2) − f(y1, y2)∥∞
+≤
+
+
+−(1 + β)D βD
+βD −(1 + β)D
+
+x1
+x2
+
+−
+
+−(1 + β)D βD
+βD −(1 + β)D
+
+y1
+y2
+
+∞
++ ∥γDP Πx2+Q∗(x2 + Q∗) − γDP Πy2+Q∗(y2 + Q∗)∥∞
++ ∥γDP Πx1+Q∗(x1 + Q∗) − γDP Πy1+Q∗(y1 + Q∗)∥∞
+≤
+
+
+−(1 + β)D βD
+βD −(1 + β)D
+
+∞
+
+
+x1
+x2
+
+−
+
+y1
+y2
+
+∞
++ ∥γDP ∥∞∥Πx2+Q∗(x2 + Q∗) − Πy2+Q∗(y2 + Q∗)∥∞
++ ∥γDP ∥∞∥Πx1+Q∗(x1 + Q∗) − Πy1+Q∗(y1 + Q∗)∥∞
+≤
+
+
+−(1 + β)D βD
+βD −(1 + β)D
+
+∞
+
+
+x1
+x2
+
+−
+
+y1
+y2
+
+∞
++ ∥γDP ∥∞∥x1 − y1∥∞
++ ∥γDP ∥∞∥x2 − y2∥∞
+≤
+
+
+−(1 + β)D βD
+βD −(1 + β)D
+
+∞
+
+
+x1
+x2
+
+−
+
+y1
+y2
+
+∞
++ 2∥γDP ∥∞
+
+
+x1
+x2
+
+−
+
+y1
+y2
+
+∞
+indicating that f is globally Lipschitz continuous with respect to the ∥ · ∥∞ norm. This completes the
+proof.
+F.2 Upper comparison system
+We consider the following system which is called the upper comparison system:
+d
+dt
+
+QA,u
+t − Q∗
+QB,u
+t − Q∗
+
+=
+ −(1 + β)D γDP ΠQB,u
+t −Q∗ + βD
+γDP ΠQA,u
+t −Q∗ + βD −(1 + β)D
+
+QA,u
+t − Q∗
+QB,u
+t − Q∗
+
+,
+
+QA,u
+0 − Q∗
+QB,u
+0 − Q∗
+
+>
+
+QA
+0 − Q∗
+QB
+0 − Q∗
+
+∈ R2|S||A|. (20)
+Defining the following vector function:
+h(x1, x2) :=
+
+h1(x1, x2)
+h2(x1, x2)
+
+:=
+
+−(1 + β)D γDP Πx2 + βD
+γDP Πx1 + βD −(1 + β)D
+
+x1
+x2
+
+the upper comparison system can be written by the system
+d
+dt
+
+xt,1
+xt,2
+
+=
+
+h1(xt,1, xt,2)
+h2(xt,1, xt,2)
+
+, x 0 >
+
+QA
+0 − Q∗
+QB
+0 − Q∗
+
+, ∀t ≥ 0
+where 
+xt,1
+xt,2
+
+=
+
+QA,u
+t − Q∗
+QB,u
+t − Q∗
+
+is the state vector. Similar to the original ODE model, we derive several useful properties of the upper
+comparison system.
+Lemma 20. h is quasi-monotone increasing.
+Proof. We will check the condition of the quasi-monotone increasing function for h1 and h2, sepa-
+rately. Assume that ∆x1 ∈ R|S|||A| and ∆x2 ∈ R|S|||A| are nonnegative vectors, and anithe element
+29
+--- Page 30 ---
+of ∆x1 is zero. For h1, we have
+eT
+i h1(x1 + ∆x1, x2 + ∆x2)
+= − (1 + β)eT
+i D(x1 + ∆x1) + βD(x2 + ∆x2) + γeT
+i DP Πx2+∆x2 (x2 + ∆x2)
+= − (1 + β)eT
+i Dx1 + βD(x2 + ∆x2) + γeT
+i DP Πx2+∆x2 (x2 + ∆x2)
+≥ −(1 + β)eT
+i Dx1 + βD(x2) + γeT
+i DP Πx2 x2
+=eT
+i h1(x1, x2),
+where the second line is due to −eT
+i D∆x1 = 0 . Similarly, assuming that ∆x1 ∈ R|S|||A| and
+∆x2 ∈ R|S|||A| are nonnegative vectors, and an ithe element of ∆x2 is zero, we get
+eT
+i h2(x1 + ∆x1, x2 + ∆x2) ≥ eT
+i h2(x1, x2),
+by symmetry. Therefore, h is quasi-monotone increasing.
+Lemma 21. h is globally Lipshcitz continuous.
+Proof. We complete the proof through the inequalities
+∥h(x1, x2) − h(y1, y2)∥∞
+=
+
+
+−D γDP Πx2
+βD −βD
+
+x1
+x2
+
+−
+
+−D γDP Πy2
+βD −βD
+
+y1
+y2
+
+∞
+≤
+
+
+−D 0
+βD −βD
+
+x1
+x2
+
+−
+
+−D 0
+βD −βD
+
+y1
+y2
+
+∞
++ ∥γDP Πx2 x1 − γDP Πy2 y2∥∞
+≤
+
+
+−D 0
+βD −βD
+
+∞
+
+
+x1
+x2
+
+−
+
+y1
+y2
+
+∞
++ ∥γDP ∥∞∥x1 − y2∥∞
+≤
+
+
+−D 0
+βD −βD
+
+∞
+
+
+x1
+x2
+
+−
+
+y1
+y2
+
+∞
++ ∥γDP ∥∞
+
+
+x1
+x2
+
+−
+
+y1
+y2
+
+∞
+indicating that h is globally Lipschitz continuous with respect to the ∥ · ∥∞ norm. This completes the
+proof.
+Lemma 22. h(x1, x2) ≥ f(x1, x2) for all (x1, x2) ∈ R|S||A| × R|S||A|, where ‘≥’ denotes the
+element-wise inequality.
+Proof. The proof follows from the inequalities
+f(x1, x2) =
+
+−(1 + β)D γDP Πx2+Q∗ + βD
+γDP Πx1+Q∗ + βD −(1 + β)D
+
+x1
+x2
+
++
+
+γDP (Πx2+Q∗ − ΠQ∗)Q∗
+γDP (Πx1+Q∗ − ΠQ∗)Q∗
+
+≤
+
+−(1 + β)D γDP Πx2+Q∗ + βD
+γDP Πx1+Q∗ + βD −(1 + β)D
+
+x1
+x2
+
+≤
+
+−(1 + β)D γDP Πx2 + βD
+γDP Πx1 + βD −(1 + β)D
+
+x1
+x2
+
+=g(x1, x2)
+for all (x1, x2) ∈ R|S||A| × R|S||A|.
+Based on the previous lemmas, we are now ready to prove that the solution of the upper comparison
+system indeed upper-bounds the solution of the original system, which is the reason why (20) is
+named as such.
+Lemma 23. We have 
+QA,u
+t − Q∗
+QB,u
+t − Q∗
+
+≥
+
+QA
+t − Q∗
+QB
+t − Q∗
+
+, ∀t ≥ 0,
+where ‘≥’ denotes the element-wise inequality.
+Proof. The desired conclusion is obtained by Lemma 2 with Lemmas 19 to 22.
+30
+--- Page 31 ---
+Next, we prove that the upper comparison system (20) is globally asymptotically stable at the origin.
+Lemma 24. For any β >0, the origin is the unique globally asymptotically stable equilibrium point
+of the upper comparison system (20).
+Proof. For notational convenience, we define Πσ, σ ∈ Mas ΠQB
+t
+such that σ = ψ(πQB
+t
+). Then, for
+the upper comparison switching system, we apply Lemma 3 with
+Aσ1,σ2 =
+
+−(1 + β)D γDP Πσ1 + βD
+γDP Πσ2 + βD −(1 + β)D
+
+and
+L =
+
+I 0
+0 I
+
+,
+which satisfies
+LAσ1,σ2 = ¯Aσ1,σ2 L
+with
+¯Aσ1,σ2 =
+
+−(1 + β)D γDP Πσ1 + βD
+γDP Πσ2 + βD −(1 + β)D
+
+To check the strictly negative row dominating diagonal condition, fori ∈ {1, 2, . . . ,|S||A|}, we have
+[ ¯Aσ1,σ2 ]ii +
+X
+j∈{1,2,...,n}\{i}
+|[ ¯Aσ1,σ2 ]ij| = − (1 + β)[D]ii + γ[D]ii
+X
+j∈{1,2,...,n}\{i}
+|[PΠσ]ij| + β[D]ii
+≤ −(1 + β)[D]ii + (γ + β)[D]ii
+=(γ − 1)[D]ii
+<0
+For i ∈ {|S||A|+ 1, |S||A| + 2, . . . ,2|S||A|}, by symmetry, we also have the same result
+[ ¯Aσ1,σ2 ]ii +
+X
+j∈{1,2,...,n}\{i}
+|[ ¯Aσ1,σ2 ]ij| < 0
+for any β > 0. Therefore, the strictly negative row dominating diagonal condition is satisfied.
+By Lemma 3, the origin of the upper comparison system is globally asymptotically stable.
+F.3 Lower comparison system
+Let us consider the so-called lower comparison system
+d
+dt
+
+QA,l
+t − Q∗
+QB,l
+t − Q∗
+
+=
+ −(1 + β)D γDP ΠπQ∗ + βD
+γDP ΠπQ∗ + βD −(1 + β)D
+
+QA,l
+t − Q∗
+QB,l
+t − Q∗
+
+,
+
+QA,l
+0 − Q∗
+QB,l
+0 − Q∗
+
+<
+
+QA
+0 − Q∗
+QB
+0 − Q∗
+
+∈ R2|S||A|, (21)
+We note that the lower comparison system is simply a linear system. Defining the vector function
+g(x1, x2) :=
+
+g1(x1, x2)
+g2(x1, x2)
+
+=
+ −(1 + β)D γDP ΠπQ∗ + βD
+γDP ΠπQ∗ + βD −(1 + β)D
+
+x1
+x2
+
+,
+the lower comparison system can be written by
+d
+dt
+
+xt,1
+xt,2
+
+=
+
+g1(xt,1, xt,2)
+g2(xt,1, xt,2)
+
+, x 0 <
+
+QA
+0 − Q∗
+QB
+0 − Q∗
+
+,
+for all t ≥ 0. Below, we present several key properties of the lower comparison system.
+Lemma 25. g is globally Lipschitz continuous.
+Proof. It is straightforward from the linearity. In particular, we complete the proof through the
+inequalities
+∥g(x1, x2) − g(y1, y2)∥∞ ≤
+
+ −(1 + β)D γDP ΠπQ∗ + βD
+γDP ΠπQ∗ + βD −(1 + β)D
+
+∞
+
+
+x1
+x2
+
+−
+
+y1
+y2
+
+∞
+31
+--- Page 32 ---
+indicating that g is globally Lipschitz continuous with respect to the ∥ · ∥∞ norm. This completes the
+proof.
+Lemma 26. f(x1, x2) ≥ g(x1, x2) for all (x1, x2) ∈ R|S||A| × R|S||A|, where ‘≥’ denotes the
+element-wise inequality.
+Proof. The proof follows directly from the inequalities
+f(x1, x2) =
+
+−(1 + β)Dx1 + βDx2 + γDP Πx2+Q∗(x2 + Q∗) − γDP ΠQ∗Q∗
+−(1 + β)Dx2 + βDx1 + γDP Πx1+Q∗(x1 + Q∗) − γDP ΠQ∗Q∗
+
+≥
+
+−(1 + β)Dx1 + βDx2 + γDP ΠQ∗(x2 + Q∗) − γDP ΠQ∗Q∗
+−(1 + β)Dx2 + βDx1 + γDP ΠQ∗(x1 + Q∗) − γDP ΠQ∗Q∗
+
+=
+ −(1 + β)D γDP ΠπQ∗ + βD
+γDP ΠπQ∗ + βD −(1 + β)D
+
+x1
+x2
+
+=g(x1, x2)
+for all (x1, x2) ∈ R|S||A| × R|S||A|. This completes the proof.
+Similar to the upper comparison system, we prove that the solution of the lower comparison system
+indeed provides a lower bound for the solution of the original system.
+Lemma 27. We have 
+QA
+t − Q∗
+QB
+t − Q∗
+
+≥
+
+QA,l
+t − Q∗
+QB,l
+t − Q∗
+
+, ∀t ≥ 0,
+where ‘≥’ denotes the element-wise inequality.
+Proof. The desired conclusion is obtained by Lemma 2with Lemmas 18, 19, 25 and 26.
+Moreover, the next lemma proves that the lower comparison system is also globally asymptotically
+stable at the origin.
+Lemma 28. For any β >0, the origin is the unique globally asymptotically stable equilibrium point
+of the lower comparison system (21).
+Proof. For the proof, one can apply the same procedure as in the proof of the upper comparison
+system.
+So far, we have established several key properties of the upper and lower comparison systems,
+including their global asymptotic stability. In the next subsection, we prove the global asymptotic
+stability of the original system based on these results.
+F.4 Stability of the original system
+We establish the global asymptotic stability of (19).
+Theorem 6. For any β > 0, the origin is the unique globally asymptotically stable equilibrium
+point of the original system (19). Equivalently,
+
+Q∗
+Q∗
+
+is the unique globally asymptotically stable
+equilibrium point of the original system (18).
+Proof. By Lemmas 23 and 27, we have
+QA,u
+t − Q∗
+QB,u
+t − Q∗
+
+≥
+
+QA
+t − Q∗
+QB
+t − Q∗
+
+≥
+
+QA,l
+t − Q∗
+QB,l
+t − Q∗
+
+, ∀t ≥ 0.
+Moreover, by Lemma 28 and Lemma 24, we have
+QA,u
+t − Q∗
+QB,u
+t − Q∗
+
+→ 0,
+
+QA,l
+t − Q∗
+QB,l
+t − Q∗
+
+→ 0
+as t → ∞. Therefore, the state of the original system also asymptotically converges to the origin.
+This completes the proof.
+32
+--- Page 33 ---
+F.5 Numerical example
+In this subsection, we provide a simple example to illustrate the validity of the properties of the
+upper and lower comparison systems established in the previous sections. Let us consider the MDP
+previously considered for AGT2-QL with S = {1, 2}, A = {1, 2}, γ = 0.9,
+P1 =
+
+0.2 0 .8
+0.3 0 .7
+
+, P 2 =
+
+0.5 0 .5
+0.7 0 .3
+
+,
+a behavior policy β such that
+P[a = 1|s = 1] = 0.2, P[a = 2|s = 1] = 0.8,
+P[a = 1|s = 2] = 0.7, P[a = 2|s = 2] = 0.3,
+and the expected reward vectors
+R1 =
+
+3
+1
+
+, R 2 =
+
+2
+1
+
+Solutions of the O.D.E. model of SGT2-QL and the upper and lower comparison systems are depicted
+in Figure 7 for QA
+t part and Figure 8 for QB
+t part.
+Figure 7: Trajectories of the O.D.E. model of SGT2-QL and the corresponding upper and lower
+comparison systems (QA
+t part). he solution of the ODE model (black line) is upper and lower bounded
+by the upper and lower comparison systems, respectively (red and blue lines, respectively). This
+result provides numerical evidence that the bounding rules hold.
+As before, the simulation study empirically proves that the ODE model associated with SGT2-QL is
+asymptotically stable. Moreover, they illustrate that the solutions of the upper and lower comparison
+systems bound the solution of the original system, as established by the theory.
+So far, we have examined key properties of the ODE model of SGT2-QL and proved its global
+asymptotic stability, which is essential for establishing the convergence of SGT2-QL. In the next
+subsection, we will analyze its convergence in detail.
+33
+--- Page 34 ---
+Figure 8: Trajectories of the original O.D.E. model of SGT2-QL and the corresponding upper and
+lower comparison systems (QB
+t part). he solution of the ODE model (black line) is upper and lower
+bounded by the upper and lower comparison systems, respectively (red and blue lines, respectively).
+This result provides numerical evidence that the bounding rules hold.
+F.6 Convergence of SGT2-QL
+In this subsection, we apply the Borkar and Meyn theorem, Lemma 4, to prove the convergence of
+SGT2-QL in Theorem 4. First of all, note that the system in (15) corresponds to the ODE model
+in Assumption 1. The proof is completed by examining all the statements in Assumption 1:
+F.6.1 Step 1:
+SGT2-QL can be expressed as the stochastic recursion in (11) with
+f
+
+θ1
+θ2
+
+:=
+
+−(1 + β)D γDP Πθ2 + βD
+γDP Πθ1 + βD −(1 + β)D
+
+θ1
+θ2
+
++
+
+DR
+DR
+
+.
+Moreover, f is globally Lipschitz continuous according to Lemma 19.
+To prove the first statement of Assumption 1, we note that
+f∞
+
+θ1
+θ2
+
+= lim
+c→∞
+f
+
+cθ1
+cθ2
+
+c
+= lim
+c→∞
+
+−(1 + β)D γDP Πcθ2 + βD
+γDP Πcθ1 + βD −(1 + β)D
+
+θ1
+θ2
+
++
+
+DR
+DR
+
+c
+= lim
+c→∞
+
+−(1 + β)D γDP Πcθ2 + βD
+γDP Πcθ1 + βD −(1 + β)D
+
+θ1
+θ2
+
+34
+--- Page 35 ---
+=
+
+−(1 + β)D γDP Πθ2 + βD
+γDP Πθ1 + βD −(1 + β)D
+
+θ1
+θ2
+
+where the last equality is due to the homogeneity of the policy, πcθi(s) = arg maxa∈Acθi(s, a) =
+arg maxa∈Aθi(s, a) for i ∈ {1, 2}, where θi(s, a) denotes the entry in the parameter vector θi
+corresponding to the state-action pair (s, a) ∈ S × A.
+F.6.2 Step 2:
+Let us consider the system
+d
+dt
+
+θ1,t
+θ2,t
+
+= f∞
+
+θ1,t
+θ2,t
+
+=
+
+−(1 + β)D γDP Πθ2,t + βD
+γDP Πθ1,t + βD −(1 + β)D
+
+θ1,t
+θ2,t
+
+.
+Its global asymptotic stability around the origin can be easily proved following similar lines as in the
+proof of the upper comparison system in Lemma 12.
+F.6.3 Step 3:
+According to Theorem 5, the ODE model of SGT2-QL is globally asymptotically stable around
+θ1
+θ2
+
+=
+
+Q∗
+Q∗
+
+.
+F.6.4 Step 4:
+Next, we prove the remaining parts. Recall that SGT2-QL is expressed as
+¯Qk+1 = ¯Qk + αk{f( ¯Qk) + εk+1}
+where ¯Qk :=
+
+QA
+k
+QB
+k
+
+and
+εk+1 :=
+
+−(1 + β)(es ⊗ ea)(es ⊗ ea)T γ(es ⊗ ea)eT
+s′ΠQB + β(es ⊗ ea)(es ⊗ ea)T
+γ(es ⊗ ea)eT
+s′ΠQA + β(es ⊗ ea)(es ⊗ ea)T −(1 + β)(es ⊗ ea)(es ⊗ ea)T
+
+QA
+QB
+
++
+
+(es ⊗ ea)(es ⊗ ea)T r(s, a, s′)
+(es ⊗ ea)(es ⊗ ea)T r(s, a, s′)
+
+−
+
+−(1 + β)D γDP ΠQB + βD
+γDP ΠQA + βD −(1 + β)D
+
+QA
+QB
+
++
+
+R
+R
+
+and
+f
+
+QA
+QB
+
+:=
+
+−(1 + β)D γDP ΠQB + βD
+γDP ΠQA + βD −(1 + β)D
+
+QA
+QB
+
++
+
+DR
+DR
+
+.
+To proceed, let us define the history
+Gk := (¯εk, ¯εk−1, . . . ,¯ε1, ¯Qk, ¯Qk−1, . . . ,¯Q0)
+Moreover, let us define the corresponding process (Mk)∞
+k=0 with Mk := Pk
+i=1 εi. Then, we can
+prove that (Mk)∞
+k=0 is Martingale. To do so, we can easily proveE[εk+1|Gk] = 0. Using this identity,
+we have
+E[Mk+1|Gk] =E
+"k+1X
+i=1
+εi
+Gk
+#
+= E[εk+1|Gk] + E
+" kX
+i=1
+εi
+Gk
+#
+=E
+" kX
+i=1
+εi
+Gk
+#
+=
+kX
+i=1
+εi = Mk.
+Therefore, (Mk)∞
+k=0 is a Martingale sequence, and εk+1 = Mk+1 − Mk is a Martingale difference.
+Moreover, it can be easily proved that the fourth condition of Assumption 1 is satisfied by algebraic
+calculations. Therefore, the fourth condition is met.
+G Experiments on AGT2-QL and SGT2-QL
+In this section, we empirically demonstrate the convergence of the proposed AGT2-QL and SGT2-QL
+algorithms.
+35
+--- Page 36 ---
+First of all, we consider the simple MDP considered in the previous sections with S = {1, 2},
+A = {1, 2}, γ = 0.9,
+P1 =
+
+0.2 0 .8
+0.3 0 .7
+
+, P 2 =
+
+0.5 0 .5
+0.7 0 .3
+
+,
+a behavior policy β such that
+P[a = 1|s = 1] = 0.2, P[a = 2|s = 1] = 0.8,
+P[a = 1|s = 2] = 0.7, P[a = 2|s = 2] = 0.3,
+and the expected reward vectors
+R1 =
+
+3
+1
+
+, R 2 =
+
+2
+1
+
+.
+Simulated errors |QA
+k (s, a) − Q∗(s, a)|, |QB
+k (s, a) − Q∗(s, a)|, (s, a) ∈ S × Aof AGT2-QL are
+depicted in Figure 9 for the QA
+k part and in Figure 10 for the QB
+k part. The results are presented for
+different weight values β ∈ {0.01, 0.05, 0.1, 0.2, 0.5} and the diminishing step-size αk = 80
+200+k .
+The results demonstrate the convergence of AGT2-QL to the optimalQ∗ over time. Moreover, the
+results illustrate the convergence trends for varying weight β. In particular, the larger the β, the faster
+the convergence.
+Figure 9: Simulated errors of AGT2-QL (QA
+k part)
+Similarly, for the same environment, simulated errors |QA
+k (s, a) − Q∗(s, a)|, |QB
+k (s, a) −
+Q∗(s, a)|, (s, a) ∈ S × A of AGT2-QL are depicted in Figure 11 for the QA
+k part and in Fig-
+ure 12 for the QB
+k part with different weight values β ∈ {0.01, 0.05, 0.1, 0.2, 0.5}. The results
+also demonstrate the convergence, but with different convergence trends for varying weight β. In
+particular, the error evolutions show that SGT2-QL generally converges faster than AGT2-QL, and
+the convergence speeds are less sensitive to β.
+36
+--- Page 37 ---
+Figure 10: Simulated errors of AGT2-QL (QB
+k part)
+Additionally, we conduct experiments using grid world environments, including Taxi, FrozenLake,
+and CliffWalk, in OpenAI Gym. Figure 13 presents reward curves for the Taxi environment, which
+shows trends similar to previous results: AGT2-QL exhibits better learning performance for higher
+values of β, whereas SGT2-QL is not significantly affected by the choice of β.
+Similarly,Figure 14 presents reward curves for the FrozenLake environment, whileFigure 15 shows
+reward curves for the CliffWalk environment. All results demonstrate that the proposed approaches,
+AGT2-QL and SGT2-QL, are valid and effectively learn the optimal policy. Moreover, the learning
+speeds of AGT2-QL and SGT2-QL are comparable to that of standard Q-learning.
+37
+--- Page 38 ---
+Figure 11: Simulated errors of SGT2-QL (QA
+k part)
+38
+--- Page 39 ---
+Figure 12: Simulated errors of SGT2-QL (QB
+k part)
+39
+--- Page 40 ---
+(a) Reward curves of AGT2-QL with
+different β
+(b) Reward curves of SGT2-QL with dif-
+ferent β
+(c) Reward curves of AGT2-QL, SGT2-
+QL, Q-learning, and double Q-learning
+Figure 13: Comparison of simulated reward curves of AGT2-QL, SGT2-QL, Q-learning, double
+Q-learning in Taxi environment
+(a) Reward curves of AGT2-QL with
+different β
+(b) Reward curves of SGT2-QL with dif-
+ferent β
+(c) Reward curves of AGT2-QL, SGT2-
+QL, Q-learning, and double Q-learning
+Figure 14: Comparison of reward curves of AGT2-QL, SGT2-QL, Q-learning, double Q-learning in
+Frozenlake environment
+40
+--- Page 41 ---
+(a)
+ (b)
+(c)
+Figure 15: Comparison of simulated reward curves of AGT2-QL, SGT2-QL, Q-learning, double
+Q-learning in CliffWalk environment
+41
+--- Page 42 ---
+H Proof of Theorem 1
+Let us assume that by minimizing the loss functions of AGT2-DQN, we can approximately minimize
+the following expected loss function
+L1(θ1) =E(s,a)∼U(S×A),s′∼P(·|s,a)
+h
+(r(s, a, s′) + γmaxa∈AQθ2 (s′, a) − Qθ1 (s, a))2i
+L2(θ2) =E(s,a)∼U(S×A),s′∼P(·|s,a)
+β
+2 (Qθ1 (s, a) − Qθ2 (s, a))2
+
+where U(S × A) means the uniform distribution over the set S × A. Let us suppose that the loss
+functions are minimized with the error
+L1(θ1) ≤ ε, L 2(θ2) ≤ ε
+To proceed further, note that using the law of iterated expectations, the expected loss functions can be
+written by
+L1(θ1) = E(s,a)∼U(S×A)
+h
+Es′∼P(·|s,a)
+h
+(r(s, a, s′) + γmaxa∈AQθ2 (s′, a) − Qθ1 (s, a))2
+s, a
+ii
+and
+L2(θ2) = E(s,a)∼U(S×A)
+
+Es′∼P(·|s,a)
+ β
+2 (Qθ1 (s, a) − Qθ2 (s, a))2
+s, a
+
+For convenience, let us define the Bellman operator
+(T Q)(s, a) := R(s, a) + γ
+X
+s′∈S
+P(s′|s, a)max
+a∈A
+Q(s′, a)
+Using Jensen’s inequality, we can prove that
+L1(θ1) ≥E(s,a)∼U(S×A)
+h 
+Es′∼P(·|s,a) [r(s, a, s′) + γmaxa∈AQθ2 (s′, a) − Qθ1 (s, a)]
+2i
+=E(s,a)∼U(S×A)
+h
+((T Qθ2 )(s, a) − Qθ1 (s, a))2
+i
+≥ 1
+|S||A| ((T Qθ2 )(s, a) − Qθ1 (s, a))2
+for all (s, a) ∈ S × A, which implies
+|(T Qθ2 )(s, a) − Qθ1 (s, a)| ≤
+p
+ε|S||A|, ∀(s, a) ∈ S × A
+Similarly, for the loss function L2(θ2), we have
+L2(θ2) = E(s,a)∼U(S×A)
+β
+2 (Qθ2 (s, a) − Qθ1 (s, a))2
+
+≥ 1
+|S||A|
+β
+2 (Qθ2 (s, a) − Qθ1 (s, a))2
+for all (s, a) ∈ S × A, which implies
+|Qθ2 (s, a) − Qθ1 (s, a)| ≤
+r2ε
+β |S||A|, (s, a) ∈ S × A. (22)
+Based on the above results, we will establish bounds on Qθ1 and Qθ2 in the sequel.
+H.1 Bound on Qθ1
+First of all, using the reverse triangle inequality leads to
+||Qθ1 (s, a) − Q∗(s, a)| − |(T Qθ2 )(s, a) − (T Q∗)(s, a)|| ≤
+p
+ε|S||A|, (s, a) ∈ S × A. (23)
+To proceed, we consider the two cases:
+Case 1: Let us consider the case
+|Qθ1 (s, a) − Q∗(s, a)| > |(T Qθ2 )(s, a) − (T Q∗)(s, a)|
+Then, one can derive from (23)
+|Qθ1 (s, a) − Q∗(s, a)| − |(T Qθ2 )(s, a) − (T Q∗)(s, a)|
+≥|Qθ1 (s, a) − Q∗(s, a)| − |(T Qθ2 )(s, a) − (T Q∗)(s, a)|
+≥|Qθ1 (s, a) − Q∗(s, a)| − ∥T Qθ2 − T Q∗∥∞
+42
+--- Page 43 ---
+≥|Qθ1 (s, a) − Q∗(s, a)| −γ∥Qθ2 − Q∗∥∞
+≥|Qθ1 (s, a) − Q∗(s, a)| −γ∥Qθ1 − Q∗∥∞ − γ∥Qθ2 − Qθ1 ∥∞
+≥|Qθ1 (s, a) − Q∗(s, a)| −γ∥Qθ1 − Q∗∥∞ − γ
+r2ε
+β |S||A|,
+where (22) is used in the last line. This leads to
+|Qθ1 (s, a) − Q∗(s, a)| ≤γ∥Qθ1 − Q∗∥∞ +
+p
+ε|S||A| + γ
+r2ε
+β |S||A|
+Taking the maximum on the left-hand side over (s, a) ∈ S × Ayields
+∥Qθ1 − Q∗∥∞ ≤ γ∥Qθ1 − Q∗∥∞ +
+p
+ε|S||A| + γ
+r2ε
+β |S||A|
+Arranging terms leads to
+∥Qθ1 − Q∗∥∞ ≤
+p
+ε|S||A|
+1 − γ + γ
+1 − γ
+s
+2ε|S||A|
+β
+Case 2: Let us consider the case
+|Qθ1 (s, a) − Q∗(s, a)| ≤ |(T Qθ2 )(s, a) − (T Q∗)(s, a)|,
+which leads to
+|Qθ1 (s, a) − Q∗(s, a)| ≤|(T Qθ2 )(s, a) − (T Q∗)(s, a)|
+≤∥T Qθ2 − T Q∗∥∞
+≤γ∥Qθ2 − Q∗∥∞
+≤γ∥Qθ1 − Q∗∥∞ + γ∥Qθ2 − Qθ1 ∥∞
+≤γ∥Qθ1 − Q∗∥∞ + γ
+r2ε
+β |S||A|.
+where the last inequality uses (22). After simple manipulations, we have
+∥Qθ1 − Q∗∥∞ ≤ γ
+1 − γ
+r2ε
+β |S||A|
+Combining the two cases, one gets the following bound:
+∥Qθ1 − Q∗∥∞ ≤
+p
+ε|S||A|
+1 − γ + γ
+1 − γ
+s
+2ε|S||A|
+β
+H.2 Bound on Qθ2
+Next, using the reverse triangle inequality, we also havep
+ε|S||A|
+1 − γ ≥|Qθ1 (s, a) − Q∗(s, a) + Q∗(s, a) − Qθ2 (s, a)|
+≥||Qθ1 (s, a) − Q∗(s, a)| − |Qθ2 (s, a) − Q∗(s, a)||. (24)
+Now, we consider the two cases:
+Case 1: Let us first consider the following case:
+|Qθ1 (s, a) − Q∗(s, a)| < |Qθ2 (s, a) − Q∗(s, a)|.
+In this case, the inequality in (24) leads to
+|Qθ2 (s, a) − Q∗(s, a)| ≤
+p
+ε|S||A|
+1 − γ + |Qθ1 (s, a) − Q∗(s, a)|
+Applying the bound on |Qθ1 (s, a) − Q∗(s, a)|, we can derive
+|Qθ2 (s, a) − Q∗(s, a)| ≤2
+p
+ε|S||A|
+1 − γ + γ
+1 − γ
+s
+2ε|S||A|
+β
+43
+--- Page 44 ---
+Now, taking the maximum on the left-hand side over (s, a) ∈ S × Aleads to
+∥Qθ2 − Q∗∥∞ ≤ 2
+p
+ε|S||A|
+1 − γ + γ
+1 − γ
+s
+2ε|S||A|
+β .
+Case 2: Next, let us consider the case
+|Qθ1 (s, a) − Q∗(s, a)| ≥ |Qθ2 (s, a) − Q∗(s, a)|
+In this case, the inequality in (24) results in
+|Qθ2 (s, a) − Q∗(s, a)| ≤ |Qθ1 (s, a) − Q∗(s, a)| ≤
+p
+ε|S||A|
+1 − γ + γ
+1 − γ
+s
+2ε|S||A|
+β
+where the last inequality is due to the bound on |Qθ1 (s, a) − Q∗(s, a)|. Taking the maximum on the
+left-hand side over (s, a) ∈ S × Aleads to
+∥Qθ2 − Q∗∥∞ ≤
+p
+ε|S||A|
+1 − γ + γ
+1 − γ
+s
+2ε|S||A|
+β
+Combining the two cases, we have the desired conclusion.
+I Proof of Theorem 2
+Let us assume that by minimizing the loss functions of SGT2-DQN, we can approximately minimize
+the following expected loss function
+L1(θ1) =E(s,a)∼U(S×A),s′∼P(·|s,a)
+"
+r(s, a, s′) + γ max
+a∈A
+Qθ2 (s′, a) − Qθ1 (s, a)
+2
++β
+2 (Qθ2 (s, a) − Qθ1 (s, a))2
+
+L2(θ2) =E(s,a)∼U(S×A),s′∼P(·|s,a)
+h
+(r(s, a, s′) + γmaxa∈AQθ1 (s′, a) − Qθ2 (s, a))2
++β
+2 (Qθ1 (s, a) − Qθ2 (s, a))2
+
+where U(S × A) means the uniform distribution over the set S × A. Suppose that the loss functions
+are minimized with
+L1(θ1) ≤ ε, L 2(θ2) ≤ ε.
+For convenience, let us define the Bellman operator
+(T Q)(s, a) := R(s, a) + γ
+X
+s′∈S
+P(s′|s, a) max
+a∈A
+Q(s′, a)
+Moreover, note that using the law of iterated expectations, the expected loss functions can be expressed
+as
+L1(θ1) =E(s,a)∼U(S×A)
+h
+Es′∼P(·|s,a)
+h
+(r(s, a, s′) + γmaxa∈AQθ2 (s′, a) − Qθ1 (s, a))2ii
++ E(s,a)∼U(S×A)
+β
+2 (Qθ2 (s, a) − Qθ1 (s, a))2
+
+,
+and
+L2(θ2) =E(s,a)∼U(S×A)
+h
+Es′∼P(·|s,a)
+h
+(r(s, a, s′) + γmaxa∈AQθ1 (s′, a) − Qθ2 (s, a))2ii
++ E(s,a)∼U(S×A)
+β
+2 (Qθ1 (s, a) − Qθ2 (s, a))2
+
+Next, applying Jensen’s inequality to L1(θ1), we can prove that
+L1(θ1) ≥E(s,a)∼U(S×A)
+"
+Es′∼P(·|s,a)
+
+r(s, a, s′) + γ max
+a∈A
+Qθ2 (s′, a) − Qθ1 (s, a)
+2#
+44
+--- Page 45 ---
++ E(s,a)∼U(S×A)
+β
+2 (Qθ2 (s, a) − Qθ1 (s, a))2
+
+=E(s,a)∼U(S×A)
+
+((T Qθ2 )(s, a) − Qθ1 (s, a))2
++ E(s,a)∼U(S×A)
+β
+2 (Qθ2 (s, a) − Qθ1 (s, a))2
+
+≥ 1
+|S||A| ((T Qθ2 )(s, a) − Qθ1 (s, a))2
++ 1
+|S||A|
+β
+2 (Qθ2 (s, a) − Qθ1 (s, a))2
+for all (s, a) ∈ S × A, which implies
+1
+|S||A| ((T Qθ2 )(s, a) − Qθ1 (s, a))2 ≤ ε, 1
+|S||A|
+β
+2 (Qθ2 (s, a) − Qθ1 (s, a))2 ≤ ε,
+and equivalently
+|(T Qθ2 )(s, a) − Qθ1 (s, a)| ≤
+p
+ε|S||A|, |Qθ2 (s, a) − Qθ1 (s, a)| ≤
+s
+2ε|S||A|
+β
+Next, applying the same procedures as in the proof for AGT2-DQN, we arrive at
+∥Qθ1 − Q∗∥∞ ≤
+p
+ε|S||A|
+1 − γ + γ
+1 − γ
+s
+2ε|S||A|
+β .
+By symmetry, one can obtain the same bound for ∥Qθ2 − Q∗∥∞. This completes the proof.
+45
+--- Page 46 ---
+J Additional comparison results among DQN, AGT2-DQN, and SGT2-DQN
+J.1 Cartpole environment
+Figure 16: Comparison of reward curves of DQN with different C in Cartpole environment. The
+results show that C = 10 gives the best learning performance among the other options.
+Figure 16 shows the learning curves of DQN for different C ∈ {1, 10, 100, 200, 500} in Cartpole
+environment. The results show that C = 10 gives the best learning performance among the other
+choices of C.
+(a) AGT2-DQN
+ (b) SGT2-DQN
+Figure 17: Comparison of reward curves of AGT2-DQN and SGT2-DQN with differentβ in Cartpole
+environment.
+Figure 17 illustrates the learning curves of AGT2-DQN and SGT2-DQN for different β ∈
+{0.01, 0.1, 1, 10, 50, 100}in Cartpole environment. The results demonstrate that their learning ef-
+ficiency is comparable to DQN but without requiring extensive tuning, as they appear to be less
+sensitive to β.
+Figure 18 illustrates the learning curves of DQN with C = 10, AGT2-DQN and SGT2-DQN with
+β = 50 in Cartpole environment. The results show that while DQN exhibits slightly better learning
+efficiency than the proposed methods in this environment, while as mentioned before the latter require
+less efforts for hyperparameter tuning.
+46
+--- Page 47 ---
+Figure 18: Comparison of reward curves of DQN with C = 10, AGT2-DQN with β = 50 and
+SGT2-DQN with β = 50 in Cartpole environment.
+47
+--- Page 48 ---
+J.2 Acrobot environment
+Figure 19: Comparison of reward curves of DQN with different C in Acrobot environment.
+Figure 19 shows the learning curves of DQN for different C ∈ {1, 10, 100, 200, 500} in Acrobot
+environment.
+(a) AGT2-DQN
+ (b) SGT2-DQN
+Figure 20: Comparison of reward curves of AGT2-DQN and SGT2-DQN with different β in Acrobot
+environment.
+Figure 20 illustrates the learning curves of AGT2-DQN and SGT2-DQN for different β ∈
+{0.01, 0.1, 1, 10, 50, 100}. The results demonstrate that their learning efficiency is comparable
+to DQN and slightly less sensitive to the choice of the hyperparameter β.
+Figure 21 illustrates the learning curves of DQN with C = 50, AGT2-DQN with β = 0.1, and
+SGT2-DQN with β = 1, where each hyperparameter has been selected to approximately yield the
+best results. The results show that DQN exhibits slightly better learning efficiency than the proposed
+methods.
+48
+--- Page 49 ---
+Figure 21: Comparison of reward curves of DQN with C = 50, AGT2-DQN with β = 0.1 and
+SGT2-DQN with β = 1 in Acrobot environment.
+49
+--- Page 50 ---
+J.3 Pendulum environment
+Figure 22: Comparison of reward curves of DQN with different C in Pendulum environment.
+Figure 22 shows the learning curves of DQN for different C ∈ {1, 10, 100, 200, 500} in Pendulum
+environment, which are sensitive to the choice of the hyperparameter C.
+(a) AGT2-DQN
+ (b) SGT2-DQN
+Figure 23: Comparison of reward curves of AGT2-DQN and SGT2-DQN with different β in
+Pendulum environment.
+Figure 23 illustrates the learning curves of AGT2-DQN and SGT2-DQN for different β ∈
+{0.01, 0.1, 1, 10, 50, 100}. The results demonstrate that their learning efficiency is comparable to
+DQN. Moreover, compared to DQN, AGT2-DQN is less sensitive to the choice of the hyperparameter
+β, while SGT2-DQN is more sensitive to the choice of the hyperparameter.
+Figure 24 illustrates the learning curves of DQN with C = 500, AGT2-DQN with β = 0.1, and
+SGT2-DQN with β = 0.1, where each hyperparameter has been selected to approximately yield the
+best results. The results show that in this case, AGT2-DQN and SGT2-DQN exhibit better learning
+efficiency than DQN.
+50
+--- Page 51 ---
+Figure 24: Comparison of reward curves of DQN with C = 500, AGT2-DQN with β = 0.1 and
+SGT2-DQN with β = 0.1 in Pendulum environment.
+51
+--- Page 52 ---
+J.4 Mountaincar environment
+Figure 25: Comparison of reward curves of DQN with different C in Mountaincar environment.
+Figure 25 shows the learning curves of DQN for different C ∈ {1, 10, 100, 200, 500} in Pendulum
+environment.
+(a) AGT2-DQN
+ (b) SGT2-DQN
+Figure 26: Comparison of reward curves of AGT2-DQN and SGT2-DQN with different β in
+Mountaincar environment.
+Figure 26 illustrates the learning curves of AGT2-DQN and SGT2-DQN for different β ∈
+{0.01, 0.1, 1, 10, 50, 100}.
+Figure 27: Comparison of reward curves of DQN with C = 200, AGT2-DQN with β = 50 and
+SGT2-DQN with β = 10 in Mountaincar environment.
+52
+--- Page 53 ---
+Figure 27 illustrates the learning curves of DQN with C = 200, AGT2-DQN with β = 50, and
+SGT2-DQN with β = 10, where each hyperparameter has been selected to approximately yield the
+best results.
+Overall, the results reveal that DQN, AGT2-DQN, and SGT2-DQN provide similar learning efficien-
+cies and sensitivity to the hyperparameters.
+53
+--- Page 54 ---
+J.5 Lunarlander environment
+Figure 28: Comparison of reward curves of DQN with different C in Lunarlander environment.
+Figure 28 shows the learning curves of DQN for different C ∈ {1, 10, 100, 200, 500} in Lunarlander
+environment.
+(a) AGT2-DQN
+ (b) SGT2-DQN
+Figure 29: Comparison of reward curves of AGT2-DQN and SGT2-DQN with different β in
+Lunarlander environment.
+Figure 29 illustrates the learning curves of AGT2-DQN and SGT2-DQN for different β ∈
+{0.01, 0.1, 1, 10, 50, 100}.
+Figure 30: Comparison of reward curves of DQN with C = 10, AGT2-DQN with β = 0.01 and
+SGT2-DQN with β = 0.01in Lunarlander environment.
+54
+--- Page 55 ---
+Figure 30 illustrates the learning curves of DQN with C = 10, AGT2-DQN with β = 0.01, and
+SGT2-DQN with β = 0.01, where each hyperparameter has been selected to approximately yield the
+best results.
+Overall, the results indicate that DQN, AGT2-DQN, and SGT2-DQN exhibit similar learning effi-
+ciencies and sensitivity to hyperparameters.
+55

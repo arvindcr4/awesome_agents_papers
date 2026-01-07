@@ -1,5 +1,5 @@
 # Eureka Human-Level Reward Design
-- Paper: [Eureka_Human-Level_Reward_Design.pdf](../../../papers/robotics/Eureka_Human-Level_Reward_Design.pdf)
+- Paper: [Eureka_Human-Level_Reward_Design.pdf](../../../reinforcement_learning_papers/16_applied_rl/Eureka_Human-Level_Reward_Design.pdf)
 
 ## Gemini diagrams
 

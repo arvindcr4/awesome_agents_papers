@@ -1,5 +1,5 @@
 # DSPy Compiling Declarative Language Model
-- Paper: [DSPy_Compiling_Declarative_Language_Model.pdf](../../../papers/agent-frameworks/DSPy_Compiling_Declarative_Language_Model.pdf)
+- Paper: [DSPy_Compiling_Declarative_Language_Model.pdf](../../../reinforcement_learning_papers/09_agentic_rl/DSPy_Compiling_Declarative_Language_Model.pdf)
 
 ## Gemini diagrams
 

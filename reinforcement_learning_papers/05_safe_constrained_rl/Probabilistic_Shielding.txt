@@ -1,0 +1,1917 @@
+Probabilistic Shielding for Safe Reinforcement Learning
+Edwin Hamel-De le Court, Francesco Belardinelli, Alexander W. Goodall
+
+arXiv:2503.07671v3 [stat.ML] 25 Mar 2025
+
+Imperial College London
+{e.hamel-de-le-court, francesco.belardinelli, a.goodall22}@ic.ac.uk
+
+Abstract
+In real-life scenarios, a Reinforcement Learning (RL) agent
+aiming to maximise their reward, must often also behave in a
+safe manner, including at training time. Thus, much attention
+in recent years has been given to Safe RL, where an agent
+aims to learn an optimal policy among all policies that satisfy
+a given safety constraint. However, strict safety guarantees
+are often provided through approaches based on linear programming, and thus have limited scaling. In this paper we
+present a new, scalable method, which enjoys strict formal
+guarantees for Safe RL, in the case where the safety dynamics of the Markov Decision Process (MDP) are known, and
+safety is defined as an undiscounted probabilistic avoidance
+property. Our approach is based on state-augmentation of the
+MDP, and on the design of a shield that restricts the actions
+available to the agent. We show that our approach provides
+a strict formal safety guarantee that the agent stays safe at
+training and test time. Furthermore, we demonstrate that our
+approach is viable in practice through experimental evaluation.
+
+Introduction
+Reinforcement Learning (RL) aims to optimise the behaviour of an agent in an unknown environment. Much attention has been given to RL in recent years, because of
+its many practical applications, which include for example
+playing games (Mnih et al. 2013) or robotics (Kober, Bagnell, and Peters 2013). In many of these applications however, safety, either for the agent or for other humans, is critical. Consequently, Safe RL has been developed, where an
+agent has to maximise its cumulative expected reward subject to a constraint. Even though much progress has been
+made to provide safety guarantees during training and at test
+time, approaches providing strict safety guarantees still rely
+on Linear Programming (Karmarkar 1984), which is known
+to lack scalability.
+Contributions. We design a new shielding approach for
+finding a policy that maximizes cumulative reward in a finite MDP with known safety dynamics while guaranteeing
+safety throughout the whole learning phase. We consider
+MDPs where some states are labelled unsafe, and the safety
+we consider consists in avoiding those unsafe states with
+Copyright © 2025, Association for the Advancement of Artificial
+Intelligence (www.aaai.org). All rights reserved.
+
+at least some probability p. This framework comes from a
+probabilistic version of what is usually called the “safety”
+fragment of Linear Temporal Logic (LTL) (Alshiekh et al.
+2018) (Jansen et al. 2020). Although, for simplicity’s sake,
+we consider only a subset of that safety fragment, i.e. safety
+definable by state-avoidance, it is possible to reduce the
+whole fragment to that subset with the usual trick of making
+a product between the automaton representing the LTL property and the MDP (Alshiekh et al. 2018) (Jansen et al. 2020).
+Thus, the model we use can capture many real-life scenarios,
+like a robot’s task of reaching a goal position while avoiding
+objects on his path.
+Our approach is, to our knowledge, in the framework we
+consider, the first approach not based on Linear Programming (Karmarkar 1984) that gives strict formal guarantees
+for safety throughout learning and at test time. Instead of
+using Linear Programming, that has limited scalability (Sutton and Barto 2018), we leverage sound Value Iteration algorithms (see e.g. (Haddad and Monmege 2018; Quatmann
+and Katoen 2018; Hartmanns and Kaminski 2020)), which
+are algorithms that improve on Value Iteration in order to
+give formal approximation guarantees. We use the values
+obtained by Value Iteration over safety costs to construct a
+shield that makes the agent’s exploration of the MDP safe
+by constraining its actions. Constructing a shield is a wellknown approach to solve constrained RL (Alshiekh et al.
+2018; Jansen et al. 2020; Elsayed-Aly et al. 2021; Yang et al.
+2023). However, in contrast to shields defined in previous
+papers, the shield we construct does not directly constrain
+the actions of the agent in the original MDP, but constrains
+the actions of the agent in a safety-aware state-augmented
+MDP. This approach allows for preserving optimality while
+ensuring safety in a probabilistic context. Any RL algorithm
+can then be used to solve the shielded MDP, such as PPO
+(Schulman et al. 2017), A2C (Mnih et al. 2016), etc. Once
+the shield is constructed, it is used to train the agent to maximize its cumulative reward, with no constraint violations
+incurred. To summarize, the contributions of the paper are
+as follows.
+1. We design a shield for a finite MDP as a safety-aware
+state-augmention of that MDP using only its safety dynamics.
+2. We show that the shield makes the agent’s exploration
+safe.
+
+3. We show that finding an optimal policy among all safe
+policies reduces to finding an optimal policy in the shield.
+4. We provide a practical way of implementing a shield as
+a gym environment.
+The paper is organized as follows. The preliminaries introduce the mathematical background and notations needed for
+the paper. Then, we introduce the problem considered, give
+an overview of our approach, formally define the shield and
+show that it is safe and optimality-preserving. Finally, we
+discuss a practical way to implement the shield.
+
+Related Work
+Safe Reinforcement Learning has gathered much attention
+in recent years, and several approaches have been proposed.
+A comprehensive survey can be found in (Gu et al. 2024).
+Policy-based approaches are arguably the most popular approaches in Safe RL. They usually consist in extending
+a known RL algorithm like PPO (Schulman et al. 2017),
+TRPO (Schulman et al. 2015), or SAC (Haarnoja et al. 2018)
+to Safe RL using a lagrangian (Ray, Achiam, and Amodei
+2019), or in enforcing the constraint by changing the objective function (Liu, Ding, and Liu 2020) or modifying the
+update process (Zhang, Vuong, and Ross 2020), without introducing a dual variable. Some of these algorithms have become widely used for benchmarking against other new Safe
+RL algorithms, and are implemented in several state-of-theart Safe RL frameworks (Ray, Achiam, and Amodei 2019;
+Ji et al. 2023a,b). We introduce in the following other, more
+specific, approaches that relate to ours.
+Shielding. A shield is a system that restricts the action of
+the agent during learning and at test time, to ensure its safety
+(Alshiekh et al. 2018; Jansen et al. 2020; Elsayed-Aly et al.
+2021; Yang et al. 2023). Shielding was introduced in (Alshiekh et al. 2018), where safety was defined as a formula of
+the ”safety” fragment of LTL. This paper can be considered
+an extension of (Alshiekh et al. 2018) to the probabilistic
+setting, since in the case where the agent must be safe with
+probability 1, the shield we introduce is almost the same as
+the one defined in (Alshiekh et al. 2018). In (Jansen et al.
+2020), the authors already also extend (Alshiekh et al. 2018)
+to the probabilistic case, but no formal guarantees are provided for the safety of the policy, and our respective methods are significantly different. In particular, their approach
+may indeed violate safety in practice. A comprehensive survey focused on shielding can be found in (Odriozola-Olalde,
+Zamalloa, and Arana-Arexolaleiba 2023).
+Linear Programming-based approaches. It is wellknown that Safe RL can be solved by Linear Programming
+under certain assumptions (Altman 1999). Several recent
+works have leveraged Linear Programming to provide statistical guarantees in the model-based case, when the dynamics
+of the MDP are learned in various contexts. For example,
+(Efroni, Mannor, and Pirotta 2020) and (Bura et al. 2022)
+provide algorithms for discounted cumulative rewards and
+costs, while (Mazumdar, Wisniewski, and Bujorianu 2024)
+provides an algorithm in the case where safety is defined by
+a reach-avoid undiscounted property.
+
+State augmentation techniques. State-augmentation
+techniques with a number representing how far the agent is
+from being unsafe have also been studied. In (Calvo-Fullana
+et al. 2024), every state of the MDP is augmented with
+a Lagrange multiplier. In (Sootla et al. 2022), the states
+are augmented with the accumulated safety cost up to that
+state, and are used to reshape the objective. In (Yang et al.
+2024), states are also augmented with the accumulated
+safety cost up to that state, and non-stationary policies
+depending on that cost are considered. However, in contrast
+to the aforementioned papers, the agent in our approach is
+able to choose the maximal accumulated safety cost he is
+able to use in the future depending on the state it goes to.
+Thus, we do not need to use the augmentation to change
+the objective function, and are able to provide stricter
+optimality-preserving and safety guarantees.
+
+Preliminaries
+We introduce in this section the mathematical prerequisites
+necessary for the paper.
+
+Constrained Reinforcement Learning
+Markov Decision Processes. A Markov Decision Process
+(MDP) is a tuple M = ⟨S, A, P, sinit , AP, L, R⟩, where
+S is a set of states; A is a mapping that associates every
+state s ∈ S to a nonempty finite set of actions A(s); P is a
+transition probability function that maps every state-action
+pair (s, a) to a probability measure over S; sinit ∈ S is the
+initial state1 ; AP is a set of atomic propositions (or atoms);
+L : S 7→ 2AP is a labeling function; and R : S 7→ R is the
+reward function. For the sake of simplicity, we may write
+P (s, a, s′ ) instead of P (s, a)(s′ ). An MDP is finite if the
+sets of states and actions are finite.
+A finite (resp. infinite) path in M is a finite (resp. infinite) word ζ = s0 a0 · · · sn−1 an−1 sn (resp. ζ =
+s0 a0 · · · sn an · · · ) such that s0 = sinit , and such that for
+any positive integer i ≤ n (resp. for any positive integer i),
+si is a state of M, ai−1 is an action in A(si−1 ), and si is in
+the support of P (si−1 , ai−1 ). In addition, for any finite path
+ζ = s0 a0 · · · sn−1 an−1 sn of M, we let first (ζ) = s0 , we let
+last (ζ) = sn , and we let Paths (M) denote the set of infinite
+paths of M. A policy π of M is a mapping that associates
+any finite path ζ of M to an element of D(A(last (ζ))),
+where D(E) is the set of all probability measures over E.
+It is memoryless if π(ζ) only depends on last (ζ). It is deterministic if for any finite path ζ of M, π(ζ) is a Dirac measure. For any policy π of M, for any state s ∈ S, we let Msπ
+denote the Markov chain induced by π in M starting from
+state s, we let Mπ denote Msπinit , and we let Pπ denote the
+transition function of Mπ . We denote the usual probability
+measure induced by the Markov chain Msπ on Paths (M) by
+probsM,π . For more details on MDPs and induced Markov
+1
+
+This can be assumed wlog compared to a model with an initial probability distribution since it is always possible to add a new
+initial state to such a model with an action from this initial state
+whose associated probability distribution is the aforementioned initial probability distribution.
+
+chains, see (Baier and Katoen 2008; Bertsekas and Shreve
+2007).
+Reinforcement Learning. For any random variable X :
+Paths (M) 7→ R, we let EsM,π (X) denote the expectation of X with respect to the probability measure probsM,π ,
+init
+and we let EM,π (X) denote EsM,π
+(X). In addition, when
+there is no ambiguity, we usually write EsM,π (•) for
+EsM,π (s0 a0 · · · sn an · · · 7→ •).
+In Reinforcement Learning, we usually solve the following the problem: given an MDP M, and a discount factor 0 < γ < 1, find a policy π ⋆ such that J(π ⋆ ) =
+maxπ (J(π)), where
+!
+X
+s
+t
+J(π) = EM,π
+γ R(st ) .
+t∈N
+
+In recent years, many algorithms have been proposed to
+solve the above problem. Proximal Policy Optimization
+(PPO) (Schulman et al. 2017), Asynchronous Advantage
+Actor Critic (A3C) (Mnih et al. 2016), or Soft Actor-Critic
+(SAC) (Haarnoja et al. 2018), are among the most popular,
+and we leverage these algorithms in our experiments.
+Probabilistic Reachability Goals. In contrast to discounted objectives, reachability goals are a simple form of
+undiscounted and infinite horizon objectives, that we use as
+a constraint for MDPs. For any MDP M, any state s and
+policy π of M, any finite path ζ = s0 a0 · · · sn−1 an−1 sn
+(resp. infinite path ζ = s0 a0 · · · sn an · · · ) in M, we write
+ζ |= Reach (c) if there exists i ∈≤ n (resp. i ∈ N) such that
+L(si ) = c. Then, Mπ |= P≤p (Reach (c)) when the property probsM,π {ζ ∈ Paths (Msπ ) | ζ |= Reach (c)} ≤ p is
+true.
+
+Probabilistic Shielding
+In this section, we introduce a new theoretical framework
+for probabilistic shielding, and show that it gives safety and
+optimality guarantees.
+
+Problem Statement
+We assume in the rest of the paper that all the labelling functions of the MDPs considered take values in {s, u}, where
+safe states are labelled by s and unsafe states are labelled by
+u.
+Definition 1 (Reachability-Constrained Optimization Problem (RCOP)). Given a finite MDP M, a safety threshold
+0 ≤ p ≤ 1, and a discount factor 0 < γ < 1, find a policy π ⋆
+such that Mπ⋆ |= P≤p (Reach (u)) and such that π ⋆ is optimal among all policies π satisfying Mπ |= P≤p (Reach (u)),
+i.e., such that
+J(π ⋆ ) =
+
+max
+
+{π|Mπ |=P≤p (Reach(u))}
+
+(J(π)).
+
+The above problem is a form of generalisation of the
+problem considered in (Alshiekh et al. 2018). Furthermore, variants of the above problem, i.e RL with infinitehorizon undiscounted safety properties, are considered in
+
+many books and papers (see for example (Bertsekas and
+Shreve 2007; Altman 1999; Jansen et al. 2020; Mazumdar,
+Wisniewski, and Bujorianu 2024; Mqirmi, Belardinelli, and
+León 2021)). However, a significant difference between the
+problem we consider and most Safe RL approaches is that,
+similarly to (Yang et al. 2024), we make the choice of including non-stationary policies in the problem. We make this
+choice because in our context, where the discount factor of
+the reward (which is less than 1) and the discount factor of
+the constraint cost (which is equal to 1) are not equal, optimal memoryless policies are not guaranteed to exist (Altman
+1999).
+
+Method Overview
+In order to tackle RCOP, we compute, for all states of the
+MDP, an approximation of the minimal probability of reaching, from that state, an unsafe state. More precisely, we define βM as the mapping such that for every state s of the
+MDP M, βM (s) is equal to
+min probsM,π {ζ ∈ Paths (Msπ ) | ζ |= Reach (u)}.
+π
+
+The mapping βM is the smallest fixed point of the following
+equation (Baier and Katoen 2008),
+
+1
+if L(s) = u
+β(s) =
+(BM (β)) (s) otherwise,
+P
+where (BM (β)) (s) = mina∈A s′ ∈S P (s, a, s′ )β(s′ ).
+This fixed point can be computed with linear programming (Forejt et al. 2011) in polynomial time (Karmarkar
+1984). In practice, this approach is inefficient and state-ofthe-art methods rely on value iteration (VI), i.e., iterating the
+operator BM from β0 such that β0 (s) = 1 if L(s) = u, and
+β0 (s) = 0 otherwise (Sutton and Barto 2018) to compute an
+approximation of βM . However, VI might not yield a good
+approximation of βM if stopped prematurely and only gives
+a lower bound on βM , whereas an upper bound is needed to
+provide safety guarantees in our approach.
+Definition 2. For any MDP M, and any ϵ ≥ 0, an inductive
+ϵ-upper bound of βM is a mapping β that associates to any
+state s of M a number in [0; 1] such that for all states s,
+0 ≤ β(s) − βM (s) ≤ ϵ, and (BM (β)) (s) ≤ β(s).
+The first step of our approach thus consists in computing an inductive ϵ-upper bound β of βM , with a small
+ϵ. To our knowledge, the fastest algorithms for that purpose in the general case are Interval Iteration (Haddad and
+Monmege 2018), Sound Value Iteration (Quatmann and Katoen 2018) and Optimistic Value Iteration (Hartmanns and
+Kaminski 2020), with no clear overall faster one (Hartmanns
+and Kaminski 2020).
+Once β is computed, we construct a shield Sh≤p
+β (M) by
+augmenting every state of the MDP M with a real number in [0; 1], that is, a “safety level” representing intuitively
+a maximal probability of reaching an unsafe state from the
+current state while following any actions. Thus, any action
+(a, α) taken in Sh≤p
+β (M) is composed of an action a of M,
+together with predictions α ∈ [0; 1], that may depend on the
+current “safety level”, as to what the next “safety levels” will
+be. Furthermore, Sh≤p
+β (M) is defined so that:
+
+1. The predictions must be coherent, i.e that the sum of the
+next “safety levels” as predicted by α, pondered with the
+probabilities given by action a, is less than or equal to the
+current “safety level”.
+2. The predicted “safety levels” cannot be less than the
+inductive ϵ-upper bound β of the minimal probability
+βM (s) of reaching in M an unsafe state from the current state s .
+Finally, we learn a policy in the constructed shield.
+
+for every (s, q) ∈ S ′ , Vβs,q is nonempty because β is inductive, i.e. because BM (β) ≤ β.
+We now show that any memoryless policy in the shield is
+safe. The proof of the following theorem is inspired by the
+proof of Theorem 10.15 in (Baier and Katoen 2008).
+Theorem 1 (Safety guarantee in any shield). For any memoryless policy π in Sh≤p
+β (M), we have
+
+The Shield: Safety and Optimality Guarantees
+
+We now justify that we can use an optimal policy of the
+shield to find a policy of the original MDP that is safe, and
+whose expected cumulative reward is close to a solution of
+RCOP. The closer β is to βM , the closer the expected cumulative reward of the policy obtained from our approach will
+be to the expected cumulative reward of a solution of RCOP.
+For any memoryless policy π of Sh≤p
+b deβ (M), we let π
+note the policy of M such that π
+b(s0 · · · sn ) = µn where
+s0 = sinit , q0 = p, (αi+1 , v i+1 ) = π(si , qi ), qi+1 = αsi+1
+,
+i+1
+n+1
+π ) = J(π) and
+and µn (a) = va . It is easy to see that J(b
+that
+
+We now give a formal definition of the shield used in our approach, and justify that our approach is theoretically sound.
+In the following, we let M be an MDP, γ ∈ [0; 1] be a discount factor, p ∈ [0; 1], ϵ ∈ R+ , and we let β be an inductive
+ϵ-upper bound of βM such that β(sinit ) ≤ p. Notice that if
+such a β does not exist, RCOP is unfeasible. Moreover, for
+any s ∈ S, we let χs denote the polytope in RA(s) representing probability distributions
+over A(s), i.e. the set of all
+X
+xa = 1 and xa ≥ 0 for any
+x ∈ RA(s) such that
+a∈A(s)
+
+a ∈ A(s), and for any s ∈ S, for any mapping α from S
+to [0; 1], any q ∈ [β(s); 1], we let As,q
+α denote the half-space
+representing Condition 2 above with s being the current state
+and q being the current“safety level”, i.e. we let As,q
+α denote
+the set of all x ∈ RA(s) such that
+!
+X
+X
+′
+′
+xa q −
+P (s, a, s )α(s ) ≥ 0.
+a∈A(s)
+
+s′ ∈S
+
+Sh≤p
+β (M)π |= P≤p (Reach (u)) .
+
+init
+probsM,b
+π (ζ ∈ Paths (M) | ζ |= Reach (u)) =
+
+
+
+(s
+,p)
+prob init
+ζ ∈ Paths Sh≤p
+≤p
+β (M)
+
+Shβ (M),π
+
+
+| ζ |= Reach (u) .
+Thus, as a corollary of Theorem 1, if π is a memoryless policy of Sh≤p
+b is safe.
+β (M), π
+
+Finally, we let Cαs,q be the polytope of probability distributions satisfying Condition 2, i.e. the polytope defined by
+Vαs,q be the (finite) set of vertices of Cαs,q ,
+χs ∩ As,q
+α , we letQ
+and we let X = s∈S [β(s); 1].
+
+Corollary 1 (Safety guarantee in the original MDP). If π is
+a memoryless policy of Sh≤p
+β (M), then
+
+Definition 3 (The Shield). We let Sh≤p
+β (M) be the MDP
+M′ with
+• set of states S ′ = {(s, q) |S
+s ∈ S,S
+q ∈ [β(s); 1]};
+• sets of actions A′ (s, q) = α∈X v∈Vαs,q (α, v);
+• initial state s′init = (sinit , p);
+• labelling L′ (s, x) = L(s);
+• reward R′ (s, x) = R(s);
+• transition probability function P ′ such that for any
+(s, q) ∈ S ′ , any α ∈ X, and any v ∈ Vαs,q ,
+P ′ ((s, q), (α, v))) is equal to
+
+
+X
+X
+va P (s, a, s′ )
+δ(s′ ,α(s)) 
+
+We let B (M) be the set of inductive upper bounds of βM ,
+that we equip with the norm ∥∥∞ such that ∥β1 − β2 ∥∞ is
+the maximum of |β1 (s) − β2 (s)| for all states s of M.
+Assumption 1 (Slater’s condition). There exists a policy π
+in M and a number q < p such that
+
+s′ ∈S
+
+a∈A(s)
+
+where δ(s′ ,α(s′ )) is the Dirac measure on S ′ with support
+{(s′ , α(s′ ))}.
+In the above definition, α corresponds to the ”safety levels” of the next states chosen by the agent, the definition of
+X guarantees that Condition 2 is satisfied, and the polytope
+Cαs,q corresponds to all combinations of actions that satisfy
+Condition 1. Notice that Sh≤p
+β (M) is indeed an MDP since
+
+Mπb |= P≤p (Reach (u)) .
+
+Mπ |= P≤q (Reach (u)) .
+Theorem 2 (Optimality-preserving guarantees). We have
+the three following properties.
+1. For any ϵ > 0, for any inductive ϵ-upper bound β of
+βM , there exists an optimal, memoryless, and deterministic policy πβ⋆ of Sh≤p
+β (M).
+⋆
+d
+2. The policy π
+is a solution to RCOP.
+βM
+
+3. If Assumption 1 holds, then
+ 
+
+
+⋆
+c⋆ = J πd
+lim
+J π
+β
+βM .
+β∈B(M),β→βM
+
+Discussion. Definition 3 allows us to construct a shield
+from any MDP M with known safety dynamics via an algorithm that computes an inductive upper bound of βM . Theorem 1 and Corollary 1 show that if we train an agent using
+the shield, the agent will be safe. Furthermore, Theorem 2
+
+Algorithm 1: Probabilistic Shielding
+1: Input: An MDP M, a discount factor γ, an uncertainty
+
+threshold ϵ, a safety threshold p.
+2: Compute an inductive ϵ-upper bound β of
+
+βM (s) = max probsM,π {ζ | ζ |= Reach (u)}
+π
+
+≤p
+
+3: Construct the shield Shβ (M)
+≤p
+
+4: Learn a memoryless policy π ⋆ in Shβ (M) with an RL
+
+algorithm.
+c⋆ .
+5: Return π
+justifies that training an agent with the shield yields a cumulative reward close to optimal.
+For the sake of simplicity, we made the choice of presenting our shielding approach in the case where the full
+dynamics of the MDP is known. However, every definition
+can be straightforwardly adapted to an MDP where only the
+safety dynamics, i.e. a quotient of the MDP containing all of
+the safety-relevant information, is known. We make use of
+that adaptation in our experiments. The assumption of knowing the safety dynamics is strong, but is adopted in several
+papers, and in particular in the majority of shielding methods (see (Alshiekh et al. 2018; Elsayed-Aly et al. 2021; He,
+León, and Belardinelli 2022) for example), and could be alleviated in the future by introducing a three-step algorithm
+that at each iteration, learns a better conservative estimation
+of the safety dynamics, changes Sh≤p
+β (M) according to that
+estimation, and does a step of policy iteration in Sh≤p
+β (M).
+The size of the state and action space of the shield is bigger than the state and action space of the original MDP, and
+thus may lead to slower convergence than state-of-the-art
+Safe RL algorithms. However, the safety of the agent after
+computing β is guaranteed, and the only constraint violations that may thus occur in a real-life scenario occur when
+computing β. This is one of the strictest guarantees possible
+for constraint violations in Safe RL as β only depends on
+the safety dynamics of the MDP, and could be theoretically
+be computed with any ϵ-greedy safe policy. Thus, if an ϵgreedy safe policy is known in advance and used to compute
+β, the algorithm incurs exactly zero constraints violations.
+This strict guarantee is, to our knowledge, offered in a more
+scalable way compared to previous Safe RL algorithms that
+usually use to that end Linear Programming (as in (Liu et al.
+2021) for example).
+
+Implementation
+We suppose in the following, without any loss of generality, that for any s ∈ S, there exists an integer d such that
+#A(s) = d, and we let {as1 , . . . , asd } denote A(s). In a gym
+environment, the policy that the agent follows is output by a
+neural network. However, even if the sets A(s) all have the
+same size, this does not guarantee that a probability distribution over a set A′ (s) (a set of actions of Sh≤p
+β (M)), can
+be directly output by a neural network, since the sets Vαs,q
+do not necessarily all have the same size, even if s and q
+
+are fixed. Therefore, to implement the shield as a gym environment, we change the MDP Sh≤p
+β (M) into an encoded
+MDP En≤p
+(M)
+that
+is
+equivalent,
+i.e
+such that every policy
+β
+≤p
+of Enβ (M) can be transformed into a policy of Sh≤p
+β (M)
+≤p
+and the converse. To avoid instability, the MDP Enβ (M) is
+constructed so that the dependency of the probabilistic transition function on the state-action pair is as continuous as
+possible. The results obtained show that this approach scales
+well. For the sake of simplicity, we do not define En≤p
+β (M)
+entirely, but we give in the following the main technical idea
+s,q
+of En≤p
+to a
+β (M), which is a way of mapping the set Vα
+larger set of fixed size, so that the dependency of the probabilistic transition function on the state-action pair is roughly
+continuous. We give such a mapping g below.
+Formally, g associates to any (s, q, α, i, j) such that s ∈
+S, q ∈ [β(s); 1], α ∈ X, i, j ∈ {1, . . . , d}, and Vαs,q is
+nonempty, an element of Vαs,q . Intuitively, if we let χsi denote the element of [0; 1]A(s) such that χsi (a) = 1 if a = asi
+and 0 otherwise, g(s, q, α, i, j) corresponds to the intersection between the border of the half-space As,q
+α and the line
+between χsi and χsj if there is one, to χsi if χsi is in As,q
+α , or to
+a means of the points in Vαs,q weighted by the minimum of
+their distances to χsi and χsj otherwise. A formal definition
+is given below.
+• If i = j,
+s
+– if χsi ∈ As,q
+α , g(s, q, α, i, j) = χi ,
+– otherwise
+P
+
+1
+v∈Vαs,q ∥χsi −v∥ v
+,
+1
+v∈Vαs,q ∥χsi −v∥
+
+g(s, q, α, i, j) = P
+
+• Otherwise, if i ̸= j,
+s
+– if χsi ∈ As,q
+α , g(s, q, α, i, j) = χi ,
+s
+s,q
+– otherwise if χj ∈ Aα , g(s, q, α, i, j) is defined as
+λmax χsi + (1 − λmax )χsj where λmax is the maximal
+λ ∈ [0; 1] such that λχsi + (1 − λ)χsj ∈ As,q
+α (notice
+that g(s, q, α, i, j) ∈ Vαs,q in that case),
+– and otherwise
+P
+1
+v∈Vαs,q min(∥χsi −v∥,∥χsj −v∥) v
+g(s, q, α, i, j) = P
+.
+1
+v∈Vαs,q min(∥χsi −v∥,∥χsj −v∥)
+
+Since the convex polytope Cαs,q whose set of vertices is Vαs,q
+is the intersection of the polytope χ whose set of vertices is
+(χi )i∈{1,...,d} , and of the half-space As,q
+α , it is easy to see
+that the elements of Vαs,q are all on the edges of χ. As a
+consequence, we have
+Vαs,q ⊆ {g(s, q, α, i, j) | i, j ∈ {1, . . . , d}}
+for any (s, q) ∈ S ′ and any α ∈ X, such that Vαs,q is
+nonempty.
+
+Experiments
+We demonstrate the viability of our approach with four case
+studies. The algorithm used to compute an inductive ϵ-upper
+
+random action probability
+episode length
+total timesteps
+safety bound
+action space size
+state space size
+
+Media ...
+40
+25k
+0.001
+2
+462
+
+Colour bomb
+0.1
+100
+25k
+0.05
+4
+81
+
+Color bomb v2
+0.1
+250
+100k
+0.05
+4
+900
+
+Bridge
+0.04
+600
+200k
+0.01
+4
+400
+
+Bridge v2
+0.04
+600
+200k
+0.01
+4
+400
+
+Pacman
+1000
+500k
+0.01
+5
+1̃00k
+
+Table 1: Environment Parameters
+bound of βM is Interval Iteration (Haddad and Monmege
+2018), which is simple in our case as the end components of
+the MDPs corresponding to the environments are trivial. We
+use PPO (Schulman et al. 2017) as an RL algorithm to find
+an optimal policy in the shield. We demonstrate the viability
+of our approach with five case studies of increasing complexity. For each case study, we compare the safety and the
+cumulative reward given at each epoch by unshielded PPO
+(Schulman et al. 2017), PPO-shield (our approach), PPOLagrangian (Ray, Achiam, and Amodei 2019), a combination of a lagrangian approach and PPO, and CPO (Achiam
+et al. 2017). We use Omnisafe (Ji et al. 2023b) for the implementation of PPO-Lagrangian and CPO.
+
+Environment descriptions
+We provide descriptions for each of our testing environments below. For the gridworld environments, the agent has
+access to four actions in every state (except for the terminal one), which are {left, right, up, down}. Every action
+carries a probability random action probability of
+choosing randomly, in a uniform manner, another direction.
+For example, the action left makes the agent go left with
+probability 1−random action probability, and the
+agent goes right, up, and down with remaining probability
+random action probability/3. Furthermore, safety
+in all the environments is defined as avoiding the unsafe
+states with probability at least 1 − safety bound.
+
+B
+
+B
+
+B
+
+B
+
+B
+
+B
+
+S
+
+S
+
+B
+
+(a) Colour bomb v1
+
+(c) Bridge v1
+
+B
+
+(b) Colour bomb v2
+
+(d) Bridge v2
+
+Figure 1: Gridworld Environments
+
+Table 1 details the parameters of each of our environments
+including this random probability, the maximum episode
+length, the total number of interactions (or timesteps) and
+the safety bound. We also provide illustrations of the relevant environments in Figure 1.
+Media streaming The agent is tasked with managing a
+data buffer. The data buffer has size 20, with packets leaving
+the data buffer according to a Bernoulli process with rate
+µout = 0.7. The agent has two actions A = {fast, slow}
+which fill the data buffer with new packets according to a
+Bernoulli process with rates µfast = 0.9 and µslow = 0.1
+respectively. The goal is to minimise the outage time: if
+the data buffer is empty, the agent receives a reward of −1
+and 0 otherwise. The state space is augmented with a cost
+c which corresponds to the number of times the action fast
+is used. The unsafe states are all the states corresponding
+to a total number of fast actions used above the threshold
+C = ⌊episode length/2⌋. Thus, the agent must avoid
+using more that C fast actions with high probability. A similar environment has been considered in (Bura et al. 2022).
+Colour bomb gridworld v1 The agent operates in a 9 × 9
+gridworld (see Fig. 1a). Upon reaching a coloured zone that
+is yellow, blue or pink, the agent receives a reward of +1
+and the episode terminates. Alternatively, when reaching the
+green or red zones, the agent can choose either to stay inside
+of them, or to go to any white square that borders. All other
+states provide a reward of 0. The unsafe states are the bombs
+labelled as B states (S denotes the starting state). A similar
+environment has been used in (Alshiekh et al. 2018), albeit
+with a hard safety constraint instead of a probabilistic one.
+Colour bomb gridworld v2 The agent operates in a 15 ×
+15 gridworld (see Fig. 1b), similar to the previous environment. However, in contrast to the previous environment, the
+non-green coloured zones that give a reward of +1 and terminate the episode are randomised, either at the start of an
+episode or when the agent enters the green zone.
+Bridge crossing (v1 and v2) The agent operates in a 20 ×
+20 gridworld (see Fig. 1c). The goal is to cross the bridge
+to the safe terminal yellow states, which provide a reward of
++1. The unsafe states are the red states (lava), and the agent
+must thus avoid falling in lava with high probability. The
+start state is denoted by the green square. Bridge crossing
+v1 has been used in (Mitta et al. 2024).
+Pacman We also consider a 15 × 19 pacman environment
+inspired by (Racanière et al. 2017), with one ghost, and col-
+
+(Alshiekh et al. 2018), we can leverage a safety abstraction
+of the environment (ignoring the dynamics of the coins) for
+efficient interval iteration. We note that even with the safety
+abstraction the total number of states exceeds 100k, demonstrating that our approach is still feasible for large state
+spaces. The goal is to collect as many coins while avoiding
+the (unsafe) ghosts for the duration of the episode.
+(a) Media streaming
+
+(b) Colour bomb gridworld v1
+
+(c) Colour bomb gridworld v2
+
+(d) Bridge crossing v1
+
+(e) Bridge crossing v2
+
+(f) Pacman
+
+Figure 2: Learning curves
+
+lectible coins (+1 reward) in every position (no food). Taking in to consideration all possible locations and directions
+of the ghost and the agent, and the locations of the coins
+the state space is combinatorially large, although similar to
+
+Results
+Figure 2 presents the results of our experiments. In every environment, PPO-shield does indeed guarantee safety
+throughout training and at test time. In terms of cumulative reward, PPO-shield converges to the expected value of
+1 (or almost 1) in the Colour bomb gridworld v1 and v2,
+and Bridge crossing v1 and v2 environments. Furthermore,
+in the media streaming environment, where there is a tradeoff between safety and reward, PPO-shield still improves to
+an expected strictly negative value. In terms of rate of convergence, PPO-shield converges slightly slower than PPO in
+every environment except for the Bridge Crossing environments where PPO-shield converges significantly slower and
+PPO converges immediately. This can be explained by the
+fact that, if not considering safety, the optimal path for the
+agent in the Bridge Crossing environments is to go straight
+up, whereas if considering safety, to get an optimal reward,
+the agent has to find the path across the bridge in Bridge
+Crossing v1, and the path that goes around the lava to the
+right in Bridge Crossing v2, correctly evaluating that the
+straight-up path is too risky. Thus, in these cases, safety is
+very restrictive, which may explain the longer convergence
+time. Overall, the rate of convergence of PPO-shield remains
+fast, requiring a maximum of 100 000 steps in all of our case
+studies.
+We can also see that PPO-shield significantly outperforms
+CPO and PPO-Lagrangian in all of the case studies. Even
+though CPO and PPO-Lagrangian both seem to learn the
+constraint correctly, neither of them manages to optimize the
+reward in every single one of our case studies. This might be
+due to the fact that these algorithms are slow to converge
+when the safety requirement is very restrictive.
+
+Conclusion
+We have developed a shielding approach for Safe RL with
+probabilistic state-avoidance constraints. We have shown
+that this approach is theoretically sound, and offers strict
+safety guarantees. Furthermore, this approach relies on
+Value Iteration on the safety dynamics of the MDP, which
+is known to be scalable, and allows to decouple the safety
+dynamics and the reward dynamics of the MDP, in contrast
+to Safe RL approaches based on Linear Programming. In
+addition, our experiments show that our method is viable
+in practice and can significantly outperform state-of-the-art
+Safe RL algorithms.
+
+Acknowledgements
+This paper was supported by the EPSRC grant number
+EP/X015823/1, titled ”An abstraction-based technique for
+Safe Reinforcement Learning”.
+
+References
+Achiam, J.; Held, D.; Tamar, A.; and Abbeel, P. 2017. Constrained Policy Optimization. In Precup, D.; and Teh, Y. W.,
+eds., Proceedings of the 34th International Conference on
+Machine Learning, ICML 2017, Sydney, NSW, Australia,
+6-11 August 2017, volume 70 of Proceedings of Machine
+Learning Research, 22–31. PMLR.
+Alshiekh, M.; Bloem, R.; Ehlers, R.; Könighofer, B.;
+Niekum, S.; and Topcu, U. 2018. Safe Reinforcement Learning via Shielding. In McIlraith, S. A.; and Weinberger, K. Q.,
+eds., Proceedings of the Thirty-Second AAAI Conference on
+Artificial Intelligence, (AAAI-18), the 30th innovative Applications of Artificial Intelligence (IAAI-18), and the 8th AAAI
+Symposium on Educational Advances in Artificial Intelligence (EAAI-18), New Orleans, Louisiana, USA, February
+2-7, 2018, 2669–2678. AAAI Press.
+Altman, E. 1999. Constrained Markov Decision Processes,
+volume 7. CRC Press.
+Baier, C.; and Katoen, J.-P. 2008. Principles of model checking. MIT press.
+Bertsekas, D. P.; and Shreve, S. E. 2007. Stochastic Optimal
+Control: The Discrete-Time Case. Athena Scientific. ISBN
+1886529035.
+Bura, A.; HasanzadeZonuzy, A.; Kalathil, D.; Shakkottai,
+S.; and Chamberland, J. 2022. DOPE: Doubly Optimistic
+and Pessimistic Exploration for Safe Reinforcement Learning. In Koyejo, S.; Mohamed, S.; Agarwal, A.; Belgrave,
+D.; Cho, K.; and Oh, A., eds., Advances in Neural Information Processing Systems 35: Annual Conference on Neural
+Information Processing Systems 2022, NeurIPS 2022, New
+Orleans, LA, USA, November 28 - December 9, 2022.
+Calvo-Fullana, M.; Paternain, S.; Chamon, L. F. O.; and
+Ribeiro, A. 2024. State Augmented Constrained Reinforcement Learning: Overcoming the Limitations of Learning
+With Rewards. IEEE Trans. Autom. Control., 69(7): 4275–
+4290.
+Efroni, Y.; Mannor, S.; and Pirotta, M. 2020. ExplorationExploitation in Constrained MDPs. CoRR, abs/2003.02189.
+Elsayed-Aly, I.; Bharadwaj, S.; Amato, C.; Ehlers, R.;
+Topcu, U.; and Feng, L. 2021. Safe Multi-Agent Reinforcement Learning via Shielding. In Dignum, F.; Lomuscio, A.;
+Endriss, U.; and Nowé, A., eds., AAMAS ’21: 20th International Conference on Autonomous Agents and Multiagent
+Systems, Virtual Event, United Kingdom, May 3-7, 2021,
+483–491. ACM.
+Forejt, V.; Kwiatkowska, M.; Norman, G.; and Parker, D.
+2011. Automated Verification Techniques for Probabilistic
+Systems, 53–113. Berlin, Heidelberg: Springer Berlin Heidelberg. ISBN 978-3-642-21455-4.
+Gu, S.; Yang, L.; Du, Y.; Chen, G.; Walter, F.; Wang, J.; and
+Knoll, A. 2024. A Review of Safe Reinforcement Learning:
+Methods, Theories, and Applications. IEEE Trans. Pattern
+Anal. Mach. Intell., 46(12): 11216–11235.
+Haarnoja, T.; Zhou, A.; Abbeel, P.; and Levine, S. 2018.
+Soft Actor-Critic: Off-Policy Maximum Entropy Deep Reinforcement Learning with a Stochastic Actor. In Dy,
+
+J. G.; and Krause, A., eds., Proceedings of the 35th International Conference on Machine Learning, ICML 2018,
+Stockholmsmässan, Stockholm, Sweden, July 10-15, 2018,
+volume 80 of Proceedings of Machine Learning Research,
+1856–1865. PMLR.
+Haddad, S.; and Monmege, B. 2018. Interval iteration algorithm for MDPs and IMDPs. Theoretical Computer Science,
+735: 111–131. Reachability Problems 2014: Special Issue.
+Hartmanns, A.; and Kaminski, B. L. 2020. Optimistic Value
+Iteration. In Lahiri, S. K.; and Wang, C., eds., Computer
+Aided Verification - 32nd International Conference, CAV
+2020, Los Angeles, CA, USA, July 21-24, 2020, Proceedings, Part II, volume 12225 of Lecture Notes in Computer
+Science, 488–511. Springer.
+He, C.; León, B. G.; and Belardinelli, F. 2022. Do Androids Dream of Electric Fences? Safety-Aware Reinforcement Learning with Latent Shielding. In Pedroza, G.;
+Hernández-Orallo, J.; Chen, X. C.; Huang, X.; Espinoza,
+H.; Castillo-Effen, M.; McDermid, J. A.; Mallah, R.; and
+hÉigeartaigh, S. Ó., eds., Proceedings of the Workshop on
+Artificial Intelligence Safety 2022 (SafeAI 2022) co-located
+with the Thirty-Sixth AAAI Conference on Artificial Intelligence (AAAI2022), Virtual, February, 2022, volume 3087 of
+CEUR Workshop Proceedings. CEUR-WS.org.
+Jansen, N.; Könighofer, B.; Junges, S.; Serban, A.; and
+Bloem, R. 2020. Safe Reinforcement Learning Using Probabilistic Shields (Invited Paper). In Konnov, I.; and Kovács,
+L., eds., 31st International Conference on Concurrency Theory, CONCUR 2020, September 1-4, 2020, Vienna, Austria (Virtual Conference), volume 171 of LIPIcs, 3:1–3:16.
+Schloss Dagstuhl - Leibniz-Zentrum für Informatik.
+Ji, J.; Zhang, B.; Zhou, J.; Pan, X.; Huang, W.; Sun,
+R.; Geng, Y.; Zhong, Y.; Dai, J.; and Yang, Y. 2023a.
+Safety-Gymnasium: A Unified Safe Reinforcement Learning Benchmark. arXiv:2310.12567.
+Ji, J.; Zhou, J.; Zhang, B.; Dai, J.; Pan, X.; Sun, R.; Huang,
+W.; Geng, Y.; Liu, M.; and Yang, Y. 2023b. OmniSafe: An
+Infrastructure for Accelerating Safe Reinforcement Learning Research. arXiv:2305.09304.
+Karmarkar, N. 1984. A new polynomial-time algorithm for
+linear programming. In Proceedings of the Sixteenth Annual ACM Symposium on Theory of Computing, STOC ’84.
+New York, NY, USA: Association for Computing Machinery. ISBN 0897911334.
+Kober, J.; Bagnell, J.; and Peters, J. 2013. Reinforcement
+Learning in Robotics: A Survey. The International Journal
+of Robotics Research, 32: 1238–1274.
+Liu, T.; Zhou, R.; Kalathil, D.; Kumar, P. R.; and Tian, C.
+2021. Learning Policies with Zero or Bounded Constraint
+Violation for Constrained MDPs. In Ranzato, M.; Beygelzimer, A.; Dauphin, Y. N.; Liang, P.; and Vaughan, J. W., eds.,
+Advances in Neural Information Processing Systems 34: Annual Conference on Neural Information Processing Systems
+2021, NeurIPS 2021, December 6-14, 2021, virtual, 17183–
+17193.
+Liu, Y.; Ding, J.; and Liu, X. 2020. IPO: Interior-Point Policy Optimization under Constraints. In The Thirty-Fourth
+
+AAAI Conference on Artificial Intelligence, AAAI 2020, The
+Thirty-Second Innovative Applications of Artificial Intelligence Conference, IAAI 2020, The Tenth AAAI Symposium
+on Educational Advances in Artificial Intelligence, EAAI
+2020, New York, NY, USA, February 7-12, 2020, 4940–4947.
+AAAI Press.
+Mazumdar, A.; Wisniewski, R.; and Bujorianu, M. 2024.
+Safe Reinforcement Learning for Constrained Markov Decision Processes with Stochastic Stopping Time. CoRR,
+abs/2403.15928.
+Mitta, R.; Hasanbeig, H.; Wang, J.; Kroening, D.; Kantaros,
+Y.; and Abate, A. 2024. Safeguarded Progress in Reinforcement Learning: Safe Bayesian Exploration for Control Policy Synthesis. In Wooldridge, M. J.; Dy, J. G.; and Natarajan, S., eds., Thirty-Eighth AAAI Conference on Artificial Intelligence, AAAI 2024, Thirty-Sixth Conference on Innovative Applications of Artificial Intelligence, IAAI 2024, Fourteenth Symposium on Educational Advances in Artificial Intelligence, EAAI 2014, February 20-27, 2024, Vancouver,
+Canada, 21412–21419. AAAI Press.
+Mnih, V.; Badia, A. P.; Mirza, M.; Graves, A.; Lillicrap,
+T. P.; Harley, T.; Silver, D.; and Kavukcuoglu, K. 2016.
+Asynchronous Methods for Deep Reinforcement Learning.
+In Balcan, M.; and Weinberger, K. Q., eds., Proceedings of
+the 33nd International Conference on Machine Learning,
+ICML 2016, New York City, NY, USA, June 19-24, 2016, volume 48 of JMLR Workshop and Conference Proceedings,
+1928–1937. JMLR.org.
+Mnih, V.; Kavukcuoglu, K.; Silver, D.; Graves, A.;
+Antonoglou, I.; Wierstra, D.; and Riedmiller, M. A. 2013.
+Playing Atari with Deep Reinforcement Learning. CoRR,
+abs/1312.5602.
+Mqirmi, P. E.; Belardinelli, F.; and León, B. G. 2021.
+An Abstraction-based Method to Check Multi-Agent Deep
+Reinforcement-Learning Behaviors. In Dignum, F.; Lomuscio, A.; Endriss, U.; and Nowé, A., eds., AAMAS ’21: 20th
+International Conference on Autonomous Agents and Multiagent Systems, Virtual Event, United Kingdom, May 3-7,
+2021, 474–482. ACM.
+Odriozola-Olalde, H.; Zamalloa, M.; and AranaArexolaleiba, N. 2023. Shielded Reinforcement Learning:
+A review of reactive methods for safe learning. In 2023
+IEEE/SICE International Symposium on System Integration
+(SII), 1–8.
+Quatmann, T.; and Katoen, J. 2018. Sound Value Iteration. In Chockler, H.; and Weissenbacher, G., eds., Computer Aided Verification - 30th International Conference,
+CAV 2018, Held as Part of the Federated Logic Conference, FloC 2018, Oxford, UK, July 14-17, 2018, Proceedings, Part I, volume 10981 of Lecture Notes in Computer
+Science, 643–661. Springer.
+Racanière, S.; Weber, T.; Reichert, D.; Buesing, L.; Guez,
+A.; Jimenez Rezende, D.; Puigdomènech Badia, A.; Vinyals,
+O.; Heess, N.; Li, Y.; et al. 2017. Imagination-augmented
+agents for deep reinforcement learning. Advances in neural
+information processing systems, 30.
+
+Raffin, A.; Hill, A.; Gleave, A.; Kanervisto, A.; Ernestus,
+M.; and Dormann, N. 2021. Stable-Baselines3: Reliable Reinforcement Learning Implementations. Journal of Machine
+Learning Research, 22(268): 1–8.
+Ray, A.; Achiam, J.; and Amodei, D. 2019. Benchmarking
+safe exploration in deep reinforcement learning. volume 7,
+2.
+Schulman, J.; Levine, S.; Moritz, P.; Jordan, M. I.; and
+Abbeel, P. 2015. Trust Region Policy Optimization. CoRR,
+abs/1502.05477.
+Schulman, J.; Wolski, F.; Dhariwal, P.; Radford, A.; and
+Klimov, O. 2017. Proximal Policy Optimization Algorithms.
+CoRR, abs/1707.06347.
+Sootla, A.; Cowen-Rivers, A. I.; Jafferjee, T.; Wang, Z.;
+Mguni, D. H.; Wang, J.; and Ammar, H. 2022. Saute RL:
+Almost Surely Safe Reinforcement Learning Using State
+Augmentation. In Chaudhuri, K.; Jegelka, S.; Song, L.;
+Szepesvári, C.; Niu, G.; and Sabato, S., eds., International
+Conference on Machine Learning, ICML 2022, 17-23 July
+2022, Baltimore, Maryland, USA, volume 162 of Proceedings of Machine Learning Research, 20423–20443. PMLR.
+Sutton, R. S.; and Barto, A. G. 2018. Reinforcement Learning: An Introduction. Cambridge, MA, USA: A Bradford
+Book. ISBN 0262039249.
+Yang, W.; Marra, G.; Rens, G.; and Raedt, L. D. 2023. Safe
+Reinforcement Learning via Probabilistic Logic Shields. In
+Proceedings of the Thirty-Second International Joint Conference on Artificial Intelligence, IJCAI 2023, 19th-25th August 2023, Macao, SAR, China, 5739–5749. ijcai.org.
+Yang, Z.; Jin, H.; Tang, Y.; and Fan, G. 2024. Risk-Aware
+Constrained Reinforcement Learning with Non-Stationary
+Policies. In Dastani, M.; Sichman, J. S.; Alechina, N.;
+and Dignum, V., eds., Proceedings of the 23rd International Conference on Autonomous Agents and Multiagent
+Systems, AAMAS 2024, Auckland, New Zealand, May 6-10,
+2024, 2029–2037. International Foundation for Autonomous
+Agents and Multiagent Systems / ACM.
+Zhang, Y.; Vuong, Q.; and Ross, K. W. 2020. First Order
+Constrained Optimization in Policy Space. In Larochelle,
+H.; Ranzato, M.; Hadsell, R.; Balcan, M.; and Lin, H., eds.,
+Advances in Neural Information Processing Systems 33: Annual Conference on Neural Information Processing Systems
+2020, NeurIPS 2020, December 6-12, 2020, virtual.
+
+Appendix
+
+Thus, since
+Z
+
+In the following, we let Fu denote Reach (u).
+
+Proof of Theorem 1
+Theorem 1 (Safety guarantee in any shield). For any memoryless policy π in Sh≤p
+β (M), we have
+Sh≤p
+β (M)π |= P≤p (Fu) .
+Proof. We fix a memoryless policy π in Sh≤p
+β (M). We let
+≤p
+′
+T be the set of all states (s, q) of Shβ (M) labeled by c,
+and we let S?′ = S ′ \ T ′ . Furthermore, we let Pπ′ be the
+mapping from S ′ to the space of probability measures over
+S ′ such that Pπ′ is the transition function of the Markov chain
+Sh≤p
+β (M)π , i.e., such that
+Z
+Pπ′ (s, q)(E) =
+P ′ ((s, q), a)(E)dπ((s, q))(a).
+a∈A′ (s,q)
+
+Further, we let A be the operator over the set of Borelmeasurable mappings from S?′ to [0; 1] such that
+Z
+f (s′ , q ′ )dPπ′ ((s, q))((s′ , q ′ ))
+(Af )(s, q) =
+(s′ ,q ′ )∈S?′
+
+and we let b be the mapping that associates every (s, q) ∈ S?′
+to Pπ′ ((s, q))(T ′ ), and let Γ be the operator such that Γ(f ) =
+A(f ) + b for any Borel-measurable mapping f from S?′ to
+[0; 1]. In addition, we let ω 0 (s, q) = 0 for any (s, q) ∈ S?′
+and ω n+1 = Γ(ω n ).
+We show, by induction on n, that
+ω n (s, q) = probs,q≤p
+
+Shβ (M),π
+
+(Ens,q ),
+
+(1)
+
+where Ens,q is the set of all infinite paths ζ =
+ζ0 a0 · · · ζn an · · · of Sh≤p
+β (M) such that ζ0 = (s, q) and
+there exists i ∈ {0, . . . , n} with ζi ∈ T ′ .
+• If n = 0, En is the set of all states labeled by c, and (1)
+follows.
+• Suppose now that for some n ∈ N, for any (s, q) ∈ S?′ ,
+we have ω n (s, q) = probs,q≤p
+(Ens,q ). The probabilShβ (M),π
+
+ity of a path ζ = ζ0 a0 · · · such that ζ0 = (s, q) being in
+s,q
+En+1
+(according to probability measure probs,q≤p
+)
+Shβ (M),π
+
+is the sum of the probability of ζ1 a1 · · · being in Enζ1 ,
+and of the probability of ζ1 being in T ′ . However, the
+probability of ζ1 a1 · · · ∈ Enζ1 is equal to (Aω n )(s, q) by
+the induction hypothesis, and the probability of ζ1 ∈ T ′
+is equal to b(s, q) by definition of b. Therefore, (1) follows.
+Let us now define the relation ≤ over mappings f, g from
+S?′ to [0; 1] such that f ≤ g iff f (s, q) ≤ g(s, q) for every
+(s, q) ∈ S?′ , and let η(s, q) R= q for any (s, q) ∈ S?′ . We have
+that Γ(η)(s, q) is equal to (s′ ,q′ )∈S ′ q ′ dPπ ((s, q))((s′ , q ′ )),
+which is the same as
+Z
+Z
+q ′ dP ((s, q), a)((s′ , q ′ ))dπ((s, q))(a).
+a∈A′ (s,q)
+
+(s′ ,q ′ )∈S ′
+
+q ′ dP ((s, q), a)((s′ , q ′ )) ≤ q
+
+(s′ ,q ′ )∈S ′
+
+for any a ∈ A(s) by definition of Sh≤p
+β (M), we have
+Γ(η) ≤ η. Furthermore, since integrating preserves the relation ≤, then the operator Γ is increasing for ≤. Consequently, since ω 0 ≤ η and since Γ(ω n ) = ω n+1 , an immen
+diate induction gives ω
+≤ η for any n ∈ N. FurtherS (s, q) s,q
+more, from (1), since n∈N En is equal to
+
+
+{ζ = ζ0 · · · ∈ Paths Sh≤p
+β (M) | ζ0 = (s, q) ∧ ζ |= Fu}
+and it is a countable union, we have that for any (s, q) ∈ S?′ ,
+ω n (s, q) converges to
+
+
+
+
+(s,q)
+ζ ∈ Paths Sh≤p
+prob ≤p
+β (M) | ζ |= Fu
+Shβ (M),π
+
+as n tends to infinity. The result follows.
+
+Proof of Theorem 2
+Assumption 1 (Slater’s condition). There exists a policy π
+in M and a number q < p such that
+Mπ |= P≤q (Fu) .
+Theorem 2 (Optimality-preserving guarantees). We have
+the three following properties.
+1. For any ϵ > 0, for any inductive ϵ-upper bound β of
+βM , there exists an optimal, memoryless, and deterministic policy πβ⋆ of Sh≤p
+β (M).
+⋆
+d
+2. The policy π
+is a solution to RCOP.
+βM
+
+3. If Assumption 1 holds, if π ⋆ is a solution to RCOP, then
+ 
+
+
+⋆
+c⋆ = J πd
+lim
+J π
+β
+βM .
+β∈B(M),β→βM
+
+Proof. We show the three properties.
+1. Since Sh≤p
+β (M) satisfies the conditions for the lower
+semi-continuous model (Definition 8.7 of (Bertsekas and
+Shreve 2007)), there exists a memoryless, deterministic,
+and optimal policy πβ⋆ of Sh≤p
+β (M) (Corollary 9.17.2 of
+(Bertsekas and Shreve 2007)).
+2. For any policy π of M such that
+init
+probsM,π
+(ζ ∈ Paths (M) | ζ |= Fu) ≤ p,
+
+we let π be the policy of Sh≤p
+βM (M) composed of π and
+of predicting “safety levels” equal to the probabilities of
+reaching an unsafe state in Mπ , i.e., the policy such that
+for any path ζ = (s0 , q0 ) · · · (sn , qn ) of Sh≤p
+βM (M) with
+n
+qn = probsM,π
+(ζ ∈ Paths (M) | ζ |= Fu) ,
+P
+π(ζ) is defined as v∈Vαsn ,qn λv (α, v) where
+
+α(s) = probsM,π (ζ ∈ Paths (M) | ζ |= Fu)
+
+sn ,qn
+
+and where the (λv )v∈Vαsn ,qn ∈ [0; 1]Vα
+are such that
+X
+X
+λv = 1 and
+λv v = π(ζ).
+v∈Vαsn ,qn
+
+v∈Vαsn ,qn
+
+For any policy π of M, since πβ⋆M is optimal for
+Sh≤p
+have J(πβ⋆M ) ≥ J(π). Moreover,
+βM (M), we
+
+
+⋆
+, and by definition of the reward
+J(π ⋆ ) = J πd
+βM
+
+βM
+
+which is less than or equal to q by definition aα and since
+v ∈ Vαs,q . Thus, v ′ ∈ Vαs,q and the λv in the definition of
+π1 are well-defined. Since for any (s, q), the probability
+measures π1 (s, q) and πβ⋆M (s, q) select the same actions
+with probability at least 1 − ω(d − 1), we have
+J(π1 ) ≥ J(πβ⋆M )−
+X ′
+X
+γ t ω(d − 1)(rmax − rmin )
+γ t+1
+
+function of Sh≤p
+(M), we have J(π) = J(π). Thus, we
+ βM 
+⋆
+≥ J(π) for any safe policy π of M.
+have that J πd
+
+t∈N
+
+=
+
+βM
+
+3. Let ϵ > 0. Since J(b
+π ) = J(π) for any memoryless π policy of Sh≤p
+(M),
+we
+show that there exists η > 0 such
+β
+ 
+
+
+that if ∥β − βM ∥∞ ≤ η, then J πβ⋆ − J πβ⋆M ≤
+
+
+ 
+ϵ. The fact that J πβ⋆M ≥ J πβ⋆ comes from the
+ 
+definition of J πβ⋆ . Therefore, it remains to find η > 0
+such that, if ∥β − βM ∥∞ < η, then
+
+
+J πβ⋆M ≤ J πβ⋆ + ϵ.
+We suppose without loss of generality that #A(s) = d
+for all states s of M.
+We first define another policy π1 of Sh≤p
+β (M) such that
+
+ϵ
+J πβ⋆M ≤ J (π1 ) + .
+3
+2
+
+ϵ(1−γ)
+We let ω = 3(d−1)(r
+, and for any state s of
+max −rmin )
+M, for any mapping α from S to [0; 1], we let aα be the
+action in A(s) such that
+X
+X
+α(s′ )P (s, aα , s′ ) = min
+α(s′ )P (s, a, s′ ).
+a∈A(s)
+
+s′ ∈S
+
+γω(d − 1)(rmax − rmin )
+ϵ
+= .
+(1 − γ)2
+3
+
+We now a define policy π2 of such that J(π2 ) ≥ J(π1 ) −
+2ϵ
+3 . We let
+ϵ(1 − γ)2
+λ=
+(2)
+3(rmax − rmin )
+and we let M ∈ N be such that
+γM
+ϵ
+(rmax − rmin ) ≤ .
+1−γ
+3
+
+(3)
+
+Furthermore, we let E be the (finite) set of all (s, q)
+such that there exists a path (s0 , q0 )a0 · · · (sn , qn ) in
+Sh≤p
+βM (M)π1 such that n < M , (s0 , q0 ) = (sinit , p)
+and (s, q) = (sn , qn ), and we let δmin be the minimum
+of all the q − βM (s) such that (s, q) ∈ E and q − βM (s),
+which exists because of Assumption 1. In addition, we let
+h0 , . . . , hM , λ0 , . . . , λM , θ0 , . . . θM , and η0 , . . . , ηM be
+four non-decreasing sequences such that, for any n < M
+h0 = θ0 = ϵ0 = 0
+λ0 > 0
+2 λn
+hn+1 = hn +
+ω λn+1
+λn
+δmin ω
+≤
+λn+1
+32
+δmin
+hM ≤
+4
+
+1
+λM ≤ min
+,λ
+4
+θn = (hn+1 − hn )λn+1
+
+s′ ∈S
+
+We define π1Pas a policy such that, for any (s, q),
+π1 (s, q) =
+such that δ(α,v⋆ ) =
+v∈Vαs,q λv δ(α,v)
+P
+πβ⋆M (s, q), and such that v ′ = v∈Vαs,q λv v satisfies
+ ′
+P
+ va = va⋆ + a′ ∈{a′ |va⋆′ ≤ω} va⋆′ if a = aα
+va′ = 0
+if va⋆ ≤ ω
+
+otherwise.
+va′ = va⋆
+
+(4)
+(5)
+(6)
+(7)
+(8)
+(9)
+(10)
+
+and we let
+
+Notice that
+
+
+
+2
+δmin ω λ1 ωδmin
+η = min θ1
+,
+.
+8
+32
+
+!
+X
+
+t′ ∈N
+
+va′
+
+X
+
+P (s, a, s′ )α(s′ )
+
+≤
+
+s′ ∈S
+
+a∈A(s)
+
+!
+X
+
+va
+
+X
+
+P (s, a, s′ )α(s′ ) +
+
+s′ ∈S
+
+a∈A(s)
+
+!
+X
+s ≤ω}
+a∈{a|va
+
+va
+
+X
+
+′
+
+′
+
+P (s, a, s )α(s ) −
+
+s′ ∈S
+
+!!
+X
+s′ ∈S
+
+α
+
+′
+
+′
+
+P (s, a , s )α(s )
+
+,
+
+(11)
+
+It is easy to check that such four sequences exist, as we
+n
+only need to take λ0 and λλn+1
+sufficiently small, and the
+fact that η > 0 comes from (5). For any s ∈ S, for
+any n ≤
+ M , we also let θn (s, q) be the number equal
+to min λn δ4min , θn if
+X
+X
+δmin ω
+va⋆
+P (s, a, s′ )(α⋆ (s′ ) − βM (s′ )) ≤
+4
+′
+a∈A(s)
+
+s ∈S
+
+and equal to θn otherwise, where {(α⋆ , v ⋆ )} is the support of the Dirac distribution π1 (s, q). Finally, we let
+
+β be such that ∥β − βM ∥∞ ≤ η, and we let π2 be
+a policy of Sh≤p
+β (M) such that, for any path ζ =
+(s0 , q0 )a0 · · · (sn , qn ) of Sh≤p
+βM (M)π1 with (s0 , q0 ) =
+(sinit , p) and n ≤ M − 1, if we let (α⋆ , v ⋆ ) denote the
+support of the Dirac distribution π1 (sn , qn ), asaf e denote
+an action of A(s) such that
+X
+P (s, asaf e , s′ )βM (s′ ) = βM (s),
+
+P (sn , a⋆ , s′ ) =
+
+⋆
+′
+a∈A(s) va P (sn , a, s ), we have
+
+P
+"
+
+(1 − λn )
+
+X
+
+qn − P (sn , a⋆ , s′ )
+
+s′ ∈S
+
+
+
+δmin ω
+θn (sn , qn ) βM (s′ ) +
++
+8
+!#
+
+s′ ∈S
+
+(1 − θn (sn , qn ))α⋆
+
+and ti denote
+
+
+δmin ω
+θi (si , qi ),
+qi − βM (si ) −
+8
+
++
+
+"
+λn qn −
+
+X
+
+P (sn , asaf e , s′ )
+
+s′ ∈S
+
+
+
+
+
+• if there exists i ≤ n such that qi = 0, then if j is the
+minimal integer i that has this property, we have
+
+π2 (s0 , q0 )
+
+δmin ω
+θn (sn , qn ) βM (s ) +
+8
+!#
+
+a0 (s1 , q1 − t1 ) · · · aj−2 (sj−1 , qj−1 − tj−1 )
+!
+
+To show (14), we first transform (14) as the following
+inequation that implies (14)
+"
+X
+(1 − λn )θn (sn , qn )
+P (sn , a⋆ , s′ )
+
+aj−1 (sj , qj + ϵ) · · · an−1 (sn , qn + ϵ)
+
+=
+
+(v ⋆ , α⋆ + ϵ) (12)
+
+′
+
+(1 − θn (sn , qn ))α⋆
+
++
+
+≤ qn − tn . (14)
+
+s′ ∈S
+
+!#
+δmin ω
++
+α (s ) − βM (s ) −
+8
+"
+X
+λn (1 − θn (sn , qn ))
+P (sn , asaf e , s′ )
+
+• otherwise,
+
+′
+
+⋆
+
+π2 (s0 , q0 )
+
+′
+
+a0 (s1 , q1 − t1 ) · · · an−2 (sn−1 , qn−1 − tn−1 )
+!
+an−1 (sn , qn − tn )
+
+s′ ∈S
+
+#
+(βM (s′ ) + δn − α⋆ (s′ ))
+
+=
+
+− tn λn ≥ 0, (15)
+
+
+
+λn χasaf e + (1 − λn )v ⋆ ,
+
+
+
+δmin ω
+θn (sn , qn ) βM +
++(1−θn (sn , qn ))α⋆ .
+8
+(13)
+Notice that the “safety levels” output by π2 in (12)
+and (13) are above βM + η by (11), the fact that θ
+is non-decreasing, and the definition of θn (s, q). The
+fact that J(π2 ) ≥ J(π1 ) − 2ϵ
+3 comes from the fact
+if n < M and (s0 , q0 ) = (sinit , p), the distributions
+π2 ((s0 , q0 )a0 · · · (sn , qn )) and π1 (sn , qn ) are the same
+on a set of measure 1 − λn by definition of π2 , from the
+fact that λn is non-decreasing, from (9), from (2), and
+from (3).
+It remains to show that π2 is well-defined as a policy of Sh≤p
+β (M), i.e. that for any finite path ζ =
+(s0 , q0 )a0 · · · (sn , qn ) of Sh≤p
+βM (M)π1 with n < M
+and qi > βM (si ) for any 0 ≤ i ≤ n, if we
+let {(α⋆ , v ⋆ )} be the support of the Dirac distribution π1 (sn , qP
+n ), if we let asaf e be the action such that
+βM (sn ) = s′ ∈S P (s, asaf e , s′ )βM (s′ ), and if we let
+
+where δn = qn − βM (sn ).
+It thus remains to show (15), and to do so, we distinguish
+the two following cases.
+• Suppose that
+X
+δmin ω
+P (s, a⋆ , s′ )(α⋆ (s′ ) − βM (s′ )) ≤
+.
+4
+′
+s ∈S
+
+Then by definition of π1 , we have that for all s′ ∈ S,
+|α⋆ (s′ ) − βM (s′ )| ≤ δmin
+4 . Therefore, we have
+"
+X
+(1 − λn )θn (sn , qn )
+P (sn , a⋆ , s′ )
+s′ ∈S
+
+δmin ω
+α (s ) − βM (s ) −
+8
+⋆
+
+′
+
+!#
+
+′
+
+≥ −θn (sn , qn )
+
+δmin ω
+8
+2
+λn δmin
+ω
+, (16)
+≥−
+16
+
+"
+
+PPO-Shield
+
+#
+′
+
+′
+
+⋆
+
+(βM (s ) + δn − α (s ))
+
+3δmin
+≥ λn
+8
+
+Reward
+
+s′ ∈S
+
+PPO-Shield
+1.0
+
+2
+
+0.8
+
+PPO-LAG
+
+CPO
+
+0.6
+0.4
+
+6
+
+0.2
+
+8
+0
+
+and
+
+100000 200000 300000 400000 500000
+Step
+
+0.0
+
+0
+
+100000 200000 300000 400000 500000
+Step
+
+(a) Media streaming
+
+−tn λn ≥ −
+
+s ∈S
+
+CPO
+
+4
+
+(17)
+
+λ2n δmin
+.
+(18)
+4
+Equation (15) is thus a consequence of (16), (17), (18)
+and (9).
+• Suppose now that
+X
+Kδmin ω
+P (s, a⋆ , s′ )(α⋆ (s′ ) − βM (s′ )) =
+,
+4
+′
+
+PPO-LAG
+
+0
+
+Safety Rate
+
+P (sn , asaf e , s′ )
+
+PPO-Shield
+
+PPO-LAG
+
+CPO
+
+1.0
+
+1.0
+
+0.8
+
+0.8
+
+PPO-LAG
+
+CPO
+
+0.6
+
+Reward
+
+0.6
+0.4
+
+0.4
+
+0.2
+0.0 0.0
+
+PPO-Shield
+
+Safety Rate
+
+λn (1 − θn (sn , qn ))
+
+X
+
+0.2
+0.2
+
+0.4
+
+Step
+
+0.6
+
+0.8
+
+1.0
+1e6
+
+0.0
+
+0.2
+
+0.4
+
+Step
+
+0.6
+
+0.8
+
+1.0
+1e6
+
+(b) Colour bomb gridworld v1
+
+with K > 1. Then, by definition of π1 , we have that
+for all s′ ∈ S, |α⋆ (s′ )−βM (s′ )| ≤ Kδ4min . Therefore,
+we have from (6) and (7)
+"
+X
+(1 − λn )θn (sn , qn )
+P (sn , a⋆ , s′ )
+s′ ∈S
+
+!#
+δmin ω
+α (s ) − βM (s ) −
+8
+
+
+K
+1
+(hn+1 − hn )λn+1
+δmin ω
+−
+≥
+2
+4
+8
+
+
+1
+K
+−
+(19)
+≥ λn δmin
+4
+8
+⋆
+
+′
+
+′
+
+Figure 3: Learning curves for additional experiments
+v2, PPO-Lagrangian and CPO fail to converge within a million steps. Figure 3 presents the results for the environments
+Colour Bomb v1 and Media Streaming.
+For the Media Streaming and the Colour Bomb v1 environments, we can see that CPO converges to the optimal
+policy roughly within the cost limit of 0.5. However, it converges much more slowly than PPO-Shield, even though
+these environments are quite simple. Unfortunately, PPOLag fails to converge in either environment, likely due to
+slow convergence of the dual variable.
+
+Hyperparameters
+"
+λn (1 − θn (sn , qn ))
+
+X
+
+P (sn , asaf e , s′ )
+
+s′ ∈S
+
+#
+′
+
+⋆
+
+′
+
+(βM (s ) + δn − α (s ))
+
+
+≥ −λn δmin
+
+1
+K
+−
+4
+4
+
+
+(20)
+
+and from (8)
+tn λn ≥ −(hn+1 − hn )λn+1 λn
+δmin λn
+(21)
+32
+Equation (15) is thus a consequence of (19), (20), (21).
+≥−
+
+Additional experiments
+We ran additional experiments to compare our approach
+with PPO-Lagrangian (Ray, Achiam, and Amodei 2019)
+and CPO (Achiam et al. 2017). Since for small cost limits
+these algorithms seem to struggle, we changed the parameter safety bound of our case studies to 0.5. Due to
+compute constraints, results are averaged over 3 independent
+runs (rather than the usual 10). For the environments Bridge
+Crossing v1 and v2, Colour Bomb v2 and Media Steaming
+
+For our implementation of PPO and PPO-Shield we used
+the default hyperparameters provided by stable baselines3
+(Raffin et al. 2021): lr = 0.0003, n steps=2048,
+batch size=64, n epochs=10, gae lambda=0.95,
+clip=0.2, max grad norm=0.5, ent coef=0.0
+and vf coef=0.5.
+For
+PPO-Lagrangian
+and
+CPO
+(main
+paper) we used comparable hyperparameters where
+applicable:
+lr = 0.0003,
+n steps=2048,
+batch size=64,
+n epochs=10,
+gae =0.95,
+gae cost=0.95, clip=0.2, max grad norm=0.5
+and ent coef=0.0. For the different environments
+in the main paper, we used cost limit=0.05 for
+colour bomb (v2), cost limit=0.01 for bridge crossing (v2) and cost limit=0.01 for media streaming
+which correspond to the safety bounds used for each
+environment.
+For
+the
+additional
+experiments
+we
+updated some of the hyperparameters for longer
+run training (for PPO-Lagrangian and CPO):
+n steps=20000, batch size=128, n epochs=40,
+max grad norm=40.0.
+Finally,
+in
+all
+experiments
+for
+PPO-Lagranian
+we
+set
+the
+lagrangian multiplier init=10.0.
+
+

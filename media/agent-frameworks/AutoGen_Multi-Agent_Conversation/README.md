@@ -1,5 +1,5 @@
 # AutoGen Multi-Agent Conversation
-- Paper: [AutoGen_Multi-Agent_Conversation.pdf](../../../papers/agent-frameworks/AutoGen_Multi-Agent_Conversation.pdf)
+- Paper: [AutoGen_Multi-Agent_Conversation.pdf](../../../reinforcement_learning_papers/09_agentic_rl/AutoGen_Multi-Agent_Conversation.pdf)
 
 ## Gemini diagrams
 

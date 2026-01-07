@@ -59,134 +59,134 @@ slides/                  # 92 presentation decks (504 MB)
 
 | Paper | Slides | Code | Media |
 |-------|--------|------|-------|
-| [Large Language Models as Optimizers](papers/planning/Large_Language_Models_as_Optimizers.pdf) | [CS839 Prompting II](slides/CS839_Prompting_II_OPRO.pdf) | [GitHub](https://github.com/google-deepmind/opro) | [🖼️](media/planning/Large_Language_Models_as_Optimizers/README.md) |
-| [Large Language Models Cannot Self-Correct Reasoning Yet](papers/reasoning/Large_Language_Models_Cannot_Self-Correct_Reasoning_Yet.pdf) | - | - | [🎨](diagrams/downloaded_images/reasoning_03_LLMs_Cannot_Self_Correct.png) [🖼️](media/reasoning/Large_Language_Models_Cannot_Self-Correct_Reasoning_Yet/README.md) |
-| [Teaching Large Language Models to Self-Debug](papers/agent-frameworks/Teaching_Large_Language_Models_to_Self-Debug.pdf) | - | - | [🎨](diagrams/downloaded_images/agent-frameworks_DSPy-_Compiling_Declarative_Language_Model.png) [🖼️](media/agent-frameworks/Teaching_Large_Language_Models_to_Self-Debug/README.md) [🎧](https://notebooklm.cloud.google.com/global/notebook/9368678b-0ef3-4ef6-a52b-250073dfd750?project=358208640342) |
-| [Chain-of-Thought Reasoning Without Prompting](papers/reasoning/Chain-of-Thought_Reasoning_Without_Prompting.pdf) | [CoT Princeton Lecture](slides/CoT_Princeton_Lecture.pdf), [CoT Toronto](slides/CoT_Toronto_Presentation.pdf), [CoT SJTU](slides/CoT_SJTU_Slides.pdf), [CoT Interpretable ML](slides/CoT_Interpretable_ML_Lecture.pdf), [Concise CoT](slides/Concise_CoT_Benefits.pdf) | [GitHub (unofficial)](https://github.com/fangyuan-ksgk/CoT-Reasoning-without-Prompting) | [🎨](diagrams/downloaded_images/reasoning_01_Chain_of_Thought_Reasoning_Without_Prompting.png) [🖼️](media/reasoning/Chain-of-Thought_Reasoning_Without_Prompting/README.md) |
-| [Premise Order Matters in Reasoning with LLMs](papers/reasoning/Premise_Order_Matters_in_Reasoning_with_Large_Language_Models.pdf) | - | - | [🎨](diagrams/downloaded_images/reasoning_04_Premise_Order_Matters.png) [🖼️](media/reasoning/Premise_Order_Matters_in_Reasoning_with_Large_Language_Models/README.md) |
-| [Chain-of-Thought Empowers Transformers](papers/reasoning/Chain-of-Thought_Empowers_Transformers_to_Solve_Inherently_Serial_Problems.pdf) | [CoT Slides](slides/CoT_SJTU_Slides.pdf) | - | [🎨](diagrams/downloaded_images/reasoning_02_Chain_of_Thought_Empowers_Transformers.png) [🖼️](media/reasoning/Chain-of-Thought_Empowers_Transformers_to_Solve_Inherently_Serial_Problems/README.md) |
+| [Large Language Models as Optimizers](reinforcement_learning_papers/09_agentic_rl/Large_Language_Models_as_Optimizers.pdf) | [CS839 Prompting II](slides/CS839_Prompting_II_OPRO.pdf) | [GitHub](https://github.com/google-deepmind/opro) | [🖼️](media/planning/Large_Language_Models_as_Optimizers/README.md) |
+| [Large Language Models Cannot Self-Correct Reasoning Yet](reinforcement_learning_papers/09_agentic_rl/Large_Language_Models_Cannot_Self-Correct_Reasoning_Yet.pdf) | - | - | [🎨](diagrams/downloaded_images/reasoning_03_LLMs_Cannot_Self_Correct.png) [🖼️](media/reasoning/Large_Language_Models_Cannot_Self-Correct_Reasoning_Yet/README.md) |
+| [Teaching Large Language Models to Self-Debug](reinforcement_learning_papers/09_agentic_rl/Teaching_Large_Language_Models_to_Self-Debug.pdf) | - | - | [🎨](diagrams/downloaded_images/agent-frameworks_DSPy-_Compiling_Declarative_Language_Model.png) [🖼️](media/agent-frameworks/Teaching_Large_Language_Models_to_Self-Debug/README.md) [🎧](https://notebooklm.cloud.google.com/global/notebook/9368678b-0ef3-4ef6-a52b-250073dfd750?project=358208640342) |
+| [Chain-of-Thought Reasoning Without Prompting](reinforcement_learning_papers/09_agentic_rl/Chain-of-Thought_Reasoning_Without_Prompting.pdf) | [CoT Princeton Lecture](slides/CoT_Princeton_Lecture.pdf), [CoT Toronto](slides/CoT_Toronto_Presentation.pdf), [CoT SJTU](slides/CoT_SJTU_Slides.pdf), [CoT Interpretable ML](slides/CoT_Interpretable_ML_Lecture.pdf), [Concise CoT](slides/Concise_CoT_Benefits.pdf) | [GitHub (unofficial)](https://github.com/fangyuan-ksgk/CoT-Reasoning-without-Prompting) | [🎨](diagrams/downloaded_images/reasoning_01_Chain_of_Thought_Reasoning_Without_Prompting.png) [🖼️](media/reasoning/Chain-of-Thought_Reasoning_Without_Prompting/README.md) |
+| [Premise Order Matters in Reasoning with LLMs](reinforcement_learning_papers/09_agentic_rl/Premise_Order_Matters_in_Reasoning_with_Large_Language_Models.pdf) | - | - | [🎨](diagrams/downloaded_images/reasoning_04_Premise_Order_Matters.png) [🖼️](media/reasoning/Premise_Order_Matters_in_Reasoning_with_Large_Language_Models/README.md) |
+| [Chain-of-Thought Empowers Transformers](reinforcement_learning_papers/09_agentic_rl/Chain-of-Thought_Empowers_Transformers_to_Solve_Inherently_Serial_Problems.pdf) | [CoT Slides](slides/CoT_SJTU_Slides.pdf) | - | [🎨](diagrams/downloaded_images/reasoning_02_Chain_of_Thought_Empowers_Transformers.png) [🖼️](media/reasoning/Chain-of-Thought_Empowers_Transformers_to_Solve_Inherently_Serial_Problems/README.md) |
 
 ## Post-Training & Alignment
 
 | Paper | Slides | Code | Media |
 |-------|--------|------|-------|
-| [Direct Preference Optimization (DPO)](papers/rl-finetuning/Direct_Preference_Optimization.pdf) | [DPO CMU](slides/DPO_CMU_Lecture.pdf), [DPO UT Austin](slides/DPO_UT_Austin.pdf), [DPO Toronto](slides/DPO_Toronto_Presentation.pdf), [DPO Jinen](slides/DPO_Jinen_Slides.pdf) | [GitHub](https://github.com/eric-mitchell/direct-preference-optimization) | [🎨](diagrams/downloaded_images/reasoning_07_Iterative_Reasoning_Preference_Optimization.png) [🖼️](media/rl-finetuning/Direct_Preference_Optimization/README.md) |
-| [Iterative Reasoning Preference Optimization](papers/reasoning/Iterative_Reasoning_Preference_Optimization.pdf) | - | - | [🎨](diagrams/downloaded_images/reasoning_07_Iterative_Reasoning_Preference_Optimization.png) [🖼️](media/reasoning/Iterative_Reasoning_Preference_Optimization/README.md) |
-| [Chain-of-Verification Reduces Hallucination](papers/reasoning/Chain-of-Verification_Reduces_Hallucination.pdf) | - | [GitHub (unofficial)](https://github.com/hwchase17/chain-of-verification) | [🎨](diagrams/downloaded_images/reasoning_05_Chain_of_Verification.png) [🖼️](media/reasoning/Chain-of-Verification_Reduces_Hallucination/README.md) |
-| [Unpacking DPO and PPO](papers/rl-finetuning/Unpacking_DPO_and_PPO.pdf) | [DPO Slides](slides/DPO_CMU_Lecture.pdf) | [GitHub](https://github.com/allenai/open-instruct) | [🖼️](media/rl-finetuning/Unpacking_DPO_and_PPO/README.md) |
+| [Direct Preference Optimization (DPO)](reinforcement_learning_papers/02_rlhf_alignment/Direct_Preference_Optimization.pdf) | [DPO CMU](slides/DPO_CMU_Lecture.pdf), [DPO UT Austin](slides/DPO_UT_Austin.pdf), [DPO Toronto](slides/DPO_Toronto_Presentation.pdf), [DPO Jinen](slides/DPO_Jinen_Slides.pdf) | [GitHub](https://github.com/eric-mitchell/direct-preference-optimization) | [🎨](diagrams/downloaded_images/reasoning_07_Iterative_Reasoning_Preference_Optimization.png) [🖼️](media/rl-finetuning/Direct_Preference_Optimization/README.md) |
+| [Iterative Reasoning Preference Optimization](reinforcement_learning_papers/09_agentic_rl/Iterative_Reasoning_Preference_Optimization.pdf) | - | - | [🎨](diagrams/downloaded_images/reasoning_07_Iterative_Reasoning_Preference_Optimization.png) [🖼️](media/reasoning/Iterative_Reasoning_Preference_Optimization/README.md) |
+| [Chain-of-Verification Reduces Hallucination](reinforcement_learning_papers/09_agentic_rl/Chain-of-Verification_Reduces_Hallucination.pdf) | - | [GitHub (unofficial)](https://github.com/hwchase17/chain-of-verification) | [🎨](diagrams/downloaded_images/reasoning_05_Chain_of_Verification.png) [🖼️](media/reasoning/Chain-of-Verification_Reduces_Hallucination/README.md) |
+| [Unpacking DPO and PPO](reinforcement_learning_papers/02_rlhf_alignment/Unpacking_DPO_and_PPO.pdf) | [DPO Slides](slides/DPO_CMU_Lecture.pdf) | [GitHub](https://github.com/allenai/open-instruct) | [🖼️](media/rl-finetuning/Unpacking_DPO_and_PPO/README.md) |
 | **RLHF Background** | [RLHF UT Austin](slides/RLHF_UT_Austin_Slides.pdf) | - | - |
 
 ## Memory & Planning
 
 | Paper | Slides | Code | Media |
 |-------|--------|------|-------|
-| [Grokked Transformers are Implicit Reasoners](papers/reasoning/Grokked_Transformers_are_Implicit_Reasoners.pdf) | - | [GitHub](https://github.com/OSU-NLP-Group/GrokkedTransformer) | [🎨](diagrams/downloaded_images/reasoning_06_Grokked_Transformers.png) [🖼️](media/reasoning/Grokked_Transformers_are_Implicit_Reasoners/README.md) |
-| [HippoRAG: Neurobiologically Inspired Long-Term Memory](papers/memory-rag/HippoRAG_Neurobiologically_Inspired_Long-Term_Memory.pdf) | [HippoRAG NeurIPS](slides/HippoRAG_NeurIPS_Slides.pdf) | [GitHub](https://github.com/OSU-NLP-Group/HippoRAG) | [🎨](diagrams/downloaded_images/memory-rag_HippoRAG.png) [🖼️](media/memory-rag/HippoRAG_Neurobiologically_Inspired_Long-Term_Memory/README.md) |
-| [Is Your LLM Secretly a World Model of the Internet](papers/memory-rag/Is_Your_LLM_Secretly_a_World_Model_of_the_Internet.pdf) | - | [GitHub](https://github.com/OSU-NLP-Group/WebDreamer) | [🖼️](media/memory-rag/Is_Your_LLM_Secretly_a_World_Model_of_the_Internet/README.md) |
-| [Tree Search for Language Model Agents](papers/planning/Tree_Search_for_Language_Model_Agents.pdf) | - | [GitHub](https://github.com/kohjingyu/search-agents) | [🖼️](media/planning/Tree_Search_for_Language_Model_Agents/README.md) |
+| [Grokked Transformers are Implicit Reasoners](reinforcement_learning_papers/09_agentic_rl/Grokked_Transformers_are_Implicit_Reasoners.pdf) | - | [GitHub](https://github.com/OSU-NLP-Group/GrokkedTransformer) | [🎨](diagrams/downloaded_images/reasoning_06_Grokked_Transformers.png) [🖼️](media/reasoning/Grokked_Transformers_are_Implicit_Reasoners/README.md) |
+| [HippoRAG: Neurobiologically Inspired Long-Term Memory](reinforcement_learning_papers/09_agentic_rl/HippoRAG_Neurobiologically_Inspired_Long-Term_Memory.pdf) | [HippoRAG NeurIPS](slides/HippoRAG_NeurIPS_Slides.pdf) | [GitHub](https://github.com/OSU-NLP-Group/HippoRAG) | [🎨](diagrams/downloaded_images/memory-rag_HippoRAG.png) [🖼️](media/memory-rag/HippoRAG_Neurobiologically_Inspired_Long-Term_Memory/README.md) |
+| [Is Your LLM Secretly a World Model of the Internet](reinforcement_learning_papers/09_agentic_rl/Is_Your_LLM_Secretly_a_World_Model_of_the_Internet.pdf) | - | [GitHub](https://github.com/OSU-NLP-Group/WebDreamer) | [🖼️](media/memory-rag/Is_Your_LLM_Secretly_a_World_Model_of_the_Internet/README.md) |
+| [Tree Search for Language Model Agents](reinforcement_learning_papers/09_agentic_rl/Tree_Search_for_Language_Model_Agents.pdf) | - | [GitHub](https://github.com/kohjingyu/search-agents) | [🖼️](media/planning/Tree_Search_for_Language_Model_Agents/README.md) |
 
 ## Agent Frameworks
 
 | Paper | Slides | Code | Media |
 |-------|--------|------|-------|
-| [ReAct: Synergizing Reasoning and Acting](papers/agent-frameworks/ReAct_Synergizing_Reasoning_and_Acting.pdf) | [ReAct UVA Lecture](slides/ReAct_UVA_Lecture.pdf) | [GitHub](https://github.com/ysymyth/ReAct) | [🎨](diagrams/downloaded_images/agent-frameworks_ReAct-_Synergizing_Reasoning_and_Acting.png) [🖼️](media/agent-frameworks/ReAct_Synergizing_Reasoning_and_Acting/README.md) [🎧](https://notebooklm.cloud.google.com/global/notebook/fe6430c3-2fee-4244-ace3-1db109cc2c0c?project=358208640342) |
-| [AutoGen: Multi-Agent Conversation](papers/agent-frameworks/AutoGen_Multi-Agent_Conversation.pdf) | - | [GitHub](https://github.com/microsoft/autogen) | [🎨](diagrams/downloaded_images/agent-frameworks_AutoGen-_Multi-Agent_Conversation.png) [🖼️](media/agent-frameworks/AutoGen_Multi-Agent_Conversation/README.md) [🎧](https://notebooklm.cloud.google.com/global/notebook/bd26a628-e81f-4dc0-9371-70d9b54dcdca?project=358208640342) |
-| [StateFlow: Enhancing LLM Task-Solving](papers/agent-frameworks/StateFlow_Enhancing_LLM_Task-Solving.pdf) | - | [GitHub](https://github.com/yiranwu0/StateFlow) | [🖼️](media/agent-frameworks/StateFlow_Enhancing_LLM_Task-Solving/README.md) [🎧](https://notebooklm.cloud.google.com/global/notebook/918935e4-1b33-4a47-be5f-ac7c115cd09f?project=358208640342) |
-| [DSPy: Compiling Declarative Language Model](papers/agent-frameworks/DSPy_Compiling_Declarative_Language_Model.pdf) | - | [GitHub](https://github.com/stanfordnlp/dspy) | [🎨](diagrams/downloaded_images/agent-frameworks_DSPy-_Compiling_Declarative_Language_Model.png) [🖼️](media/agent-frameworks/DSPy_Compiling_Declarative_Language_Model/README.md) [🎧](https://notebooklm.cloud.google.com/global/notebook/7c68d545-0d36-402e-97f5-44e730389da2?project=358208640342) |
+| [ReAct: Synergizing Reasoning and Acting](reinforcement_learning_papers/09_agentic_rl/ReAct_Synergizing_Reasoning_and_Acting.pdf) | [ReAct UVA Lecture](slides/ReAct_UVA_Lecture.pdf) | [GitHub](https://github.com/ysymyth/ReAct) | [🎨](diagrams/downloaded_images/agent-frameworks_ReAct-_Synergizing_Reasoning_and_Acting.png) [🖼️](media/agent-frameworks/ReAct_Synergizing_Reasoning_and_Acting/README.md) [🎧](https://notebooklm.cloud.google.com/global/notebook/fe6430c3-2fee-4244-ace3-1db109cc2c0c?project=358208640342) |
+| [AutoGen: Multi-Agent Conversation](reinforcement_learning_papers/09_agentic_rl/AutoGen_Multi-Agent_Conversation.pdf) | - | [GitHub](https://github.com/microsoft/autogen) | [🎨](diagrams/downloaded_images/agent-frameworks_AutoGen-_Multi-Agent_Conversation.png) [🖼️](media/agent-frameworks/AutoGen_Multi-Agent_Conversation/README.md) [🎧](https://notebooklm.cloud.google.com/global/notebook/bd26a628-e81f-4dc0-9371-70d9b54dcdca?project=358208640342) |
+| [StateFlow: Enhancing LLM Task-Solving](reinforcement_learning_papers/09_agentic_rl/StateFlow_Enhancing_LLM_Task-Solving.pdf) | - | [GitHub](https://github.com/yiranwu0/StateFlow) | [🖼️](media/agent-frameworks/StateFlow_Enhancing_LLM_Task-Solving/README.md) [🎧](https://notebooklm.cloud.google.com/global/notebook/918935e4-1b33-4a47-be5f-ac7c115cd09f?project=358208640342) |
+| [DSPy: Compiling Declarative Language Model](reinforcement_learning_papers/09_agentic_rl/DSPy_Compiling_Declarative_Language_Model.pdf) | - | [GitHub](https://github.com/stanfordnlp/dspy) | [🎨](diagrams/downloaded_images/agent-frameworks_DSPy-_Compiling_Declarative_Language_Model.png) [🖼️](media/agent-frameworks/DSPy_Compiling_Declarative_Language_Model/README.md) [🎧](https://notebooklm.cloud.google.com/global/notebook/7c68d545-0d36-402e-97f5-44e730389da2?project=358208640342) |
 | **LLM Agents Tutorials** | [EMNLP 2024 Tutorial](slides/EMNLP2024_Language_Agents_Tutorial.pdf), [WWW 2024 Tutorial](slides/WWW2024_LLM_Agents_Tutorial.pdf), [Berkeley Training Agents](slides/Berkeley_LLM_Training_Agents.pdf) | - | - |
 
 ## Code Generation & Software Agents
 
 | Paper | Slides | Code | Media |
 |-------|--------|------|-------|
-| [SWE-agent: Agent-Computer Interfaces](papers/computer-use/SWE-agent_Agent-Computer_Interfaces.pdf) | [Software Agents (Neubig)](slides/Software_Agents_Neubig.pdf) | [GitHub](https://github.com/SWE-agent/SWE-agent) | [🎨](diagrams/downloaded_images/agent-frameworks_AutoGen-_Multi-Agent_Conversation.png) [🖼️](media/computer-use/SWE-agent_Agent-Computer_Interfaces/README.md) |
-| [OpenHands: AI Software Developers](papers/agent-frameworks/OpenHands_AI_Software_Developers.pdf) | [Software Agents (Neubig)](slides/Software_Agents_Neubig.pdf) | [GitHub](https://github.com/OpenHands/OpenHands) | [🖼️](media/agent-frameworks/OpenHands_AI_Software_Developers/README.md) [🎧](https://notebooklm.cloud.google.com/global/notebook/ed315459-c9ed-478d-975c-d17dd7f357ac?project=358208640342) |
-| [Interactive Tools Assist LM Agents Security Vulnerabilities](papers/security/Interactive_Tools_Assist_LM_Agents_Security_Vulnerabilities.pdf) | [Code Agents & Vulnerability Detection](slides/Code_Agents_Vulnerability_Detection_Berkeley.pdf) | [GitHub](https://github.com/NYU-LLM-CTF/NYU_CTF_) | - |
-| [Big Sleep: LLM Vulnerabilities Real-World](papers/security/Big_Sleep_LLM_Vulnerabilities_Real-World.pdf) | [Code Agents & Vulnerability Detection](slides/Code_Agents_Vulnerability_Detection_Berkeley.pdf) | - | - |
-| [SWE-bench Verified](papers/benchmarks/SWE-bench_Verified.pdf) | - | [GitHub](https://github.com/SWE-bench/SWE-bench) | [🖼️](media/benchmarks/SWE-bench_Verified/README.md) [🎧](https://notebooklm.cloud.google.com/global/notebook/a23fbadb-1949-4a19-b9b1-77d65d8478d4?project=358208640342) |
+| [SWE-agent: Agent-Computer Interfaces](reinforcement_learning_papers/09_agentic_rl/SWE-agent_Agent-Computer_Interfaces.pdf) | [Software Agents (Neubig)](slides/Software_Agents_Neubig.pdf) | [GitHub](https://github.com/SWE-agent/SWE-agent) | [🎨](diagrams/downloaded_images/agent-frameworks_AutoGen-_Multi-Agent_Conversation.png) [🖼️](media/computer-use/SWE-agent_Agent-Computer_Interfaces/README.md) |
+| [OpenHands: AI Software Developers](reinforcement_learning_papers/09_agentic_rl/OpenHands_AI_Software_Developers.pdf) | [Software Agents (Neubig)](slides/Software_Agents_Neubig.pdf) | [GitHub](https://github.com/OpenHands/OpenHands) | [🖼️](media/agent-frameworks/OpenHands_AI_Software_Developers/README.md) [🎧](https://notebooklm.cloud.google.com/global/notebook/ed315459-c9ed-478d-975c-d17dd7f357ac?project=358208640342) |
+| [Interactive Tools Assist LM Agents Security Vulnerabilities](reinforcement_learning_papers/05_safe_constrained_rl/Interactive_Tools_Assist_LM_Agents_Security_Vulnerabilities.pdf) | [Code Agents & Vulnerability Detection](slides/Code_Agents_Vulnerability_Detection_Berkeley.pdf) | [GitHub](https://github.com/NYU-LLM-CTF/NYU_CTF_) | - |
+| [Big Sleep: LLM Vulnerabilities Real-World](reinforcement_learning_papers/05_safe_constrained_rl/Big_Sleep_LLM_Vulnerabilities_Real-World.pdf) | [Code Agents & Vulnerability Detection](slides/Code_Agents_Vulnerability_Detection_Berkeley.pdf) | - | - |
+| [SWE-bench Verified](reinforcement_learning_papers/09_agentic_rl/SWE-bench_Verified.pdf) | - | [GitHub](https://github.com/SWE-bench/SWE-bench) | [🖼️](media/benchmarks/SWE-bench_Verified/README.md) [🎧](https://notebooklm.cloud.google.com/global/notebook/a23fbadb-1949-4a19-b9b1-77d65d8478d4?project=358208640342) |
 
 ## Web & Multimodal Agents
 
 | Paper | Slides | Code | Media |
 |-------|--------|------|-------|
-| [WebShop: Scalable Real-World Web Interaction](papers/web-agents/WebShop_Scalable_Real-World_Web_Interaction.pdf) | [Multimodal Agents Berkeley](slides/Multimodal_Agents_Berkeley.pdf) | [GitHub](https://github.com/princeton-nlp/WebShop) | - |
-| [Mind2Web: Generalist Agent for the Web](papers/web-agents/Mind2Web_Generalist_Agent_for_the_Web.pdf) | [Multimodal Agents Berkeley](slides/Multimodal_Agents_Berkeley.pdf) | [GitHub](https://github.com/OSU-NLP-Group/Mind2Web) | - |
-| [WebArena: Realistic Web Environment](papers/web-agents/WebArena_Realistic_Web_Environment.pdf) | [Multimodal Agents Berkeley](slides/Multimodal_Agents_Berkeley.pdf), [Web Agent Evaluation](slides/Web_Agent_Evaluation_Refinement.pdf) | [GitHub](https://github.com/web-arena-x/webarena) | - |
-| [VisualWebArena](papers/web-agents/VisualWebArena.pdf) | [Multimodal Agents Berkeley](slides/Multimodal_Agents_Berkeley.pdf) | [GitHub](https://github.com/web-arena-x/visualwebarena) | - |
-| [AGUVIS: Unified Pure Vision Agents GUI](papers/web-agents/AGUVIS_Unified_Pure_Vision_Agents_GUI.pdf) | - | [GitHub](https://github.com/xlang-ai/aguvis) | - |
-| [BrowseComp: Web Browsing Benchmark](papers/web-agents/BrowseComp_Web_Browsing_Benchmark.pdf) | - | [GitHub](https://github.com/openai/simple-evals) | - |
+| [WebShop: Scalable Real-World Web Interaction](reinforcement_learning_papers/09_agentic_rl/WebShop_Scalable_Real-World_Web_Interaction.pdf) | [Multimodal Agents Berkeley](slides/Multimodal_Agents_Berkeley.pdf) | [GitHub](https://github.com/princeton-nlp/WebShop) | - |
+| [Mind2Web: Generalist Agent for the Web](reinforcement_learning_papers/09_agentic_rl/Mind2Web_Generalist_Agent_for_the_Web.pdf) | [Multimodal Agents Berkeley](slides/Multimodal_Agents_Berkeley.pdf) | [GitHub](https://github.com/OSU-NLP-Group/Mind2Web) | - |
+| [WebArena: Realistic Web Environment](reinforcement_learning_papers/09_agentic_rl/WebArena_Realistic_Web_Environment.pdf) | [Multimodal Agents Berkeley](slides/Multimodal_Agents_Berkeley.pdf), [Web Agent Evaluation](slides/Web_Agent_Evaluation_Refinement.pdf) | [GitHub](https://github.com/web-arena-x/webarena) | - |
+| [VisualWebArena](reinforcement_learning_papers/09_agentic_rl/VisualWebArena.pdf) | [Multimodal Agents Berkeley](slides/Multimodal_Agents_Berkeley.pdf) | [GitHub](https://github.com/web-arena-x/visualwebarena) | - |
+| [AGUVIS: Unified Pure Vision Agents GUI](reinforcement_learning_papers/09_agentic_rl/AGUVIS_Unified_Pure_Vision_Agents_GUI.pdf) | - | [GitHub](https://github.com/xlang-ai/aguvis) | - |
+| [BrowseComp: Web Browsing Benchmark](reinforcement_learning_papers/09_agentic_rl/BrowseComp_Web_Browsing_Benchmark.pdf) | - | [GitHub](https://github.com/openai/simple-evals) | - |
 
 ## Enterprise & Workflow Agents
 
 | Paper | Slides | Code | Media |
 |-------|--------|------|-------|
-| [WorkArena: Common Knowledge Work Tasks](papers/benchmarks/WorkArena_Common_Knowledge_Work_Tasks.pdf) | - | [GitHub](https://github.com/ServiceNow/WorkArena) | [🖼️](media/benchmarks/WorkArena_Common_Knowledge_Work_Tasks/README.md) [🎧](https://notebooklm.cloud.google.com/global/notebook/e719ad68-4c9a-4587-b792-c35c10e8b405?project=358208640342) |
-| [WorkArena++: Compositional Planning](papers/benchmarks/WorkArena_Compositional_Planning.pdf) | - | [GitHub](https://github.com/ServiceNow/WorkArena) | [🖼️](media/benchmarks/WorkArena_Compositional_Planning/README.md) [🎧](https://notebooklm.cloud.google.com/global/notebook/53f4fdb1-7eb9-4ecf-a0be-11bfbdcd4e29?project=358208640342) |
-| [TapeAgents: Holistic Framework Agent Development](papers/agent-frameworks/TapeAgents_Holistic_Framework_Agent_Development.pdf) | [TapeAgents Slides](slides/TapeAgents_ServiceNow.pdf) | [GitHub](https://github.com/ServiceNow/TapeAgents) | [🖼️](media/agent-frameworks/TapeAgents_Holistic_Framework_Agent_Development/README.md) [🎧](https://notebooklm.cloud.google.com/global/notebook/8cd2f3fb-cb23-44a8-863d-3242c823aa04?project=358208640342) |
+| [WorkArena: Common Knowledge Work Tasks](reinforcement_learning_papers/09_agentic_rl/WorkArena_Common_Knowledge_Work_Tasks.pdf) | - | [GitHub](https://github.com/ServiceNow/WorkArena) | [🖼️](media/benchmarks/WorkArena_Common_Knowledge_Work_Tasks/README.md) [🎧](https://notebooklm.cloud.google.com/global/notebook/e719ad68-4c9a-4587-b792-c35c10e8b405?project=358208640342) |
+| [WorkArena++: Compositional Planning](reinforcement_learning_papers/09_agentic_rl/WorkArena_Compositional_Planning.pdf) | - | [GitHub](https://github.com/ServiceNow/WorkArena) | [🖼️](media/benchmarks/WorkArena_Compositional_Planning/README.md) [🎧](https://notebooklm.cloud.google.com/global/notebook/53f4fdb1-7eb9-4ecf-a0be-11bfbdcd4e29?project=358208640342) |
+| [TapeAgents: Holistic Framework Agent Development](reinforcement_learning_papers/09_agentic_rl/TapeAgents_Holistic_Framework_Agent_Development.pdf) | [TapeAgents Slides](slides/TapeAgents_ServiceNow.pdf) | [GitHub](https://github.com/ServiceNow/TapeAgents) | [🖼️](media/agent-frameworks/TapeAgents_Holistic_Framework_Agent_Development/README.md) [🎧](https://notebooklm.cloud.google.com/global/notebook/8cd2f3fb-cb23-44a8-863d-3242c823aa04?project=358208640342) |
 
 ## Mathematics & Theorem Proving
 
 | Paper | Slides | Code | Media |
 |-------|--------|------|-------|
-| [LeanDojo: Theorem Proving Retrieval-Augmented](papers/theorem-proving/LeanDojo_Theorem_Proving_Retrieval-Augmented.pdf) | [LeanDojo AITP](slides/LeanDojo_AITP_Slides.pdf), [LeanDojo NeurIPS](slides/LeanDojo_NeurIPS_Slides.pdf), [Theorem Proving ML](slides/Theorem_Proving_ML_Slides.pdf) | [GitHub](https://github.com/lean-dojo/LeanDojo) | [🎨](diagrams/downloaded_images/theorem-proving_leandojo-_retrieval-augmented.png) |
-| [Autoformalization with Large Language Models](papers/theorem-proving/Autoformalization_with_Large_Language_Models.pdf) | - | - | [🎨](diagrams/downloaded_images/agent-frameworks_DSPy-_Compiling_Declarative_Language_Model.png) |
-| [Autoformalizing Euclidean Geometry](papers/theorem-proving/Autoformalizing_Euclidean_Geometry.pdf) | - | [GitHub](https://github.com/loganrjmurphy/LeanEuclid) | [🎨](diagrams/downloaded_images/theorem-proving_autoformalizing_euclidean_geometry.png) |
-| [Draft, Sketch and Prove: Formal Theorem Provers](papers/theorem-proving/Draft_Sketch_and_Prove_Formal_Theorem_Provers.pdf) | [Theorem Proving ML](slides/Theorem_Proving_ML_Slides.pdf) | [GitHub](https://github.com/albertqjiang/draft_sketch_prove) | [🎨](diagrams/downloaded_images/theorem-proving_draft_sketch_prove.png) |
-| [miniCTX: Neural Theorem Proving Long-Contexts](papers/theorem-proving/miniCTX_Neural_Theorem_Proving_Long-Contexts.pdf) | - | [GitHub](https://github.com/cmu-l3/minictx-eval) | [🎨](diagrams/downloaded_images/theorem-proving_minictx-_long-context.png) |
-| [Lean-STaR: Interleave Thinking and Proving](papers/theorem-proving/Lean-STaR_Interleave_Thinking_and_Proving.pdf) | [Berkeley Slides](slides/Welleck_Berkeley_Bridging_Informal_Formal_Math.pdf) | [GitHub](https://github.com/Lagooon/LeanSTaR) [Website](https://leanstar.github.io/) | [🎨](diagrams/downloaded_images/agent-frameworks_ReAct-_Synergizing_Reasoning_and_Acting.png) |
-| [ImProver: Agent-Based Automated Proof Optimization](papers/theorem-proving/ImProver_Agent-Based_Automated_Proof_Optimization.pdf) | - | [GitHub](https://github.com/riyazahuja/ImProver) | [🎨](diagrams/downloaded_images/reasoning_07_Iterative_Reasoning_Preference_Optimization.png) |
-| [In-Context Learning Agent Formal Theorem-Proving](papers/theorem-proving/In-Context_Learning_Agent_Formal_Theorem-Proving.pdf) | - | [GitHub](https://github.com/trishullab/copra) | - |
-| [Symbolic Regression: Learned Concept Library](papers/planning/Symbolic_Regression_Learned_Concept_Library.pdf) | - | [GitHub](https://github.com/trishullab/LibraryAugmentedSymbolicRegression.jl) | [🖼️](media/planning/Symbolic_Regression_Learned_Concept_Library/README.md) |
-| [AlphaGeometry: Solving Olympiad Geometry](papers/theorem-proving/AlphaGeometry_Solving_Olympiad_Geometry.pdf) | - | [GitHub](https://github.com/google-deepmind/alphageometry) | - |
+| [LeanDojo: Theorem Proving Retrieval-Augmented](reinforcement_learning_papers/16_applied_rl/LeanDojo_Theorem_Proving_Retrieval-Augmented.pdf) | [LeanDojo AITP](slides/LeanDojo_AITP_Slides.pdf), [LeanDojo NeurIPS](slides/LeanDojo_NeurIPS_Slides.pdf), [Theorem Proving ML](slides/Theorem_Proving_ML_Slides.pdf) | [GitHub](https://github.com/lean-dojo/LeanDojo) | [🎨](diagrams/downloaded_images/theorem-proving_leandojo-_retrieval-augmented.png) |
+| [Autoformalization with Large Language Models](reinforcement_learning_papers/16_applied_rl/Autoformalization_with_Large_Language_Models.pdf) | - | - | [🎨](diagrams/downloaded_images/agent-frameworks_DSPy-_Compiling_Declarative_Language_Model.png) |
+| [Autoformalizing Euclidean Geometry](reinforcement_learning_papers/16_applied_rl/Autoformalizing_Euclidean_Geometry.pdf) | - | [GitHub](https://github.com/loganrjmurphy/LeanEuclid) | [🎨](diagrams/downloaded_images/theorem-proving_autoformalizing_euclidean_geometry.png) |
+| [Draft, Sketch and Prove: Formal Theorem Provers](reinforcement_learning_papers/16_applied_rl/Draft_Sketch_and_Prove_Formal_Theorem_Provers.pdf) | [Theorem Proving ML](slides/Theorem_Proving_ML_Slides.pdf) | [GitHub](https://github.com/albertqjiang/draft_sketch_prove) | [🎨](diagrams/downloaded_images/theorem-proving_draft_sketch_prove.png) |
+| [miniCTX: Neural Theorem Proving Long-Contexts](reinforcement_learning_papers/16_applied_rl/miniCTX_Neural_Theorem_Proving_Long-Contexts.pdf) | - | [GitHub](https://github.com/cmu-l3/minictx-eval) | [🎨](diagrams/downloaded_images/theorem-proving_minictx-_long-context.png) |
+| [Lean-STaR: Interleave Thinking and Proving](reinforcement_learning_papers/16_applied_rl/Lean-STaR_Interleave_Thinking_and_Proving.pdf) | [Berkeley Slides](slides/Welleck_Berkeley_Bridging_Informal_Formal_Math.pdf) | [GitHub](https://github.com/Lagooon/LeanSTaR) [Website](https://leanstar.github.io/) | [🎨](diagrams/downloaded_images/agent-frameworks_ReAct-_Synergizing_Reasoning_and_Acting.png) |
+| [ImProver: Agent-Based Automated Proof Optimization](reinforcement_learning_papers/16_applied_rl/ImProver_Agent-Based_Automated_Proof_Optimization.pdf) | - | [GitHub](https://github.com/riyazahuja/ImProver) | [🎨](diagrams/downloaded_images/reasoning_07_Iterative_Reasoning_Preference_Optimization.png) |
+| [In-Context Learning Agent Formal Theorem-Proving](reinforcement_learning_papers/16_applied_rl/In-Context_Learning_Agent_Formal_Theorem-Proving.pdf) | - | [GitHub](https://github.com/trishullab/copra) | - |
+| [Symbolic Regression: Learned Concept Library](reinforcement_learning_papers/09_agentic_rl/Symbolic_Regression_Learned_Concept_Library.pdf) | - | [GitHub](https://github.com/trishullab/LibraryAugmentedSymbolicRegression.jl) | [🖼️](media/planning/Symbolic_Regression_Learned_Concept_Library/README.md) |
+| [AlphaGeometry: Solving Olympiad Geometry](reinforcement_learning_papers/16_applied_rl/AlphaGeometry_Solving_Olympiad_Geometry.pdf) | - | [GitHub](https://github.com/google-deepmind/alphageometry) | - |
 
 ## Robotics & Embodied Agents
 
 | Paper | Slides | Code | Media |
 |-------|--------|------|-------|
-| [Voyager: Open-Ended Embodied Agent](papers/robotics/Voyager_Open-Ended_Embodied_Agent.pdf) | [Voyager UT Austin](slides/Voyager_UT_Austin_Presentation.pdf) | [GitHub](https://github.com/MineDojo/Voyager) | [🎨](diagrams/downloaded_images/robotics_Voyager-_Open-Ended_Embodied_Agent.png) |
-| [Eureka: Human-Level Reward Design](papers/robotics/Eureka_Human-Level_Reward_Design.pdf) | [Eureka Paper/Slides](slides/Eureka_Reward_Design_Paper.pdf) | [GitHub](https://github.com/eureka-research/Eureka) | [🎨](diagrams/downloaded_images/robotics_Eureka-_Human-Level_Reward_Design.png) [🖼️](media/robotics/Eureka_Human-Level_Reward_Design/README.md) |
-| [DrEureka: Language Model Guided Sim-To-Real](papers/robotics/DrEureka_Language_Model_Guided_Sim-To-Real.pdf) | - | [GitHub](https://github.com/eureka-research/DrEureka) | [🎨](diagrams/downloaded_images/robotics_DrEureka-_Sim-to-Real.png) [🖼️](media/robotics/DrEureka_Language_Model_Guided_Sim-To-Real/README.md) |
-| [Gran Turismo: Deep Reinforcement Learning](papers/robotics/Gran_Turismo_Deep_Reinforcement_Learning.pdf) | - | - | [🖼️](media/robotics/Gran_Turismo_Deep_Reinforcement_Learning/README.md) |
-| [GR00T N1: Foundation Model Humanoid](papers/robotics/GR00T_N1_Foundation_Model_Humanoid.pdf) | - | [GitHub](https://github.com/NVIDIA/Isaac-GR00T) | [🎨](diagrams/downloaded_images/robotics_GR00T_N1-_Humanoid_Foundation_Model.png) [🖼️](media/robotics/GR00T_N1_Foundation_Model_Humanoid/README.md) |
-| [SLAC: Simulation-Pretrained Latent Action](papers/robotics/SLAC_Simulation-Pretrained_Latent_Action.pdf) | - | - | - |
+| [Voyager: Open-Ended Embodied Agent](reinforcement_learning_papers/16_applied_rl/Voyager_Open-Ended_Embodied_Agent.pdf) | [Voyager UT Austin](slides/Voyager_UT_Austin_Presentation.pdf) | [GitHub](https://github.com/MineDojo/Voyager) | [🎨](diagrams/downloaded_images/robotics_Voyager-_Open-Ended_Embodied_Agent.png) |
+| [Eureka: Human-Level Reward Design](reinforcement_learning_papers/16_applied_rl/Eureka_Human-Level_Reward_Design.pdf) | [Eureka Paper/Slides](slides/Eureka_Reward_Design_Paper.pdf) | [GitHub](https://github.com/eureka-research/Eureka) | [🎨](diagrams/downloaded_images/robotics_Eureka-_Human-Level_Reward_Design.png) [🖼️](media/robotics/Eureka_Human-Level_Reward_Design/README.md) |
+| [DrEureka: Language Model Guided Sim-To-Real](reinforcement_learning_papers/16_applied_rl/DrEureka_Language_Model_Guided_Sim-To-Real.pdf) | - | [GitHub](https://github.com/eureka-research/DrEureka) | [🎨](diagrams/downloaded_images/robotics_DrEureka-_Sim-to-Real.png) [🖼️](media/robotics/DrEureka_Language_Model_Guided_Sim-To-Real/README.md) |
+| [Gran Turismo: Deep Reinforcement Learning](reinforcement_learning_papers/16_applied_rl/Gran_Turismo_Deep_Reinforcement_Learning.pdf) | - | - | [🖼️](media/robotics/Gran_Turismo_Deep_Reinforcement_Learning/README.md) |
+| [GR00T N1: Foundation Model Humanoid](reinforcement_learning_papers/16_applied_rl/GR00T_N1_Foundation_Model_Humanoid.pdf) | - | [GitHub](https://github.com/NVIDIA/Isaac-GR00T) | [🎨](diagrams/downloaded_images/robotics_GR00T_N1-_Humanoid_Foundation_Model.png) [🖼️](media/robotics/GR00T_N1_Foundation_Model_Humanoid/README.md) |
+| [SLAC: Simulation-Pretrained Latent Action](reinforcement_learning_papers/16_applied_rl/SLAC_Simulation-Pretrained_Latent_Action.pdf) | - | - | - |
 
 ## Scientific Discovery
 
 | Paper | Slides | Code | Media |
 |-------|--------|------|-------|
-| [Paper2Agent: Research Papers as AI Agents](papers/agent-frameworks/Paper2Agent_Research_Papers_as_AI_Agents.pdf) | - | [GitHub](https://github.com/jmiao24/Paper2Agent) | [🖼️](media/agent-frameworks/Paper2Agent_Research_Papers_as_AI_Agents/README.md) [🎧](https://notebooklm.cloud.google.com/global/notebook/9db0bff2-5fa0-4eeb-87d4-477d420ef5c9?project=358208640342) |
-| [OpenScholar: Synthesizing Scientific Literature](papers/memory-rag/OpenScholar_Synthesizing_Scientific_Literature.pdf) | - | [GitHub](https://github.com/AkariAsai/OpenScholar) | [🖼️](media/memory-rag/OpenScholar_Synthesizing_Scientific_Literature/README.md) |
+| [Paper2Agent: Research Papers as AI Agents](reinforcement_learning_papers/09_agentic_rl/Paper2Agent_Research_Papers_as_AI_Agents.pdf) | - | [GitHub](https://github.com/jmiao24/Paper2Agent) | [🖼️](media/agent-frameworks/Paper2Agent_Research_Papers_as_AI_Agents/README.md) [🎧](https://notebooklm.cloud.google.com/global/notebook/9db0bff2-5fa0-4eeb-87d4-477d420ef5c9?project=358208640342) |
+| [OpenScholar: Synthesizing Scientific Literature](reinforcement_learning_papers/09_agentic_rl/OpenScholar_Synthesizing_Scientific_Literature.pdf) | - | [GitHub](https://github.com/AkariAsai/OpenScholar) | [🖼️](media/memory-rag/OpenScholar_Synthesizing_Scientific_Literature/README.md) |
 
 ## Safety & Security
 
 | Paper | Slides | Code | Media |
 |-------|--------|------|-------|
-| [DataSentinel: Game-Theoretic Detection Prompt Injection](papers/security/DataSentinel_Game-Theoretic_Detection_Prompt_Injection.pdf) | [Prompt Injection Duke](slides/Prompt_Injection_Duke_Slides.pdf) | [GitHub](https://github.com/liu00222/Open-Prompt-Injection) | - |
-| [AgentPoison: Red-teaming LLM Agents](papers/security/AgentPoison_Red-teaming_LLM_Agents.pdf) | [Prompt Injection Duke](slides/Prompt_Injection_Duke_Slides.pdf) | [GitHub](https://github.com/AI-secure/AgentPoison) | [🎨](diagrams/downloaded_images/robotics_Voyager-_Open-Ended_Embodied_Agent.png) |
-| [Progent: Programmable Privilege Control](papers/security/Progent_Programmable_Privilege_Control.pdf) | - | - | - |
-| [DecodingTrust: Trustworthiness GPT Models](papers/security/DecodingTrust_Trustworthiness_GPT_Models.pdf) | - | [GitHub](https://github.com/AI-secure/DecodingTrust) | - |
-| [Representation Engineering: AI Transparency](papers/security/Representation_Engineering_AI_Transparency.pdf) | - | [GitHub](https://github.com/andyzoujm/representation-engineering) | - |
-| [Extracting Training Data from LLMs](papers/security/Extracting_Training_Data_from_LLMs.pdf) | - | - | - |
-| [The Secret Sharer: Unintended Memorization](papers/security/The_Secret_Sharer_Unintended_Memorization.pdf) | - | - | - |
-| [Privtrans: Privilege Separation](papers/security/Privtrans_Privilege_Separation.pdf) | - | - | - |
+| [DataSentinel: Game-Theoretic Detection Prompt Injection](reinforcement_learning_papers/05_safe_constrained_rl/DataSentinel_Game-Theoretic_Detection_Prompt_Injection.pdf) | [Prompt Injection Duke](slides/Prompt_Injection_Duke_Slides.pdf) | [GitHub](https://github.com/liu00222/Open-Prompt-Injection) | - |
+| [AgentPoison: Red-teaming LLM Agents](reinforcement_learning_papers/05_safe_constrained_rl/AgentPoison_Red-teaming_LLM_Agents.pdf) | [Prompt Injection Duke](slides/Prompt_Injection_Duke_Slides.pdf) | [GitHub](https://github.com/AI-secure/AgentPoison) | [🎨](diagrams/downloaded_images/robotics_Voyager-_Open-Ended_Embodied_Agent.png) |
+| [Progent: Programmable Privilege Control](reinforcement_learning_papers/05_safe_constrained_rl/Progent_Programmable_Privilege_Control.pdf) | - | - | - |
+| [DecodingTrust: Trustworthiness GPT Models](reinforcement_learning_papers/05_safe_constrained_rl/DecodingTrust_Trustworthiness_GPT_Models.pdf) | - | [GitHub](https://github.com/AI-secure/DecodingTrust) | - |
+| [Representation Engineering: AI Transparency](reinforcement_learning_papers/05_safe_constrained_rl/Representation_Engineering_AI_Transparency.pdf) | - | [GitHub](https://github.com/andyzoujm/representation-engineering) | - |
+| [Extracting Training Data from LLMs](reinforcement_learning_papers/05_safe_constrained_rl/Extracting_Training_Data_from_LLMs.pdf) | - | - | - |
+| [The Secret Sharer: Unintended Memorization](reinforcement_learning_papers/05_safe_constrained_rl/The_Secret_Sharer_Unintended_Memorization.pdf) | - | - | - |
+| [Privtrans: Privilege Separation](reinforcement_learning_papers/05_safe_constrained_rl/Privtrans_Privilege_Separation.pdf) | - | - | - |
 
 ## Evaluation & Benchmarking
 
 | Paper | Slides | Code | Media |
 |-------|--------|------|-------|
-| [Survey: Evaluation LLM-based Agents](papers/benchmarks/Survey_Evaluation_LLM-based_Agents.pdf) | [AgentBench Multi-Turn NeurIPS](slides/AgentBench_Multi_Turn_NeurIPS.pdf) | - | [🖼️](media/benchmarks/Survey_Evaluation_LLM-based_Agents/README.md) [🎧](https://notebooklm.cloud.google.com/global/notebook/728fb1d8-6903-4ac3-bd97-eec90cc67182?project=358208640342) |
-| [Adding Error Bars to Evals](papers/benchmarks/Adding_Error_Bars_to_Evals.pdf) | - | [GitHub](https://github.com/openai/evals) | [🖼️](media/benchmarks/Adding_Error_Bars_to_Evals/README.md) [🎧](https://notebooklm.cloud.google.com/global/notebook/2df09327-6444-4c47-995c-4d5389b15fe9?project=358208640342) |
-| [Tau2-Bench: Conversational Agents Dual-Control](papers/benchmarks/Tau2-Bench_Conversational_Agents_Dual-Control.pdf) | - | [GitHub](https://github.com/sierra-research/tau2-bench) | [🖼️](media/benchmarks/Tau2-Bench_Conversational_Agents_Dual-Control/README.md) [🎧](https://notebooklm.cloud.google.com/global/notebook/f5a83e17-9a24-4ad6-a32f-e8921ee4c73d?project=358208640342) |
+| [Survey: Evaluation LLM-based Agents](reinforcement_learning_papers/09_agentic_rl/Survey_Evaluation_LLM-based_Agents.pdf) | [AgentBench Multi-Turn NeurIPS](slides/AgentBench_Multi_Turn_NeurIPS.pdf) | - | [🖼️](media/benchmarks/Survey_Evaluation_LLM-based_Agents/README.md) [🎧](https://notebooklm.cloud.google.com/global/notebook/728fb1d8-6903-4ac3-bd97-eec90cc67182?project=358208640342) |
+| [Adding Error Bars to Evals](reinforcement_learning_papers/09_agentic_rl/Adding_Error_Bars_to_Evals.pdf) | - | [GitHub](https://github.com/openai/evals) | [🖼️](media/benchmarks/Adding_Error_Bars_to_Evals/README.md) [🎧](https://notebooklm.cloud.google.com/global/notebook/2df09327-6444-4c47-995c-4d5389b15fe9?project=358208640342) |
+| [Tau2-Bench: Conversational Agents Dual-Control](reinforcement_learning_papers/09_agentic_rl/Tau2-Bench_Conversational_Agents_Dual-Control.pdf) | - | [GitHub](https://github.com/sierra-research/tau2-bench) | [🖼️](media/benchmarks/Tau2-Bench_Conversational_Agents_Dual-Control/README.md) [🎧](https://notebooklm.cloud.google.com/global/notebook/f5a83e17-9a24-4ad6-a32f-e8921ee4c73d?project=358208640342) |
 | **Data Science Agents** | [Data Science Agents Benchmark](slides/Data_Science_Agents_Benchmark.pdf) | - | - |
 
 ## Neural & Symbolic Reasoning
 
 | Paper | Slides | Code | Media |
 |-------|--------|------|-------|
-| [Beyond A-Star: Better Planning Transformers](papers/reasoning/Beyond_A-Star_Better_Planning_Transformers.pdf) | - | [GitHub](https://github.com/facebookresearch/searchformer) | [🖼️](media/reasoning/Beyond_A-Star_Better_Planning_Transformers/README.md) |
-| [Dualformer: Controllable Fast and Slow Thinking](papers/reasoning/Dualformer_Controllable_Fast_and_Slow_Thinking.pdf) | - | [GitHub](https://github.com/facebookresearch/dualformer) | [🖼️](media/reasoning/Dualformer_Controllable_Fast_and_Slow_Thinking/README.md) |
-| [Composing Global Optimizers: Algebraic Objects](papers/planning/Composing_Global_Optimizers_Algebraic_Objects.pdf) | - | - | [🖼️](media/planning/Composing_Global_Optimizers_Algebraic_Objects/README.md) |
-| [SurCo: Learning Linear Surrogates](papers/planning/SurCo_Learning_Linear_Surrogates.pdf) | - | - | [🖼️](media/planning/SurCo_Learning_Linear_Surrogates/README.md) |
+| [Beyond A-Star: Better Planning Transformers](reinforcement_learning_papers/09_agentic_rl/Beyond_A-Star_Better_Planning_Transformers.pdf) | - | [GitHub](https://github.com/facebookresearch/searchformer) | [🖼️](media/reasoning/Beyond_A-Star_Better_Planning_Transformers/README.md) |
+| [Dualformer: Controllable Fast and Slow Thinking](reinforcement_learning_papers/09_agentic_rl/Dualformer_Controllable_Fast_and_Slow_Thinking.pdf) | - | [GitHub](https://github.com/facebookresearch/dualformer) | [🖼️](media/reasoning/Dualformer_Controllable_Fast_and_Slow_Thinking/README.md) |
+| [Composing Global Optimizers: Algebraic Objects](reinforcement_learning_papers/09_agentic_rl/Composing_Global_Optimizers_Algebraic_Objects.pdf) | - | - | [🖼️](media/planning/Composing_Global_Optimizers_Algebraic_Objects/README.md) |
+| [SurCo: Learning Linear Surrogates](reinforcement_learning_papers/09_agentic_rl/SurCo_Learning_Linear_Surrogates.pdf) | - | - | [🖼️](media/planning/SurCo_Learning_Linear_Surrogates/README.md) |
 
 ## Agentic Reasoning & RL Fine-Tuning
 
@@ -196,31 +196,31 @@ slides/                  # 92 presentation decks (504 MB)
 
 | Paper | Slides | Code | Media |
 |-------|--------|------|-------|
-| [DeepSeek-R1: Reasoning via RL](papers/rl-finetuning/DeepSeek-R1_Reasoning_via_RL.pdf) | [DeepSeek R1 Intro](slides/DeepSeek_R1_Introduction.pdf), [DeepSeek R1 Toronto](slides/DeepSeek_R1_Toronto.pdf), [DeepSeek R1 CMU](slides/DeepSeek_R1_CMU_Reasoning.pdf), [DeepSeek R1 Seoul](slides/DeepSeek_R1_Seoul_National.pdf) | [GitHub](https://github.com/deepseek-ai/DeepSeek-R1) | [🎨](diagrams/downloaded_images/rl-finetuning_DeepSeek-R1-_Reasoning_via_RL.png) [🖼️](media/rl-finetuning/DeepSeek-R1_Reasoning_via_RL/README.md) |
-| [DeepSeek R1: Implications for AI](papers/rl-finetuning/DeepSeek_R1_Implications_for_AI.pdf) | [DeepSeek R1 Intro](slides/DeepSeek_R1_Introduction.pdf) | - | [🎨](diagrams/downloaded_images/rl-finetuning_DeepSeek_R1-_Implications_for_AI.png) [🖼️](media/rl-finetuning/DeepSeek_R1_Implications_for_AI/README.md) |
-| [DeepSeek R1: Are Reasoning Models Faithful?](papers/rl-finetuning/DeepSeek_R1_Reasoning_Models_Faithful.pdf) | - | - | [🎨](diagrams/downloaded_images/rl-finetuning_DeepSeek-R1-_Reasoning_via_RL.png) [🖼️](media/rl-finetuning/DeepSeek_R1_Reasoning_Models_Faithful/README.md) |
-| [OpenAI O1 Replication Journey](papers/rl-finetuning/OpenAI_O1_Replication_Journey.pdf) | - | [GitHub](https://github.com/GAIR-NLP/O1-Journey) | [🎨](diagrams/downloaded_images/rl-finetuning_DeepSeek_R1-_Implications_for_AI.png) [🖼️](media/rl-finetuning/OpenAI_O1_Replication_Journey/README.md) |
-| [Qwen QwQ Reasoning Model](papers/rl-finetuning/Qwen_QwQ_Reasoning_Model.pdf) | - | [HuggingFace](https://huggingface.co/Qwen/QwQ-32B-Preview) | [🎨](diagrams/downloaded_images/rl-finetuning_DeepSeek-R1-_Reasoning_via_RL.png) [🖼️](media/rl-finetuning/Qwen_QwQ_Reasoning_Model/README.md) |
-| [Sky-T1: Training Small Reasoning LLMs](papers/rl-finetuning/Sky-T1_Training_Small_Reasoning_LLMs.pdf) | - | [GitHub](https://github.com/NovaSky-AI/SkyThought) | [🖼️](media/rl-finetuning/Sky-T1_Training_Small_Reasoning_LLMs/README.md) |
-| [s1: Simple Test-Time Scaling](papers/rl-finetuning/s1_Simple_Test-Time_Scaling.pdf) | - | [GitHub](https://github.com/simplescaling/s1) | [🖼️](media/rl-finetuning/s1_Simple_Test-Time_Scaling/README.md) |
+| [DeepSeek-R1: Reasoning via RL](reinforcement_learning_papers/02_rlhf_alignment/DeepSeek-R1_Reasoning_via_RL.pdf) | [DeepSeek R1 Intro](slides/DeepSeek_R1_Introduction.pdf), [DeepSeek R1 Toronto](slides/DeepSeek_R1_Toronto.pdf), [DeepSeek R1 CMU](slides/DeepSeek_R1_CMU_Reasoning.pdf), [DeepSeek R1 Seoul](slides/DeepSeek_R1_Seoul_National.pdf) | [GitHub](https://github.com/deepseek-ai/DeepSeek-R1) | [🎨](diagrams/downloaded_images/rl-finetuning_DeepSeek-R1-_Reasoning_via_RL.png) [🖼️](media/rl-finetuning/DeepSeek-R1_Reasoning_via_RL/README.md) |
+| [DeepSeek R1: Implications for AI](reinforcement_learning_papers/02_rlhf_alignment/DeepSeek_R1_Implications_for_AI.pdf) | [DeepSeek R1 Intro](slides/DeepSeek_R1_Introduction.pdf) | - | [🎨](diagrams/downloaded_images/rl-finetuning_DeepSeek_R1-_Implications_for_AI.png) [🖼️](media/rl-finetuning/DeepSeek_R1_Implications_for_AI/README.md) |
+| [DeepSeek R1: Are Reasoning Models Faithful?](reinforcement_learning_papers/02_rlhf_alignment/DeepSeek_R1_Reasoning_Models_Faithful.pdf) | - | - | [🎨](diagrams/downloaded_images/rl-finetuning_DeepSeek-R1-_Reasoning_via_RL.png) [🖼️](media/rl-finetuning/DeepSeek_R1_Reasoning_Models_Faithful/README.md) |
+| [OpenAI O1 Replication Journey](reinforcement_learning_papers/02_rlhf_alignment/OpenAI_O1_Replication_Journey.pdf) | - | [GitHub](https://github.com/GAIR-NLP/O1-Journey) | [🎨](diagrams/downloaded_images/rl-finetuning_DeepSeek_R1-_Implications_for_AI.png) [🖼️](media/rl-finetuning/OpenAI_O1_Replication_Journey/README.md) |
+| [Qwen QwQ Reasoning Model](reinforcement_learning_papers/02_rlhf_alignment/Qwen_QwQ_Reasoning_Model.pdf) | - | [HuggingFace](https://huggingface.co/Qwen/QwQ-32B-Preview) | [🎨](diagrams/downloaded_images/rl-finetuning_DeepSeek-R1-_Reasoning_via_RL.png) [🖼️](media/rl-finetuning/Qwen_QwQ_Reasoning_Model/README.md) |
+| [Sky-T1: Training Small Reasoning LLMs](reinforcement_learning_papers/02_rlhf_alignment/Sky-T1_Training_Small_Reasoning_LLMs.pdf) | - | [GitHub](https://github.com/NovaSky-AI/SkyThought) | [🖼️](media/rl-finetuning/Sky-T1_Training_Small_Reasoning_LLMs/README.md) |
+| [s1: Simple Test-Time Scaling](reinforcement_learning_papers/02_rlhf_alignment/s1_Simple_Test-Time_Scaling.pdf) | - | [GitHub](https://github.com/simplescaling/s1) | [🖼️](media/rl-finetuning/s1_Simple_Test-Time_Scaling/README.md) |
 
 ### GRPO & RL Fine-Tuning
 
 | Paper | Slides | Code | Media |
 |-------|--------|------|-------|
-| [DeepSeekMath: GRPO Algorithm](papers/rl-finetuning/DeepSeekMath_GRPO.pdf) | [Stanford RL for Reasoning](slides/Stanford_RL_for_LLM_Reasoning.pdf) | [GitHub](https://github.com/deepseek-ai/DeepSeek-Math) | [🎨](diagrams/downloaded_images/rl-finetuning_DeepSeek_R1-_Implications_for_AI.png) [🖼️](media/rl-finetuning/DeepSeekMath_GRPO/README.md) |
-| [Guided GRPO: Adaptive Guidance](papers/rl-finetuning/Guided_GRPO_Adaptive_Guidance.pdf) | [PTA-GRPO Planning](slides/PTA_GRPO_Planning_Reasoning.pdf) | [GitHub](https://github.com/T-Lab-CUHKSZ/G2RPO-A) | [🖼️](media/rl-finetuning/Guided_GRPO_Adaptive_Guidance/README.md) |
-| [R-Search: Multi-Step Reasoning](papers/rl-finetuning/R-Search_Multi-Step_Reasoning.pdf) | [Stanford RL for Reasoning](slides/Stanford_RL_for_LLM_Reasoning.pdf) | [GitHub](https://github.com/wentao0429/Reasoning-search) | [🖼️](media/rl-finetuning/R-Search_Multi-Step_Reasoning/README.md) |
-| [RL Fine-tuning: Instruction Following](papers/rl-finetuning/RL_Fine-tuning_Instruction_Following.pdf) | - | - | [🖼️](media/rl-finetuning/RL_Fine-tuning_Instruction_Following/README.md) |
-| [RFT Powers Multimodal Reasoning](papers/rl-finetuning/RFT_Powers_Multimodal_Reasoning.pdf) | - | - | [🖼️](media/rl-finetuning/RFT_Powers_Multimodal_Reasoning/README.md) |
-| [STILL-2: Distilling Reasoning](papers/rl-finetuning/STILL-2_Distilling_Reasoning.pdf) | - | - | [🖼️](media/rl-finetuning/STILL-2_Distilling_Reasoning/README.md) |
+| [DeepSeekMath: GRPO Algorithm](reinforcement_learning_papers/02_rlhf_alignment/DeepSeekMath_GRPO.pdf) | [Stanford RL for Reasoning](slides/Stanford_RL_for_LLM_Reasoning.pdf) | [GitHub](https://github.com/deepseek-ai/DeepSeek-Math) | [🎨](diagrams/downloaded_images/rl-finetuning_DeepSeek_R1-_Implications_for_AI.png) [🖼️](media/rl-finetuning/DeepSeekMath_GRPO/README.md) |
+| [Guided GRPO: Adaptive Guidance](reinforcement_learning_papers/02_rlhf_alignment/Guided_GRPO_Adaptive_Guidance.pdf) | [PTA-GRPO Planning](slides/PTA_GRPO_Planning_Reasoning.pdf) | [GitHub](https://github.com/T-Lab-CUHKSZ/G2RPO-A) | [🖼️](media/rl-finetuning/Guided_GRPO_Adaptive_Guidance/README.md) |
+| [R-Search: Multi-Step Reasoning](reinforcement_learning_papers/02_rlhf_alignment/R-Search_Multi-Step_Reasoning.pdf) | [Stanford RL for Reasoning](slides/Stanford_RL_for_LLM_Reasoning.pdf) | [GitHub](https://github.com/wentao0429/Reasoning-search) | [🖼️](media/rl-finetuning/R-Search_Multi-Step_Reasoning/README.md) |
+| [RL Fine-tuning: Instruction Following](reinforcement_learning_papers/02_rlhf_alignment/RL_Fine-tuning_Instruction_Following.pdf) | - | - | [🖼️](media/rl-finetuning/RL_Fine-tuning_Instruction_Following/README.md) |
+| [RFT Powers Multimodal Reasoning](reinforcement_learning_papers/02_rlhf_alignment/RFT_Powers_Multimodal_Reasoning.pdf) | - | - | [🖼️](media/rl-finetuning/RFT_Powers_Multimodal_Reasoning/README.md) |
+| [STILL-2: Distilling Reasoning](reinforcement_learning_papers/02_rlhf_alignment/STILL-2_Distilling_Reasoning.pdf) | - | - | [🖼️](media/rl-finetuning/STILL-2_Distilling_Reasoning/README.md) |
 
 ### Agentic RL
 
 | Paper | Slides | Code | Media |
 |-------|--------|------|-------|
-| [WebAgent-R1: Multi-Turn RL for Web Agents](papers/web-agents/WebAgent-R1_Multi-Turn_RL.pdf) | - | [GitHub](https://github.com/weizhepei/WebAgent-R1) | - |
-| [ARTIST: Agentic Reasoning & Tool Integration](papers/agent-frameworks/ARTIST_Agentic_Reasoning_Tool_Integration.pdf) | [ARTIST Microsoft](slides/ARTIST_Agentic_Reasoning_Microsoft.pdf) | [GitHub](https://github.com/microsoft/ARTIST) | [🎨](diagrams/downloaded_images/agent-frameworks_ReAct-_Synergizing_Reasoning_and_Acting.png) [🖼️](media/agent-frameworks/ARTIST_Agentic_Reasoning_Tool_Integration/README.md) [🎧](https://notebooklm.cloud.google.com/global/notebook/dd5aab2c-a230-4161-b521-81c63cbf2902?project=358208640342) |
+| [WebAgent-R1: Multi-Turn RL for Web Agents](reinforcement_learning_papers/09_agentic_rl/WebAgent-R1_Multi-Turn_RL.pdf) | - | [GitHub](https://github.com/weizhepei/WebAgent-R1) | - |
+| [ARTIST: Agentic Reasoning & Tool Integration](reinforcement_learning_papers/09_agentic_rl/ARTIST_Agentic_Reasoning_Tool_Integration.pdf) | [ARTIST Microsoft](slides/ARTIST_Agentic_Reasoning_Microsoft.pdf) | [GitHub](https://github.com/microsoft/ARTIST) | [🎨](diagrams/downloaded_images/agent-frameworks_ReAct-_Synergizing_Reasoning_and_Acting.png) [🖼️](media/agent-frameworks/ARTIST_Agentic_Reasoning_Tool_Integration/README.md) [🎧](https://notebooklm.cloud.google.com/global/notebook/dd5aab2c-a230-4161-b521-81c63cbf2902?project=358208640342) |
 
 ## Agentic Architectures & Coordination
 
@@ -230,24 +230,24 @@ slides/                  # 92 presentation decks (504 MB)
 
 | Paper | Slides | Code | Media |
 |-------|--------|------|-------|
-| [AgentNet: Decentralized Multi-Agent Coordination](papers/multi-agent/AgentNet_Decentralized_Multi-Agent.pdf) | - | [GitHub](https://github.com/zoe-yyx/AgentNet) | [🎨](diagrams/downloaded_images/multi-agent_AgentNet.png) [🖼️](media/multi-agent/AgentNet_Decentralized_Multi-Agent/README.md) |
-| [MasRouter: Multi-Agent Routing](papers/multi-agent/MasRouter_Multi-Agent_Routing.pdf) | [MasRouter ACL 2025](slides/MasRouter_ACL_2025.pdf) | [GitHub](https://github.com/THU-KEG/MasRouter) | [🎨](diagrams/downloaded_images/agent-frameworks_AutoGen-_Multi-Agent_Conversation.png) [🖼️](media/multi-agent/MasRouter_Multi-Agent_Routing/README.md) |
+| [AgentNet: Decentralized Multi-Agent Coordination](reinforcement_learning_papers/03_multi_agent_rl/AgentNet_Decentralized_Multi-Agent.pdf) | - | [GitHub](https://github.com/zoe-yyx/AgentNet) | [🎨](diagrams/downloaded_images/multi-agent_AgentNet.png) [🖼️](media/multi-agent/AgentNet_Decentralized_Multi-Agent/README.md) |
+| [MasRouter: Multi-Agent Routing](reinforcement_learning_papers/03_multi_agent_rl/MasRouter_Multi-Agent_Routing.pdf) | [MasRouter ACL 2025](slides/MasRouter_ACL_2025.pdf) | [GitHub](https://github.com/THU-KEG/MasRouter) | [🎨](diagrams/downloaded_images/agent-frameworks_AutoGen-_Multi-Agent_Conversation.png) [🖼️](media/multi-agent/MasRouter_Multi-Agent_Routing/README.md) |
 | **Multi-Agent RL Overview** | [Edinburgh MARL Intro](slides/Edinburgh_Multi_Agent_RL_Intro.pdf) | - | - |
 
 ### Device & Computer Control
 
 | Paper | Slides | Code | Media |
 |-------|--------|------|-------|
-| [DigiRL: Device Control Agents](papers/computer-use/DigiRL_Device_Control_Agents.pdf) | [DigiRL NeurIPS 2024](slides/DigiRL_NeurIPS_2024.pdf) | [GitHub](https://github.com/DigiRL-agent/digirl) | [🖼️](media/computer-use/DigiRL_Device_Control_Agents/README.md) [🎧](https://notebooklm.cloud.google.com/global/notebook/931f05c0-39d7-48d2-a51a-8d273bd3d6af?project=358208640342) |
-| [OSWorld: Multimodal Agents Benchmark](papers/computer-use/OSWorld_Multimodal_Agents_Benchmark.pdf) | - | [GitHub](https://github.com/xlang-ai/OSWorld) | [🖼️](media/computer-use/OSWorld_Multimodal_Agents_Benchmark/README.md) |
-| [OS-Harm: Computer Use Safety](papers/computer-use/OS-Harm_Computer_Use_Safety.pdf) | [OS-Harm Benchmark](slides/OS_Harm_Benchmark.pdf) | [GitHub](https://github.com/tml-epfl/os-harm) | [🖼️](media/computer-use/OS-Harm_Computer_Use_Safety/README.md) [🎧](https://notebooklm.cloud.google.com/global/notebook/09f307c6-9716-45a3-9c83-be2e99b1f8e6?project=358208640342) |
+| [DigiRL: Device Control Agents](reinforcement_learning_papers/09_agentic_rl/DigiRL_Device_Control_Agents.pdf) | [DigiRL NeurIPS 2024](slides/DigiRL_NeurIPS_2024.pdf) | [GitHub](https://github.com/DigiRL-agent/digirl) | [🖼️](media/computer-use/DigiRL_Device_Control_Agents/README.md) [🎧](https://notebooklm.cloud.google.com/global/notebook/931f05c0-39d7-48d2-a51a-8d273bd3d6af?project=358208640342) |
+| [OSWorld: Multimodal Agents Benchmark](reinforcement_learning_papers/09_agentic_rl/OSWorld_Multimodal_Agents_Benchmark.pdf) | - | [GitHub](https://github.com/xlang-ai/OSWorld) | [🖼️](media/computer-use/OSWorld_Multimodal_Agents_Benchmark/README.md) |
+| [OS-Harm: Computer Use Safety](reinforcement_learning_papers/09_agentic_rl/OS-Harm_Computer_Use_Safety.pdf) | [OS-Harm Benchmark](slides/OS_Harm_Benchmark.pdf) | [GitHub](https://github.com/tml-epfl/os-harm) | [🖼️](media/computer-use/OS-Harm_Computer_Use_Safety/README.md) [🎧](https://notebooklm.cloud.google.com/global/notebook/09f307c6-9716-45a3-9c83-be2e99b1f8e6?project=358208640342) |
 
 ### Agent Fine-Tuning & Tool Use
 
 | Paper | Slides | Code | Media |
 |-------|--------|------|-------|
-| [FireAct: Language Agent Fine-tuning](papers/agent-frameworks/FireAct_Language_Agent_Fine-tuning.pdf) | [LLM Agents Tool Learning](slides/LLM_Agents_Tool_Learning_Tutorial.pdf) | [GitHub](https://github.com/anchen1011/FireAct) | [🖼️](media/agent-frameworks/FireAct_Language_Agent_Fine-tuning/README.md) [🎧](https://notebooklm.cloud.google.com/global/notebook/79089fc8-bf2d-406d-985b-e06fd724c9fc?project=358208640342) |
-| [DeepSeek Janus Pro: Multimodal](papers/rl-finetuning/DeepSeek_Janus_Pro_Multimodal.pdf) | - | [GitHub](https://github.com/deepseek-ai/Janus) | [🎨](diagrams/downloaded_images/rl-finetuning_DeepSeek_R1-_Implications_for_AI.png) [🖼️](media/rl-finetuning/DeepSeek_Janus_Pro_Multimodal/README.md) |
+| [FireAct: Language Agent Fine-tuning](reinforcement_learning_papers/09_agentic_rl/FireAct_Language_Agent_Fine-tuning.pdf) | [LLM Agents Tool Learning](slides/LLM_Agents_Tool_Learning_Tutorial.pdf) | [GitHub](https://github.com/anchen1011/FireAct) | [🖼️](media/agent-frameworks/FireAct_Language_Agent_Fine-tuning/README.md) [🎧](https://notebooklm.cloud.google.com/global/notebook/79089fc8-bf2d-406d-985b-e06fd724c9fc?project=358208640342) |
+| [DeepSeek Janus Pro: Multimodal](reinforcement_learning_papers/02_rlhf_alignment/DeepSeek_Janus_Pro_Multimodal.pdf) | - | [GitHub](https://github.com/deepseek-ai/Janus) | [🎨](diagrams/downloaded_images/rl-finetuning_DeepSeek_R1-_Implications_for_AI.png) [🖼️](media/rl-finetuning/DeepSeek_Janus_Pro_Multimodal/README.md) |
 | [PTA-GRPO: High-Level Planning](slides/PTA_GRPO_High_Level_Planning.pdf) | [PTA-GRPO Planning](slides/PTA_GRPO_High_Level_Planning.pdf) | - | - |
 | **Stanford RL for Agents** | [Stanford RL Agents 2025](slides/Stanford_RL_for_Agents_2025.pdf) | - | - |
 | **CMU LM Agents** | [CMU Language Models as Agents](slides/CMU_Language_Models_as_Agents.pdf) | - | - |
@@ -341,7 +341,7 @@ slides/                  # 92 presentation decks (504 MB)
 
 ### Beginner
 1. Start with [WWW 2024 LLM Agents Tutorial](slides/WWW2024_LLM_Agents_Tutorial.pdf) - comprehensive overview
-2. Read [ReAct paper](papers/agent-frameworks/ReAct_Synergizing_Reasoning_and_Acting.pdf) + [slides](slides/ReAct_UVA_Lecture.pdf) + [code](https://github.com/ysymyth/ReAct)
+2. Read [ReAct paper](reinforcement_learning_papers/09_agentic_rl/ReAct_Synergizing_Reasoning_and_Acting.pdf) + [slides](slides/ReAct_UVA_Lecture.pdf) + [code](https://github.com/ysymyth/ReAct)
 3. Study Chain-of-Thought with [CoT Princeton Lecture](slides/CoT_Princeton_Lecture.pdf)
 
 ### Intermediate
@@ -355,9 +355,9 @@ slides/                  # 92 presentation decks (504 MB)
 3. [Prompt Injection Duke](slides/Prompt_Injection_Duke_Slides.pdf) for security
 
 ### Reasoning & RL Fine-Tuning Path
-1. [DeepSeek-R1 paper](papers/rl-finetuning/DeepSeek-R1_Reasoning_via_RL.pdf) + [DeepSeek R1 CMU slides](slides/DeepSeek_R1_CMU_Reasoning.pdf) + [code](https://github.com/deepseek-ai/DeepSeek-R1)
-2. [DeepSeekMath GRPO](papers/rl-finetuning/DeepSeekMath_GRPO.pdf) + [Stanford RL for Reasoning](slides/Stanford_RL_for_LLM_Reasoning.pdf) + [code](https://github.com/deepseek-ai/DeepSeek-Math)
-3. [ARTIST paper](papers/agent-frameworks/ARTIST_Agentic_Reasoning_Tool_Integration.pdf) for agentic reasoning with tools
+1. [DeepSeek-R1 paper](reinforcement_learning_papers/02_rlhf_alignment/DeepSeek-R1_Reasoning_via_RL.pdf) + [DeepSeek R1 CMU slides](slides/DeepSeek_R1_CMU_Reasoning.pdf) + [code](https://github.com/deepseek-ai/DeepSeek-R1)
+2. [DeepSeekMath GRPO](reinforcement_learning_papers/02_rlhf_alignment/DeepSeekMath_GRPO.pdf) + [Stanford RL for Reasoning](slides/Stanford_RL_for_LLM_Reasoning.pdf) + [code](https://github.com/deepseek-ai/DeepSeek-Math)
+3. [ARTIST paper](reinforcement_learning_papers/09_agentic_rl/ARTIST_Agentic_Reasoning_Tool_Integration.pdf) for agentic reasoning with tools
 
 ---
 

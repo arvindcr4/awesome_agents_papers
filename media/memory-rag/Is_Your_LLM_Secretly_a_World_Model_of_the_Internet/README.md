@@ -1,5 +1,5 @@
 # Is Your LLM Secretly a World Model of the Internet
-- Paper: [Is_Your_LLM_Secretly_a_World_Model_of_the_Internet.pdf](../../../papers/memory-rag/Is_Your_LLM_Secretly_a_World_Model_of_the_Internet.pdf)
+- Paper: [Is_Your_LLM_Secretly_a_World_Model_of_the_Internet.pdf](../../../reinforcement_learning_papers/09_agentic_rl/Is_Your_LLM_Secretly_a_World_Model_of_the_Internet.pdf)
 
 ## Gemini diagrams
 

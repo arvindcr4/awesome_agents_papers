@@ -1,0 +1,2737 @@
+Towards Efficient Online Exploration for Reinforcement Learning
+with Human Feedback
+Gen Li∗†
+
+Yuling Yan∗‡
+
+arXiv:2509.22633v1 [stat.ML] 26 Sep 2025
+
+September 29, 2025
+
+Abstract
+Reinforcement learning with human feedback (RLHF), which learns a reward model from human preference data and then optimizes a policy to favor preferred responses, has emerged as a central paradigm
+for aligning large language models (LLMs) with human preferences. In this paper, we investigate exploration principles for online RLHF, where one seeks to adaptively collect new preference data to refine
+both the reward model and the policy in a data-efficient manner. By examining existing optimism-based
+exploration algorithms, we identify a drawback in their sampling protocol: they tend to gather comparisons that fail to reduce the most informative uncertainties in reward differences, and we prove lower
+bounds showing that such methods can incur linear regret over exponentially long horizons. Motivated
+by this insight, we propose a new exploration scheme that directs preference queries toward reducing
+uncertainty in reward differences most relevant to policy improvement. Under a multi-armed bandit
+model of RLHF, we establish regret bounds of order T (β+1)/(β+2) , where β > 0 is a hyperparameter that
+balances reward maximization against mitigating distribution shift. To our knowledge, this is the first
+online RLHF algorithm with regret scaling polynomially in all model parameters.
+
+Keywords: Reinforcement learning from human feedback (RLHF), online exploration, principle of optimism, preference data
+
+1
+
+Introduction
+
+Large language models (LLMs) have demonstrated remarkable capabilities across a wide range of natural
+language tasks, yet aligning their behavior with human preferences remains a central challenge. A widely
+adopted solution is reinforcement learning with human feedback (RLHF), which fine-tunes a pretrained LLM
+using human preference data (Bai et al., 2022; Christiano et al., 2017; Ziegler et al., 2019). The standard
+RLHF pipeline involves three stages: (i) supervised fine-tuning (SFT) on human-written demonstrations to
+produce a baseline model; (ii) training a reward model from human preference comparisons (Bradley and
+Terry, 1952); and (iii) optimizing the LLM with reinforcement learning against the learned reward. This
+framework has been instrumental in the success of instruction-following LLMs such as InstructGPT (Ouyang
+et al., 2022) and ChatGPT (OpenAI, 2023), enabling models to produce responses that are more helpful,
+safe, and aligned with human expectations.
+Despite this progress, most existing RLHF implementations are offline (Azar et al., 2024; Rafailov et al.,
+2024; Zhao et al., 2023): the preference data is collected once from static policies, and the reward model is
+trained on this fixed dataset (Ivison et al., 2023; Shi et al., 2025; Zhu et al., 2024). While effective, offline
+RLHF has inherent limitations—It cannot adaptively explore the enormous space of natural language, leading
+to inefficient use of expensive human feedback. In contrast, online RLHF offers a more powerful alternative:
+the policy iteratively collects new preference data, updates the reward model, and improves itself based
+on these updates (Chen et al., 2024; Dong et al., 2024; Feng et al., 2025; Guo et al., 2024; Rosset et al.,
+2024; Xiong et al., 2023). This interactive loop has the potential to greatly improve both alignment quality
+∗ The authors contributed equally.
+
+† Department of Statistics and Data Science, The Chinese University of Hong Kong, Hong Kong; Email: genli@cuhk.edu.hk.
+‡ Department of Statistics, University of Wisconsin-Madison, WI 53706, USA; Email: yuling.yan@wisc.edu.
+
+1
+
+and sample efficiency. However, realizing this potential requires principled approaches to exploration, i.e.,
+deciding which comparisons to query in order to most effectively reduce uncertainty in reward estimation.
+A natural candidate for encouraging and guiding exploration is the principle of optimism (Lai and Robbins, 1985; Lattimore and Szepesvári, 2020), which acts as if the environment is more optimistic than
+currently estimated, within the limits of statistical uncertainty based on all data that has been observed so
+far. It is usually implemented by adding an uncertainty-based bonus to reward or value estimates, thereby
+prioritizing actions whose values are uncertain but potentially high. This has yielded provably efficient algorithms in standard RL (see e.g., Azar et al. (2017); Jin et al. (2018); Russo and Van Roy (2013); Zanette and
+Brunskill (2019)). However, extending this principle to RLHF introduces new difficulties, where feedback
+comes not as a single reward but as a difference between rewards of two actions. The key challenge is to
+determine the action pairs with the large uncertainties most relevant to policy improvement. A few recent
+works achieved important progress towards designing sample-efficient online RLHF algorithms based on the
+optimism principle (Cen et al., 2025; Xie et al., 2025; Zhang et al., 2025). However the existing theoretical
+guarantees still exhibit exponential dependency on certain model parameters, which potentially leads to
+inefficient exploration.
+With this context, this paper makes contribution towards designing efficient online exploration schemes
+for RLHF with provable guarantees. By analyzing the existing algorithms in the seminal works (Cen et al.,
+2025; Xie et al., 2025; Zhang et al., 2025), we discuss their inadequacy in exploring the action pairs with
+the large uncertainties most relevant to policy improvement, and construct lower bounds to show that the
+exponential dependency on certain parameters is unavoidable in their regret. Based on these insights, we
+propose a new exploration scheme for RLHF that adopts a different sampling protocol, and establish a regret
+bound that depends polynomially on all model parameters.
+
+2
+
+Model set-up
+
+Preliminaries. In RLHF, the prompt space X refers to the collection of all possible inputs or queries that
+a user might provide to the model. The answer (or action) space A is the set of all possible outputs the
+model can generate in reply to a given prompt. A language model is a policy π : X → ∆(A) that defines a
+probability distribution π(· | x) over A conditioned on a prompt x ∈ X , specifying how likely the model is
+to produce each potential response. The pipeline of RLHF starts with supervised fine-tuning (SFT), where
+a reference policy πref : X → ∆(A) is obtained by fine-tuning a pre-trained LLM on a dataset of prompts
+paired with high-quality answers written by humans. SVT provides an initialization that stabilizes and
+improves the effectiveness of the subsequent training stages that aligns the LLM with human preferences.
+Reward modeling. To translate human preferences into a trainable objective, one need to model how
+an oracle (e.g., a human annotator) rank two answers a1 and a2 given prompt x. Following a line of prior
+works (e.g., Cen et al. (2025); Xie et al. (2025); Zhang et al. (2025)), we assume that preferences follow the
+Bradley-Terry model (Bradley and Terry, 1952)
+P(a1 ≻ a2 | x) =
+
+exp(r⋆ (x, a1 ))
+= σ (r⋆ (x, a1 ) − r⋆ (x, a2 )) .
+exp(r⋆ (x, a1 )) + exp(r⋆ (x, a2 ))
+
+(2.1)
+
+Here r⋆ : X × A → [0, rmax ] is an underlying reward function of an answer given a prompt, a1 ≻ a2 means
+the answer a1 is preferred compared to a2 , and σ(x) = (1 + e−x )−1 is the sigmoid function. We also define
+a policy πHF to characterize human preference:
+exp(r⋆ (x, a))
+.
+⋆
+′
+a′ ∈A exp(r (x, a ))
+
+πHF (a | x) = P
+
+The reward function is unknown and can be learned from e.g., an offline dataset D = {(xi , ai+ , ai− )} comprised
+of independent preference data samples using maximum likelihood estimation (MLE):
+X
+
+arg max ℓ(r, D) where ℓ(r, D) :=
+log σ r(xi , ai+ ) − r(xi , ai− ) ,
+(2.2)
+r
+
+D
+
+where a preference data sample denoted by (x, a+ , a− ) means that a+ ≻ a− given prompt x.
+2
+
+RL fine-tuning. Given a reward model r, we seek to fine-tune the policy π to balance reward maximization
+with maintaining similarity to the original model πref from the SFT stage. Towards this, we define the KLregularized reward objective
+
+
+J(π, r; πcal ) := Ex∼ρ Ea∼π(· | x) [r(x, a)] − Ea∼πcal (· | x) [r(x, a)] − βKL π(· | x) ∥ πref (· | x) .
+(2.3)
+Here ρ is the prompt distribution, and β > 0 is the regularization parameter reflecting the strength of the
+KL regularization. In practice, β is typically chosen to be small; for instance, in InstructGPT (Ouyang
+et al., 2022) the optimal value is reported to be around 0.01 and 0.02. This objective function includes a
+calibration policy πcal to eliminate the shift ambiguity of the reward function, as two reward functions r(x, a)
+and r(x, a) + c(x) lead to the same preference model (2.1). Given any reward function r, the optimal policy
+πr := arg maxπ J(π, r; πcal ) admits a closed-form expression (Rafailov et al., 2024)
+πr (a | x) =
+
+πref (a | x) exp(r(x, a)/β)
+Zr (x)
+
+(2.4)
+
+P
+where Zr (x) = a πref (a|x) exp(r(x, a)/β) is the normalizing factor. Notice that the selection of πcal does not
+affect the optimal policy πr given the reward function r. Our target is the optimal policy π ⋆ that maximizes
+the objective (2.3) under the true reward function r = r⋆ , namely
+π ⋆ := arg max J(π, r⋆ ; πcal ).
+π
+
+(2.5)
+
+Offline RLHF. The above framework leads to offline RLHF methods that relies on the preference dataset
+D for training. Initial approaches (Christiano et al., 2017; Ouyang et al., 2022) first estimate a reward
+function rb based on the preference dataset D using MLE, then optimize the KL-regularized objective (2.3)
+with respect to rb. Another approach introduced by Rafailov et al. (2024) condensed these two steps into one
+single step, known as direct preference optimization (DPO), which optimizes
+ 
+
+i
+i
+X
+| x)
+π(y+
+| x) 
+π(y−
+log σ β log
+max
+−
+log
+.
+i | x)
+i | x)
+π
+πref (y+
+πref (y−
+D
+The above objective avoids explicitly estimating the reward function, which can be obtained by expressing
+the reward function r in the MLE formulation (2.2) with the associated optimal policy πr using the closedform expression (2.4). However, as discussed in e.g., Xie et al. (2025); Zhang et al. (2025), the efficiency
+of offline RLHF is limited by the coverage of the offline dataset D, and online exploration with active data
+collection is necessary to achieve sample efficiency.
+Online RLHF. We consider reward learning and policy learning iteratively, where in the t-th iteration we
+use the current policy π (t) , obtained from previous iterations, to sample new data and subsequently update
+both the reward estimate and the policy. This setup enables online exploration in RLHF by refining the
+reward model and policy in tandem as new preference data is collected. We aim to minimize the regret
+R(T ) :=
+
+T
+X
+
+
+J(π ⋆ ; r⋆ , πcal ) − J(π (t) ; r⋆ , πcal ) .
+
+(2.6)
+
+t=1
+
+It is worth mentioning that the choice of πcal does not affect the regret. We define the following function J ⋆
+that measures the optimal objective value for a given reward r:
+J ⋆ (r; πcal ) := max J(π, r; πcal ) = J(πr , r; πcal ).
+π
+
+(2.7)
+
+This function plays an important role in the exploration algorithms.
+
+3
+
+RLHF with online exploration
+
+Three recent algorithms for online RLHF are most closely related to this work: VPO (Cen et al., 2025),
+XPO (Xie et al., 2025), and SELM (Zhang et al., 2025). In this section, we first analyze and discuss these
+approaches, and then introduce our proposed exploration scheme.
+3
+
+3.1
+
+Inadequacy of existing approaches
+
+We begin by reviewing the procedure and intuition behind VPO (Cen et al., 2025). Fix a calibration policy
+πcal and an initial policy π (1) . For t = 1, 2, . . . , T , the t-th iteration of VPO consists of the following steps:
+1. Sample a prompt xt ∼ ρ and two answers at1 , at2 ∼ π (t) (· | xt ). Query the preference oracle to obtain
+pairwise comparison at+ ≻ at− . Update the preference dataset D(t) = D(t−1) ∪ {(xt , at+ , at− )}.
+2. Update the reward model r(t+1) and the policy π (t+1) using the updated preference dataset D(t) :
+r(t+1) =
+
+(3.1a)
+
+ℓ(r, D(t) ) + αJ ⋆ (r; πcal ),
+
+arg max
+r:X ×A→[0,rmax ]
+
+(3.1b)
+
+π (t+1) = arg max J(π, r(t+1) ; πcal ),
+π
+
+where α > 0 is a regularization parameter, and step (3.1b) admits closed-form solution (2.4).
+To illustrate the rationale behind VPO, consider the bandit case with no prompt. Step (3.1a) applies the
+optimism principle, encouraging exploration based on the uncertainty in estimating the reward difference
+between each action a and the calibration policy πcal . Formally, it can be viewed as the Lagrangian form of
+the constrained optimization problem
+max Ea∼π [r(a)] − Ea∼πcal [r(a)] − βKL(π ∥ πref )
+r,π
+
+s.t.
+
+ℓ(r, D(t) ) ≥ max ℓ(r, D(t) ) − B
+r
+
+for some B > 0. After the change of variable r′ (a) = r(a) − Ea∼πcal [r(a)], this becomes
+max
+Ea∼π [r′ (a)] − βKL(π ∥ πref )
+′
+r ,π
+
+s.t.
+
+ℓ(r′ , D(t) ) ≥ max
+ℓ(r′ , D(t) ) − B,
+′
+r
+
+Ea∼πcal [r′ (a)] = 0.
+
+Here, the constraint set can be interpreted as a confidence region reflecting the uncertainty in estimating
+each r′ (a) from D(t) . Consequently, the updated policy π (t+1) depends both on the true reward gap r(a) −
+Ea∼πcal [r(a)] and on the uncertainty in estimating this gap for each action a ∈ A.
+For intuition, suppose πcal = 1a0 for some a0 ∈ A, and assume that the true reward gaps are small.
+In this case, π (t+1) favors actions with higher estimation uncertainty relative to a0 , i.e., those a where the
+estimate of r(a) − r(a0 ) is most uncertain. However, comparing two actions a1 , a2 ∼ π (t+1) reduces the
+uncertainty between them, rather than the (potentially larger) uncertainty relative to a0 . This misalignment
+can lead to inefficient exploration, as illustrated in the following example.
+Example 1. Consider the bandit setting with three actions A = {a0 , a1 , a2 }, where the true rewards are
+r⋆ (a0 ) = 1 and r⋆ (a1 ) = r⋆ (a2 ) = 0. Let the reference policy πref be uniform over A, and the calibration
+policy be πcal (a1 ) = πcal (a2 ) = p and πcal (a0 ) = 1 − 2p for some 0 ≤ p < 1/4.
+The following proposition shows that VPO may fail to explore efficiently in this setting The proof can
+be found in Appendix A.
+Proposition 1. Consider the setup in Example 1. Let the initial policy π (1) of VPO be the uniform distribution over A. Assume that rmax /β ≥ 3. For any α > 0, with probability at least 4/(9e), we have
+J(π ⋆ , r⋆ ; πcal ) − J(π (t) , r⋆ ; πcal ) ≥
+
+1
+2
+
+holds for any 1 < t ≤ exp(rmax /β)/2.
+Let’s discuss the idea behind Proposition 1 with πcal = 1a0 . If the calibration action a0 is not visited
+during the first t iterations, then π (t+1) will continue to favor a1 and a2 , since both gaps r(a1 ) − r(a0 )
+and r(a2 ) − r(a0 ) remain highly uncertain. In particular, we establish that π (t+1) (a0 ) ≤ exp(−rmax /β),
+which is exponentially small, implying that a0 is unlikely to be sampled in iteration t + 1. As a result, with
+constant probability, a0 will not be sampled within the first O(exp(rmax /β)) iterations, and the resulting
+highly suboptimal policy incurs linear regret over an exponentially long horizon. This example highlights
+an algorithmic drawback: although VPO acknowledges uncertainty in the reward gaps between a1 and a0
+(and between a2 and a0 ), it continues to encourage sampling a1 and a2 , leading primarily to comparisons
+between them that fail to reduce their uncertainty relative to a0 .
+4
+
+Algorithm 1: Uncertainty-based RLHF exploration.
+Input: initial policies π (0) , π (1) , regularizaton parameters {αt }t≥1 .
+2 for t = 1 to T do
+3
+Sample a prompt xt ∼ ρ and two answers at1 ∼ π (t−1) (· | xt ), at2 ∼ π (t) (· | xt ).
+4
+Query the preference oracle to obtain pairwise comparison at+ ≻ at− and update the preference
+dataset D(t) = D(t−1) ∪ {(xt , at+ , at− )}.
+5
+Update the reward model r(t+1) and the policy π (t+1) using D(t) :
+
+1
+
+r(t+1) =
+
+ℓ(r, D(t) ) + αt J ⋆ (r; π (t) ),
+
+arg max
+
+(3.2a)
+
+r:X ×A→[0,rmax ]
+
+π (t+1) = arg max J(π, r(t+1) ; π (t) ).
+π
+
+(3.2b)
+
+where the policy update (3.2b) admits closed-form solution (2.4).
+6
+
+Output: {π (t) : 1 ≤ t ≤ T }
+
+3.2
+
+Our approach: exploration based on uncertainty
+
+A natural modification to address the issue above is to change the sampling scheme so that at1 ∼ π (t) and
+at2 ∼ πcal . The intuition is that π (t) encourages to explore actions with higher estimation uncertainty relative
+to the actions favored by the calibration policy πcal . To effectively reduce this uncertainty, it is sensible to
+compare one action drawn from π (t) with another drawn from πcal . Indeed, the XPO and SELM algorithms
+(Xie et al., 2025; Zhang et al., 2025) can be viewed as taking πcal = πref .
+However, if the fixed calibration policy πcal is highly suboptimal for reward maximization (for example, if
+it concentrates on a few low-reward actions), then the comparison will almost always favor at1 ∼ π (t) against
+at2 ∼ πcal , yielding little useful information. This issue is illustrated in the following example.
+Example 2. Consider the bandit setting with three actions A = {a0 , a1 , a2 }, where the true rewards are
+r⋆ (a0 ) = 0, r⋆ (a1 ) = rmax and r⋆ (a2 ) = rmax − 2. Let the reference policy be πref (a0 ) = 1 − 2/κ, πref (a1 ) =
+πref (a2 ) = 1/κ for any κ ≥ 4.
+The following result shows that, when κ is large (as we will see in Assumption 1, this corresponds to the
+case where the reference policy deviates from human preference), this modified sampling schemes can lead
+to inefficient exploration in this setting. The proof is deferred to Appendix B.
+Proposition 2. Consider the setup in Example 2. Assume that β ≤ 1 and κ ≤ exp(rmax /β). For any initial
+policy π (1) and any α > 0, with probability at least 1/64, the modified exploration scheme which samples
+at1 ∼ π (t) and at2 ∼ πref satisfies
+J(π ⋆ , r⋆ ; πref ) − J(π (t) , r⋆ ; πref ) ≥ 0.01
+for any 1 < t ≤ min{κ, exp(rmax )/2}.
+This lower bound suggests that relying on a fixed calibration policy can lead to inefficient exploration
+over an exponentially long horizon. We will come back to this example in Section 4 after presenting our
+algorithm and theoretical guarantees. This observation motivates us to update the calibration policy in each
+iteration adaptively.
+Uncertainty-based exploration. We propose an exploration scheme where the calibration policy evolves
+with the iterations. In the t-th iteration, instead of a fixed πcal , we use π (t) as the calibration policy when
+optimizing r(t+1) and π (t+1) :
+r(t+1) =
+
+arg max
+
+ℓ(r, D(t) ) + αt J ⋆ (r; π (t) ),
+
+r:X ×A→[0,rmax ]
+
+π
+
+(t+1)
+
+= arg max J(π, r(t+1) ; π (t) ).
+π
+
+5
+
+The key advantage is that π (t) improves over time, guiding exploration away from uninformative comparisons.
+Since π (t) emphasizes actions with higher uncertainty relative to π (t−1) , it is natural to compare at1 ∼ π (t−1)
+and at2 ∼ π (t) . This yields preference data that more directly reduces uncertainty, leading to more efficient
+exploration. Our full exploration scheme is summarized in Algorithm 1.
+
+4
+
+Theoretical results
+
+We establish theoretical guarantees for Algorithm 1 under the multi-armed bandit setting (i.e., X = ∅) with
+A = |A|. We begin with a general regret bound, whose proof is deferred to Section 5.
+Theorem 1. Let αt > A log T be non-decreasing in t. There exists a universal constant C > 0 such that,
+with probability at least 1 − O(T −10 ), the cumulative regret of running Algorithm 1 for T iterations satisfies
+R(T ) ≤ Crmax A
+
+2
+
+p
+
+2
++ CA2 αT rmax
+α
+t
+t=1
+
+
+ β
+
+1
+1
+X
+πref (a− ) β+1 β+1
+πHF (a+ )
+β+1
+αT rmax
+.
+αT rmax , T
+min
+πHF (a− )
+πref (a+ )
+⋆
+
+T log T + C
+
++ C(rmax + log T )
+
+T
+X
+Armax log T
+
+(4.1)
+
+r ⋆ (a+ )≥r (a− )
+
+We now discuss the implications of Theorem 1. When β = 0, which corresponds to the case where only
+reward maximization matters, the regret bound (4.1) simplifies to
+r
+√ 
+t
+3/2 3/2
+2
+e
+R(T ) = O (A rmax + A rmax ) T
+when
+αt ≍ A log T +
+.
+Armax
+When β > 0, the performance of the exploration algorithm becomes more intricate due to the trade-off
+between reward maximization and similarity to the reference policy. To interpret the general regret bound
+in this regime, we introduce the following assumption to capture the interaction between human preference
+πHF and the reference policy πref .
+Assumption 1. There exists κ, τ ≥ 1 such that, for any action pair (a+ , a− ),
+πHF (a+ )
+≥τ
+πHF (a− )
+
+=⇒
+
+πref (a+ )
+≥ κ−1 .
+πref (a− )
+
+Intuitively, Assumption 1 requires that whenever a+ is substantially more preferred than a− under human
+preference, the reference policy does not assign disproportionately higher weight to a− than to a+ . This
+is reasonable, since πref is obtained from the SFT step, where a pretrained LLM is fine-tuned on human
+demonstrations already broadly aligned with preference. The quantities κ and τ capture the degree of
+alignment between πref and πHF , and their size reflects the influence of the reference policy on RLHF. We
+note that the illustrative Example 1 satisfies Assumption 1 with κ, τ = O(1), and the parameter κ in
+Example 2 is consistent with the κ here. Under this assumption, we obtain the following simplified regret
+bound, whose proof is deferred to Appendix D.
+Proposition 3. Suppose that Assumption 1 holds. Let
+1
+
+αt = A log T + t β+2
+
+r
+
+max
+
+β 
+ β+2
+
+κ
+
+Then with probability at least 1 − O(T −10 ), we have
+β+1
+
+R(T ) ≲ (τ + κβ T β+2 ) poly(A, rmax , log T ),
+where the degree of the polynomial factor does not depend on β.
+
+6
+
+β+1
+
+ β+2
+log T
+.
+A(rmax + log T )
+
+Remark 1. When κ is large, namely the reference policy deviates significantly from the human preference,
+it is natural to choose a small KL regularization parameter β to reduce the influence of the reference policy.
+In this regime, Algorithm 1 remains robust, since the regret bound scales only with κβ . By contrast, the
+lower bound in Proposition 2 suggests that the sampling protocols in prior works (Xie et al., 2025; Zhang
+et al., 2025) would incur regret at least linear in κ. This demonstrates that our strategy accommodates
+scenarios with small β, where the reference policy is poorly aligned with human preference.
+Remark 2. In Appendix E, we present an alternative assumption linking human preference and the reference
+policy, together with the corresponding regret guarantee.
+β+1
+
+Proposition 3 establishes a regret bound of order O(T β+2 ), with only polynomial dependence on the other
+parameters. This stands in sharp contrast to
+√ prior works (Cen et al., 2025; Xie et al., 2025; Zhang et al.,
+2025), which achieved the more standard O( T ) regret but at the cost of exponential dependence on terms
+such as rmax /β. We conjecture that, for RLHF, eliminating exponential dependence inevitably requires a
+slower rate in T , with the exponent governed by β. This trade-off is intuitive: online exploration primarily
+serves to learn human preference, and as the regularization parameter β increases, greater emphasis is placed
+on preserving similarity to the reference measure. This constraint naturally slows convergence.
+
+5
+
+Proof of Theorem 1
+
+5.1
+
+Step 1: regret decomposition
+
+In view of the optimality of r(t) (cf. equation (3.2a)), we have
+ℓ(r(t) , D(t−1) ) + αt J ⋆ (r(t) ; π (t−1) ) ≥ ℓ(r⋆ , D(t−1) ) + αt J ⋆ (r⋆ ; π (t−1) ).
+Rearrange terms to get
+
+1  (t) (t−1)
+ℓ(r , D
+) − ℓ(r⋆ , D(t−1) ) ≥ J ⋆ (r⋆ ; π (t−1) ) − J ⋆ (r(t) ; π (t−1) )
+αt
+(i)
+
+= max J(π, r⋆ ; π (t−1) ) − max J(π, r(t) ; π (t−1) )
+π
+
+π
+
+(ii)
+
+(5.1)
+
+≥ J(π ⋆ , r⋆ ; π (t−1) ) − J(π (t) , r(t) ; π (t−1) ).
+
+Here step (i) follows from the definition of J ⋆ (cf. equation (2.7)), while step (ii) follows from the optimality
+of π (t) (cf. equation (3.2b)). This allows us to reach the following decomposition:
+Regrett := J(π ⋆ , r⋆ ; π (t−1) ) − J(π (t) , r⋆ ; π (t−1) )
+
+
+≤ αt−1 ℓ(r(t) , D(t) ) − ℓ(r⋆ , D(t) ) + J(π (t) , r(t) ; π (t−1) ) − J(π (t) , r⋆ ; π (t−1) ) .
+{z
+}
+|
+{z
+} |
+
+(5.2)
+
+=:γt
+
+=:θt
+
+In view of the definition of J (cf. equation (2.3)), we can further decompose
+γt = Ea∼π(t) [r(t) (a)] − Ea∼π(t−1) [r(t) (a)] − Ea∼π(t) [r⋆ (a)] + Ea∼π(t−1) [r⋆ (a)]
+= r(t) (at2 ) − r(t) (at1 ) − r⋆ (at2 ) + r⋆ (at1 ) + ξt
+where ξt is the martingale difference sequence
+ξt = Ea∼π(t) [r(t) (a)] − r(t) (at2 ) − Ea∼π(t−1) [r(t) (a)] + r(t) (at1 )
+− Ea∼π(t) [r⋆ (a)] + r⋆ (at2 ) + Ea∼π(t−1) [r⋆ (a)] − r⋆ (at1 ).
+Therefore we have
+Regret =
+
+T
+X
+t=1
+
+Regrett ≤
+
+T
+X
+
+θt +
+
+T
+X
+
+ξt +
+
+T
+X
+
+t=1
+
+t=1
+
+t=1
+
+| {z }
+
+| {z }
+
+|
+
+=:θ
+
+=:ξ
+
+7
+
+|r(t) (at2 ) − r(t) (at1 ) − r⋆ (at2 ) + r⋆ (at1 )| .
+{z
+
+=:ζ
+
+}
+
+(5.3)
+
+It is straightforward to bound the second term ξ. Notice that |ξt | ≤ 8rmax holds deterministically for any
+1 ≤ t ≤ T . By the Azuma-Hoeffding inequality, with probability exceeding 1 − O(T −10 ) we have
+ξ=
+
+T
+X
+
+ξt ≤ C1 rmax
+
+p
+
+(5.4)
+
+T log T
+
+t=1
+
+for some universal constant C1 > 0. In what follows, we bound the other two terms θ and ζ.
+
+5.2
+
+Step 2: bounding likelihood ratios
+
+To bound θ, we need to analyze the regularized MLE. Notice that
+θt =
+
+t
+X
+σ(r(t) (xi , ai+ ) − r(t) (xi , ai− ))
+ℓ(r(t) , D(t) ) − ℓ(r⋆ , D(t) )
+.
+= αt−1
+log
+αt
+σ(r⋆ (xi , ai+ ) − r⋆ (xi , ai− ))
+i=1
+
+The following lemma is crucial for the subsequent analysis. The proof can be found in Appendix C.1.
+Lemma 1. For any given reward function r : A → [0, rmax ] and any 1 ≤ t ≤ T , define
+∆t (r) :=
+
+t
+X
+
+log
+
+i=1
+
+t
+
+σ(r⋆ (ai+ ) − r⋆ (ai− )) X
+KL σ(r⋆ (ai1 ) − r⋆ (ai2 )) ∥ σ(r(ai1 ) − r(ai2 )) .
+−
+i
+i
+σ(r(a+ ) − r(a− ))
+i=1
+
+There exists some universal constant C2 > 1 such that for any fixed r, with probability at least 1 − δ,
+v
+u t
+uX
+
+log T
+log t
+rmax KL σ(r⋆ (ai1 ) − r⋆ (ai2 )) ∥ σ(r(ai1 ) − r(ai2 )) log
+|∆t (r)| ≤ C2 t
++ C2 rmax log
+.
+δ
+δ
+i=1
+Equipped with the concentration bounds in Lemma 1, we can use the standard covering argument to
+derive an uniform upper bound, whose proof is deferred to Appendix C.2.
+Lemma 2. There exists some universal constant C3 > 0 such that with probability exceeding 1 − O(T −9 ),
+ℓ(r, D(t) ) − ℓ(r⋆ , D(t) ) ≤ −
+
+t
+
+1X
+KL σ(r⋆ (ai1 ) − r⋆ (ai2 )) ∥ σ(r(ai1 ) − r(ai2 )) + C3 Armax log T
+2 i=1
+
+holds for any r : A → [0, rmax ] and 1 ≤ t ≤ T .
+As an immediate consequence of Lemma 2, with probability exceeding 1 − O(T −9 ),
+ℓ(r(t) , D(t) ) − ℓ(r⋆ , D(t) ) ≤ C3 Armax log T
+holds for any 1 ≤ t ≤ T . Therefore
+θ=
+
+T
+X
+t=1
+
+5.3
+
+θt =
+
+T
+X
+ℓ(r(t) , D(t) ) − ℓ(r⋆ , D(t) )
+
+αt
+
+t=1
+
+≤
+
+T
+X
+C3 Armax log T
+
+αt
+
+t=1
+
+.
+
+Step 3: bounding reward errors
+
+We first notice that
+
+ (i)
+αt−1 ℓ(r(t) , D(t−1) ) − ℓ(r⋆ , D(t−1) ) ≥ max J(π, r⋆ ; π (t−1) ) − max J(π, r(t) ; π (t−1) )
+π
+
+π
+
+(ii)
+
+≥ J(π (t) , r⋆ ; π (t−1) ) − J(π (t) , r(t) ; π (t−1) )
+
+(iii)
+
+= Ea∼π(t) [r(t) (a) − r⋆ (a)] − Ea∼π(t−1) [r(t) (a) − r⋆ (a)]
+8
+
+(5.5)
+
+(5.6)
+
+≥ −4rmax .
+
+Here step (i) is an intermediate step of (5.1); step (ii) follows from the optimality of π (t) (cf. (3.2b)); step
+(iii) follows from the definition of J (cf. (2.3)). This combined with Lemma 2 implies that
+t
+X
+
+(5.7)
+
+
+KL σ(r⋆ (ai1 ) − r⋆ (ai2 )) ∥ σ(r(t) (ai1 ) − r(t) (ai2 ))
+
+i=1
+
+
+
+≤ −2 ℓ(r(t) , D(t) ) − ℓ(r⋆ , D(t) ) + 2C3 Armax log T ≤ C4 αt rmax ,
+as long as αt ≥ A log T and C4 ≥ 8 + 2C3 . This implies that for any t ∈ [T ] and any action pair (a+ , a− ),
+
+C4 αt rmax
+,
+KL σ(r⋆ (a+ ) − r⋆ (a− ))∥σ(r(t) (a+ ) − r(t) (a− )) ≤
+Nt (a+ , a− )
+
+(5.8)
+
+where Nt (a+ , a− ) is the number of comparison for (a+ , a− ) up to time t. This motivates us to decompose ζ
+according to whether Nt (a+ , a− ) ≫ αt rmax : let τ := 100C4 αT rmax and denote by tn (a+ , a− ) the time of the
+n-th comparison for (a+ , a− ), we have
+NT (a+ ,a− )
+
+X
+
+2
+
+ζ ≤ 2τ A rmax +
+r ⋆ (a
+
++
+
+X
+
+)≥r ⋆ (a
+
+r(tn ) (a+ ) − r(tn ) (a− ) − r⋆ (a+ ) + r⋆ (a− ) ,
+
+n=τ
+
+−)
+
+{z
+
+|
+
+=:ζ(a+ ,a− )
+
+}
+
+where we denote by tn (a+ , a− ) the time of the n-th comparison for (a+ , a− ), and the first summation is taken
+over all action pairs (a+ , a− ) satisfying r⋆ (a+ ) ≥ r⋆ (a− ). To bound each ζ(a+ , a− ), we need the following
+technical lemma. The proof can be found in Appendix C.3.
+Lemma 3. Consider any action pair (a+ , a− ) and time t0 such that Nt0 (a+ , a− ) ≥ τ . There exists universal
+constant C5 > 0 such that, for any t0 ≤ t1 < t2 ≤ T , with probability exceeding 1 − O(T −10 ) we have
+1/β
+
+Nt2 (a+ , a− ) − Nt1 (a+ , a− ) ≤ C5
+
+t2
+X
+1
+πref (a− ) h
+KL σ(r⋆ (a+ ) − r⋆ (a− ))∥σ(r(t) (a+ ) − r(t) (a− )) β
+π (a )
+t=t1 +1 ref +
+i
+p
+1
++ σ(r⋆ (a− ) − r⋆ (a+ )) β + C5 T log T .
+
+Equipped with Lemma 3, we can bound each ζ(a+ , a− ) using both density ratios regarding human
+feedback πHF (a+ )/πHF (a− ), and regarding the reference policy πref (a− )/πref (a+ ). The proof is deferred to
+Appendix C.4.
+Lemma 4. There exists universal constant C6 > 0 such that, for any action pair (a+ , a− ), with probability
+exceeding 1 − O(T −9 ) we have
+(
+)
+
+ β
+1
+1
+πHF (a+ )
+πref (a− ) β+1 β+1
+β+1
+ζ(a+ , a− ) ≤ C6 (rmax + log T ) min
+αT rmax , T
+αT rmax
+πHF (a− )
+πref (a+ )
+
+
+ANT (a+ , a− ) log T p
++ C6
++ T log T rmax .
+αT
+This immediately implies that
+
+
+p
+AT log T
+2
+2
+ζ ≤ 2τ A rmax + C6
++ A T log T rmax
+αT
+
+
+ β
+
+1
+1
+X
+πHF (a+ )
+πref (a− ) β+1 β+1
+β+1
++ C6 (rmax + log T )
+min
+αT rmax , T
+αT rmax .
+πHF (a− )
+πref (a+ )
+⋆
+⋆
+
+(5.9)
+
+r (a+ )≥r (a− )
+
+Putting the regret decomposition (5.3) and the bounds (5.4), (5.5) and (5.9) collectively yields the desired
+regret bound (4.1).
+9
+
+6
+
+Discussion
+
+In this paper, we investigated the problem of efficient exploration in online RLHF. By a careful analysis of
+the existing optimism-based exploration strategies, we identified a conceptual drawback in their sampling
+protocol, and we proved lower bounds to show that they can lead to inefficient exploration. We then proposed
+our algorithm that explicitly targets uncertainty in reward differences most relevant for policy improvement.
+Under a multi-armed bandit setup of RLHF, we establish regret bounds of order T (β+1)/(β+2) , which scales
+polynomially in all model parameters.
+Our work opens several avenues for future investigation. An immediate question is whether the rate
+T (β+1)/(β+2) is minimax optimal, or if faster rates can be achieved. Another important direction is to
+refine the dependence on parameters such as A and rmax , which may be improved with sharper analysis
+or alternative exploration schemes. Finally, our theoretical results are restricted to the bandit setting;
+extending the analysis to richer environments that incorporate a prompt space would be an exciting step
+toward bridging theory and practice in online RLHF.
+
+Acknowledgements
+G. Li is supported in part by the Chinese University of Hong Kong Direct Grant for Research and the Hong
+Kong Research Grants Council ECS 2191363.
+
+A
+
+Proof of Proposition 1
+
+For each t ≥ 1, define the event
+Et := {no a0 is sampled in the first t samples}.
+We will show that for any t ≥ 1,
+P(Et ) ≥
+
+2(t−1)
+4
+1 − exp(−rmax /β)
+.
+9
+
+(A.1)
+
+Conditional on Et , it can be seen that ℓ(r, D(t) ) only depends on r(a1 ) − r(a2 ). Now we study when we
+fix r(a1 ) − r(a2 ) ≡ δ such that ℓ(r, D(t) ) is fixed, when is J(π, r; πcal ) maximized over both π and r. By
+symmetry, we can assume without loss of generality that δ ≥ 0. We can compute
+J(π, r; πcal ) = Ea∼π [r(a)] − Ea∼πcal [r(a)] − βKL(π ∥ πref )
+= [π(a1 ) − p][r(a1 ) − r(a0 )] + [π(a2 ) − p][r(a2 ) − r(a0 )] − βKL(π ∥ πref )
+= [π(a1 ) + π(a2 ) − 2p][r(a1 ) − r(a0 )] − δ[π(a2 ) − p] − βKL(π ∥ πref ).
+For fixed π, we check which reward function r maximizes J(π, r; πcal ).
+• When π(a1 ) + π(a2 ) > 2p, we know that
+max J(π, r; πcal ) = rmax [π(a1 ) + π(a2 ) − 2p] − δ[π(a2 ) − p] − βKL(π ∥ πref ),
+r
+
+(A.2)
+
+which is maximized at r(a1 ) = rmax , r(a2 ) = rmax − δ and r(a0 ) = 0.
+• When π(a1 ) + π(a2 ) < 2p, we know that
+max J(π, r; πcal ) = (rmax − δ)[2p − π(a1 ) − π(a2 )] − δ[π(a2 ) − p] − βKL(π ∥ πref ),
+r
+
+which is maximized at r(a1 ) = δ, r(a2 ) = 0 and r(a0 ) = rmax .
+
+10
+
+(A.3)
+
+In addition, for any policy π such that π(a1 ) + π(a2 ) < 2p, by considering another policy π ′ defined as
+π ′ (a1 ) = 2p − π(a2 ) and π ′ (a2 ) = 2p − π(a1 ), we have
+max J(π ′ , r; πcal ) − max J(π, r; πcal )
+r
+
+r
+
+= rmax [π ′ (a1 ) + π ′ (a2 ) − 2p] − δ[π ′ (a2 ) − p] − βKL(π ′ ∥ πref )
+− (rmax − δ)[2p − π(a1 ) − π(a2 )] + δ[π(a2 ) − p] + βKL(π ∥ πref )
+= β[KL(π ∥ πref ) − KL(π ′ ∥ πref )].
+Here the first relation follows from (A.2), (A.3) and the fact that π ′ (a1 ) + π ′ (a2 ) > 2p. Let x = π(a1 ) and
+y = π(a2 ). Let
+f (x, y) := KL(π ∥ πref ) − KL(π ′ ∥ πref )
+= x log x + y log y + (1 − x − y) log(1 − x − y) − (2p − x) log(2p − x)
+− (2p − y) log(2p − y) − (1 − 4p + x + y) log(1 + x + y − 4p).
+By elementary analysis, it is straightforward to check that f (x, y) > 0 for any x, y > 0 satisfying x + y < 2p.
+Therefore we have
+max J(π ′ , r; πcal ) > max J(π, r; πcal ).
+r
+
+r
+
+Therefore in order to maximize ℓ(r, D ) + αJ (r; πcal ), the following statement always holds regardless of
+the value of δ:
+
+r(t+1) (a0 ) = 0, max r(t+1) (a1 ), r(t+1) (a2 ) = rmax .
+(t)
+
+⋆
+
+This immediately implies that
+π (t+1) (a0 ) =
+
+1
+exp(r(t+1) (a0 )/β)
+≤
+.
+(t+1)
+2 + exp(rmax /β)
+exp(r
+(a0 )/β) + exp(r(t+1) (a1 )/β) + exp(r(t+1) (a2 )/β)
+
+Therefore conditional on Et , we know that
+P(Et+1 |Et ) ≥ 1 − π (t+1) (a0 )
+
+2
+
+
+≥
+
+1
+1 + exp(−rmax /β)
+
+2
+
+2
+≥ 1 − exp(−rmax /β) .
+
+This relation, together with
+
+4
+,
+9
+establishes the statement (A.1). This immediately implies that, for any t ≤ exp(rmax /β)/2,
+P(E0 ) = π (1) (a1 ) + π (1) (a2 )
+
+P(Et ) ≥
+
+2
+
+=
+
+2(t−1)
+exp(rmax /β)
+4
+4
+4
+1 − exp(−rmax /β)
+≥ 1 − exp(−rmax /β)
+≥
+≥ 0.16.
+9
+9
+9e
+
+Finally, when Et holds, we have
+J(π ⋆ ; r⋆ , πcal ) − J(π (t) ; r⋆ , πcal ) = π ⋆ (a0 ) − π (t) (a0 ) − βKL(π ⋆ ∥πref ) + βKL(π (t) ∥πref ).
+We have
+π ⋆ (a0 ) =
+
+exp(1/β)
+,
+exp(1/β) + 2
+
+π ⋆ (a1 ) = π ⋆ (a2 ) =
+
+1
+.
+exp(1/β) + 2
+
+Therefore we have
+KL(π ⋆ ∥ πref ) = log 3 + π ⋆ (a0 ) log π ⋆ (a0 ) + π ⋆ (a1 ) log π ⋆ (a1 ) + π ⋆ (a2 ) log π ⋆ (a2 )
+exp(1/β)
+exp(1/β)
+2
+1
+log
++
+log
+exp(1/β) + 2
+exp(1/β) + 2 exp(1/β) + 2
+exp(1/β) + 2
+exp(1/β)
+= log 3 + β −1
+− log[exp(1/β) + 2].
+exp(1/β) + 2
+= log 3 +
+
+11
+
+In addition, when E t−1 happens, we know that
+KL(π (t) ∥ πref ) = log 3 + π (t) (a0 ) log π (t) (a0 ) + π (t) (a1 ) log π (t) (a1 ) + π (t) (a2 ) log π (t) (a2 )
+
+
+π (t) (a1 ) + π (t) (a2 )
+≥ log 3 + π (t) (a0 ) log π (t) (a0 ) + π (t) (a1 ) + π (t) (a2 ) log
+2
+(t)
+
+
+1
+−
+π
+(a
+)
+0
+= log 3 + π (t) (a0 ) log π (t) (a0 ) + 1 − π (t) (a0 ) log
+2
+(i)
+
+(ii)
+
+≥ log 3 − log 2 − 0.16.
+Here step (i) uses Jensen’s inequality for convex function f (x) = x log x; step (ii) holds since the function
+g(x) = x log x + (1 − x) log(1 − x)/2 is monotonically decreasing for 0 < x < 1/3, and we have
+π (t) (a0 ) ≤
+
+1
+1
+≤
+≤ 0.046
+2 + exp(rmax /β)
+2 + exp(3)
+
+provided that rmax /β ≥ 3. We have
+J(π ⋆ ; r⋆ , πcal ) − J(π (t) ; r⋆ , πcal ) = π ⋆ (a0 ) − π (t) (a0 ) − βKL(π ⋆ ∥ πref ) + βKL(π (t) ∥ πref )
+
+≥ β log exp(1/β) + 2 − (log 2 + 0.16)β − 0.046
+≥ 1/2,
+where the last relation holds for any β > 0.
+
+B
+
+Proof of Proposition 2
+
+Let T = min{κ, exp(rmax )/2}, and define the events
+
+A := at2 = a0 for all 1 ≤ t ≤ T
+and
+
+E := {at1 ≻ at2 or at1 = at2 for all 1 ≤ t ≤ T }.
+
+We can check that when κ ≥ 5,
+P(A) = [πref (a0 )]T ≤ (1 − 2κ−1 )κ ≥
+
+1
+.
+16
+
+Conditional on A, we know that when rmax ≥ 1,
+P(E | A) ≥
+
+T  exp(r
+exp(rmax )/2
+ exp(r
+1
+max − 1)
+max − 1)
+≥
+≥ .
+1 + exp(rmax − 1)
+1 + exp(rmax − 1)
+4
+
+Conditional on A and Et , for any 1 ≤ t ≤ T − 1, all the preference data in D(t) are of form at1 ≻ at2 . In this
+case, it is straightforward to check that the reward function that maximizes ℓ(r, D(t) ) + αJ ⋆ (r; πref ) is
+r(t+1) (a0 ) = 0,
+
+r(t+1) (a1 ) = r(t+1) (a2 ) = rmax .
+
+This immediately implies that
+π (t+1) (a0 ) =
+
+κ−2
+,
+κ − 2 + 2 exp(rmax /β)
+
+π (t+1) (a1 ) = π (t+1) (a2 ) =
+
+exp(rmax /β)
+.
+κ − 2 + 2 exp(rmax /β)
+
+On the other hand, we know that
+π ⋆ (a0 ) =
+
+κ−2
+,
+κ − 2 + exp(rmax /β) + exp((rmax − 2)/β)
+12
+
+exp(rmax /β)
+,
+κ − 2 + exp(rmax /β) + exp((rmax − 2)/β)
+exp((rmax − 2)/β)
+π ⋆ (a2 ) =
+.
+κ − 2 + exp(rmax /β) + exp((rmax − 2)/β)
+
+π ⋆ (a1 ) =
+
+For any 2 ≤ t ≤ T , we first lower bound
+J(π ⋆ ; r⋆ , πref ) − J(π (t) ; r⋆ , πref ) ≥ J(πθ⋆ ; r⋆ , πref ) − J(π1 ; r⋆ , πref )
+
+(B.1)
+
+for any θ⋆ ∈ [0, 1], where we define πθ := θπ (t) + (1 − θ)π ⋆ , and the above relation follows from the optimality
+of π ⋆ . Recall the definition
+J(π; r⋆ , πref ) = π(a1 )rmax + π(a2 )(rmax − 2) − β
+
+2
+X
+
+π(ai ) log
+
+i=0
+
+π(ai )
+,
+πref (ai )
+
+we can compute
+
+r⋆ (a0 ) − β log[π(a0 )/πref (a0 )] − β
+
+
+∇π J(π; r⋆ , πref ) =  r⋆ (a1 ) − β log[π(a1 )/πref (a1 )] − β 
+r⋆ (a2 ) − β log[π(a2 )/πref (a2 )] − β
+
+
+and
+
+∇2π J(π; r⋆ , πref ) = −βdiag {π(a0 ), π(a1 ), π(a2 )}
+
+−1
+
+.
+
+It is straightforward to check that
+
+ 
+1
+0
+
+ 
+
+∇π J(π (t) ; r⋆ , πref ) =  0  + const ·  1  .
+1
+−1
+
+
+(B.2)
+
+Since π (t) (a0 ) < π ⋆ (a0 ), π (t) (a1 ) < π ⋆ (a1 ) and π (t) (a2 ) > π ⋆ (a2 ), we know that for any θ ∈ [0, θ⋆ ]
+
+−1
+∇2π J(πθ ; r⋆ , πref ) ⪰ −βdiag π (t) (a0 ), π (t) (a1 ), θ⋆ π (t) (a2 ) + (1 − θ⋆ )π ⋆ (a2 )
+.
+
+(B.3)
+
+Therefore we have
+(i)
+
+J(πθ⋆ ; r⋆ , πref ) − J(π1 ; r⋆ , πref ) ≥ θ⋆ ∇π J(π (t) ; r⋆ , πref )⊤ (π ⋆ − π (t) )
+
+βθ⋆2 ⋆
+−1 ⋆
+−
+(π − π (t) )⊤ diag π (t) (a0 ), π (t) (a1 ), θ⋆ π (t) (a2 ) + (1 − θ⋆ )π ⋆ (a2 )
+(π − π (t) )
+2
+(ii)
+βθ⋆2 ⋆
+9
+≥ θ⋆ [π (t) (a2 ) − π ⋆ (a2 )] −
+[π (a0 ) + π ⋆ (a1 ) + π (t) (a2 )/θ⋆ ]
+2
+16
+9 ⋆ (t)
+βθ⋆2
+⋆ (t)
+⋆
+= θ [π (a2 ) − π (a2 )] − βθ π (a2 ) −
+[1 − π ⋆ (a2 )]
+32
+2
+
+
+
+
+9
+βθ⋆
+βθ⋆2
+⋆ (t)
+= 1 − β θ π (a2 ) − 1 −
+θ⋆ π ⋆ (a2 ) −
+32
+2
+2
+
+
+⋆
+⋆2
+(iii)
+3
+9
+βθ
+βθ (iv) 15 ⋆ (t)
+θ⋆2
+≥
+− β+
+θ⋆ π (t) (a2 ) −
+≥
+θ π (a2 ) −
+.
+4 32
+8
+2
+32
+2
+
+(B.4)
+
+Here step (i) follows from the Taylor expansion and (B.3); step (ii) utilizes (B.2) and as well as the following
+relations
+π (t) (a0 ) ≤ π ⋆ (a0 ) ≤ 2π (t) (a0 ), π (t) (a1 ) ≤ π ⋆ (a1 ) ≤ 2π (t) (a1 )
+and when β ≤ 1,
+π ⋆ (a2 ) ≤
+
+2
+1
+π (t) (a2 ) ≤ π (t) (a2 );
+exp(2/β) + 1
+4
+13
+
+(B.5)
+
+steps (iii) and (iv) follows from (B.5) and β ≤ 1. When κ ≤ exp(rmax β), we have
+π (t) (a2 ) =
+
+exp(rmax /β)
+exp(rmax /β)
+1
+≥
+≥ .
+κ − 2 + 2 exp(rmax /β)
+3 exp(rmax /β) − 2
+3
+
+(B.6)
+
+By taking (B.1), (B.4) and (B.6) collectively, we have
+(π ⋆ ; r⋆ , πref ) − J(π (t) ; r⋆ , πref ) ≥
+
+25
+5 ⋆ θ⋆2
+θ −
+≥
+> 0.01
+32
+2
+2048
+
+where we take θ⋆ = 5/32.
+
+C
+
+Proof of auxiliary lemmas
+
+C.1
+
+Proof of Lemma 1
+
+We first express
+Xi := log
+
+σ(r⋆ (ai+ ) − r⋆ (ai− ))
+σ(r⋆ (ai1 ) − r⋆ (ai2 ))
+σ(r⋆ (ai2 ) − r⋆ (ai1 ))
+i
+i
+i
+i
+=
+1{a
+≻
+a
+}
+log
++
+1{a
+≺
+a
+}
+log
+.
+1
+2
+1
+2
+σ(r(ai+ ) − r(ai− ))
+σ(r(ai1 ) − r(ai2 ))
+σ(r(ai2 ) − r(ai1 ))
+
+It is straightforward to check that
+
+
+
+
+σ(r⋆ (ai2 ) − r⋆ (ai1 ))
+σ(r⋆ (ai1 ) − r⋆ (ai2 ))
+i
+i i
+i
++
+P
+a
+≺
+a
+|a
+,
+a
+log
+E Xi ai1 , ai2 = P ai1 ≻ ai2 |ai1 , ai2 log
+1
+2
+1
+2
+σ(r(ai1 ) − r(ai2 ))
+σ(r(ai2 ) − r(ai1 ))
+⋆ i
+⋆ i
+σ(r⋆ (ai2 ) − r⋆ (ai1 ))
+σ(r (a1 ) − r (a2 ))
+⋆ i
+⋆ i
++
+σ(r
+(a
+)
+−
+r
+(a
+))
+log
+= σ(r⋆ (ai1 ) − r⋆ (ai2 )) log
+2
+1
+σ(r(ai1 ) − r(ai2 ))
+σ(r(ai2 ) − r(ai1 ))
+
+⋆ i
+⋆ i
+i
+i
+= KL σ(r (a1 ) − r (a2 )) ∥ σ(r(a1 ) − r(a2 )) .
+and
+
+
+|Xi | ≤ log 1 + exp(−r(ai+ ) + r(ai− )) ≤ 2rmax .
+
+In addition, we can compute the variance
+2
+
+
+σ(r⋆ (ai2 ) − r⋆ (ai1 ))
+σ(r⋆ (ai1 ) − r⋆ (ai2 ))
+−
+log
+Var Xi ai1 , ai2 = σ(r⋆ (ai1 ) − r⋆ (ai2 ))σ(r⋆ (ai2 ) − r⋆ (ai1 )) log
+σ(r(ai1 ) − r(ai2 ))
+σ(r(ai2 ) − r(ai1 ))
+
+2
+σ(r⋆ (ai1 ) − r⋆ (ai2 ))
+σ(r(ai1 ) − r(ai2 ))
+= σ(r⋆ (ai1 ) − r⋆ (ai2 ))σ(r⋆ (ai2 ) − r⋆ (ai1 )) log
+−
+log
+σ(r⋆ (ai2 ) − r⋆ (ai1 ))
+σ(r(ai2 ) − r(ai1 ))
+
+2
+= σ(r⋆ (ai1 ) − r⋆ (ai2 ))σ(r⋆ (ai2 ) − r⋆ (ai1 )) r(ai1 ) − r(ai2 ) − r⋆ (ai1 ) + r⋆ (ai2 ) .
+In view of Lemma 5, we have
+
+KL σ(r⋆ (ai1 ) − r⋆ (ai2 )) ∥ σ(r(ai1 ) − r(ai2 ))
+1
+≥ σ(r⋆ (ai1 ) − r⋆ (ai2 ))σ(r⋆ (ai2 ) − r⋆ (ai1 ))
+4
+n
+
+
+2 o
+· min |r(ai1 ) − r(ai2 ) − r⋆ (ai1 ) + r⋆ (ai2 )|, r(ai1 ) − r(ai2 ) − r⋆ (ai1 ) + r⋆ (ai2 )
+
+≥
+
+
+2
+1
+σ(r⋆ (ai1 ) − r⋆ (ai2 ))σ(r⋆ (ai2 ) − r⋆ (ai1 )) r(ai1 ) − r(ai2 ) − r⋆ (ai1 ) + r⋆ (ai2 ) ,
+16rmax
+
+where the last step follows from |r(ai1 ) − r(ai2 ) − r⋆ (ai1 ) + r⋆ (ai2 )| ≤ 4rmax . Therefore we have
+
+
+Var Xi ai1 , ai2 ≤ 16rmax KL σ(r⋆ (ai+ ) − r⋆ (ai− )) ∥ σ(r(ai+ ) − r(ai− )) .
+In addition, we have the following deterministic bound
+t
+X
+
+
+2
+Var Xi ai1 , ai2 ≤ 16trmax
+.
+
+i=1
+
+14
+
+(C.1)
+
+By the Freedman’s inequality (cf. Lemma 6), for any fixed r, with probability exceeding 1 − δ,
+|∆t (r)| ≤
+
+t
+X
+
+
+
+Xi − E Xi ai1 , ai2
+
+i=1
+
+v
+u t
+uX
+
+log t
+log t
+≤ C2 t
+rmax KL σ(r⋆ (ai1 ) − r⋆ (ai2 )) ∥ σ(r(ai1 ) − r(ai2 )) log
++ C2 rmax log
+δ
+δ
+i=1
+for some sufficiently large constant C2 > 0.
+
+C.2
+
+Proof of Lemma 2
+
+For any fixed r : A → [±rmax ], with probability exceeding 1 − δ we have
+v
+u t
+uX
+(i)
+
+log T
+log T
+|∆t (r)| ≤ C2 t
++ C2 rmax log
+rmax KL σ(r⋆ (ai1 ) − r⋆ (ai2 )) ∥ σ(r(ai1 ) − r(ai2 )) log
+δ
+δ
+i=1
+(ii) 1 X
+
+≤
+
+2
+
+i
+
+
+log T
+KL σ(r⋆ (ai1 ) − r⋆ (ai2 )) ∥ σ(r(ai1 ) − r(ai2 )) + 2C22 rmax log
+.
+δ
+
+Here step (i) follows from Lemma 1, and step (ii) utilizes the AM-GM inequality. This immediately implies
+that
+ℓ(r, D(t) ) − ℓ(r⋆ , D(t) ) =
+
+t
+X
+
+σ(r(ai+ ) − r(ai− ))
+σ(r⋆ (ai+ ) − r⋆ (ai− ))
+
+log
+
+i=1
+
+=−
+
+≤−
+
+t
+X
+
+
+KL σ(r⋆ (ai1 ) − r⋆ (ai2 )) ∥ σ(r(ai1 ) − r(ai2 )) − ∆t (r)
+
+i=1
+t
+X
+
+
+log T
+1
+KL σ(r⋆ (ai1 ) − r⋆ (ai2 )) ∥ σ(r(ai1 ) − r(ai2 )) + 2C22 rmax log
+.
+2 i=1
+δ
+
+(C.2)
+
+Then we explore the Lipschitzness continuity of the above functionals of r. For any two fixed reward
+functions r, r′ : A → [±rmax ], we have
+ℓ(r, D
+
+(t)
+
+′
+
+) − ℓ(r , D
+
+(t)
+
+) =
+
+≤
+
+t
+X
+i=1
+t
+X
+
+log[σ(r(ai+ ) − r(ai− ))] − log[σ(r′ (ai+ ) − r′ (ai− ))]
+|r(ai+ ) − r(ai− ) − r′ (ai+ ) + r′ (ai− )| ≤ 2T ∥r − r′ ∥∞ ,
+
+(C.3)
+
+i=1
+
+where the penultimate step follows from d log(σ(x))/dx = σ(−x) ≤ 1. Similarly, for any x, y, δ ∈ R, we have
+
+
+1 − σ(y + δ)
+σ(y + δ)
++ (1 − σ(x)) log
+KL σ(x) ∥ σ(y) − KL σ(x) ∥ σ(y + δ) = σ(x) log
+σ(y)
+1 − σ(y)
+≤ σ(x)|δ| + (1 − σ(x))|δ| = |δ|.
+This implies that
+t
+X
+
+
+KL σ(r⋆ (ai1 ) − r⋆ (ai2 )) ∥ σ(r(ai1 ) − r(ai2 ))
+
+i=1
+
+−
+
+t
+X
+
+KL σ(r⋆ (ai1 ) − r⋆ (ai2 )) ∥ σ(r′ (ai1 ) − r′ (ai2 ))
+
+i=1
+
+15
+
+
+
+≤ 2∥r − r′ ∥∞ .
+
+(C.4)
+
+Let Nε be an ε-net of [−rmax , rmax ]A (or equivalently, the function space of r : A → [±rmax ]) under the
+ℓ∞ norm such that |Nε | ≤ (2rmax /ε)A . By standard union bound argument and (C.2), with probability
+exceeding 1 − δ,
+ℓ(r, D(t) ) − ℓ(r⋆ , D(t) ) ≤ −
+
+t
+
+|Nε | log T
+1X
+KL σ(r⋆ (ai1 ) − r⋆ (ai2 )) ∥ σ(r(ai1 ) − r(ai2 )) + 2C22 rmax log
+(C.5)
+2 i=1
+δ
+
+holds for any r ∈ Nε . This implies that for any r : A → [±rmax ], there exists r0 ∈ Nε such that ∥r − r′ ∥ ≤ ε,
+hence
+(i)
+
+ℓ(r, D(t) ) − ℓ(r⋆ , D(t) ) ≤ ℓ(r0 , D(t) ) − ℓ(r⋆ , D(t) ) + 2T ε
+(ii)
+
+≤ −
+
+t
+
+|Nε | log T
+1X
+KL σ(r⋆ (ai1 ) − r⋆ (ai2 )) ∥ σ(r0 (ai1 ) − r0 (ai2 )) + 2C22 rmax log
++ 2T ε
+2 i=1
+δ
+
+(iii)
+
+≤ −
+
+t
+
+1X
+|Nε | log T
+KL σ(r⋆ (ai1 ) − r⋆ (ai2 )) ∥ σ(r(ai1 ) − r(ai2 )) + 2C22 rmax log
++ 4T ε
+2 i=1
+δ
+
+t
+
+1X
+KL σ(r⋆ (ai1 ) − r⋆ (ai2 )) ∥ σ(r(ai1 ) − r(ai2 )) + C3 Armax log T.
+≤ −
+2 i=1
+
+(iv)
+
+Here step (i) utilizes (C.3); step (ii) follows from r0 ∈ Nε and the uniform concentration bound (C.5); step
+(iii) uses (C.4); step (iv) holds as long as C3 ≫ 2C22 , where we let ε = Armax /T and δ = T −10 . This
+completes the proof.
+
+C.3
+
+Proof of Lemma 3
+
+When Nt (a+ , a− ) ≥ 100C4 αt rmax , we have
+
+1
+KL σ(r⋆ (a+ ) − r⋆ (a− )) ∥ σ(r(t) (a+ ) − r(t) (a− )) ≤
+.
+100
+
+(C.6)
+
+Now we assert that r(t) (a− ) − r(t) (a+ ) < 0.5 for any t ≥ t0 . This is because, if r(t) (a− ) − r(t) (a+ ) ≥ 0.5, we
+have
+
+
+KL σ(r⋆ (a+ ) − r⋆ (a− )) ∥ σ(r(t) (a+ ) − r(t) (a− )) = KL σ(r⋆ (a− ) − r⋆ (a+ )) ∥ σ(r(t) (a− ) − r(t) (a+ ))
+
+1
+.
+≥ KL σ(0) ∥ σ(0.5) >
+100
+Here we use the fact that r⋆ (a− ) − r⋆ (a+ ) ≤ 0. This contradicts with (C.6). Hence we have
+(C.7)
+
+r(t) (a− ) − r(t) (a+ ) < 0.5.
+Let p := σ(r⋆ (a− ) − r⋆ (a+ )) and q := σ(r(t) (a− ) − r(t) (a+ )). We have
+(i)
+
+(ii)
+
+exp(r(t) (a− ) − r(t) (a+ )) ≤ 3σ(r(t) (a− ) − r(t) (a+ )) = 3q ≤ 6p + KL(p ∥ q)
+⋆
+
+⋆
+
+⋆
+
+⋆
+
+= 6σ(r (a− ) − r (a+ )) + 24KL σ(r (a+ ) − r (a− )) ∥ σ(r
+
+(t)
+
+(a+ ) − r
+
+(t)
+
+(C.8)
+
+(a− )) .
+
+Here step (i) follows from (C.7), while step (ii) holds trivially when q ≤ 2p, and when q > 2p we have
+KL(p ∥ q) = p log
+
+p
+1−p
+(q − p)2
+1
++ (1 − p) log
+≥
+≥ q.
+q
+1−q
+2q
+8
+
+Finally, for any t0 ≤ t1 < t2 ≤ T , we can upper bound
+Nt2 (a+ , a− ) − Nt1 (a+ , a− ) ≤
+
+t2
+X
+
+Xi
+
+where
+
+i=t1 +1
+
+16
+
+Xi := 1{a− is sampled in the i-th iteration}.
+
+It is straightforward to check that Xi − E[Xi |Fi−1 ] is a martingale difference sequence, and by the AzumaHoeffding inequality, with probability exceeding 1 − O(T −100 ) we have
+t2
+
+X
+
+
+p
+e T log T
+Xi − E[Xi |π (i) , π (i−1) ] ≤ C
+
+i=t1 +1
+
+e > 0. In addition, we have
+for some universal constant C
+E[Xi |π (i) , π (i−1) ] ≤
+
+π (i) (a− )
+π (i−1) (a− )
++ (i−1)
+.
+(i)
+π
+(a− ) + π (i−1) (a+ )
+− ) + π (a+ )
+
+π (i) (a
+
+For each t ∈ [T ], we have
+πref (a− ) exp(r(t) (a− )/β)
+π (t) (a− )
+(i)
+=
+(t)
+(t)
+π (a− ) + π (a+ )
+πref (a− ) exp(r(t) (a− )/β) + πref (a+ ) exp(r(t) (a+ )/β)
+
+ 
+πref (a− )
+exp r(t) (a− ) − r(t) (a+ ) /β
+πref (a+ )
+i1/β
+πref (a− ) h
+6σ(r⋆ (a− ) − r⋆ (a+ )) + 24KL σ(r⋆ (a+ ) − r⋆ (a− )) ∥ σ(r(t) (a+ ) − r(t) (a− ))
+.
+≤
+πref (a+ )
+≤
+
+Here step (i) utilizes (2.4), while step (ii) follows from (C.8). Hence we have
+Nt2 (a+ , a− ) − Nt1 (a+ , a− ) ≤ 2
+
+t2
+X
+
+p
+π (t) (a− )
+e T log T
++ 2C
+(t)
+(t)
+π (a− ) + π (a+ )
+t=t +1
+1
+
+1/β
+
+≤ C5
+
+t2
+X
+1
+πref (a− ) h
+KL σ(r⋆ (a+ ) − r⋆ (a− ))∥σ(r(t) (a+ ) − r(t) (a− )) β
+π (a )
+t=t1 +1 ref +
+i
+p
+1
++ σ(r⋆ (a− ) − r⋆ (a+ )) β + C5 T log T
+
+for some sufficiently large constant C5 > 0.
+
+C.4
+
+Proof of Lemma 4
+
+Let t0 be the first iteration such that
+
+Nt0 (a+ , a− ) ≥ min
+
+
+1
+NT (a+ , a− ), 100C4 αT rmax .
+2
+
+(C.9)
+
+In what follows, we establish the desired result under two different cases: NT (a+ , a− ) being larger or smaller
+than c0 exp(r⋆ (a+ ) − r⋆ (a− ))αT rmax for some sufficiently large constant c0 > 0.
+Case 1.
+
+When NT (a+ , a− ) ≤ c0 exp(r⋆ (a+ ) − r⋆ (a− ))αT rmax , it is straightforward to show that
+
+2
+ζ(a+ , a− ) ≤ NT (a+ , a− )rmax ≤ C6 exp(r⋆ (a+ ) − r⋆ (a− ))αT rmax
+= C6
+
+πHF (a+ )
+2
+αT rmax
+.
+πHF (a− )
+
+(C.10)
+
+In addition, we have
+σ(r⋆ (a− ) − r⋆ (a+ )) ≤ exp(r⋆ (a− ) − r⋆ (a+ )) ≤
+
+c0 αT rmax
+.
+NT (a+ , a− )
+
+In addition, for any t0 ≤ t ≤ T , we can use (5.8) to show that
+
+C4 αt rmax
+2C4 αT rmax
+KL σ(r⋆ (a+ ) − r⋆ (a− ))∥σ(r(t) (a+ ) − r(t) (a− )) ≤
+≤
+.
+Nt (a+ , a− )
+NT (a+ , a− )
+17
+
+(C.11)
+
+By taking t1 = t0 − 1 and t2 = T in Lemma 3, we have
+(i)
+
+NT (a+ , a− ) ≤ 2[NT (a+ , a− ) − Nt0 −1 (a+ , a− )]
+(ii)
+p
+πref (a− )  C5 max{c0 , 2C4 }αT rmax 1/β
++ 2C5 T log T .
+≤ 4T
+πref (a+ )
+NT (a+ , a− )
+Here step (i) follows from the definition of t0 (cf. (C.9)), while step (ii) uses the above two bounds and
+Lemma 3 with t1 = t0 − 1 and t2 = T . This immediately implies that
+ β
+
+p
+1
+πref (a− ) β+1
+(αT rmax ) β+1 + C7 T log T
+NT (a+ , a− ) ≤ C7 T
+πref (a+ )
+for some sufficiently large constant C7 > 0. This leads to
+
+ β
+β+2
+1
+p
+πref (a− ) β+1 β+1
+β+1
+αT rmax
+ζ(a+ , a− ) ≤ NT (a+ , a− )rmax ≤ C7 T
++ C7 T log T rmax .
+πref (a+ )
+Case 2.
+
+(C.12)
+
+When NT (a+ , a− ) > c0 exp(r⋆ (a+ ) − r⋆ (a− ))αT rmax , we have
+(i) 2
+1
+NT (a+ , a− ) ≤ [NT (a+ , a− ) − Nt0 −1 (a+ , a− )]
+c0
+c0
+1/β
+h
+ 2C α r
+1/β i 2C p
+(ii) 2C
+πref (a− )
+4 T max
+5
+5
+≤
+σ(r⋆ (a− ) − r⋆ (a+ ))1/β +
++
+T
+T log T
+c0
+πref (a+ )
+NT (a+ , a− )
+c0
+(iii) 4
+2C5 p
+πref (a− )
+≤
+exp(r⋆ (a− ) − r⋆ (a+ ))1/β +
+T log T .
+max{C5 , 2C4 C5 /c0 }1/β T
+c0
+πref (a+ )
+c0
+
+exp(r⋆ (a+ ) − r⋆ (a− ))αT rmax ≤
+
+Here step (i) follows from the definition of t0 (cf. (C.9)); step (ii) utilizes Lemma 3 with t1 = t0 − 1 and
+t2 = T , as well as (C.11); step (iii) holds since σ(r⋆ (a− ) − r⋆ (a+ )) ≤ exp(r⋆ (a− ) − r⋆ (a+ )) and
+2C4 αT rmax
+2C4 αT rmax
+2C4
+≤
+≤
+exp(r⋆ (a− ) − r⋆ (a+ )).
+⋆
+⋆
+NT (a+ , a− )
+c0 exp(r (a+ ) − r (a− ))αT rmax
+c0
+This immediately implies that for some sufficiently large constant C8 > 0, we have
+√
+β
+ π (a )T  β+1
+T log T
+πHF (a+ )
+ref −
++ C8
+= exp(r⋆ (a+ ) − r⋆ (a− )) ≤ C8
+.
+πHF (a− )
+πref (a+ )αT rmax
+αT rmax
+
+(C.13)
+
+Similar to (C.1), we can show that
+
+
+KL σ(r⋆ (a+ ) − r⋆ (a− ))∥σ(r(a+ ) − r(a− )) = KL σ(r⋆ (a− ) − r⋆ (a+ ))∥σ(r(a− ) − r(a+ ))
+(a)
+
+1
+σ(r⋆ (a− ) − r⋆ (a+ ))[1 − σ(r⋆ (a− ) − r⋆ (a+ ))][r(a+ ) − r(a− ) − r⋆ (a+ ) + r⋆ (a− )]2
+16rmax
+(b)
+1
+exp(r⋆ (a− ) − r⋆ (a+ ))[r(a+ ) − r(a− ) − r⋆ (a+ ) + r⋆ (a− )]2 .
+≥
+64rmax
+≥
+
+Here step (a) follows from Lemma 5; step (b) makes use of the fact that r⋆ (a− ) ≤ r⋆ (a+ ). Hence we have
+[r(a+ ) − r(a− ) − r⋆ (a+ ) + r⋆ (a− )]2
+≤ 64rmax
+
+
+πHF (a+ )
+KL σ(r⋆ (a+ ) − r⋆ (a− )) ∥ σ(r(a+ ) − r(a− )) .
+πHF (a− )
+
+(C.14)
+
+In addition, we have
+t
+X
+
+ (i)
+
+
+KL σ(r⋆ (ai1 ) − r⋆ (ai2 )) ∥ σ(r(t) (ai1 ) − r(t) (ai2 )) ≤ −2 ℓ(r(t) , D(t) ) − ℓ(r⋆ , D(t) ) + 2C3 Armax log T
+
+i=1
+
+18
+
+(ii)
+
+≤ 2αt γt + 2C3 Armax log T
+Here step (i) follows from Lemma 2, while step (ii) utilizes (5.6) and the definition of γt (cf. (5.2)). This
+immediately implies that
+ 2αt γt + 2C3 Armax log T
+KL σ(r⋆ (a+ ) − r⋆ (a− )) ∥ σ(r(t) (a+ ) − r(t) (a− )) ≤
+.
+(C.15)
+Nt (a+ , a− )
+Therefore for any 1 ≤ n1 < n2 ≤ NT (a+ , a− ), we have
+2
+ X
+n2
+1
+r(tn ) (a+ ) − r(tn ) (a− ) − r⋆ (a+ ) + r⋆ (a− )
+n2 − n1 n=n
+1
+
+n2
+(i) X
+≤
+[r(tn ) (a+ ) − r(tn ) (a− ) − r⋆ (a+ ) + r⋆ (a− )]2
+n=n1
+(ii)
+
+≤ 64rmax
+
+n2
+
+πHF (a+ ) X
+KL σ(r⋆ (a+ ) − r⋆ (a− )) ∥ σ(r(tn ) (a+ ) − r(tn ) (a− ))
+πHF (a− ) n=n
+1
+
+(iii) 128r
+max αT πHF (a+ )
+
+≤
+
+n1
+
+n2
+X
+
+πHF (a− ) n=n
+
+2
+γtn + 128C3 Armax
+log T
+
+1
+
+n2 − n1 πHF (a+ )
+.
+n1 πHF (a− )
+
+(C.16)
+
+Here step (i) uses the Cauchy-Schwarz inequality; step (ii) follows from (C.14); step (iii) utilizes (C.15) and
+the fact that {αt } is monotonically increasing. Following the same analysis as in (5.3) and (5.4), we know
+that
+n2
+n2
+n2
+X
+X
+X
+r(tn ) (a+ ) − r(tn ) (a− ) − r⋆ (a+ ) + r⋆ (a− )
+γtn ≤
+ξtn +
+n=n1
+
+n=n1
+
+n=n1
+
+≤ C1 rmax
+
+p
+
+(n2 − n1 ) log T +
+
+n2
+X
+
+r(tn ) (a+ ) − r(tn ) (a− ) − r⋆ (a+ ) + r⋆ (a− ) .
+
+(C.17)
+
+n=n1
+
+Taking (C.16) and (C.17) collectively and let n2 = 2n1 , we know that for any n1 ≤ NT (a+ , a− )/2,
+ X
+2
+2n1
+r(tn ) (a+ ) − r(tn ) (a− ) − r⋆ (a+ ) + r⋆ (a− )
+n=n1
+(iii)
+
+2n
+πHF (a+ ) X1 (tn )
+r (a+ ) − r(tn ) (a− ) − r⋆ (a+ ) + r⋆ (a− )
+πHF (a− ) n=n
+1
+!
+r
+πHF (a+ )
+log T
++ 128rmax
+n1 αT C1 rmax
++ C3 Armax log T .
+πHF (a− )
+n1
+
+≤ 128rmax αT
+
+This self-bounding relation implies that
+2n1
+X
+
+r(tn ) (a+ ) − r(tn ) (a− ) − r⋆ (a+ ) + r⋆ (a− ) ≤ 256rmax αT
+
+n=n1
+
+v
+u
+u
+πHF (a+ )
++ t256rmax
+n1
+πHF (a− )
+≤ 400rmax αT
+
+r
+αT C1 rmax
+
+πHF (a+ )
+πHF (a− )
+
+!
+log T
++ C3 Armax log T .
+n1
+
+p
+πHF (a+ )
+Armax log T
++ C1 rmax n1 log T + C3 n1
+,
+πHF (a− )
+αT
+
+where the last relation follows from the AM-GM inequality. By using the above relation recursively, we have
+⌈log T ⌉ NT (a+ ,a− )/2k−1
+
+ζ(a+ , a− ) ≤
+
+X
+
+X
+
+r(tn ) (a+ ) − r(tn ) (a− ) − r⋆ (a+ ) + r⋆ (a− )
+
+k=1 n=NT (a+ ,a− )/2k
+
+19
+
+≤ C9 rmax
+
+p
+πHF (a+ )
+Armax log T
+αT log T + C9 rmax NT (a+ , a− ) log T + C9 NT (a+ , a− )
+πHF (a− )
+αT
+
+(C.18)
+
+for some sufficiently large constant C9 > 0. On the other hand, taking (C.18) and (C.13) collectively yields
+ β
+
+1
+1
+p
+πref (a− ) β+1 β+1
+β+1
+αT rmax
+log T + C9 rmax NT (a+ , a− ) log T
+ζ(a+ , a− ) ≤ C8 C9 T
+πref (a+ )
+Armax log T
++ C9 NT (a+ , a− )
+.
+αT
+
+(C.19)
+
+By putting (C.10), (C.12), (C.18) and (C.19) together, we have
+(
+)
+
+ β
+1
+1
+πHF (a+ )
+πref (a− ) β+1 β+1
+β+1
+ζ(a+ , a− ) ≤ C6 (rmax + log T ) min
+αT rmax , T
+αT rmax
+πHF (a− )
+πref (a+ )
+
+
+ANT (a+ , a− ) log T p
++ C6
++ T log T rmax
+αT
+always holds for some universal constant C6 > 0.
+
+D
+
+Proof of Proposition 3
+
+Under Assumption 1, we know that for any action pair (a+ , a− ),
+
+min
+
+
+ β
+
+1
+1
+1
+1
+β
+
+πHF (a+ )
+πref (a− ) β+1 β+1
+β+1
+β+1
+αT rmax
+.
+αT rmax , T
+≤ max τ αT rmax , (κT ) β+1 αTβ+1 rmax
+πHF (a− )
+πref (a+ )
+
+Therefore we have
+T
+X
+p
+Armax log T
+R(T ) ≤ Crmax A T log T + C
++ 2C(rmax + log T )A2 τ αT rmax
+α
+t
+t=1
+2
+
+1
+
+β
+
+1
+
+β+1
+.
++ C(rmax + log T )A2 (κT ) β+1 αTβ+1 rmax
+
+By taking
+1
+
+αt = A log T + t β+2
+
+r
+
+max
+
+β 
+ β+2
+
+κ
+
+β+1
+
+ β+2
+log T
+,
+A(rmax + log T )
+
+we can achieve
+R(T ) ≲ (rmax + log T )A3 τ rmax log T + rmax A2
++ (rmax + log T )
+
+β+1
+β+2
+
+2
+β+2
+
+rmax κ
+
+1
+
+β
+β+2
+
+A
+
+2β+3
+β+2
+
+2β+2
+
+β+3
+
+p
+
+T log T
+β+1
+
+1
+
+T β+2 (log T ) β+2
+β
+
+β+1
+
+1
+
+β+2
++ (rmax + log T ) β+2 A β+2 τ rmax
+κ− β+2 (log T ) β+2 T β+2
+2β+3
+
+β
+
+1
+
+1
+
+β
+
+β+1
++ (rmax + log T )A β+1 κ β+1 (log T ) β+1 rmax
+T β+1
+β+1
+
+2
+2
+A3 τ log2 T.
+≲ τ A3 rmax
+log2 T + T β+2 κβ rmax
+
+E
+
+Another assumption and the regret bound
+
+As an alternaive to Assumption 1, we can also impose the following assumption to capture the relation
+between human preference πHF and the reference policy πref .
+Assumption 2. There exists some quantity µ > 0 such that, for any action pair (a+ , a− ),
+πHF (a+ )
+πref (a+ )
+≤µ
+.
+πHF (a− )
+πref (a− )
+20
+
+The quantity µ measures the deviation of human preference from the reference policy. Under Assumption 2, we have
+
+ β
+
+1
+1
+πHF (a+ )
+πref (a− ) β+1 β+1
+β+1
+αT rmax
+min
+αT rmax , T
+πHF (a− )
+πref (a+ )
+
+
+ β
+
+1
+1
+πref (a+ )
+πref (a− ) β+1 β+1
+β+1
+≤ min µ
+αT rmax , T
+αT rmax .
+πref (a− )
+πref (a+ )
+
+
+β
+
+β+1
+
+≤ (µT ) 2β+1 (αT rmax ) 2β+1 .
+Putting the above relation with (4.1), we have
+R(T ) ≲ rmax A2
+
+p
+
+T log T +
+
+T
+X
+Armax log T
+t=1
+
+αt
+
+2
++ A2 αT rmax
+
+β
+
+β+1
+
++ (rmax + log T )A2 (µT ) 2β+1 (αT rmax ) 2β+1 .
+By taking
+β+1
+
+αt = A + t 3β+2
+
+β
+2β+1
+ 3β+2
+rmax  3β+2
+log T
+,
+µ
+A(rmax + log T )
+
+we have
+2β+1
+
+β
+
+R(T ) ≲ T 3β+2 µ 3β+2 poly(A, rmax , log T ).
+
+F
+
+Technical lemmas
+
+Lemma 5. For any x, δ ∈ R, we have
+KL(σ(x)∥σ(x + δ)) ≥
+
+1
+σ(x) (1 − σ(x)) min{|δ|, δ 2 }.
+4
+
+Proof. Let fx (t) := KL(σ(x)∥σ(x + t)). We have
+σ(x)
+1 − σ(x)
++ (1 − σ(x)) log
+σ(x + t)
+1 − σ(x + t)
+
+
+1 − σ(x + t)
+1 − σ(x)
+σ(x)
+·
++ log
+= σ(x) log
+1 − σ(x)
+σ(x + t)
+1 − σ(x + t)
+
+1 + exp(x + t)
+= log
+− σ(x)t = log 1 + σ(x)(et − 1) − σ(x)t.
+1 + exp(x)
+
+fx (t) = σ(x) log
+
+Then we have
+fx′ (t) =
+
+σ(x)et
+σ(x) (1 − σ(x)) (et − 1)
+−
+σ(x)
+=
+.
+1 + σ(x)(et − 1)
+1 + σ(x)(et − 1)
+
+For any t > 0, we can check that
+ 1
+fx′ (t) > σ(x) (1 − σ(x)) 1 − e−t ≥ σ(x) (1 − σ(x)) min {t, 1} ,
+2
+and for any t ∈ (0, 1) we have
+
+fx′ (t) < σ(x) (1 − σ(x)) et − 1 ≤ 2σ(x) (1 − σ(x)) t.
+This immediately implies that for δ > 0,
+Z δ
+KL (σ(x)∥σ(x + δ)) = fx (δ) − fx (0) =
+0
+
+21
+
+fx′ (t)dt
+
+Z δ
+1
+σ(x) (1 − σ(x))
+min {t, 1} dt
+2
+0
+(a) 1
+≥ σ(x) (1 − σ(x)) min{δ, δ 2 }.
+4
+Rδ
+Rδ
+Here step (a) holds since 0 min{t, 1}dt = δ 2 /2 for δ ≤ 1, and 0 min{t, 1}dt = δ − 1/2 ≥ δ/2 for δ > 1.
+For δ < 0, we can use the same argument to show that
+≥
+
+KL (σ(x)∥σ(x + δ)) ≥
+
+1
+σ(x) (1 − σ(x)) min{−δ, δ 2 }.
+4
+
+This completes the proof.
+The following lemma provides a user-friendly version of Freedman’s inequality (the Bernstein inequality
+for martingale differences) (Freedman, 1975; Tropp, 2011).
+Lemma 6. Consider a filtration {Fi }i≥0 and random variables {Xi }i≥1 obeying
+|Xi | ≤ R
+
+and
+
+E[Xi |Fi−1 ] = 0
+
+for all i ≥ 1.
+
+Pn
+
+Define Wn = i=1 E[Xi2 |Fi−1 ], and suppose that Wn ≤ σ 2 holds deterministically for some given quantity
+σ > 0. Then for any positive integer m ≥ 1, with probability exceeding 1 − δ we have
+s
+
+
+n
+X
+2m 4
+2m
+σ2
+Xi ≤ 8 max Wn , m log
++ R log
+.
+2
+δ
+3
+δ
+i=1
+Proof. See Li et al. (2021, Section A).
+
+References
+Azar, M. G., Guo, Z. D., Piot, B., Munos, R., Rowland, M., Valko, M., and Calandriello, D. (2024). A
+general theoretical paradigm to understand learning from human preferences. In International Conference
+on Artificial Intelligence and Statistics, pages 4447–4455. PMLR.
+Azar, M. G., Osband, I., and Munos, R. (2017). Minimax regret bounds for reinforcement learning. In
+International Conference on Machine Learning, pages 263–272. PMLR.
+Bai, Y., Jones, A., Ndousse, K., Askell, A., Chen, A., DasSarma, N., Drain, D., Fort, S., Ganguli, D.,
+Henighan, T., et al. (2022). Training a helpful and harmless assistant with reinforcement learning from
+human feedback. arXiv preprint arXiv:2204.05862.
+Bradley, R. A. and Terry, M. E. (1952). Rank analysis of incomplete block designs: I. the method of paired
+comparisons. Biometrika, 39(3/4):324–345.
+Cen, S., Mei, J., Goshvadi, K., Dai, H., Yang, T., Yang, S., Schuurmans, D., Chi, Y., and Dai, B. (2025).
+Value-incentivized preference optimization: A unified approach to online and offline RLHF. In The Thirteenth International Conference on Learning Representations.
+Chen, Z., Deng, Y., Yuan, H., Ji, K., and Gu, Q. (2024). Self-play fine-tuning converts weak language models
+to strong language models. In International Conference on Machine Learning, pages 6621–6642. PMLR.
+Christiano, P. F., Leike, J., Brown, T., Martic, M., Legg, S., and Amodei, D. (2017). Deep reinforcement
+learning from human preferences. Advances in neural information processing systems, 30.
+Dong, H., Xiong, W., Pang, B., Wang, H., Zhao, H., Zhou, Y., Jiang, N., Sahoo, D., Xiong, C., and Zhang,
+T. (2024). Rlhf workflow: From reward modeling to online rlhf. arXiv preprint arXiv:2405.07863.
+Feng, Y., Kwiatkowski, A., Zheng, K., Kempe, J., and Duan, Y. (2025). Pilaf: Optimal human preference
+sampling for reward modeling. arXiv preprint arXiv:2502.04270.
+22
+
+Freedman, D. A. (1975). On tail probabilities for martingales. The Annals of Probability, pages 100–118.
+Guo, S., Zhang, B., Liu, T., Liu, T., Khalman, M., Llinares, F., Rame, A., Mesnard, T., Zhao, Y., Piot, B.,
+et al. (2024). Direct language model alignment from online ai feedback. arXiv preprint arXiv:2402.04792.
+Ivison, H., Wang, Y., Pyatkin, V., Lambert, N., Peters, M., Dasigi, P., Jang, J., Wadden, D., Smith, N. A.,
+Beltagy, I., et al. (2023). Camels in a changing climate: Enhancing lm adaptation with tulu 2. arXiv
+preprint arXiv:2311.10702.
+Jin, C., Allen-Zhu, Z., Bubeck, S., and Jordan, M. I. (2018). Is Q-learning provably efficient? In Advances
+in Neural Information Processing Systems, pages 4863–4873.
+Lai, T. L. and Robbins, H. (1985). Asymptotically efficient adaptive allocation rules. Advances in applied
+mathematics, 6(1):4–22.
+Lattimore, T. and Szepesvári, C. (2020). Bandit algorithms. Cambridge University Press.
+Li, G., Cai, C., Chen, Y., Gu, Y., Wei, Y., and Chi, Y. (2021). Is Q-learning minimax optimal? a tight
+sample complexity analysis. arXiv preprint arXiv:2102.06548.
+OpenAI (2023). Gpt-4 technical report. arXiv preprint arXiv:2303.08774.
+Ouyang, L., Wu, J., Jiang, X., Almeida, D., Wainwright, C., Mishkin, P., Zhang, C., Agarwal, S., Slama, K.,
+Ray, A., et al. (2022). Training language models to follow instructions with human feedback. Advances in
+neural information processing systems, 35:27730–27744.
+Rafailov, R., Hejna, J., Park, R., and Finn, C. (2024). From r to Q∗ : Your language model is secretly a
+Q-function. In First Conference on Language Modeling.
+Rosset, C., Cheng, C.-A., Mitra, A., Santacroce, M., Awadallah, A., and Xie, T. (2024). Direct nash optimization: Teaching language models to self-improve with general preferences. arXiv preprint arXiv:2404.03715.
+Russo, D. and Van Roy, B. (2013). Eluder dimension and the sample complexity of optimistic exploration.
+Advances in Neural Information Processing Systems, 26.
+Shi, R., Song, M., Zhou, R., Zhang, Z., Fazel, M., and Du, S. S. (2025). Understanding the performance gap
+in preference learning: A dichotomy of rlhf and dpo. arXiv preprint arXiv:2505.19770.
+Tropp, J. (2011). Freedman’s inequality for matrix martingales. Electronic Communications in Probability,
+16:262–270.
+Xie, T., Foster, D. J., Krishnamurthy, A., Rosset, C., Awadallah, A. H., and Rakhlin, A. (2025). Exploratory preference optimization: Harnessing implicit q*-approximation for sample-efficient RLHF. In
+The Thirteenth International Conference on Learning Representations.
+Xiong, W., Dong, H., Ye, C., Wang, Z., Zhong, H., Ji, H., Jiang, N., and Zhang, T. (2023). Iterative
+preference learning from human feedback: Bridging theory and practice for rlhf under kl-constraint. arXiv
+preprint arXiv:2312.11456.
+Zanette, A. and Brunskill, E. (2019). Tighter problem-dependent regret bounds in reinforcement learning
+without domain knowledge using value function bounds. In International Conference on Machine Learning,
+pages 7304–7312. PMLR.
+Zhang, S., Yu, D., Sharma, H., Zhong, H., Liu, Z., Yang, Z., Wang, S., Awadalla, H. H., and Wang, Z.
+(2025). Self-exploring language models: Active preference elicitation for online alignment. Transactions
+on Machine Learning Research.
+Zhao, Y., Joshi, R., Liu, T., Khalman, M., Saleh, M., and Liu, P. J. (2023). Slic-hf: Sequence likelihood
+calibration with human feedback. arXiv preprint arXiv:2305.10425.
+
+23
+
+Zhu, B., Frick, E., Wu, T., Zhu, H., Ganesan, K., Chiang, W.-L., Zhang, J., and Jiao, J. (2024). Starling-7b:
+Improving helpfulness and harmlessness with rlaif. In First Conference on Language Modeling.
+Ziegler, D. M., Stiennon, N., Wu, J., Brown, T. B., Radford, A., Amodei, D., Christiano, P., and Irving, G.
+(2019). Fine-tuning language models from human preferences. arXiv preprint arXiv:1909.08593.
+
+24
+
+

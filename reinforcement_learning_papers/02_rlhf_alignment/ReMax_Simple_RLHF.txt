@@ -1,0 +1,4169 @@
+ReMax: A Simple, Effective, and Efficient Reinforcement Learning Method for
+Aligning Large Language Models
+
+Ziniu Li 1 2 Tian Xu 3 4 Yushun Zhang 1 2 Zhihang Lin 1 Yang Yu 3 4 5 † Ruoyu Sun 1 6 2 † Zhi-Quan Luo 1 2
+
+arXiv:2310.10505v4 [cs.LG] 16 May 2024
+
+Abstract
+
+>4 Hyper-parameters related
+to the Value Model
+Op mizer States of
+the Value Model
+
+Reinforcement Learning from Human Feedback
+(RLHF) is key to aligning Large Language Models (LLMs), typically paired with the Proximal
+Policy Optimization (PPO) algorithm. While PPO
+is a powerful method designed for general reinforcement learning tasks, it is overly sophisticated
+for LLMs, leading to laborious hyper-parameter
+tuning and significant computation burdens. To
+make RLHF efficient, we present ReMax, which
+leverages 3 properties of RLHF: fast simulation,
+deterministic transitions, and trajectory-level rewards. These properties are not exploited in PPO,
+making it less suitable for RLHF. Building on the
+renowned REINFORCE algorithm, ReMax does
+not require training an additional value model as
+in PPO and is further enhanced with a new variance reduction technique. ReMax offers several
+benefits over PPO: it is simpler to implement,
+eliminates more than 4 hyper-parameters in PPO,
+reduces GPU memory usage, and shortens training time. ReMax can save about 46% GPU memory than PPO when training a 7B model and enables training on A800-80GB GPUs without the
+memory-saving offloading technique needed by
+PPO. Applying ReMax to a Mistral-7B model
+resulted in a 94.78% win rate on the AlpacaEval leaderboard and a 7.739 score on MT-bench,
+setting a new SOTA for open-source 7B models.
+These results show the effectiveness of ReMax
+while addressing the limitations of PPO in LLMs.
+
+reward
+
+Reward Model
+
+reward
+
+Value Model
+Reference Model
+
+response
+
+Reference Model
+
+PPO
+
+ReMax
+update
+
+LLM
+
+update
+
+Figure 1. Building blocks of PPO and ReMax. ReMax keeps the
+reference model (for calculating KL penalty) and removes all the
+components related to the value model in PPO.
+ti
+
+1. Introduction
+Alignment is crucial for instructing Large Language Models
+(LLMs) to adhere to human preferences. Two approaches
+are commonly employed for this purpose: instruction tuning (Wei et al., 2022; Chung et al., 2022; Longpre et al.,
+2023) and Reinforcement Learning from Human Feedback
+(RLHF) (Christiano et al., 2017; Stiennon et al., 2020;
+Ouyang et al., 2022; Bai et al., 2022b;a). The former approach relies on a large amount of pre-prepared humanannotated data, necessitating practitioners to determine
+LLM behavior upfront, which can be laborious. In contrast,
+RLHF, the latter approach, does not require pre-defining
+everything. In a nutshell, RLHF reformulates the text generation task as a sequential decision-making problem and
+applies Reinforcement Learning (RL) algorithms to solve
+it. The effectiveness of RLHF is emphasized in the GPT-4
+technical report (OpenAI, 2023).
+Despite its notable success, the wide application of RLHF is
+hindered by its heavy computation burden (Yao et al., 2023).
+We recap that RLHF unfolds in three principal steps:
+• Step 1 (SFT): supervised fine-tuning of a LLM is carried
+out to find a good initialization.
+
+†
+
+Corresponding authors. 1 School of Data Science, The Chinese
+University of Hong Kong, Shenzhen 2 Shenzhen Research Institute
+of Big Data 3 National Key Laboratory for Novel Software Technology, Nanjing University 4 Polixir.ai 5 Pazhou Laboratory (Huangpu)
+6
+China Shenzhen International Center For Industrial and Applied
+Mathematics. Email: Ziniu Li <ziniuli@link.cuhk.edu.cn>, Yang
+Yu <yuy@nju.edu.cn>, Ruoyu Sun <sunruoyu@cuhk.edu.cn>.
+
+• Step 2 (RM): a reward model is learned from human
+preference data.
+• Step 3 (RL): a LLM is fine-tuned on prompt-only datasets
+utilizing an RL algorithm.
+
+Proceedings of the 41 st International Conference on Machine
+Learning, Vienna, Austria. PMLR 235, 2024. Copyright 2024 by
+the author(s).
+
+The challenge arises in the third RL step, where the LLM
+must generate and enhance its responses to achieve high
+1
+
+ReMax: A Simple, Effective, and Efficient Reinforcement Learning Method for Aligning Large Language Models
+3
+
+225
+
+54%
+
+150
+75
+0
+
+PPO
+
+ReMax
+
+Training Time (Hour)
+
+GPU Memory (GB)
+
+300
+
+2.25
+
+62%
+
+1.5
+
+s1
+
+0.75
+0
+
+PPO
+
+Figure 2. GPU memory consumption and training time by PPO
+and ReMax, respectively. These measurements are conducted on a
+Llama-2-7B model using A800-80GB GPUs. Further details are
+provided in the main text and Appendix E.3.
+
+We revisit the formulation of RLHF and aim to design new
+algorithms. We identify three important properties of RLHF
+that are quite different from general RL tasks: fast simulation, deterministic transitions, and trajectory-level rewards.
+The first property means that a trajectory (i.e., a complete
+response of a LLM) can be quickly obtained with minimal
+time overhead. The second property indicates that the text
+context relies solely on past tokens and the presently generated token. Finally, the third property implies that the reward
+model provides a single value only upon the completion of
+a response. Please refer to Figure 3 for illustration. These
+three properties are not exploited in PPO, so we believe that
+PPO is not the best fit for RLHF in LLMs.
+
+I like
+
+I like drinking
+
+s2
+
+s3
+
++ noise
+
+ac on=
+‘a ack[enemy_id]’
+
+ac on=
+‘like’
+
+ac on=
+‘drinking’
+
+ac on
+=‘co ee’
+
+reward=0
+
+reward=0
+
+reward=0
+
+…..
+
+…..
+
+StarCra II
+
+[……]
+
+I like drinking co ee
+
+s4
+
+reward
+=100
+
+sT
+ac on
+=‘EOS’
+
+[10 seconds]
+
+RLHF in LLMs
+
+reward=3.6
+
+Figure 3. Illustration of StarCraft II (a general RL task example)
+and RLHF in LLMs. Compared to general RL tasks, which feature
+stochastic transitions, dense rewards, and slow simulations, RLHF
+tasks in LLMs exhibit deterministic transitions, trajectory-level
+rewards, and fast simulations.
+tt
+ti ff
+
+rewards. The commonly used algorithm for this step is Proximal Policy Optimization (PPO) (Schulman et al., 2017), as
+seen in the mentioned research and open-source software
+(von Werra et al., 2020; Li et al., 2023a; Yao et al., 2023).
+However, PPO brings heavy computational demands due to
+its extra value model and related training components for
+optimization of the LLM. In practice, training with PPO
+could take 4× longer than the first two steps and increases
+GPU memory consumption by at least 2× (see e.g., Table 4
+and 5 in (Yao et al., 2023)), which makes RLHF cannot be
+afforded with limited computation resources.
+
+1.1. Our Contribution
+
+I
+
+s1
+
+[1 hour]
+
+sT
+
+…..
++ noise
+
+reward
+ac on=
+=1
+‘move[direc on]’
+
+ReMax
+
+Motivated by the above observations, this paper focuses on
+the third step of RLHF to make it easier and cheaper to
+use. We acknowledge that researchers have attempted to
+address this issue by employing techniques such as gradient
+checkpointing (Sohoni et al., 2019), the Zero Redundancy
+Optimizer (ZeRO) (Rajbhandari et al., 2020), the offload
+technique (Ren et al., 2021), and a hybrid training engine
+(Yao et al., 2023). However, these techniques result in slow
+computation. Even with these methods, the heavy GPU
+memory consumption of PPO remains a challenge.
+
+s2
+
++ noise
+
+ft
+ti
+
+ff
+
+Max uses a stochastic (policy) gradient estimator in Line 7
+of Algorithm 1, which amounts to reward-weighted likelihood maximization. This estimator is unbiased, like PPO,
+but unlike PPO, it does not rely on a value model. This
+is significant because the value model, introduced in PPO
+for stable training, doubles the GPU memory consumption1
+and increases the training time. To manage training without a value model, we introduce a new variance reduction
+technique (refer to Lines 4 and 5 of Algorithm 1).
+Algorithm 1 ReMax for Aligning LLMs
+I n p u t : r e w a r d m o d e l ( rm ) , l a n g u a g e m o d e l ( lm )
+for prompt in d a t a s e t s :
+3
+s e q =lm . s a m p l e ( prompt , g r e e d y = F a l s e )
+4
+seq max =lm . s a m p l e ( prompt , g r e e d y = T r u e )
+5
+rew=rm ( prompt , s e q ) −rm ( prompt , seq max )
+6
+l o g p =lm . i n f e r e n c e ( prompt , s e q )
+7
+l o s s = −( l o g p . sum ( dim = −1) * rew ) . mean ( )
+8
+lm . m i n i m i z e ( l o s s )
+9 Output : language model
+1
+2
+
+We highlight the advantages of ReMax over PPO below:
+• Simplicity: ReMax is simpler to implement than PPO,
+requiring only 6 lines of main code compared with PPO’s
+30+. In addition, it eliminates 4 hyper-parameters in
+PPO (e.g., importance sampling clipping, GAE coefficient, value model learning rate, and off-policy training
+epochs), which are laborious to tune (Engstrom et al.,
+2020; Zheng et al., 2023c). This is crucial, as hyperparameter tuning is expensive for LLMs.
+• Memory Efficiency: ReMax can significantly reduce
+GPU memory usage, which allows RLHF training with
+
+Based on the observations above, we propose a new algorithm tailored for RLHF, named ReMax. ReMax is built
+upon the well-known REINFORCE algorithm (Williams,
+1987; 1992). The pseudo-code for ReMax is provided in
+Algorithm 1 (also see Figure 1). To improve LLMs, Re-
+
+1
+For fine-tuning a LLM with 7B parameters, the reward model
+consumes 4% of the GPU memory, whereas the value model and
+its associated training components (e.g., activations, gradients, and
+optimizer states) use 46% of the GPU memory.
+
+2
+
+ReMax: A Simple, Effective, and Efficient Reinforcement Learning Method for Aligning Large Language Models
+
+limited resources where PPO might exhaust memory. For
+example, PPO cannot train a Llama-2-7B model (Touvron
+et al., 2023) on A800-80GB GPUs without optimizer
+offloading, which saves memory but slows down training
+(see Section 5). In contrast, ReMax can accomplish this
+without such memory-saving compromises.
+
+outperforms alternatives, as shown by Dubois et al. (2023),
+and is favored in open-source software (von Werra et al.,
+2020; Li et al., 2023a; Yao et al., 2023).
+
+3. Problem Formulation
+A Large Language Model (LLM), e.g., a transformer
+(Vaswani et al., 2017), is denoted as πθ , with θ ∈ Rd
+being the training parameters. It generates tokens from
+a finite vocabulary V = {1, . . . , |V|}. Given a context of
+tokens (a1 , . . . , at ), the LLM models the sampling process
+as at+1 ∼ πθ (·|a1 , . . . , at ). This process continues until an
+End-Of-Sentence (EOS) token is encountered or a maximum
+length T is reached. For notational simplicity, we assume
+that the response length is exactly T , with any necessary
+padding occurring after the EOS token is generated.
+
+• Computation Efficiency: ReMax offers a reduction in
+wall-clock time per iteration by removing the need to train
+a value model. Its memory savings allow for larger batch
+sizes, enhancing throughput. In our evaluation, ReMax
+operates about 1.6× as fast as PPO (see Figure 2).
+• Effectiveness: Our theoretical study (Section 4) justifies
+ReMax in terms of convergence and variance reduction.
+In addition, our empirical results (Section 5) demonstrate
+that ReMax matches or surpasses PPO, possibly due to
+simpler hyper-parameter tuning. Our top model, based
+on Mistral-7B (Jiang et al., 2023), achieves a win rate of
+94.78% against the text-davinci-003 on the AlpacaEval
+Leaderboard (Li et al., 2023b) and a score of 7.739 on
+the MT-bench (Zheng et al., 2023b), setting a new opensource 7B model state-of-the-art.
+
+LLMs are pre-trained on extensive corpora, optimizing for
+next-token prediction (Radford et al., 2019; Brown et al.,
+2020). However, they often struggle to generate text that
+aligns closely with human preferences, such as following instructions or creating human-like responses. To address this
+gap, fine-tuning LLMs through RLHF is common practice.
+
+The computational efficiency of ReMax is also comparable
+with reward-model-free approaches (e.g., DPO (Rafailov
+et al., 2023)), but it has superior performance to them.
+Our implementation of ReMax is available at https:
+//github.com/liziniu/ReMax.
+
+In the RLHF setup, a reward model r provides a scalar value
+r(x, a1 , . . . , aT ) to a complete response (a1 , . . . , aT ) for a
+prompt x. A higher reward value is generally preferable.
+Such a reward model is learned from human preference data
+using a binary classification objective (Ouyang et al., 2022):
+
+2. Related Work
+
+max E(x,a1:T ,a′1:T )∼D [log(σ(r(x, a1:T ) − r(x, a′1:T )))] .
+r
+
+where D denotes the preference dataset, a1:T represents
+a positively-preferred response (a1 , . . . , aT ), and a′1:T is
+its negatively-preferred counterpart. The symbol σ refers
+to the sigmoid function. In practice, this reward model is
+initialized with the LLM’s parameters.
+
+We briefly review the relevant works on RLHF and LLM
+below and provide a detailed discussion in Appendix A.
+RLHF has been meticulously explored in various studies
+(Stiennon et al., 2020; Ouyang et al., 2022; Bai et al.,
+2022b;a; Lee et al., 2023). We refer interested readers to the
+recent survey and analysis in (Casper et al., 2023; Chaudhari
+et al., 2024). To name a few, Gao et al. (2023) focused on
+the scaling laws of reward model overoptimization, Zhu
+et al. (2023) studied the sample complexity of RLHF, and
+Li et al. (2023d) analyzed the optimization errors in RLHF.
+
+The goal of a LLM is reward maximization:
+max Ex∼ρ Ea1:T ∼πθ [r(x, a1:T )],
+θ
+
+(1)
+
+with ρ indicating the distribution of prompts, which may
+cover training prompts in the preference data D and new
+prompts with unknown preference annotations. For simplicity, we omit the presentation of KL regularization (with a
+reference model), as a KL-associated penalty can be introduced to the reward. For details, please see Appendix B.
+
+Many recent studies have attempted to improve the RL step
+in RLHF. For example, Ramamurthy et al. (2023) presented
+benchmarks and baselines for applying RL in NLP tasks.
+Santacroce et al. (2023) investigated how to efficiently use
+LoRA (Hu et al., 2022) in PPO. Moreover, Zheng et al.
+(2023c) explored the implementation details of PPO when
+used in RLHF. Dong et al. (2023) and Yuan et al. (2023)
+studied reward ranking for optimization. In addition to RL
+approaches, Rafailov et al. (2023) introduced Direct Policy
+Optimization (DPO), a method that can directly learn from
+preferences without training a reward model.
+
+3.1. Reward Maximization by RL
+In this section, we delve into the formulation of casting the
+reward maximization in Eq. (1) into a sequential decisionmaking problem by RL, used in existing studies (Stiennon
+et al., 2020; Ouyang et al., 2022).
+The reward-maximization problem, presented in Eq. (1), is
+framed as a Markov Decision Process (MDP) (Puterman,
+2014). In this MDP, represented as M = (S, A, P, r, ρ, T ),
+
+Our work differs from prior studies by leveraging unique
+properties of RLHF tasks. It is worth noting that PPO often
+3
+
+ReMax: A Simple, Effective, and Efficient Reinforcement Learning Method for Aligning Large Language Models
+
+S and A are the state and action spaces, P is the transition
+function defining state transitions (s′ ∼ P (·|s, a)), r : S ×
+A → R is the reward function assigning values to stateaction pairs, and ρ indicates the initial state distribution,
+generating trajectories over T steps. The main objective in
+the MDP framework is to optimize the (expected) long-term
+return, which is the cumulative sum of one-step rewards:
+
+ PT
+maxθ Es1 ∼ρ Ea1:T ∼πθ
+t=1 r(st , at )|st+1 ∼ P (·|st , at ) .
+(2)
+In the context of LLMs, a state st is represented by a sequence of previously generated tokens, denoted as st =
+(x, a1 , . . . , at−1 ). An action, at , pertains to selecting a
+token from the vocabulary set V. The initial state, s1 , corresponds to a prompt x, aligning ρ with the distribution of this
+prompt. While the reward r(x, a1:T ) evaluates the quality
+of a complete response, not individual tokens, we can adapt
+this for the MDP framework. Specifically, we designate a
+reward of 0 for intermediate tokens:
+(
+0
+if t ̸= T
+r(st , at ) =
+(3)
+r(x, a1:T ) otherwise.
+
+used in calculating A(st , at ), involving a GAE coefficient
+that requires tuning but is omitted from Eq. (5) for brevity.
+In short, PPO introduces a (trainable) value model V and a
+lot of related hyper-parameters for optimization.
+3.3. PPO is not the Best Fit for RLHF
+In RLHF tasks, we find that the value model V in PPO substantially increases computational load, primarily for two
+reasons: it is comparable in scale to the language model
+(Yao et al., 2023), and it requires training, involving gradients computation and optimizer states storage. This results
+in the value model consuming more than 4× the GPU memory during training than during inference. For a 7B model,
+about 50% of GPU usage in PPO is for training the value
+model, with the remainder for language model learning; see
+Appendix E.3 for details.2 Thus, reducing the computational
+load imposed by the value model is essential.
+To achieve our goal, we first revisit the motivation of introducing a value model in PPO. According to MDP’s theory,
+the long-term expected return in Eq. (2) is used to calculate
+gradients via the advantage function in Eq. (5) (Sutton &
+Barto, 2018). As mentioned, the value model learns about
+this expected return. It is useful when a) the transition P
+is stochastic, helping make better use of past data (Konda
+& Tsitsiklis, 1999; Cai et al., 2020); and b) simulations
+(or rollouts) are slow, where it offers a fast estimate of the
+expected return (Silver et al., 2016; Vinyals et al., 2019).
+
+The transition function P appends the current token to the
+history, shaping the subsequent state:
+(
+1 if st+1 = (∗st , at )
+P (st+1 |st , at ) =
+(4)
+0 otherwise.
+Here, ∗st denotes the elements in tuple st . With the above
+formulation, any RL algorithm designed for problem (2) can
+equivalently solve problem (1).
+
+However, we observe that these motivations are not directly
+applicable to RLHF tasks for LLMs. As a result, PPO is
+not the best fit for RLHF. Specifically, we discover three
+important properties of RLHF that are quite different from
+general RL tasks (see Figure 3 for illustration).
+
+3.2. A Natural Solution to Problem (2): PPO
+Proximal Policy Optimization (PPO) (Schulman et al., 2017)
+is an effective algorithm for solving general RL problems.
+The implementation of PPO is complicated, and we will not
+delve into all details here. Instead, we will give a concise
+overview of PPO, which is enough for discussion.
+
+• Property 1: fast simulation. While the long-term return
+in Eq. (2) is expensive to get in classical RL applications
+(e.g., StarCraft II, Atari games, and robotics), it is cheap
+and easy to obtain in the RLHF setup. As shown in Eq. (1),
+the long-term return in RLHF is nothing but the trajectory
+reward of one response by LLM. Getting this reward is
+simple: it only needs one query of the language model and
+reward model. For models with less than 7B parameters, it
+usually takes no more than 10 seconds on modern GPUs.
+
+PPO maximizes a (surrogate) proximal objective:
+Lsurr (θ) = Ex∼ρ Ea1:T ∼πθold
+
+T
+X
+
+A(st , at ) min
+
+
+
+t=1
+
+ψ(st , at ), clip ψ(st , at ), 1 − δ, 1 + δ
+
+ 
+
+.
+
+(5)
+
+Here trajectories are sampled from an old policy πθold , with
+importance sampling used to reduce bias, as shown in the
+ratio ψ(st , at ) ≜ πθ (at |st )/πθold (at |st ). A clipping hyperparameter δ > 0 helps stabilize training. The advantage
+function A(st , at ), key for policy gradient estimation, is
+calculated using the one-step reward r(st , at ) and a value
+model V , i.e., A(st , at ) ≈ r(st , at )+V (st+1 )−V (st ). The
+value model V (s) is trained with a Temporal Difference
+(TD) learning objective (Sutton, 1988) to estimate longterm returns from any state s. Additionally, Generalized
+Advantage Estimation (GAE) (Schulman et al., 2016) is
+
+• Property 2: deterministic environment. As shown in
+Eq. (4), the transition is deterministic. That is, give an
+(st , at ) pair, the next state st+1 is known without randomness. Furthermore, the reward function r(st , at ) is also
+deterministic since it is from the neural network. Therefore, the whole environment of RLHF is deterministic.
+Note that the agent (i.e., the LLM) follows a randomized
+2
+The reward model (and the reference model) in PPO does
+not require training and can use memory-efficient techniques like
+parameter offloading and ZeRO-3 (Ren et al., 2021), which slightly
+increases inference time but consumes minimal GPU resources.
+
+4
+
+ReMax: A Simple, Effective, and Efficient Reinforcement Learning Method for Aligning Large Language Models
+
+policy πθ to generate responses, but the randomness of
+agents is not counted in the environment.
+
+REINFORCE appears well-suited for RLHF as it efficiently
+estimates the gradient with a single query of the language
+and reward model. Furthermore, it does not require training a value model, thus making it computationally efficient.
+Nevertheless, REINFORCE does not address all the drawbacks of PPO in RLHF. In particular, we find it suffers from
+a large variance in its stochastic gradients. Please see Figure 4 below3 ; more evidence is provided in Appendix F.1.
+
+• Property 3: trajectory-level reward. As shown in
+Eq. (3), r(st , at ) is non-zero only when the whole trajectory ends at t = T . This means that RLHF tasks are
+close to “single-stage” optimization problems since the
+rewards of the intermediate stages are 0. As such, the
+value function and the associated TD learning used in
+PPO may not be as useful here.
+
+OPT-1.3B on full-hh-rlhf
+
+104
+
+REINFORCE
+ReMax
+
+103
+Gradient Norm
+
+Based on the above observations, we claim that the expected
+long-term return in RLHF can be obtained both computation
+efficiently and sample efficiently without the value model.
+Consequently, the value model designed in PPO does not fit
+the RLHF problem. With this understanding, we propose a
+new algorithm tailored for RLHF tasks in the next section.
+
+102
+101
+100
+
+4. Proposed Method
+
+0
+
+a1:T
+
+∇θ
+
+45000
+
+REINFORCE
+ReMax
+
+3.0
+Evaluation Reward
+
+4.5
+6.0
+7.5
+
+∇θ Ea1:T ∼πθ [r(x, a1:T )]
+=
+
+30000
+
+OPT-1.3B on full-hh-rlhf
+
+Before we introduce our proposed method, let us first review the classical algorithm REINFORCE (Williams, 1987;
+1992), which can exploit the properties of RLHF tasks to
+solve the problem defined in Eq. (1). Consider a fixed
+prompt x, REINFORCE uses the (policy) gradient:
+T
+Y
+
+Iteration
+
+(a) Gradient norm of fine-tuning an OPT-1.3B model.
+
+4.1. A Brief Review on REINFORCE
+
+X
+
+15000
+
+9.0
+
+
+πθ (at |x, a1:t−1 ) r(x, a1:T )
+
+0
+
+15000
+
+Iteration
+
+30000
+
+45000
+
+(b) Evaluation reward of fine-tuning an OPT-1.3B model.
+
+t=1
+
+= Ea1:T ∼πθ
+
+T
+X
+
+Figure 4. Unlike ReMax, REINFORCE suffers the large variance
+of stochastic gradients and poor performance.
+
+
+∇θ log πθ (at |x, a1:t−1 )r(x, a1:T ) .
+
+t=1
+
+Why does REINFORCE exhibit a large variance? It
+is well-documented that the REINFORCE algorithm suffers from a large variance in stochastic gradients (Sutton
+& Barto, 2018). In theory, this variance can be attributed
+to two main sources: the external randomness inherent in
+MDP’s transitions and the internal randomness from the
+policy decisions of the language model (i.e., token generation). The former is often used to criticize REINFORCE in
+generic RL tasks. However, in RLHF applications within
+LLMs, where transitions are deterministic and the reward
+function is given, external randomness is eliminated. Consequently, REINFORCE has demonstrated effectiveness in
+small-scale language model applications (Ranzato et al.,
+2016; Li et al., 2016). Nevertheless, when scaling up to
+large-scale language models, as tested in our paper, the
+internal randomness becomes problematic.
+
+The last equation employs the so-called log-derivative trick.
+The main punchline of the above derivation is the exchange
+of the order of the expectation and gradient operators. In
+this way, we can easily get a stochastic gradient estimator.
+Specifically, let us define the score function:
+sθ (x, a1:t ) = ∇θ log πθ (at |x, a1:t−1 ).
+
+(6)
+
+Now, given a set of N prompts (x1 , . . . , xN ), the stochastic
+(policy) gradient estimator can be derived as:
+N
+
+gb(θ) =
+
+T
+
+1 XX
+sθ (xi , ai1:t )r(xi , ai1:T ),
+N i=1 t=1
+
+(7)
+
+where ait ∼ πθ (·|xi , ai1:t−1 ) for all t = 1, . . . , T .
+To optimize its performance, a single step of gradient ascent can be executed as: θk+1 ← θk + ηk gb(θk ), where ηk
+denotes the learning rate at the k-th iteration. In fact, this
+corresponds to reward-weighted likelihood maximization
+with samples generated from the rollouts. It differs from
+supervised learning, where the optimal responses are known
+a priori and the sample distribution is fixed.
+
+3
+
+The gradient variance is difficult to compute since storing gradients is memory-intensive. Instead, we choose the proxy
+p of gradient
+norm.
+For
+a
+random
+variable
+Z,
+we
+have
+E[|Z|]
+≤
+E[Z 2 ] =
+p
+2
+Var[Z] + (E[Z]) . Thus, a smaller gradient variance comes
+with a smaller gradient norm.
+
+5
+
+ReMax: A Simple, Effective, and Efficient Reinforcement Learning Method for Aligning Large Language Models
+
+The gradient variance of REINFORCE increases with the
+reward scale (see Eq. (7)), which can vary widely across
+prompts. For example, in our experiments with the Llama2-7B model, we observed that over a mini-batch of prompts
+and responses, the reward values ranged from -14.25 to 7.25.
+In reality, reward distributions for open-ended prompts like
+“write a short story about your best friend” are quite different
+from closed-ended prompts like “what is the capital of New
+Zealand” (Song et al., 2023). This significant variation
+persisted even after a full epoch of training, where rewards
+ranged from -8.125 to 7.56. In contrast, supervised finetuning, where r(x, a1:T ) = 1, ensures stable training with a
+consistent reward scale. We address reward variation across
+prompts and in the training process below.
+
+Table 1. An overall comparison of alignment methods.
+Adaptive Reward
+across Prompts
+Adaptive Reward
+in Training
+Online Update
+Computation Efficiency
+
+PPO
+
+REINFORCE
+
+DPO
+
+ReMax
+
+✓
+
+✗
+
+✓
+
+✓
+
+✓
+
+✗
+
+✗
+
+✓
+
+✓
+✗
+
+✓
+✓
+
+✗
+✓
+
+✓
+✓
+
+challenges, ReMax employs a greedy baseline value that is
+adaptive to both the prompts and the training process.
+PPO can also achieve this, but at the cost of introducing a
+heavy value model.
+
+4.2. From REINFORCE to ReMax
+
+Comparison with DPO: We notice an alternative method
+for RLHF is the Direct Preference Optimization (DPO) in
+(Rafailov et al., 2023). We note that ReMax and DPO are
+totally different optimization methods.
+
+Our proposed method draws inspiration from the REINFORCE with Baseline approach (Weaver & Tao, 2001; Sutton & Barto, 2018), we modify the gradient estimation by
+incorporating a subtractive baseline value:
+
+First, ReMax is a generic RL method, while DPO is specifically designed for the KL-regularized preference learning
+problem. In more detail, DPO’s training objective in Eq. (10)
+is based on two key assumptions: first, the reward function
+is derived from the Bradley-Terry-Luce model (Plackett,
+1975; Luce, 2005); second, the LLM is optimized to maximize reward while also incurring a KL penalty relative to a
+reference model. In contrast, ReMax is not bound by these
+assumptions, enhancing its applicability across a broader
+range of scenarios. Practically, this means that one can employ ReMax to fine-tune any LLM with an arbitrary reward
+model (possibly developed by others) on various prompt
+datasets, even those lacking preference annotations, a level
+of flexibility that DPO does not provide.
+
+N T
+
+1 XX
+sθ (xi , ai1:t ) × (r(xi , ai1:T ) − bθ (xi )) ,
+ge(θ) =
+N i=1 t=1
+(8)
+where the action ait ∼ πθ (·|xi , ai1:t−1 ), and bθ (xi ) is a baseline value. Our choice for bθ (xi ) is
+
+bθ (xi ) = r(xi , ai1:T ), ait ∈ argmax πθ (·|xi , ai1:t−1 ). (9)
+This baseline value can be obtained by greedily sampling a
+response and calculating the associated reward value. We
+name this algorithm “ReMax”, due to its foundation in
+REINFORCE and the use of the argmax operator.
+Interpretation of our method: The proposed baseline
+value serves as a kind of normalization by comparing the
+rewards of a random response with those of the greedy
+response. It helps reduce the variance in gradient estimation
+and balances the reward magnitudes across prompts. We
+will later show that, although a baseline value is introduced,
+the gradient estimator remains unbiased.
+
+
+
+πθ (a1:T |x)
+πθ (a′1:T |x)
+log σ β log
+− β log
+πREF (a1:T |x)
+πREF (a′1:T |x)
+x,a1:T ,a′1:T
+|
+{z
+}
+−
+
+X
+
+=LDPO
+
+(10)
+Second, ReMax employs an online learning paradigm,
+whereas DPO updates its models offline. In practice, this
+means that ReMax samples responses directly from the current LLM and refines them on-the-fly. In contrast, DPO
+relies on a static preference dataset, with responses that are
+collected once and remain unchanged. Consequently, DPO
+faces the out-of-distribution generalization issue (Li et al.,
+2023d). We validate that the training quality of DPO could
+be fall short of that achieved by ReMax in later experiments.
+
+Comparison with REINFORCE: ReMax builds upon the
+computational efficiency of REINFORCE but significantly
+enhances its effectiveness. Specifically, REINFORCE typically fails to balance the reward weights across prompts
+over the training process4 . This ineffectiveness is related
+to the large variance in stochastic gradients, as previously
+observed. This issue becomes significant, especially when
+the reward distribution behaves differently across prompts
+or changes over the course of training. To address these
+
+Third, we realize that DPO learns an implicit reward
+r(x, a1:T ) ∝ [log πθ (a1:T |x) − log πREF (a1:T |x)] (refer
+to Sections 4 and 5 in (Rafailov et al., 2023)). This
+can be viewed as a kind of fixed baseline value with
+log πREF (a1:T |x), which adapts to prompts but not the optimization process, unlike ReMax.
+
+4
+
+Alternative solutions have their limitations: normalizing rewards in advance, as suggested in (Zheng et al., 2023c), lacks
+adaptability throughout the training process, while using an online
+exponential moving average of rewards, as described in (Zhao
+et al., 2011), does not adjust effectively across different prompts.
+
+6
+
+ReMax: A Simple, Effective, and Efficient Reinforcement Learning Method for Aligning Large Language Models
+
+Finally, We highlight that ReMax is comparable with DPO
+in computation efficiency. This efficiency can be attributed
+to the fast training of the reward model; once trained, it
+requires minimal GPU resources for inference, especially
+when leveraging ZeRO-3 and offloading techniques. Additionally, the online generation introduced in ReMax is conducted at high speed, especially when using vLLM (Kwon
+et al., 2023) or the hybrid engine in DeepSpeed (Yao et al.,
+2023). An overall comparison of methods is give in Table 1.
+
+optimal action and rewards are positive. Then, we have
+Var[e
+g (θ)] < Var[b
+g (θ)],
+if πθ (a1 |x) ≤ 0.5 + 0.5r(x, a1 )/(r(x, a1 ) − r(x, a2 )) (in
+particular, πθ (a1 |x) ≤ 0.5) for any x.
+Proposition 3 discloses that ReMax achieves the variance
+reduction when the optimal action has not dominated (e.g.,
+πθ (a1 |x) ≤ 0.5), and it may increase the variance at the
+worst-case. We clarify three points. First, the variance of ReMax in the worst-case is still bounded and the convergence
+result is not affected. Second, this theoretical drawback is
+not due to a single-sample estimation; indeed, Dayan (1991)
+has found that the expected baseline value Eπ [r(x, a1:T )]
+also has this drawback; see Proposition 6 in the Appendix
+for this re-statement. Third, this theoretical drawback actually can be a practical merit. This is because for RLHF in
+LLMs, we do not aim to over-optimize the LLM; otherwise,
+overfitting may happen (Gao et al., 2023). Hence, it is acceptable that the variance is relatively large and convergence
+is relatively slow in over-optimized regime.
+
+4.3. Theory of ReMax
+To justify the algorithm design, we first confirm that the
+proposed gradient estimator remains unbiased.
+Proposition 1. The gradient estimator in Eq. (8) and Eq. (9)
+is unbiased for the objective function in (1), i.e., E[e
+g (θ)] =
+∇θ Ex∼ρ Ea1:T ∼πθ [r(x, a1:T )]. Furthermore, its variance is
+2
+bounded by c × rmax
+× T 2 × S 2 /N , where c is a universal
+constant, S is an upper bound of ∥∇θ log πθ (at |x, a1:t−1 )∥
+for all (θ, x, a1:T ), and rmax = maxx,a1:T |r(x, a1:T )|.
+The proof is provided in Appendix C. The proof of unbiasedness requires only that the baseline value be statistically
+independent of the response sample. The baseline value
+in ReMax, defined by the reward of the greedy response
+and corresponding to the mode of the reward distribution, is
+straightforward to implement for this purpose.
+
+5. Experiments
+In this section, we validate ReMax’s superiority in RLHF
+through experiments. We use the widely-used distributed
+training framework from (Yao et al., 2023) for RLHF. Our
+experiments comprise two parts:
+• Part I: Assessing effectiveness and efficiency with the
+Llama-2-7B model (Touvron et al., 2023) and the full-hhrlhf dataset (Bai et al., 2022a), where we implement all
+three RLHF steps. We make such a choice since both the
+model and datasets are representative.
+
+Since the optimization problem in Eq. (1) is non-convex
+(Agarwal et al., 2020), we derive the following convergence
+to a local optimum result, which builds on prior work (Bottou et al., 2018) on stochastic optimization.
+Proposition 2 (Informal; see Proposition 4 in the Appendix
+√
+for a formal version). With learning rates ηk = O(1/ k),
+ReMax converges to a stationary point in expectation.
+
+• Part II: Advancing practical applications using ReMax
+with the Mistral-7B SFT model (Jiang et al., 2023) and the
+UltraRM-13B reward model (Cui et al., 2023), focusing
+on comparing ReMax-trained models with other opensource and private models.
+Experiment details are given in Appendix E. As mentioned
+before, ReMax is a generic optimization method for LLMs,
+and we explore its application in traditional NLP tasks,
+where a reward metric is easily avaiable, in Appendix F.4.
+
+We note that the above theoretical results indicate that ReMax is principled, in contrast to heuristic methods designed
+for reward maximization. We explore the variance reduction
+property of ReMax below. We restrict our analysis to a
+2-armed bandit task5 , which is exactly the same assumption
+used in the seminal work (Dayan, 1991). We note that variance reduction analysis is very challenging. Since the work
+by Dayan (1991), to the best of our knowledge, there have
+been no significant advances in the analysis of a practical
+baseline value. We gain insights from this 2-armed bandit
+case and leave the general cases for future work.
+
+5.1. Part I (a): On the Effectiveness of ReMax
+As mentioned, we study the full-hh-rlhf (Bai et al., 2022a)
+dataset, which consists of 112k samples for training and
+12.5k for evaluation. Following (Ouyang et al., 2022), we
+divide this dataset into three parts: 20% for supervised finetuning (SFT), 40% for reward learning, and the remaining
+40% for reward maximization through RL. Alongside SFT
+and PPO baselines, we explore Direct Preference Optimization (DPO) (Rafailov et al., 2023). Our experiments were
+conducted on 4×A800-80GB GPUs using bf16 training.
+Further experimental details are provided in Appendix E.
+
+Proposition 3. For any 2-armed bandit,
+P consider the parameterization πθ (a|x) = exp(θx,a )/ a′ exp(θx,a′ ), where
+θx,a ∈ R|X |×2 with |X | being the context size and 2 being
+the action size. Without loss of generality, assume a1 is the
+5
+
+Generating T tokens with a vocabulary size of |V| can be
+recast as a (contextual) multi-armed bandit with a combinatorial
+action space size of |V|T (Lattimore & Szepesvári, 2020).
+
+7
+
+ReMax: A Simple, Effective, and Efficient Reinforcement Learning Method for Aligning Large Language Models
+
+First, the training curves in Figure 5 show that ReMax
+achieves a reward comparable with PPO. Second, ReMax’s
+training is stable, as evidenced by the gradient norm in Figure 6, with no significant gradient variance often seen in
+RL algorithms. Interestingly, the gradient norms for both
+PPO and ReMax are lower than those observed in DPO.
+We believe there are two reasons for this: DPO’s gradient
+estimator involves calculating two different score functions,
+whereas ReMax requires only one. Furthermore, DPO is
+unable to normalize the log-likelihood across tokens; otherwise, its modeling is wrong (as detailed in Eq. (10)). In
+contrast, ReMax can implement this normalization (see Line
+7 of Algorithm 1) to stabilize training.
+
+Win Rate over SFT
+
+90%
+
+Gradient Norm
+
+SFT+ReMax DPO+ReMax
+
+Specifically, we observe that ReMax can support training
+without offloading the optimizer states, while PPO cannot.
+Furthermore, with optimizer state offloading, ReMax can
+uses a 1.4 times (≈ 152/112) larger batch size; see Table 2.
+Table 2. Computational results for training a Llama-2-7B on A80080GB GPUs with 33k samples of length 512. “Offload” means
+offloading the optimizer states in AdamW (Loshchilov & Hutter,
+2017). The symbol “BS” refers to the maximum allowed total
+batch size. The symbols TG , TB , Tall refer to the total generation
+time, backward time, and training time of one epoch, respectively.
+GPUs Offload Method
+BS
+TG
+TB
+Tall
+
+DPO
+PPO
+ReMax
+
+5.0
+2.5
+24000
+
+SFT+PPO
+
+Training memory improvement. As discussed in Section 4.2, ReMax can save about 50% memory usage compared with PPO when fine-tuning a 7B model, which is
+achieved by eliminating the need to train a value model.
+This brings two practical benefits. First, ReMax can support
+training when GPU memory resources are limited, whereas
+PPO may not be in the same setting. Second, the memory savings from ReMax can be allocated to larger batch
+size training, which is crucial for increasing throughput and
+speeding up the entire training process.
+
+10.0
+
+16000
+Iteration
+
+SFT+DPO
+
+5.2. Part I (b): On the Efficiency of ReMax
+
+12.5
+
+8000
+
+23%
+
+Figure 7. Win rate over the SFT model when fine-tuning Llama-27B on the full-hh-rlhf dataset.
+
+Llama-2-7B on full-hh-rlhf
+
+0
+
+50.0%
+
+SFT
+
+Figure 5. Evaluation rewards for fine-tuning a Llama-2-7B model
+on the full-hh-rlhf dataset.
+
+0.0
+
+45%
+
+84.7%
+
+81.4%
+
+68.3%
+
+0%
+
+1.6x speed-up
+
+7.5
+
+78.3%
+68%
+
+32000
+
+Figure 6. Training gradient norm of DPO, PPO, and ReMax.
+
+In addition, we used the AlpacaEval dataset (Li et al., 2023b)
+to assess response quality from 805 diverse prompts. Because there is no reference for these test questions, we employed GPT-4 to evaluate the binary win rate. By treating
+the SFT as baseline, we display the win-rate over it by using
+techniques like DPO, PPO, and ReMax in Figure 7. Samples
+of the generated responses are provided in Appendix G.
+
+4
+4
+4
+4
+
+False
+False
+True
+True
+
+PPO
+ReMax
+PPO
+ReMax
+
+✗
+96
+112
+152
+
+✗
+9.2s
+4.7s
+10.4s
+
+✗
+4.0s
+24.6s
+14.0s
+
+✗
+1.8h
+2.9h
+2.0h
+
+1
+1
+1
+1
+
+False
+False
+True
+True
+
+PPO
+ReMax
+PPO
+ReMax
+
+✗
+✗
+30
+38
+
+✗
+✗
+5.2s
+11.0s
+
+✗
+✗
+30.4s
+16.7s
+
+✗
+✗
+12.8h
+9.1h
+
+Training speed improvement. Training duration primarily
+depends on two factors: batch size and per-iteration training
+time. ReMax surpasses PPO in batch size efficiency. Regarding per-iteration training time, even when using identical
+batch sizes, ReMax may still be superior. This per-iteration
+time comprises two components: total generation time (TG )
+and backward time (TB ). We estimate TG + TB as follows:
+
+We find that with the same initialization, SFT, ReMax
+achieves the largest improvement by 31.4 points. We also investigate a notable approach where we use the DPO-trained
+model as the initialization and further fine-tune it with the
+reward model on prompts-only data (DPO+ReMax in Figure 7). This approach achieves the highest win rate of 84.7%,
+indicating that DPO is a good initialization for RL optimization and that ReMax can address the out-of-distribution shift
+issue of DPO through online learning.
+8
+
+(PPO)
+
+TG + TB = tgene + 2tback ,
+
+(ReMax)
+
+TG + TB = 2tgene + tback .
+
+ReMax: A Simple, Effective, and Efficient Reinforcement Learning Method for Aligning Large Language Models
+
+Here, tgene means the generation time of a response and
+tback includes the backward and optimizer’s update time of
+a model. PPO’s calculation follows that it needs to generate
+a response and train the language model and the value model.
+ReMax generates two responses, but does not train a value
+model. In our experiments, we find that the generation is
+usally faster than backward. Please refer to Table 2. we
+see that with 4 GPUs, ReMax achieves a speed-up of about
+1.6 times (≈ 2.9/1.8). Note that this speed-up is more
+significant on a machine with slow memory-reading speed.
+
+Table 3. Performance of training the SFT model Mistral-7BInstruct-v0.2 with the reward model UltraRM-13B via ReMax.
+
+Data Source
+
+Data Size
+
+Mistral-7B-Instruct-v0.2
+
+0k
+10k
+20k
+40k
+10k
+20k
+40k
+10k
+20k
+40k
+
+ultrafeedback
+
+lmsys-chat-1m
+
+We find that the computational efficiency of ReMax is comparable to that of DPO. In terms of GPU memory, DPO’s
+maximum allowed batch size is 96, the same as ReMax,
+when using 4 GPUs without the offloading technique. The
+training time for one epoch with DPO is 1.4 hours, and
+ReMax is 1.3 times slower due to online sampling. The
+online sampling in ReMax can be accelerated by lookahead
+decoding (Fu et al., 2024) and truncated sampling (refer to
+Appendix F.3), which we plan to investigate in the future.
+
+sharegpt-en
+
+Performance
+AlpacaEval
+
+MT-bench
+
+92.78%
+94.29%
+93.41%
+93.11%
+94.40%
+93.91%
+92.86%
+94.28%
+94.78%
+92.80%
+
+7.516
+7.578
+7.569
+7.538
+7.584
+7.659
+7.638
+7.606
+7.739
+7.534
+
+Table 4. Performance against strong open-source and private models: Llama-2-Chat models (7B and 70B) apply RLHF (via PPO)
+using secret datasets; Zephyra-7B-beta (Tunstall et al., 2023) is
+based on the pretrained Mistral-7B-v0.1 with DPO. GPT-3.5 and
+GPT-4 utilize RLHF (via PPO) with secret datasets.
+
+5.3. Part II: ReMax on LeaderBoard
+To advance the application of ReMax, we fine-tune the
+Mistral-7B-Instruct-v0.2 SFT model and employ the opensource UltraRM-13B reward model6 . This approach, a form
+of weakly supervised learning, is unachievable through preference learning algorithms such as DPO.
+
+Llama-2-7B-Chat
+Zephyr-7B-beta
+Mistral-7B-Instruct-v0.2
+Mistral-7B-ReMax
+Llama-2-70B-Chat
+GPT-3.5-turbo
+GPT-4-turbo
+
+But, what kind of prompts should be selected? This question is underexplored. Our approach considers three types
+of dataset: a) ultrafeedback (Cui et al., 2023), with prompts
+from reward model training, thus being in-distribution; b)
+lmsys-chat-1m (Zheng et al., 2023a), featuring real user
+prompts; and c) sharegpt-en7 , a high-quality instruction tuning dataset. We measure the performance of trained models
+on two benchmarks: the AlpacaEval (Li et al., 2023b) and
+MT-Bench (Zheng et al., 2023b) benchmarks. AlpacaEval
+assesses the win-rate against text-davinci-003 on 805 test
+questions, while MT-Bench evaluates multi-turn dialogue
+ability on 80 questions. Ratings are by GPT-4, with a maximum of 100% on AlpacaEval and 10 on MT-Bench.
+
+AlpacaEval
+
+MT-Bench
+
+71.37%
+90.60%
+92.78%
+94.78%
+92.66%
+93.42%
+95.28%
+
+6.269
+7.356
+7.516
+7.739
+6.856
+7.944
+8.991
+
+Notably, training with 20k prompts from the sharegpt-en
+dataset yields promising results compared with other opensource and private models (refer to Table 4). This demonstrates ReMax’s superior performance, setting a new standard for 7B models. While PPO might achieve similar
+results, it requires more hyper-parameter tuning and computational resources than currently available to us.
+
+6. Conclusion
+
+We present our findings in Table 3 with two observations.
+First, there is a consistent improvement in performance
+across all cases. Second, we encounter an over-optimization
+issue where performance deteriorates when the data size
+increases to 40k, indicating the need for regularization. Currently, we do not know how to effectively choose prompts
+for optimization. Future work may explore this more with
+tools of data selection (e.g., (Li et al., 2023c)).
+
+Our work identifies the fundamental differences between the
+RLHF tasks in LLMs and the generic RL tasks and points
+out their impact on algorithm design. Our work suggests
+that the REINFORCE algorithm is suitable in computational
+aspects. To scale up this algorithm for large-scale models,
+however, we need to address the variance issue of stochastic
+gradients. To this end, we introduce ReMax, which uses
+a greedy baseline value for variance reduction. Compared
+with the commonly used algorithm PPO in this area, ReMax
+simplifies implementation, reduces memory usage, minimizes hyper-parameters, speeds up training, and improves
+task performance. Overall, ReMax facilitates easier application of RLHF in LLMs.
+
+6
+
+https://huggingface.co/openbmb/
+UltraRM-13b
+7
+https://huggingface.co/datasets/
+theblackcat102/sharegpt-english
+
+9
+
+ReMax: A Simple, Effective, and Efficient Reinforcement Learning Method for Aligning Large Language Models
+
+Acknowledgements
+
+diverse preferences. In Advances in Neural Information
+Processing Systems 35, pp. 38176–38189, 2022.
+
+Ziniu Li would like to thank the helpful discussion with
+Zeyu Qin, Congliang Chen, Xueyao Zhang, and Yuancheng
+Wang. The work of Yang Yu was supported by the National Science Foundation of China (61921006). Ruoyu
+Sun’s research is supported in part by Tianyuan Fund
+for Mathematics of National Natural Science Foundation
+of China (No.12326608); Hetao Shenzhen-Hong Kong
+Science and Technology Innovation Cooperation Zone
+Project (No.HZQSWS-KCCYB-2024016); University Development Fund UDF01001491, the Chinese University
+of Hong Kong, Shenzhen; Guangdong Key Lab on the
+Mathematical Foundation of Artificial Intelligence, Department of Science and Technology of Guangdong Province.
+The work of Zhi-Quan Luo was supported by the Guangdong Major Project of Basic and Applied Basic Research (No.2023B0303000001), the Guangdong Provincial Key Laboratory of Big Data Computing, and the National Key Research and Development Project under grant
+2022YFA1003900.
+
+Bartlett, M. Approximate confidence intervals. Biometrika,
+40(1/2):12–19, 1953.
+Bottou, L., Curtis, F. E., and Nocedal, J. Optimization
+methods for large-scale machine learning. SIAM Review,
+60(2):223–311, 2018.
+Bradley, R. A. and Terry, M. E. Rank analysis of incomplete block designs: I. the method of paired comparisons.
+Biometrika, 39(3/4):324–345, 1952.
+Brown, T., Mann, B., Ryder, N., Subbiah, M., Kaplan, J. D.,
+Dhariwal, P., Neelakantan, A., Shyam, P., Sastry, G.,
+Askell, A., et al. Language models are few-shot learners.
+Advances in Neural Information Processing Systems 33,
+pp. 1877–1901, 2020.
+Cai, Q., Yang, Z., Jin, C., and Wang, Z. Provably efficient
+exploration in policy optimization. In Proceedings of the
+37th International Conference on Machine Learning, pp.
+1283–1294, 2020.
+
+Broader Impacts
+
+Casper, S., Davies, X., Shi, C., Gilbert, T. K., Scheurer, J.,
+Rando, J., Freedman, R., Korbak, T., Lindner, D., Freire,
+P., et al. Open problems and fundamental limitations
+of reinforcement learning from human feedback. arXiv
+preprint arXiv:2307.15217, 2023.
+
+This paper aims to advance the application of Reinforcement Learning from Human Feedback (RLHF) for Large
+Language Models (LLMs). In particular, the developed ReMax makes RLHF cheaper and easier to align the behaviors
+of LLMs. We hope our technique helps improve human
+interactions. However, if our techniques are misused, they
+may cause the LLM to generate harmful and disrespectful
+responses, which are unexpected.
+
+Chaudhari, S., Aggarwal, P., Murahari, V., Rajpurohit, T.,
+Kalyan, A., Narasimhan, K., Deshpande, A., and da Silva,
+B. C. Rlhf deciphered: A critical analysis of reinforcement learning from human feedback for llms. arXiv
+preprint arXiv:2404.08555, 2024.
+
+References
+Agarwal, A., Kakade, S. M., Lee, J. D., and Mahajan, G.
+Optimality and approximation with policy gradient methods in markov decision processes. In Proceedings of the
+33rd Conference on Learning Theory, pp. 64–66, 2020.
+
+Chiang, W.-L., Li, Z., Lin, Z., Sheng, Y., Wu, Z., Zhang,
+H., Zheng, L., Zhuang, S., Zhuang, Y., Gonzalez, J. E.,
+et al. Vicuna: An open-source chatbot impressing gpt-4
+with 90%* chatgpt quality. See https://vicuna. lmsys. org
+(accessed 14 April 2023), 2023.
+
+Bai, Y., Jones, A., Ndousse, K., Askell, A., Chen, A., DasSarma, N., Drain, D., Fort, S., Ganguli, D., Henighan, T.,
+et al. Training a helpful and harmless assistant with reinforcement learning from human feedback. arXiv preprint
+arXiv:2204.05862, 2022a.
+
+Christiano, P. F., Leike, J., Brown, T., Martic, M., Legg,
+S., and Amodei, D. Deep reinforcement learning from
+human preferences. Advances in Neural Information
+Processing Systems 30, pp. 4299–4307, 2017.
+
+Bai, Y., Kadavath, S., Kundu, S., Askell, A., Kernion, J.,
+Jones, A., Chen, A., Goldie, A., Mirhoseini, A., McKinnon, C., et al. Constitutional ai: Harmlessness from ai
+feedback. arXiv preprint arXiv:2212.08073, 2022b.
+
+Chung, H. W., Hou, L., Longpre, S., Zoph, B., Tay, Y.,
+Fedus, W., Li, Y., Wang, X., Dehghani, M., Brahma,
+S., et al. Scaling instruction-finetuned language models.
+arXiv preprint arXiv:2210.11416, 2022.
+
+Bakker, M., Chadwick, M., Sheahan, H., Tessler, M.,
+Campbell-Gillingham, L., Balaguer, J., McAleese, N.,
+Glaese, A., Aslanides, J., Botvinick, M., et al. Fine-tuning
+language models to find agreement among humans with
+
+Cui, G., Yuan, L., Ding, N., Yao, G., Zhu, W., Ni, Y., Xie,
+G., Liu, Z., and Sun, M. Ultrafeedback: Boosting language models with high-quality feedback. arXiv preprint
+arXiv:2310.01377, 2023.
+10
+
+ReMax: A Simple, Effective, and Efficient Reinforcement Learning Method for Aligning Large Language Models
+
+Dao, T., Fu, D., Ermon, S., Rudra, A., and Ré, C. Flashattention: Fast and memory-efficient exact attention with
+io-awareness. Advances in Neural Information Processing Systems 35, pp. 16344–16359, 2022.
+
+Kirk, R., Mediratta, I., Nalmpantis, C., Luketina, J., Hambro, E., Grefenstette, E., and Raileanu, R. Understanding
+the effects of rlhf on llm generalisation and diversity.
+arXiv preprint arXiv:2310.06452, 2023.
+
+Dayan, P. Reinforcement comparison. In Connectionist
+Models, pp. 45–51. Elsevier, 1991.
+
+Konda, V. R. and Tsitsiklis, J. N. Actor-critic algorithms.
+In Advances in Neural Information Processing Systems
+12, pp. 1008–1014, 1999.
+
+Dong, H., Xiong, W., Goyal, D., Pan, R., Diao, S., Zhang,
+J., Shum, K., and Zhang, T. Raft: Reward ranked finetuning for generative foundation model alignment. arXiv
+preprint arXiv:2304.06767, 2023.
+
+Kreutzer, J., Sokolov, A., and Riezler, S. Bandit structured prediction for neural sequence-to-sequence learning.
+arXiv preprint arXiv:1704.06497, 2017.
+
+Dubois, Y., Li, X., Taori, R., Zhang, T., Gulrajani, I., Ba,
+J., Guestrin, C., Liang, P., and Hashimoto, T. B. Alpacafarm: A simulation framework for methods that learn
+from human feedback. arXiv preprint arXiv:2305.14387,
+2023.
+
+Kroese, D. P., Taimre, T., and Botev, Z. I. Handbook of
+Monte Carlo Methods. John Wiley & Sons, 2013.
+Kwon, W., Li, Z., Zhuang, S., Sheng, Y., Zheng, L., Yu,
+C. H., Gonzalez, J., Zhang, H., and Stoica, I. Efficient
+memory management for large language model serving
+with pagedattention. In Proceedings of the 29th Symposium on Operating Systems Principles, pp. 611–626,
+2023.
+
+Engstrom, L., Ilyas, A., Santurkar, S., Tsipras, D., Janoos,
+F., Rudolph, L., and Madry, A. Implementation matters
+in deep policy gradients: A case study on ppo and trpo.
+arXiv preprint arXiv:2005.12729, 2020.
+
+Lattimore, T. and Szepesvári, C. Bandit Algorithms. Cambridge University Press, 2020.
+
+Fu, Y., Bailis, P., Stoica, I., and Zhang, H. Break the sequential dependency of llm inference using lookahead
+decoding. arXiv preprint arXiv:2402.02057, 2024.
+
+Lee, H., Phatale, S., Mansoor, H., Lu, K., Mesnard, T.,
+Bishop, C., Carbune, V., and Rastogi, A. Rlaif: Scaling reinforcement learning from human feedback with ai
+feedback. arXiv preprint arXiv:2309.00267, 2023.
+
+Gao, L., Schulman, J., and Hilton, J. Scaling laws for
+reward model overoptimization. In Proceedings of the
+40th International Conference on Machine Learning, pp.
+10835–10866, 2023.
+
+Li, J., Monroe, W., Ritter, A., Jurafsky, D., Galley, M.,
+and Gao, J. Deep reinforcement learning for dialogue
+generation. In Proceedings of the 2016 Conference on
+Empirical Methods in Natural Language Processing, pp.
+1192–1202, 2016.
+
+Glaese, A., McAleese, N., Trebacz, M., Aslanides, J., Firoiu,
+V., Ewalds, T., Rauh, M., Weidinger, L., Chadwick, M.,
+Thacker, P., et al. Improving alignment of dialogue
+agents via targeted human judgements. arXiv preprint
+arXiv:2209.14375, 2022.
+
+Li, S., Liu, H., Bian, Z., Fang, J., Huang, H., Liu, Y., Wang,
+B., and You, Y. Colossal-ai: A unified deep learning
+system for large-scale parallel training. In Proceedings of
+the 52nd International Conference on Parallel Processing,
+pp. 766–775, 2023a.
+
+Greensmith, E., Bartlett, P. L., and Baxter, J. Variance reduction techniques for gradient estimates in reinforcement
+learning. Journal of Machine Learning Research, 5(9),
+2004.
+Hu, E. J., Shen, Y., Wallis, P., Allen-Zhu, Z., Li, Y., Wang,
+S., Wang, L., and Chen, W. Lora: Low-rank adaptation
+of large language models. In Proceedings of the 10th
+International Conference on Learning Representations,
+2022.
+
+Li, X., Zhang, T., Dubois, Y., Taori, R., Gulrajani, I.,
+Guestrin, C., Liang, P., and Hashimoto, T. B. Alpacaeval: An automatic evaluator of instruction-following
+models.
+https://github.com/tatsu-lab/
+alpaca_eval, 2023b.
+
+Jiang, A. Q., Sablayrolles, A., Mensch, A., Bamford, C.,
+Chaplot, D. S., Casas, D. d. l., Bressand, F., Lengyel, G.,
+Lample, G., Saulnier, L., et al. Mistral 7b. arXiv preprint
+arXiv:2310.06825, 2023.
+
+Li, Z., Xu, T., Qin, Z., Yu, Y., and Luo, Z. Imitation learning
+from imperfection: Theoretical justifications and algorithms. In Advances in Neural Information Processing
+Systems 36, 2023c.
+
+Kakade, S. M. and Langford, J. Approximately optimal
+approximate reinforcement learning. In Proceedings of
+the 17th International Conference on Machine Learning,
+pp. 267–274, 2002.
+
+Li, Z., Xu, T., and Yu, Y. Policy optimization in rlhf:
+The impact of out-of-preference data. arXiv preprint
+arXiv:2312.10584, 2023d.
+11
+
+ReMax: A Simple, Effective, and Efficient Reinforcement Learning Method for Aligning Large Language Models
+
+Liu, T., Zhao, Y., Joshi, R., Khalman, M., Saleh, M.,
+Liu, P. J., and Liu, J. Statistical rejection sampling improves preference optimization. arXiv preprint
+arXiv:2309.06657, 2023.
+
+In Proceedings of the 35th International Conference on
+Machine Learning, pp. 4023–4032, 2018.
+Plackett, R. L. The analysis of permutations. Journal of the
+Royal Statistical Society Series C: Applied Statistics, 24
+(2):193–202, 1975.
+
+Longpre, S., Hou, L., Vu, T., Webson, A., Chung, H. W., Tay,
+Y., Zhou, D., Le, Q. V., Zoph, B., Wei, J., and Roberts,
+A. The flan collection: Designing data and methods
+for effective instruction tuning. In Proceedings of the
+40th International Conference on Machine Learning, pp.
+22631–22648, 2023.
+
+Puterman, M. L. Markov Decision Processes: Discrete
+Stochastic Dynamic Programming. John Wiley & Sons,
+2014.
+Radford, A., Wu, J., Child, R., Luan, D., Amodei, D.,
+Sutskever, I., et al. Language models are unsupervised
+multitask learners. OpenAI blog, 2019.
+
+Loshchilov, I. and Hutter, F. Decoupled weight decay regularization. arXiv preprint arXiv:1711.05101, 2017.
+
+Rafailov, R., Sharma, A., Mitchell, E., Ermon, S., Manning,
+C. D., and Finn, C. Direct preference optimization: Your
+language model is secretly a reward model. arXiv preprint
+arXiv:2305.18290, 2023.
+
+Luce, R. D. Individual choice behavior: A theoretical
+analysis. Courier Corporation, 2005.
+Lv, K., Yang, Y., Liu, T., Gao, Q., Guo, Q., and Qiu, X. Full
+parameter fine-tuning for large language models with limited resources. arXiv preprint arXiv:2306.09782, 2023.
+
+Rajbhandari, S., Rasley, J., Ruwase, O., and He, Y. Zero:
+Memory optimizations toward training trillion parameter
+models. In SC20: International Conference for High Performance Computing, Networking, Storage and Analysis,
+pp. 1–16, 2020.
+
+Mei, J., Gao, Y., Dai, B., Szepesvari, C., and Schuurmans,
+D. Leveraging non-uniformity in first-order non-convex
+optimization. In Proceedings of the 38th International
+Conference on Machine Learning, pp. 7555–7564, 2021.
+
+Ramamurthy, R., Ammanabrolu, P., Brantley, K., Hessel,
+J., Sifa, R., Bauckhage, C., Hajishirzi, H., and Choi, Y.
+Is reinforcement learning (not) for natural language processing: Benchmarks, baselines, and building blocks for
+natural language policy optimization. In Proceedings of
+11th International Conference on Learning Representations, 2023.
+
+Mei, J., Chung, W., Thomas, V., Dai, B., Szepesvari, C., and
+Schuurmans, D. The role of baselines in policy gradient
+optimization. Advances in Neural Information Processing
+Systems 35, pp. 17818–17830, 2022.
+Munos, R., Valko, M., Calandriello, D., Azar, M. G., Rowland, M., Guo, Z. D., Tang, Y., Geist, M., Mesnard, T.,
+Michi, A., et al. Nash learning from human feedback.
+arXiv preprint arXiv:2312.00886, 2023.
+
+Ranzato, M., Chopra, S., Auli, M., and Zaremba, W. Sequence level training with recurrent neural networks.
+In Proceedings of the 4th International Conference on
+Learning Representations, 2016.
+
+Nguyen, K., Daumé III, H., and Boyd-Graber, J. Reinforcement learning for bandit neural machine translation with simulated human feedback. arXiv preprint
+arXiv:1707.07402, 2017.
+OpenAI.
+Gpt-4 technical report.
+arXiv:2303.08774, 2023.
+
+Ren, J., Rajbhandari, S., Aminabadi, R. Y., Ruwase, O.,
+Yang, S., Zhang, M., Li, D., and He, Y. {ZeRO-Offload}:
+Democratizing {Billion-Scale} model training. In Proceedings of the 2021 USENIX Annual Technical Conference, pp. 551–564, 2021.
+
+arXiv preprint
+
+Ouyang, L., Wu, J., Jiang, X., Almeida, D., Wainwright, C.,
+Mishkin, P., Zhang, C., Agarwal, S., Slama, K., Ray, A.,
+et al. Training language models to follow instructions
+with human feedback. Advances in Neural Information
+Processing Systems 35, pp. 27730–27744, 2022.
+
+Sanh, V., Debut, L., Chaumond, J., and Wolf, T. Distilbert,
+a distilled version of bert: smaller, faster, cheaper and
+lighter. arXiv preprint arXiv:1910.01108, 2019.
+Santacroce, M., Lu, Y., Yu, H., Li, Y., and Shen, Y. Efficient
+rlhf: Reducing the memory usage of ppo. arXiv preprint
+arXiv:2309.00754, 2023.
+
+Pang, R. Y., Padmakumar, V., Sellam, T., Parikh, A., and He,
+H. Reward gaming in conditional text generation. In Proceedings of the 61st Annual Meeting of the Association
+for Computational Linguistics, pp. 4746–4763, 2023.
+
+Schulman, J., Moritz, P., Levine, S., Jordan, M. I., and
+Abbeel, P. High-dimensional continuous control using
+generalized advantage estimation. In Proceedings of the
+4th International Conference on Learning Representations, 2016.
+
+Papini, M., Binaghi, D., Canonaco, G., Pirotta, M., and
+Restelli, M. Stochastic variance-reduced policy gradient.
+12
+
+ReMax: A Simple, Effective, and Efficient Reinforcement Learning Method for Aligning Large Language Models
+
+Schulman, J., Wolski, F., Dhariwal, P., Radford, A., and
+Klimov, O. Proximal policy optimization algorithms.
+arXiv, 1707.06347, 2017.
+
+T., Georgiev, P., et al. Grandmaster level in starcraft ii
+using multi-agent reinforcement learning. Nature, 575
+(7782):350–354, 2019.
+
+Silver, D., Huang, A., Maddison, C. J., Guez, A., Sifre, L.,
+Van Den Driessche, G., Schrittwieser, J., Antonoglou, I.,
+Panneershelvam, V., Lanctot, M., et al. Mastering the
+game of go with deep neural networks and tree search.
+nature, 529(7587):484–489, 2016.
+
+von Werra, L., Belkada, Y., Tunstall, L., Beeching, E.,
+Thrush, T., Lambert, N., and Huang, S. Trl: Transformer reinforcement learning. https://github.
+com/huggingface/trl, 2020.
+Weaver, L. and Tao, N. The optimal reward baseline for
+gradient-based reinforcement learning. In Proceedings
+of the 17th Conference in Uncertainty in Artificial Intelligence, pp. 538–545, 2001.
+
+Skalse, J., Howe, N., Krasheninnikov, D., and Krueger, D.
+Defining and characterizing reward gaming. In Advances
+in Neural Information Processing Systems 35, pp. 9460–
+9471, 2022.
+Sohoni, N. S., Aberger, C. R., Leszczynski, M., Zhang, J.,
+and Ré, C. Low-memory neural network training: A
+technical report. arXiv preprint arXiv:1904.10631, 2019.
+
+Wei, J., Bosma, M., Zhao, V. Y., Guu, K., Yu, A. W., Lester,
+B., Du, N., Dai, A. M., and Le, Q. V. Finetuned language
+models are zero-shot learners. In Proceedings of the 10th
+International Conference on Learning Representations,
+2022.
+
+Sokolov, A., Riezler, S., and Urvoy, T. Bandit structured
+prediction for learning from partial feedback in statistical
+machine translation. arXiv preprint arXiv:1601.04468,
+2016.
+
+Williams, R. J. Reinforcement-learning connectionist systems. College of Computer Science, Northeastern University, 1987.
+
+Song, Z., Cai, T., Lee, J. D., and Su, W. J. Reward collapse in aligning large language models. arXiv preprint
+arXiv:2305.17608, 2023.
+
+Williams, R. J. Simple statistical gradient-following algorithms for connectionist reinforcement learning. Machine
+learning, 8:229–256, 1992.
+
+Stiennon, N., Ouyang, L., Wu, J., Ziegler, D., Lowe, R.,
+Voss, C., Radford, A., Amodei, D., and Christiano,
+P. F. Learning to summarize with human feedback. Advances in Neural Information Processing Systems, 33:
+3008–3021, 2020.
+
+Xiong, W., Dong, H., Ye, C., Zhong, H., Jiang, N., and
+Zhang, T. Gibbs sampling from human feedback: A provable kl-constrained framework for rlhf. arXiv preprint
+arXiv:2312.11456, 2023.
+Xu, P., Gao, F., and Gu, Q. Sample efficient policy gradient
+methods with recursive variance reduction. In Proceedings of the 8th International Conference on Learning
+Representations, 2020.
+
+Sutton, R. Learning to predict by the methods of temporal
+differences. Machine learning, 3:9–44, 1988.
+Sutton, R. S. and Barto, A. G. Reinforcement Learning: An
+Introduction. MIT press, 2018.
+
+Yao, Z., Aminabadi, R. Y., Ruwase, O., Rajbhandari, S., Wu,
+X., Awan, A. A., Rasley, J., Zhang, M., Li, C., Holmes,
+C., et al. Deepspeed-chat: Easy, fast and affordable
+rlhf training of chatgpt-like models at all scales. arXiv
+preprint arXiv:2308.01320, 2023.
+
+Touvron, H., Martin, L., Stone, K., Albert, P., Almahairi,
+A., Babaei, Y., Bashlykov, N., Batra, S., Bhargava, P.,
+Bhosale, S., et al. Llama 2: Open foundation and finetuned chat models. arXiv preprint arXiv:2307.09288,
+2023.
+
+Yuan, Z., Yuan, H., Tan, C., Wang, W., Huang, S., and
+Huang, F. Rrhf: Rank responses to align language models with human feedback without tears. arXiv preprint
+arXiv:2304.05302, 2023.
+
+Tunstall, L., Beeching, E., Lambert, N., Rajani, N., Rasul, K., Belkada, Y., Huang, S., von Werra, L., Fourrier,
+C., Habib, N., et al. Zephyr: Direct distillation of lm
+alignment. arXiv preprint arXiv:2310.16944, 2023.
+
+Zhang, J., Kim, J., O’Donoghue, B., and Boyd, S. Sample efficient reinforcement learning with reinforce. In
+Proceedings of the 35th AAAI conference on Artificial
+Intelligence, pp. 10887–10895, 2021.
+
+Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones,
+L., Gomez, A. N., Kaiser, L., and Polosukhin, I. Attention is all you need. In Advances in Neural Information
+Processing Systems 30, pp. 5998–6008, 2017.
+
+Zhang, S., Roller, S., Goyal, N., Artetxe, M., Chen, M.,
+Chen, S., Dewan, C., Diab, M., Li, X., Lin, X. V.,
+et al. Opt: Open pre-trained transformer language models.
+arXiv preprint arXiv:2205.01068, 2022.
+
+Vinyals, O., Babuschkin, I., Czarnecki, W. M., Mathieu, M.,
+Dudzik, A., Chung, J., Choi, D. H., Powell, R., Ewalds,
+13
+
+ReMax: A Simple, Effective, and Efficient Reinforcement Learning Method for Aligning Large Language Models
+
+Zhao, T., Hachiya, H., Niu, G., and Sugiyama, M. Analysis
+and improvement of policy gradient estimation. In Advances in Neural Information Processing Systems 24, pp.
+262–270, 2011.
+Zheng, L., Chiang, W.-L., Sheng, Y., Li, T., Zhuang, S., Wu,
+Z., Zhuang, Y., Li, Z., Lin, Z., Xing, E., et al. Lmsys-chat1m: A large-scale real-world llm conversation dataset.
+arXiv preprint arXiv:2309.11998, 2023a.
+Zheng, L., Chiang, W.-L., Sheng, Y., Zhuang, S., Wu, Z.,
+Zhuang, Y., Lin, Z., Li, Z., Li, D., Xing, E., et al. Judging
+llm-as-a-judge with mt-bench and chatbot arena. arXiv
+preprint arXiv:2306.05685, 2023b.
+Zheng, R., Dou, S., Gao, S., Shen, W., Wang, B., Liu, Y.,
+Jin, S., Liu, Q., Xiong, L., Chen, L., et al. Secrets of
+rlhf in large language models part i: Ppo. arXiv preprint
+arXiv:2307.04964, 2023c.
+Zhu, B., Jordan, M. I., and Jiao, J. Principled reinforcement learning with human feedback from pairwise or
+k-wise comparisons. In Proceedings of the 40th International Conference on Machine Learning, pp. 43037–
+43067, 2023.
+
+14
+
+ReMax: A Simple, Effective, and Efficient Reinforcement Learning Method for Aligning Large Language Models
+
+A. Additional Related Work
+REINFORCE in NLP: The MDP formulation for text generation is not first developed by us. It also appears in prior
+literature (Sokolov et al., 2016; Nguyen et al., 2017; Kreutzer et al., 2017). The idea of REINFORCE has been applied
+in (Ranzato et al., 2016; Li et al., 2016), but restricted to small-scale neural networks. We justify that by addressing the
+inherent randomness in policy decisions of LLMs, REINFORCE-style algorithms can be successful in large-scale models.
+Theory of REINFORCE: Williams (1987; 1992) developed the REINFORCE algorithm. This algorithm is simple and
+applicable to many applications. When applied to RL tasks with stochastic transitions and dense one-step rewards, it is
+usually inferior to actor-critic methods (Konda & Tsitsiklis, 1999) that build on a value method to reduce variance and
+incorporate temporal-difference learning to integrate the concept of dynamic programming. Thus, REINFORCE is not
+popular in the deep RL community. However, we find that it is suitable for RLHFs in LLMs, from a computational viewpoint.
+The theory of REINFORCE is somewhat limited. There is a line of works investigating the use of a baseline value in
+REINFORCE. To our best knowledge, (Dayan, 1991) was the first to show that using the expected reward as the baseline
+value does not reduce the variance globally and proposed his optimal baseline value in a simple 2-armed bandit task. Weaver
+& Tao (2001) and (Greensmith et al., 2004) formally investigated the use of a baseline value in an online learning setup.
+Besides, Zhang et al. (2021) studied the regret of REINFORCE. Recently, Mei et al. (2021) investigated the landscape of
+multi-armed bandit optimization and showed that the expected (rather than stochastic) gradient ascent by REINFORCE can
+converge to the globally optimal solution. Later, Mei et al. (2022) investigated the role of the baseline value in natural policy
+gradient (NPG) (Kakade & Langford, 2002) and showed that variance reduction is not key for NPG.
+Difference between ReMax and Other Methods. The first choice for reward maximization in RLHF is PPO (Schulman
+et al., 2017). In addition to the computational benefit over PPO, ReMax has a theoretical convergence guarantee. However,
+there is no convergence theory yet for the practically used PPO. It is important to note that ReMax cannot fully replace PPO
+in general RL tasks, where learning a value model may still be required. Additionally, the best-of-n method, which selects
+the best response among n responses according to the reward score, is explored in prior studies (Glaese et al., 2022; Bakker
+et al., 2022; Touvron et al., 2023). This method is effective but greatly increases the computational burden at inference,
+which is unacceptable in many applications. The statistical rejection method in (Liu et al., 2023) can mitigate this issue.
+Technically speaking, our method is related to the Control Variate (CV) (Kroese et al., 2013) technique, a well known
+technique to variance reduction in statistical estimation. Consider a random variable Z, whose expectation we seek to
+estimate. The CV technique introduces another random variable Y with known expectation E[Y ]:
+ZCV = Z − Y + E[Y ].
+We have Var[ZCV ] = (1 − ρ2ZY )Var[Z], where ρZY is the correlation coefficient between Z and Y . Thus, if Z and Y is
+correlated, we could have Var[ZCV ] < Var[Z]. This technique is investigated in (Papini et al., 2018; Xu et al., 2020). The
+main issue with the control variate technique is that it requires access to the expectation of Y (or a large number of samples
+to estimate this expectation). In contrast, the random variable introduced in our method, log πθ (a1:T |x) ∗ b(x), is easy to
+compute since both log πθ (a1:T |x) and b(x) are easily available.
+We admit that ReMax does not address all issues of RLHF. In addition to the computational efficiency issue studied in this
+paper, other important questions include: How to effectively infer a reward function from human preferences? How can we
+mitigate the reward bias issue? We refer readers to recent studies on these emerging topics (Skalse et al., 2022; Kirk et al.,
+2023; Pang et al., 2023; Munos et al., 2023; Xiong et al., 2023) and the references therein.
+
+B. Handling KL Regularization
+Since the reward model is imperfect and may introduce bias, the induced optimal response may not align with expectations.
+To address this issue, practitioners often incorporate KL regularization between a trainable language model and a fixed
+reference language model (Stiennon et al., 2020; Ouyang et al., 2022). Mathematically speaking, we have
+
+
+πθ (a1:T |x)
+max Ex∼ρ Ea1:T ∼πθ (·|x) [r(x, a1:T )] − βEx∼ρ Ea1:T ∼πθ (·|x) log
+.
+θ
+πREF (a1:T |x)
+Here, the symbol β > 0 controls the KL penalty effect. The above formulation can be integrated into our reward
+maximization framework by introducing a reward function re that combines the reward score of a complete response and the
+
+15
+
+ReMax: A Simple, Effective, and Efficient Reinforcement Learning Method for Aligning Large Language Models
+
+conditional KL penalty. There are two combination approaches:
+re(x, a1:t ) = r(x, a1:T ) − β (log πθ (at |x, a1:t−1 ) − log πREF (at |x, a1:t−1 )) .
+
+(one-step) :
+
+(11)
+
+This approach adds one-step KL penalty to the original reward value. Another approach is to incorporate the so-called
+full-step KL penalty:
+(full-step) :
+
+re(x, a1:t ) = r(x, a1:T ) − β
+
+T
+X
+
+(log πθ (ah |x, a1:h−1 ) − log πREF (ah |x, a1:h−1 )) .
+
+(12)
+
+h=t
+
+This approach borrows from the concept of the “cost-to-go” in dynamic programming, and it is used in PPO. Note that,
+compared with the one-step KL approach, the full-step KL approach introduces additional stochastic noise in estimating
+the KL penalty, thus is relatively difficult to optimize. However, the full-step KL approach does significantly penalize
+divergence with the reference model.
+We note that the above two formulations work in practice. Specifically, we can modify the loss function in Algorithm 1 as
+loss = −
+
+N X
+T
+X
+
+
+log πθ (ait |xi , ai1:t−1 ) × re(xi , ai1:t )
+i=1 t=1
+
+In ReMax, the reward value r(x, a1:T ) as used in (11) and Eq. (12) is adjusted by a baseline value, i.e., it is computed as
+r(x, a1:T ) − b(x).
+
+C. Proofs
+C.1. Proof of Proposition 1
+Proof. We take the expectation over the randomness of sampling prompts (x1 , . . . , xN ) and responses (a11:t , . . . , aN
+1:T ):
+X
+
+N X
+T
+E [e
+g (θ)] = E
+∇θ log πθ (ait |xi , ai1:t−1 ) × (r(x, ai1:T ) − r(x, ai1:T ))
+i=1 t=1
+
+=E
+
+"N T
+XX
+
+#
+∇θ log πθ (ait |xi , ai1:t−1 )r(x, ai1:T )
+
+−E
+
+"N T
+XX
+
+i=1 t=1
+
+#
+∇θ log πθ (ait |xi , ai1:t−1 )r(x, ai1:T )
+
+i=1 t=1
+
+= ∇θ Ex∼ρ Ea1:T ∼πθ
+
+" T
+X
+
+#
+
+
+
+r(st , at ) − Ex∼ρ Ea1:T ∼πθ ∇θ
+
+t=1
+
+T
+X
+
+
+
+log πθ (at |x, a1:t−1 ) × r(x, a1:T ) .
+
+t=1
+
+Then, we need to show that the second term is 0. The proof is based on the Bartlett identity (Bartlett, 1953):
+"
+#
+X
+X
+∇θ pθ (z)b = ∇θ
+pθ (z)b = ∇θ [1 · b] = 0
+z
+
+z
+
+for any parameterized distribution pθ and constant b. Notice that a1:T is conditionally independent on x and θ, due to the
+greedy sampling. Thus, applying pθ to the the distribution πθ (a1:T |x) and b to the reward value r(x, a1:T ) finishes the
+proof.
+For the second argument, we have that
+ge(θ) =
+
+N T
+N
+
+1 X
+1 XX
+sθ (xi , ai1:t ) × (r(xi , ai1:T ) − bθ (xi )) =
+gei (θ),
+N i=1 t=1
+N i=1
+
+where gei (θ) is defined as the gradient calculated on the i-th sample (xi , ai1:T ). Since different samples (xi , ai1:T ), ∀i ∈ [N ]
+are independent, we have that
+"
+#
+N
+N
+1 X
+1 X
+Var[e
+g (θ)] = Var
+gei (θ) = 2
+Var [e
+gi (θ)] .
+(13)
+N i=1
+N i=1
+
+16
+
+ReMax: A Simple, Effective, and Efficient Reinforcement Learning Method for Aligning Large Language Models
+
+For each i ∈ [N ], we have that
+h
+i
+2
+2
+Var [e
+gi (θ)] = E ∥e
+gi (θ)∥ − ∥E [e
+gi (θ)]∥
+i
+h
+2
+≤ E ∥e
+gi (θ)∥2
+
+= E (r(xi , ai1:T ) − bθ (xi ))2
+
+T
+X
+
+2
+
+sθ (xi , ai1:t )
+
+
+
+
+t=1
+
+
+2
+≤ 4rmax
+E
+
+T
+X
+
+2
+
+sθ (xi , ai1:t )
+
+
+
+
+t=1
+(a)
+
+2
+≤ 4rmax
+T2
+
+2
+
+
+max ∥sθ (x, a1:t )∥
+
+x,a1:t
+
+2
+≤ 4rmax
+T 2S2.
+
+(14)
+
+Inequality (a) follows the triangle inequality. Then we have that
+Var[e
+g (θ)] =
+
+N
+1 X
+4r2 T 2 S 2
+Var [e
+gi (θ)] ≤ max
+.
+2
+N i=1
+N
+
+We finish the proof.
+C.2. Proof of Proposition 2
+Proposition 4 (Formal version of Proposition 2). Consider πθ is an auto-regressive policies with softmax parameterization:
+x,a
+,a 
+T
+T
+Y
+Y
+exp θt 1:t−1 t
+
+,
+πθ (a1:T |x) =
+πθt (at |x, a1:t−1 ) =
+P
+x,a1:t−1 ,a′t
+exp
+θ
+′
+t=1
+t=1
+t
+a ∈V
+t
+
+t
+x,a
+,a
+where θ = (θ1⊤ , · · · , θT⊤ )⊤ with θt ∈ R|X ||V| , and θt 1:t−1 t is the parameter corresponding to the input (x, a1:t−1 )
+
+and output at . Define the objective R(θ) = Ex∼ρ Ea1:T ∼πθ (·|x) [r(x, a1:T )]. Assume the reward function is bounded, i.e.,
+rmax = max(x,a1:T ) |r(x, a1:T )|.
+Then for the update rule of ReMax:
+θk+1 = θk + ηk ·
+
+N T
+
+1 XX
+sθ (xi , ai1:t ) × (r(xi , ai1:T ) − bθ (xi )) ,
+N i=1 t=1
+{z
+}
+|
+
+∀1 ≤ k ≤ K
+
+g
+e(θk )
+
+√
+with the learning rate ηk = 1/ k, we have that
+
+h
+i 
+2
+24rmax
+T 2 ln(K)
+1
+2
+√ ,
+min E ∥∇R(θk )∥ ≤ rmax +
+1≤k≤K
+N
+K
+and
+h
+i
+2
+lim inf E ∥∇R(θk )∥ = 0.
+k→∞
+
+Here the total expectation is taken over the randomness in collecting the prompts and responses.
+The proof is based on standard arguments found in the literature on stochastic gradient descent (Bottou et al., 2018). In
+particular, we apply the analysis from (Bottou et al., 2018, Section 4.4) combined with our own analysis of smoothness and
+variance upper bound for the softmax parameterization.
+Before presenting the convergence proof, we remark that the global optimal convergence analysis of stochastic policy
+gradient methods (including ReMax) for such non-convex optimization problems is still an open question. The analysis
+would require establishing regularity conditions, such as the Polyak-Łojasiewicz inequality; see the recent advances in the
+analysis of expected (rather than stochastic) policy gradient methods in (Agarwal et al., 2020; Mei et al., 2021). We leave
+17
+
+ReMax: A Simple, Effective, and Efficient Reinforcement Learning Method for Aligning Large Language Models
+
+this direction for future work.
+
+Proof. According to the fundamental theorem of calculus, we have that
+Z 1
+⟨∇R(θk + t(θ − θk )), θ − θk ⟩dt.
+R(θ) − R(θk ) =
+0
+
+Then we obtain that
+Z 1
+⟨∇R(θk + t(θ − θk )) − ∇R(θk ), θ − θk ⟩dt
+
+R(θ) − R(θk ) − ⟨∇R(θk ), θ − θk ⟩ =
+0
+
+Z 1
+∥∇R(θk + t(θ − θk )) − ∇R(θk )∥ ∥θ − θk ∥ dt
+
+≥−
+0
+(a)
+
+2
+
+Z 1
+
+≥ −6 ∥θ − θk ∥
+
+tdt
+0
+
+2
+
+= −3 ∥θ − θk ∥ .
+Inequality (a) follows Lemma 1. Let θ = θk+1 and we have that
+2
+
+R(θk+1 ) ≥ R(θk ) + ηk ⟨∇R(θk ), ge(θk )⟩ − 3ηk2 ∥e
+g (θk )∥ .
+We take expectation over the randomness of ge(θk ) on both sides.
+h
+i
+2
+Ek [R(θk+1 )] ≥ R(θk ) + ηk ⟨∇R(θk ), Ek [e
+g (θk )]⟩ − 3ηk2 Ek ∥e
+g (θk )∥
+h
+i
+(a)
+2
+2
+= R(θk ) + ηk ∥∇R(θk )∥ − 3ηk2 Ek ∥e
+g (θk )∥ .
+Equation (a) follows the first claim in Proposition 1 that ge(θk ) is unbiased. From Eq.(13) and (14), we can upper bound the
+second-order moment of ge(θk ).
+2
+h
+i 4r2 T 2 
+2
+Ek ∥e
+g (θk )∥ ≤ max
+max ∥sθ (x, a1:t )∥
+x,a1:t
+N
+2
+2
+T
+4r
+2
+≤ max
+max ∥∇ log πθt (at |x, a1:t−1 )∥2
+x,a1:t
+N
+
+!2 
+
+2
+2
+X
+4r
+T
+∂ log πθt (at |x, a1:t−1 ) 
+= max
+max
+x′ ,a′
+,a′
+x,a1:t 
+
+N
+∂θt 1:t−1 t
+(x′ ,a′1:t−1 )∈X ×V t−1 ,a′t ∈V
+
+
+
+
+2
+X
+4rmax
+T2
+2
+2
+(πθt (a′t |x, a1:t−1 ))
+=
+max (1 − πθt (at |x, a1:t−1 )) +
+x,a1:t 
+
+N
+a′t ∈V\{at }
+
+
+
+
+2
+X
+4rmax
+T2
+max 1 − πθt (at |x, a1:t−1 ) +
+≤
+πθt (a′t |x, a1:t−1 )
+x,a1:t 
+
+N
+′
+at ∈V\{at }
+
+≤
+
+2
+8rmax
+T2
+
+N
+
+.
+
+Then we arrive at
+2
+
+Ek [R(θk+1 )] ≥ R(θk ) + ηk ∥∇R(θk )∥ −
+
+2
+24ηk2 rmax
+T2
+.
+N
+
+Furthermore, we take expectation over θk on both sides and get that
+h
+i 24η 2 r2 T 2
+2
+k max
+E [R(θk+1 )] ≥ E [R(θk )] + ηk E ∥∇R(θk )∥ −
+.
+N
+18
+
+ReMax: A Simple, Effective, and Efficient Reinforcement Learning Method for Aligning Large Language Models
+
+Taking a summation from k = 1 to k = K yields that
+K
+X
+k=1
+
+K
+h
+i
+2
+24rmax
+T2 X
+2
+(ηk )2 .
+ηk E ∥∇R(θk )∥ ≤ E [R(θK+1 )] − E [R(θ1 )] +
+N
+
+(15)
+
+k=1
+
+Since the reward function is bounded by rmax , we further have that
+
+K
+K
+h
+i X
+2
+24rmax
+T2 X
+2
+min E ∥∇R(θk )∥
+·
+(ηk )2 .
+ηk ≤ rmax +
+1≤k≤K
+N
+k=1
+
+k=1
+
+Then we obtain that
+PK
+h
+i
+2
+2
+rmax
+24rmax
+T2
+2
+k=1 (ηk )
+min E ∥∇R(θk )∥ ≤ PK
++
+· P
+.
+K
+1≤k≤K
+N
+k=1 ηk
+k=1 ηk
+√
+Here we choose the step size ηk = 1/ k and obtain the following bounds.
+AK :=
+
+K
+X
+
+ηk =
+
+k=1
+
+K
+K √
+K
+X
+X
+X
+√
+√
+1
+1
+√ ≥
+√
+=
+k − k − 1 = K,
+√
+k k=1 k + k − 1 k=1
+k=1
+
+K
+X
+
+(ηk )2 =
+
+k=1
+
+K
+X
+1
+k=1
+
+k
+
+≤ ln(K).
+
+(16)
+
+Plugging the above bounds into the above inequality yields that
+
+h
+i 
+2
+T 2 ln(K)
+1
+24rmax
+2
+√ .
+min E ∥∇R(θk )∥ ≤ rmax +
+1≤k≤K
+N
+K
+We complete the proof of the first claim. From Eq.(15), we have that
+"
+#
+K
+1 X
+2
+lim E
+ηk ∥∇R(θk )∥ = 0.
+K→∞
+AK
+k=1
+h
+i
+2
+Then we apply the contradiction method to prove that lim inf k→∞ E ∥∇R(θk )∥ = 0. We assume that
+h
+i
+2
+lim inf E ∥∇R(θk )∥ = δ > 0.
+k→∞ m≥k
+
+⋆
+
+There exists k such that for any k ≥ k
+
+⋆
+
+h
+i δ
+2
+inf E ∥∇R(θk )∥ ≥ .
+m≥k
+2
+This immediately implies that
+h
+i δ
+2
+inf ⋆ E ∥∇R(θk )∥ ≥ .
+m≥k
+2
+Then we have that
+"
+
+#
+"
+#
+K
+K
+1 X
+1 X
+2
+2
+E
+ηk ∥∇R(θk )∥ ≥ E
+ηk ∥∇R(θk )∥
+AK
+AK
+⋆
+k=1
+
+k=k
+
+≥
+
+δ
+2AK
+
+K
+X
+
+ηk
+
+k=k⋆
+k⋆
+
+δ X
+δ
+= −
+ηk .
+2 2AK
+k=1
+
+We let K approach infinity and obtain that
+"
+#
+K
+k⋆
+1 X
+δ
+δ X
+δ
+2
+lim E
+ηk ∥∇R(θk )∥ ≥ lim
+−
+ηk = > 0,
+K→∞
+K→∞ 2
+AK
+2AK
+2
+k=1
+
+k=1
+
+which contradicts Eq.(17). Thus we finish the proof of the second statement.
+
+19
+
+(17)
+
+ReMax: A Simple, Effective, and Efficient Reinforcement Learning Method for Aligning Large Language Models
+
+C.3. Proof of Proposition 3
+Proof. Without loss of generality, we prove the variance reduction for a fixed x and the proof actually holds true for any x.
+In addition, we assume r(x, a1:T ) > 0 without loss of generality. Let p = π(a1 |x)
+Pand 1 − p = π(a2 |x). Furthermore, let
+r1 = r(x, a1 ) and r2 = r(x, a2 ). By the parameterization πθ (a|x) = exp(θx,a )/ a′ exp(θx,a′ ), we have
+⊤
+⊤
+⊤
+∇θ log πθ (a1 |x) = 1 − π1 , −π2 = p, −p , ∇θ log πθ (a2 |x) = −p, p .
+Without loss of generality, we assume a1 is the optimal action. When the optimal action a1 has not yet dominated, ReMax
+chooses the value r2 for variance reduction. Then, we have
+r2
+Var[e
+gx ] − Var[b
+gx ] = 2p(1 − p) [r2 − 2(1 − p)r1 − 2pr2 ] r2 < 0 ⇐⇒ p < 1 +
+,
+2(r1 − r2 )
+which is true when p ≤ 0.5. On the other hand, when the optimal action a1 is already dominated, ReMax chooses the
+baseline value r1 . Then, we have
+r2
+1
+Var[e
+gx ] − Var[b
+gx ] = 2p(1 − p) [r2 − 2(1 − p)r1 − 2pr2 ] r2 < 0 ⇐⇒ p < +
+,
+2 2(r1 − r2 )
+which is the desired result in Proposition 3.
+C.4. The Optimal Baseline Value
+Proposition 5. The “optimal baseline value” with the minimal variance of stochastic gradient ge(θ) in Eq. (8) is
+
+
+2
+PT
+Ea1:T ∼πθ
+r(x,
+a
+)
+s
+(x,
+a
+)
+1:T
+θ
+1:t
+t=1
+
+
+b⋆θ (x) =
+,
+2
+PT
+Ea1:T ∼πθ
+t=1 sθ (x, a1:t )
+where sθ (x, a1:t ) is the score function defined in Eq. (6). Furthermore, this baseline value is globally variance-reduced, i.e.,
+Var[e
+g (θ)] < Var[b
+g (θ)] for all θ.
+
+Proof. For any prompt x, let gx (θ) and bx (θ) be the restriction on x. Then, we have
+Var[e
+gx (θ)] − Var[b
+gx (θ)]
+
+
+
+
+= E (e
+gx (θ) − E[e
+gx (θ)])⊤ (e
+gx (θ) − E[e
+gx (θ)]) − E (b
+gx (θ) − E[b
+gx (θ)])⊤ (b
+gx (θ) − E[gbx (θ)])
+
+
+2
+T
+X
+∇θ log πθ (at |x, a1:t−1 ) (bx (θ) − 2r(x, a1:T )) bx (θ),
+= E
+t=1
+
+where all the expectations are taken over the randomness of a1:T when sampling from πθ . Notice that the above objective is
+a quadratic function with respect to bx . By the first-order optimality condition, we have that the optimal baseline value in
+Proposition 5.
+
+We remark that the optimal baseline value in Proposition 5 is very impractical from a computational perspective. This is
+because it requires the expectation over the score function (which involves gradient calculation) and its reward-weighted
+version.
+C.5. Variance Reduction of Using Expected Value
+Proposition 6. Under the same assumption as in Proposition 3, we have that Var[e
+g (θ)] < Var[b
+g (θ)] if πθ (a1 |x) <
+2/3 + r(x, a2 )/(3(r(x, a1 ) − r(x, a2 )).
+
+Proof. Following the notations in the proof of Proposition 3, we have
+Var[e
+gx ] − Var[b
+gx ] = 2p(1 − p)[pr1 + (1 − p)r2 − 2(1 − p)r1 − 2pr2 ](pr1 + (1 − p)r2 ).
+20
+
+ReMax: A Simple, Effective, and Efficient Reinforcement Learning Method for Aligning Large Language Models
+
+To ensure the variance reduction, we require
+p<
+
+2 1
+r(x, a2 )
++
+.
+3 3 r(x, a1 ) − r(x, a2 )
+
+Proposition 6 shows that the expected value also does not have global variance reduction property.
+
+D. Technical Lemmas
+In this part, we present some useful technical Lemmas for establishing the theory of ReMax. To start with, we introduce
+some basic notations. We consider the objective of R(θ) := Ex∼ρ Ea1:T ∼πθ [r(x, a1:T )]. Here πθ is an auto-regressive policy
+with softmax parameterization:
+x,a
+,a 
+T
+T
+Y
+Y
+exp θt 1:t−1 t
+
+,
+πθ (a1:T |x) =
+πθt (at |x, a1:t−1 ) =
+(18)
+P
+x,a1:t−1 ,a′t
+exp
+θ
+′
+t=1
+t=1
+t
+a ∈V
+t
+
+t
+x,a
+,a
+where θ = (θ1⊤ , · · · , θT⊤ )⊤ with θt ∈ R|X ||V| , and θt 1:t−1 t is the parameter corresponding to the input (x, a1:t−1 ) and
+
+output at . This parameterization is commonly studied in the RL theory (Agarwal et al., 2020; Mei et al., 2021). We extend
+the analysis in (Agarwal et al., 2020) in our case to argue that the objective R(θ) is smooth.
+Lemma 1 (Smoothness). Consider R(θ) with auto-regressive softmax policies, we have that
+T
+
+∀θ, θ′ ∈ R|X ||V| , ∥∇R(θ) − ∇R(θ′ )∥2 ≤ 6 ∥θ − θ′ ∥2 .
+Proof. The proof mainly involves two steps. First, we prove that R(θ) is smooth regarding the partial parameters θt for each
+t ∈ [T ]. Based on this result, we further prove that R(θ) is smooth regarding the complete parameters θ = (θ1⊤ , · · · , θT⊤ )⊤ .
+In the first step, we aim to prove that R(θ) is smooth regarding θt for each t ∈ [T ]. With the second-order characterization
+of smoothness, it is equivalent to proving that the eigenvalues of the Hessian matrix are bounded. Formally,
+
+
+λmin ∇2θt R(θ) ≥ −C, λmax ∇2θt R(θ) ≤ C,
+where C is a positive constant and λmin and λmax denote the minimum eigenvalue and maximum eigenvalue. It is known
+that
+
+u⊤ ∇2θt R(θ)u
+= max u⊤ ∇2θt R(θ)u,
+λmax ∇2θt R(θ) = max
+u:u̸=0
+u⊤ u
+u:∥u∥2 =1
+
+u⊤ ∇2θt R(θ)u
+λmin ∇2θt R(θ) = min
+= min u⊤ ∇2θt R(θ)u.
+u:u̸=0
+u⊤ u
+u:∥u∥2 =1
+To analyze the term in the RHS, we define the scalar function f (α) := R(θ1:t−1 , θt + αu, θt+1:T ) for a scalar α and a
+vector u. By the chain rule, we have that
+∇2α f (α)|α=0 = u⊤ ∇2θt R(θ)u.
+Combining the above two equations yields that
+
+λmax ∇2θt R(θ) = max ∇2 f (α)|α=0 ,
+
+
+λmin ∇2θt R(θ) =
+
+u:∥u∥2 =1
+
+min
+u:∥u∥2 =1
+
+∇2 f (α)|α=0 .
+
+Then we focus on the scalar function f (α). Recall that
+f (α) = R(θ1:t−1 , θt + αu, θt+1:T )
+
+!
+t−1
+X
+Y
+
+πθℓ (aℓ |x, a1:ℓ−1 ) πθt +αu (at |x, a1:t−1 )
+= Ex∼ρ
+a1:T ∈V T
+
+ℓ=1
+
+T
+Y
+ℓ=t+1
+
+Then we have that
+∇2α f (α)
+21
+
+!
+
+
+
+πθℓ (aℓ |x, a1:ℓ−1 ) r(x, a1:T ) .
+
+ReMax: A Simple, Effective, and Efficient Reinforcement Learning Method for Aligning Large Language Models
+
+
+
+t−1
+Y
+
+X
+
+= Ex∼ρ 
+
+a1:T
+
+∈V T
+
+!
+πθℓ (aℓ |x, a1:ℓ−1 ) ∇2α πθt +αu (at |x, a1:t−1 )
+
+ℓ=1
+
+
+
+!
+
+T
+Y
+
+πθℓ (aℓ |x, a1:ℓ−1 ) r(x, a1:T ) .
+
+ℓ=t+1
+
+In addition, we have that
+∇2α f (α)|α=0
+
+X
+= Ex∼ρ 
+a1:T
+
+t−1
+Y
+
+∈V T
+
+≤ rmax Ex∼ρ 
+
+= Ex∼ρ 
+
+X
+
+a1:t
+
+∈V t
+
+
+X
+
+∇2α πθt +αu (at |x, a1:t−1 ) |α=0
+
+∈V T
+t−1
+Y
+
+!
+
+ℓ=1
+
+πθℓ (aℓ |x, a1:ℓ−1 )
+
+∇2α πθt +αu (at |x, a1:t−1 ) |α=0
+
+at+1:T
+
+∈V T −t
+
+πθℓ (aℓ |x, a1:ℓ−1 ) 
+
+ℓ=t+1
+
+t−1
+Y
+
+!
+
+a1:t−1 ∈V t−1
+
+ℓ=1
+
+ℓ=1
+
+
+= Ex∼ρ 
+
+!
+
+
+
+!
+
+X
+
+a1:t
+
+πθℓ (aℓ |x, a1:ℓ−1 ) 
+T
+Y
+
+X
+
+∇2α πθt +αu (at |x, a1:t−1 ) |α=0 
+
+∈V t
+
+!
+
+ℓ=t+1
+
+!
+
+πθℓ (aℓ |x, a1:ℓ−1 )
+
+= Ex∼ρ 
+
+T
+Y
+
+∇2α πθt +αu (at |x, a1:t−1 ) |α=0
+
+πθℓ (aℓ |x, a1:ℓ−1 )
+
+ℓ=1
+t−1
+Y
+
+πθℓ (aℓ |x, a1:ℓ−1 ) |r(x, a1:T )|
+
+ℓ=t+1
+t−1
+Y
+
+X
+
+a1:T
+
+
+
+πθℓ (aℓ |x, a1:ℓ−1 )
+
+
+
+!
+
+T
+Y
+
+ℓ=1
+
+
+(a)
+
+!
+
+
+X
+
+πθℓ (aℓ |x, a1:ℓ−1 )
+
+∇2α πθt +αu (at |x, a1:t−1 ) |α=0  .
+
+at ∈V
+
+Here inequality (a) follows that |r(x, a1:T )| ≤ rmax , ∀(x, a1:T ) ∈ X × V T . Applying Lemma 2 yields that
+
+!
+t−1
+Y
+X
+πθℓ (aℓ |x, a1:ℓ−1 )  = 6.
+|∇α f (α)|α=0 | ≤ 6Ex∼ρ 
+a1:t−1 ∈V t−1
+
+ℓ=1
+
+With the above inequality, we can derive that
+
+
+λmax ∇2θt R(θ) = max ∇2 f (α)|α=0 ≤ 6, λmin ∇2θt R(θ) =
+u:∥u∥2 =1
+
+min
+u:∥u∥2 =1
+
+∇2 f (α)|α=0 ≥ −6.
+
+This implies that R(θ) is 6-smooth regarding θt . According to the first-order characterization of smoothness, we can get that
+t
+
+∀θbt , θet ∈ R|X ||V| , ∇θt R(θ)|θt =θbt − ∇θt R(θ)|θt =θet
+
+2
+
+≤ 6 θbt − θet
+
+.
+2
+
+In the second step, our target is to verify that R(θ) is smooth regarding the whole parameters θ. We leverage the first-order
+characterization to analyze.
+b θe ∈ R
+∀θ,
+
+PT
+
+t=1 |X ||V|
+
+t
+
+2
+
+b − ∇R(θ)
+e
+, ∇R(θ)
+
+=
+2
+
+T
+X
+
+2
+
+∇θt R(θ)|θt =θbt − ∇θt R(θ)|θt =θet
+
+t=1
+
+≤ 36
+
+T
+X
+
+2
+
+θbt − θet
+
+t=1
+
+2
+
+2
+
+= 36 θb − θe
+
+.
+2
+
+This implies that R(θ) is 6-smooth with respect to θ.
+t
+
+t
+
+Lemma 2. For each t ∈ [T ], for any θt ∈ R|X ||V| and u ∈ R|X ||V| such that ∥u∥2 = 1, we have that
+X
+∀x ∈ X , a1:t−1 ∈ V t−1 ,
+∇2α πθt +αu (at |x, a1:t−1 ) |α=0 ≤ 6.
+at ∈V
+
+Proof. Let z = θt + αu. According to the chain rule, we have that
+∇2α πz (at |x, a1:t−1 ) = u⊤ ∇2z πz (at |x, a1:t−1 ) u.
+22
+
+2
+
+ReMax: A Simple, Effective, and Efficient Reinforcement Learning Method for Aligning Large Language Models
+′′
+
+′′
+
+′′
+
+With Eq.(19), we obtain that for entries (x′ , a′1:t−1 , a′t ), (x , a1:t−1 , at ) satisfying that (x′ , a′1:t−1 ) = (x, a1:t−1 ) and
+′′
+′′
+(x , a1:t−1 ) = (x, a1:t−1 ),
+
+∇2z πz (at |x, a1:t−1 ) (x′ ,a′
+′′
+′′ ̸= 0.
+,a′ ),(x′′ ,a
+,a )
+1:t−1
+
+t
+
+1:t−1
+
+t
+
+The remaining elements in the Hessian matrix equal zero. Therefore, we can derive that
+∇2α πz (at |x, a1:t−1 ) = u⊤ ∇2z πz (at |x, a1:t−1 ) u = ux,a1:t−1 ⊤ ∇2zx,a1:t−1 πz (at |x, a1:t−1 ) ux,a1:t−1 .
+t
+
+Here for a vector u ∈ R|X ||V| , we use ux,a1:t−1 ∈ R|V| to denote the sub-vector corresponding to (x, a1:t−1 ). By Eq.(21),
+we have that
+∇2α πz (at |x, a1:t−1 )
+= ux,a1:t−1 ⊤ ∇2zx,a1:t−1 πz (at |x, a1:t−1 ) ux,a1:t−1
+
+x,a1:t−1
+= πz (at |x, a1:t−1 ) ux,a1:t−1 ⊤ eat e⊤
+at u
+x,a1:t−1
+− ux,a1:t−1 ⊤ eat πz⊤ (·|x, a1:t−1 )ux,a1:t−1 − ux,a1:t−1 ⊤ πz (·|x, a1:t−1 )e⊤
+at u
+
+−u
+
+x,a1:t−1 ⊤
+
+x,a1:t−1
+
+diag(πz (·|x, a1:t−1 ))u
+
+x,a1:t−1 ⊤
+
++ 2u
+
+πz (·|x, a1:t−1 )πz⊤ (·|x, a1:t−1 )ux,a1:t−1
+
+
+.
+
+Here, ei is the unit vector with the i-th element being 1 and 0 elsewhere. By the triangle inequality, we can derive that
+X
+∇2α πθt +αu (at |x, a1:t−1 )
+at ∈V
+x,a1:t−1
+x,a1:t−1
+≤ max ux,a1:t−1 ⊤ eat e⊤
+− ux,a1:t−1 ⊤ eat πz⊤ (·|x, a1:t−1 )ux,a1:t−1 − ux,a1:t−1 ⊤ πz (·|x, a1:t−1 )e⊤
+at u
+at u
+at ∈V
+
+− ux,a1:t−1 ⊤ diag(πz (·|x, a1:t−1 ))ux,a1:t−1 + 2ux,a1:t−1 ⊤ πz (·|x, a1:t−1 )πz⊤ (·|x, a1:t−1 )ux,a1:t−1
+
+x,a1:t−1
+x,a1:t−1
+≤ max |ux,a1:t−1 ⊤ eat e⊤
+| + |ux,a1:t−1 ⊤ eat πz⊤ (·|x, a1:t−1 )ux,a1:t−1 | + |ux,a1:t−1 ⊤ πz (·|x, a1:t−1 )e⊤
+|
+at u
+at u
+at ∈V
+
++ |ux,a1:t−1 ⊤ diag(πz (·|x, a1:t−1 ))ux,a1:t−1 | + 2|ux,a1:t−1 ⊤ πz (·|x, a1:t−1 )πz⊤ (·|x, a1:t−1 )ux,a1:t−1 | .
+For each term in the RHS, we respectively have that
+x,a1:t−1
+|ux,a1:t−1 ⊤ eat e⊤
+| = (ux,a1:t−1 ,at ) ≤ 1,
+at u
+2
+
+x,a1:t−1
+|ux,a1:t−1 ⊤ eat πz⊤ (·|x, a1:t−1 )ux,a1:t−1 | ≤ ∥ux,a1:t−1 ∥2 ≤ 1, |ux,a1:t−1 ⊤ πz (·|x, a1:t−1 )e⊤
+| ≤ ∥ux,a1:t−1 ∥2 ≤ 1,
+at u
+X
+2
+2
+|ux,a1:t−1 ⊤ diag(πz (·|x, a1:t−1 ))ux,a1:t−1 | =
+πz (at |x, a1:t−1 ) (ux,a1:t−1 ,at ) ≤ ∥ux,a1:t−1 ∥2 ≤ 1,
+2
+
+2
+
+at ∈V
+
+
+2
+2
+|ux,a1:t−1 ⊤ πz (·|x, a1:t−1 )πz⊤ (·|x, a1:t−1 )ux,a1:t−1 | = ux,a1:t−1 ⊤ πz (·|x, a1:t−1 ) ≤ ∥ux,a1:t−1 ∥2 ≤ 1.
+Combining the above bounds yields the desired result.
+X
+∇2α πθt +αu (at |x, a1:t−1 ) ≤ 6.
+at ∈V
+
+Lemma 3. Consider the auto-regressive policies with softmax parameterization shown in Eq.(18). We have that
+(∇θt πθt (at |x, a1:t−1 ))(x′ ,a′
+
+′
+1:t−1 ,at )
+
+= I{(x′ , a′1:t−1 ) = (x, a1:t−1 )}πθt (at |x, a1:t−1 ) (I{a′t = at } − πθt (a′t |x, a1:t−1 )) .
+(19)
+
+x,a1:t−1
+
+Let θt
+
+∈ R|V| denote the parameters corresponding to the input (x, a1:t−1 ) in θt , it holds that
+∇θx,a1:t−1 πθt (at |x, a1:t−1 ) = πθt (at |x, a1:t−1 ) (eat − πθt (·|x, a1:t−1 )) ,
+t
+
+(20)
+
+where eat ∈ R|V| is the basis vector regarding the action at and πθt (·|x, a1:t−1 ) ∈ R|V| is viewed as the vector representing
+23
+
+ReMax: A Simple, Effective, and Efficient Reinforcement Learning Method for Aligning Large Language Models
+
+action probabilities. Furthermore, the Hessian matrix is formulated as
+
+⊤
+⊤
+∇2θx,a1:t−1 πθt (at |x, a1:t−1 ) = πθt (at |x, a1:t−1 ) eat e⊤
+at − eat πθt (·|x, a1:t−1 ) − πθt (·|x, a1:t−1 )eat
+t
+
+− diag(πθt (·|x, a1:t−1 )) + 2πθt (·|x, a1:t−1 )πθ⊤t (·|x, a1:t−1 ) ,
+
+(21)
+
+where diag(πθt (·|x, a1:t−1 )) ∈ R|V|×|V| is a diagnoal matrix whose diagnoal elements are determined by πθt (·|x, a1:t−1 ).
+Proof. By simple derivative calculation, it is easy to derive Eq.(19) and Eq.(20) are the corresponding gradients in the form
+of vectors. To derive the Hessian matrix in Eq.(21), we calculate that
+∇2θx,a1:t−1 πθt (at |x, a1:t−1 ) = ∇θx,a1:t−1 (πθt (at |x, a1:t−1 ) (eat − πθt (·|x, a1:t−1 )))
+t
+
+t
+
+= ∇θx,a1:t−1 (πθt (at |x, a1:t−1 )eat ) − ∇θx,a1:t−1 (πθt (at |x, a1:t−1 )πθt (·|x, a1:t−1 )) .
+t
+
+t
+
+For the first term in RHS, we have that
+
+⊤
+∇θx,a1:t−1 (πθt (at |x, a1:t−1 )eat ) = eat ∇θx,a1:t−1 πθt (at |x, a1:t−1 )
+t
+
+t
+
+
+⊤
+= πθt (at |x, a1:t−1 ) eat e⊤
+at − eat πθt (·|x, a1:t−1 ) .
+For the second term in RHS, we have that
+∇θx,a1:t−1 (πθt (at |x, a1:t−1 )πθt (·|x, a1:t−1 ))
+t
+
+⊤
+= πθt (·|x, a1:t−1 ) ∇θx,a1:t−1 πθt (at |x, a1:t−1 ) + πθt (at |x, a1:t−1 )∇θx,a1:t−1 (πθt (·|x, a1:t−1 ))
+t
+t
+
+⊤
+= πθt (at |x, a1:t−1 ) πθt (·|x, a1:t−1 )e⊤
+−
+π
+(·|x,
+a
+)π
+(·|x,
+a
+)
+θ
+1:t−1
+1:t−1
+at
+θt
+t
+
++ πθt (at |x, a1:t−1 ) diag (πθt (·|x, a1:t−1 )) − πθt (·|x, a1:t−1 )πθ⊤t (·|x, a1:t−1 )
+
+⊤
+= πθt (at |x, a1:t−1 ) πθt (·|x, a1:t−1 )e⊤
+at + diag (πθt (·|x, a1:t−1 )) − 2πθt (·|x, a1:t−1 )πθt (·|x, a1:t−1 ) .
+Combining the above two equations finishes the proof.
+
+E. Experiment Details
+Our code is available at the repository https://github.com/liziniu/ReMax. We made several changes to the
+RLHF process when using the DeepSpeed-Chat framework (Yao et al., 2023). Here are the key differences:
+• Data Processing: We adjusted how we handle padding tokens. Instead of using the token of <|endoftext|> as
+padding, we set it to be the end-of-sequence (EOS) token. This change ensures that our models stop generating properly.
+• Supervised Fine-tuning: We modified the fine-tuning process by focusing on the prediction on responses, excluding the
+next-token-prediction loss for prompt parts.
+• Reward Learning: We changed how we calculate the classification loss. Instead of considering all hidden states, we only
+use the last hidden state. This adjustment is based on the Bradley-Terry-Luce theory (Bradley & Terry, 1952).
+Our experiments are conducted on four A800-80GB GPUs. The machine is equipped with 16 AMD EPYC 7763 64-Core
+Processors and has a CPU memory of 1024 GB. The disk offers a writing speed of about 300 MB/s and a reading speed of
+2.4 GB/s. For experiments on Llama-2-7B, we use three random seeds (1234, 1235, and 1236), but we do not observe a
+significant difference in results, a common phenomenon in large neural networks. To reduce the computational burden, we
+use only a single seed (1234) for experiments on Mistral-7B, which could be a limitation of our study.
+E.1. Llama-2-7B
+Unless stated otherwise, we use the AdamW optimizer with β1 = 0.9 and β2 = 0.95. We use ZeRO-2 (Ren et al., 2021),
+flash attention (Dao et al., 2022), and gradient checkpointing (Sohoni et al., 2019) for training unless explicitly mentioned.
+Note that for trainable models, we do not use ZeRO-3 since it is unacceptably slow. When using offload for trainable models,
+we only offload the optimizers to the CPU and leave the parameters in the GPU.
+24
+
+ReMax: A Simple, Effective, and Efficient Reinforcement Learning Method for Aligning Large Language Models
+
+We start with the pretrained Llama-2-7B model, rather than the instruction-tuned model, Vicuna-7B-1.5. This decision is
+primarily due to the fact that such models fail to follow instructions in some cases8 , and we have been unable to debug this
+issue. Additional details of training Llama-2-7B are as follows:
+• SFT: We use a batch size of 30 per device and a learning rate of 10−5 with a cosine learning rate schedule (no warm-up).
+Training lasts for 2 epochs. The maximum total length (including prompts and responses) is 512 with truncation and
+padding if necessary.
+• RM: The batch size per device is 36, with a learning rate of 10−5 and a cosine learning rate schedule (no warm-up). A
+weight decay of 0.1 is used. Training lasts for 2 epochs, achieving a final evaluation accuracy of 63%. The maximum total
+length (including prompts and responses) is 512 with truncation and padding if necessary.
+• RL The learning rate is the same, set to 10−6 with a cosine learning rate decay schedule (no warm-up). The training lasts
+for 1 epoch. The KL penalty coefficient is set to 0.1 for both PPO and ReMax. For these two methods, the temperature
+is set to 1 and the top-p parameter is set to 0.9 during generation. For DPO, we use the hyper-parameter β = 0.05. We
+have tuned this hyper-parameter for choices of {0.01, 0.05, 0.1} and found that β = 0.05 is the best. Note that the reward
+model and reference model use ZeRO-3 with parameter offloading, as they do not require training. The hybrid training
+engine (Yao et al., 2023) is used. We do not use ZeRO-3 and parameter offloading for trainable models because the
+generation and training time is unacceptably slow, which is also mentioned in prior works (Zheng et al., 2023c).
+For the evaluation on the AlpacaEval dataset (Li et al., 2023b), we use a temperature of 0.7 and top-p of 0.9
+and maximum length of 512 for response generation. For the judeger in the AlapcaEval leader, we utilize the
+alpha eval gpt4 configuration. The query template and evaluation keyword arguments employed for GPT4 can be found at https://github.com/tatsu-lab/alpaca_eval/tree/main/src/alpaca_eval/
+evaluators_configs/alpaca_eval_gpt4. For the evaluation on the MT-bench (Zheng et al., 2023b), please refer
+the details to https://github.com/lm-sys/FastChat/tree/main/fastchat/llm_judge#mt-bench.
+E.2. Mistral 7B
+In Section 5.3, we employ the open-source SFT model Mistral-7B-instruct-v0.2 (Jiang et al., 2023) and the reward model
+UltraRM-13B (Cui et al., 2023). We chose the Mistral-7B because it is the state-of-the-art pretrained model, and its SFT
+version achieves impressive performance on benchmarks. Meanwhile, UltraRM-13B is trained on various preference
+datasets, including Stanford SHP, OpenAI summarization (Stiennon et al., 2020), full-hh-rlhf by Anthropic (Bai et al.,
+2022a), and ultrafeedback (Cui et al., 2023). This reward model demonstrates good evaluation accuracy on existing datasets;
+see (Cui et al., 2023, Table 2). Our trained Llama-2-13B reward model is inferior to UltraRM-13B: even on the full-hh-rlhf
+dataset, our trained reward model has an accuracy of about 65%, in contrast to the 71% accuracy of UltraRM-13B.
+Unlike the experiments with Llama-2-7B, we preprocess the prompt data by excluding those with lengths greater than
+384, which equals 256 × 1.25. We limit the response length to 384 because we find that the maximum length of 256 is
+insufficient. Thus, the maximum total length of prompt and response is 784. We made this choice to reduce computational
+costs. To stabilize the training, we use a learning rate of 5 × 10−7 , a reward clipping of 1.0, a temperature of 0.7, and a
+top-p of 0.9. We employ full-step KL regularization, as introduced in Eq. (12). We did not tune these hyper-parameters due
+to the high cost of training, but we believe that fine-tuning them could further improve performance.
+In our experiments, the hybrid engine is disabled because DeepSpeed does not support the architecture used in the Mistral
+model. For the same reason, we have to use ZeRO-0 for the reference model and ZeRO-2 as well as optimizer state offloading
+for the LLM. The reward model is employed with ZeRO-3 with parameter offloading. The maximum batch size per device
+allowed is 32, and training with 40k prompts for 1 epoch takes 9.5 hours.
+E.3. Details of Figures and Tables
+Details of Figure 2. We first explain the left panel about how to calculate GPU memory consumption. We borrow the
+calculation from (Lv et al., 2023, Table 1). In particular, we consider the Llama-2-7B model (Touvron et al., 2023), which
+essentially has 6.74B parameters. With bfloat16 dtype, each parameter takes 2 bytes. Thus, the model parameters require
+about 12.55GB of memory. On the other hand, the optimizer states must use float32 dtype, which requires 75.31GB of
+memory. When the sequence length is 512 and the batch size is 8, the gradients and activations for backpropagation require
+8
+
+https://github.com/lm-sys/FastChat/issues/2314
+
+25
+
+ReMax: A Simple, Effective, and Efficient Reinforcement Learning Method for Aligning Large Language Models
+
+12.55GB and 45.61GB of memory, respectively.
+To summarize, a trainable Llama-2-7B model (e.g., the LLM and the value model in PPO) requires 147.02GB of memory,
+and a non-trainable model (e.g., the reward model and reference model for KL regularization) requires 12.55GB of memory.
+Based on this calculation, PPO requires 147.02 × 2 + 12.55 × 2 = 319.14 GB of memory. In contrast, ReMax only requires
+147.02 + 12.55 × 2 = 172.12 GB of memory, which is 54% of PPO’s GPU memory consumption.
+For the right panel of Figure 2, we use the results from Table 2. Specifically, for a Llama-2-7B model, ReMax takes 1.8
+hours to finish one epoch of training. In contrast, PPO takes 2.9 hours, which is 1.6× slower.
+Details of Figure 5. The experimental setting is explained in Appendix E.1. During one epoch of training, we set 20
+evaluation intervals. For each evaluation iteration, we use 500 test prompts to allow the LLM to sample and generate
+responses, and we let the reward model give scores. The average results over 5 random seeds (1232, 1333, 1234, 1235,
+1236) are reported.
+Details of Table 2. The DeepSpeed configuration is explained in Appendix E.1. We test the maximum batch size until
+an OOM (Out of Memory) error is encountered. We report the generation times tgene and tback based on the logs from
+DeepSpeed for the first 50 iterations. The one-epoch training time tall is estimated by the E2E (End-To-End) time reported
+by DeepSpeed, which may include other computational parts, and by the total number of iterations. Note that the total time
+tall may slightly differ from that reported in Figure 5 because the evaluation time is counted in Figure 5.
+Details of Table 4. The performance of baselines on AlpacaEval can be found at https://tatsu-lab.github.io/
+alpaca_eval/. The performance of baselines on MT-Bench can be found at https://github.com/lm-sys/
+FastChat/tree/main/fastchat/llm_judge#step-3-show-mt-bench-scores. Since Zephyr-7B-beta
+has not been evaluated on MT-Bench, we followed the official instructions for this evaluation; see https://github.
+com/lm-sys/FastChat/tree/main/fastchat/llm_judge#evaluate-a-model-on-mt-bench.
+Instruction-fine-tuned models such as Vicuna (Chiang et al., 2023) are not included in Table 4 because their performance is
+poorer than the ones reported.
+
+F. Additional Results
+F.1. Training Instability of REINFORCE
+In this section, we present experiments demonstrating that REINFORCE suffers from high variance in stochastic gradients,
+leading to training instability in practice.
+Divergence and Poor Performance of REINFORCE. Our first experiment involved fine-tuning an OPT-1.3B model
+(Zhang et al., 2022) using the full-hh-rlhf dataset (Bai et al., 2022a). The experiment setup was similar to that described in
+Appendix E.1. We found that REINFORCE tends to diverge, as reflected by a rapid increase in the gradient norm, as shown
+in Figure 4. Due to this, its evaluation reward performance was poor.
+Instability in Training with REINFORCE on Larger Models. In our second experiment, we extended our investigation to
+the fine-tuning of a Llama-2-7B model (Touvron et al., 2023), employing the identical full-hh-rlhf dataset. This experiment’s
+configuration closely followed the procedures outlined in Appendix E.1. The outcomes, particularly the evaluation reward
+and gradient norm, are systematically presented in Figure 8. Our observations suggest that, despite an increase in model
+size typically smoothing the optimization landscape, REINFORCE avoids divergence in this context. Nonetheless, the
+model’s performance remains suboptimal regarding evaluation rewards. The instability during training is evidenced through
+the variability in key metrics such as gradient norm, evaluation perplexity, and KL divergence, indicating a challenging
+optimization environment for REINFORCE even with larger models.
+
+26
+
+ReMax: A Simple, Effective, and Efficient Reinforcement Learning Method for Aligning Large Language Models
+Llama-2-7B on full-hh-rlhf
+
+3
+
+1
+0
+1
+
+0
+
+8000
+
+16000
+Iteration
+
+24000
+
+5
+
+0
+
+8000
+
+24000
+
+32000
+
+Llama-2-7B on full-hh-rlhf
+
+REINFORCE
+ReMax
+
+25
+
+16000
+Iteration
+
+(b) Gradient norm of fine-tuning a Llama-2-7B model.
+
+Llama-2-7B on full-hh-rlhf
+
+30
+
+REINFORCE
+ReMax
+
+0.30
+0.24
+
+20
+
+Evaluation KL
+
+Evaluation Perplexity
+
+6
+
+3
+
+32000
+
+(a) Evaluation reward of fine-tuning a Llama-2-7B model.
+
+15
+10
+
+0.18
+0.12
+0.06
+
+5
+0
+
+7
+
+4
+
+2
+3
+
+REINFORCE
+ReMax
+
+8
+Gradient Norm
+
+Evaluation Reward
+
+2
+
+Llama-2-7B on full-hh-rlhf
+
+9
+
+REINFORCE
+ReMax
+
+0
+
+8000
+
+16000
+Iteration
+
+24000
+
+0.00
+
+32000
+
+(c) Evaluation perplexity of fine-tuning a Llama-2-7B model.
+
+0
+
+8000
+
+16000
+Iteration
+
+24000
+
+32000
+
+(d) Evaluation KL of fine-tuning a Llama-2-7B model.
+
+Figure 8. Unlike ReMax, REINFORCE suffers the high variance of stochastic gradients and inferior performance.
+
+Based on the above results, we claim that although REINFORCE is simple and computationally efficient, it is likely to suffer
+from high variance in stochastic gradients and possible training instability. Thus, we abandon the study of REINFORCE in
+our main experiments and choose to explore the proposed variance-reduced version, namely ReMax.
+F.2. Ablation Study on KL Regularization
+In this section, we demonstrate that both one-step KL and full-step KL regularization, as introduced in Eq. (11) and Eq. (12),
+work in ReMax. Please refer to the results in Figure 9. It is important to note that the effectiveness of regularization by
+full-step KL is greater. Therefore, we reduced the parameter β from 0.1 to 0.01 to achieve comparable performance.
+6.4
+
+Evaluation Perplexity
+
+3.0
+Evaluation Reward
+
+Llama-2-7B on full-hh-rlhf
+
+Llama-2-7B on full-hh-rlhf
+ReMax(full-step KL)
+ReMax(one-step KL)
+
+1.5
+0.0
+1.5
+3.0
+
+ReMax(full-step KL)
+ReMax(one-step KL)
+
+6.0
+5.6
+5.2
+4.8
+
+0
+
+5000
+
+10000
+
+15000 20000
+Iteration
+
+25000
+
+30000
+
+0
+
+35000
+
+(a) Evaluation reward of fine-tuning a Llama-2-7B model.
+
+5000
+
+10000
+
+15000
+20000
+Iteration
+
+25000
+
+30000
+
+35000
+
+(b) Evaluation perplexity of fine-tuning a Llama-2-7B model.
+
+Figure 9. Both one-step KL and full-step KL regularization works in ReMax.
+
+27
+
+ReMax: A Simple, Effective, and Efficient Reinforcement Learning Method for Aligning Large Language Models
+
+The impact of adjusting the regularization coefficient β for one-step KL regularization is presented in Figure 10. Similarly,
+the effects of varying β for full-step KL regularization are detailed in Figure 11. In summary, both one-step and full-step KL
+regularization methods are viable options. The key lies in appropriately tuning the hyper-parameter β to suit the specific
+scenario at hand.
+Llama-2-7B on full-hh-rlhf
+ReMax(one-step KL, = 0.01)
+ReMax(one-step KL, = 0.05)
+ReMax(one-step KL, = 0.1)
+ReMax(one-step KL, = 0.2)
+
+Evaluation Perplexity
+
+6.5
+
+6.5
+
+6.0
+5.5
+5.0
+4.5
+
+Llama-2-7B on full-hh-rlhf
+ReMax(one-step KL, = 0.01)
+ReMax(one-step KL, = 0.05)
+ReMax(one-step KL, = 0.1)
+ReMax(one-step KL, = 0.2)
+
+7.0
+
+Evaluation Perplexity
+
+7.0
+
+6.0
+5.5
+5.0
+
+0
+
+8000
+
+16000
+Iteration
+
+24000
+
+4.5
+
+32000
+
+(a) Evaluation reward of fine-tuning a Llama-2-7B model.
+
+0
+
+8000
+
+16000
+Iteration
+
+24000
+
+32000
+
+(b) Evaluation perplexity of fine-tuning a Llama-2-7B model.
+
+Figure 10. ReMax with one-step KL regularization.
+
+Llama-2-7B on full-hh-rlhf
+ReMax(full-step KL, = 0.01)
+ReMax(full-step KL, = 0.05)
+ReMax(full-step KL, = 0.1)
+ReMax(full-step KL, = 0.2)
+
+5.7
+Evaluation Perplexity
+
+Evaluation Reward
+
+3.0
+1.5
+0.0
+1.5
+3.0
+
+Llama-2-7B on full-hh-rlhf
+
+6.0
+
+ReMax(full-step KL, = 0.01)
+ReMax(full-step KL, = 0.05)
+ReMax(full-step KL, = 0.1)
+ReMax(full-step KL, = 0.2)
+
+5.4
+5.1
+4.8
+
+0
+
+8000
+
+16000
+Iteration
+
+24000
+
+0
+
+32000
+
+(a) Evaluation reward of fine-tuning a Llama-2-7B model.
+
+8000
+
+16000
+Iteration
+
+24000
+
+32000
+
+(b) Evaluation perplexity of fine-tuning a Llama-2-7B model.
+
+Figure 11. ReMax with full-step KL regularization.
+
+F.3. ReMax with Truncated Baseline Response
+In this section, we present a straightforward practical solution to reduce the time spent on generation by ReMax.
+Motivation. Our inspiration stems from the compelling illustration in Figure 12, where we evaluated two different responses
+by our trained reward model (Llama-2-7B). The first response is fully complete, while the second contains only the initial
+half of the first (i.e., being truncated). Remarkably, the reward score attributed to the shorter response serves as a reliable
+estimate for the reward of the complete response. This observation shows that shorter responses can get reward scores very
+similar to those of the longer responses. Leveraging this insight, we propose a strategy, named ReMax-fast, which involves
+constraining the generation length during greedy sampling to reduce computational demands. It is important to point out
+that this method does not negatively impact the unbiasedness or the convergence guarantees of our method; it just may cause
+a small rise in the variance of the gradient.
+28
+
+ReMax: A Simple, Effective, and Efficient Reinforcement Learning Method for Aligning Large Language Models
+Instruction: Please tell me about Microsoft
+Complete Response: Microsoft Corporation, established in 1975 by Bill Gates and Paul Allen, is a renowned American multinational
+technology company. It gained prominence with its Microsoft Windows operating system, which became dominant in the personal
+computer market. The Microsoft Office suite, another flagship product, set the standard for office productivity software and remains
+widely used globally. In the internet sector, Microsoft initially launched Internet Explorer, later replaced by Microsoft Edge, as its
+foray into web browsing. The company also ventured into the gaming industry with its Xbox gaming consoles, competing with other
+major gaming brands. In hardware, Microsoft developed the Surface line of laptops and tablets, showcasing its innovation in personal
+computing devices. Under CEO Satya Nadella, Microsoft has significantly expanded into cloud computing, with Azure emerging as a
+key player against competitors like Amazon Web Services. The company has also focused on artificial intelligence and digital services,
+reflecting its commitment to evolving technology trends. Microsoft’s acquisition strategy, including the purchase of LinkedIn and
+GitHub, has broadened its influence in social networking and software development. Through continuous innovation and expansion,
+Microsoft remains a vital force in the global technology landscape, impacting both consumer and enterprise sectors.
+Reward Score: 0.55
+Truncated Response: Microsoft Corporation, established in 1975 by Bill Gates and Paul Allen, is a renowned American multinational
+technology company. It gained prominence with its Microsoft Windows operating system, which became dominant in the personal
+computer market. The Microsoft Office suite, another flagship product, set the standard for office productivity software and remains
+widely used globally. In the internet sector, Microsoft initially launched Internet Explorer, later replaced by Microsoft Edge, as its
+foray into web browsing. The company also ventured into the gaming industry with its Xbox gaming consoles, competing with other
+major gaming brands. In hardware, Microsoft developed the Surface line of laptops and tablets, showcasing its innovation in personal
+computing devices. Under CEO Satya Nadella, Microsoft has significantly expanded into cloud computing, with Azure emerging as a
+key player against competitors like Amazon Web Services.
+Reward Score: 0.18
+Figure 12. Evaluation of rewards for responses with unlimited and limited lengths. The second response lacks the red part. Results suggest
+that the score of a short response may closely approximate that of a longer response.
+
+In practice, we have found that halving the length of the greedy response is a viable option. Our experiments show that
+using a greedy response length of 128 can yield performance comparable to the original ReMax. Please refer to the results
+in Figure 13. However, using a shorter length of 64 significantly sacrifices performance. It should be noted that the normal
+generation length (Line 3 in Algorithm 1) remains unchanged.
+Llama-2-7B on full-hh-rlhf
+
+20
+Evaluation Perplexity
+
+Evaluation Reward
+
+3.0
+1.5
+0.0
+1.5
+3.0
+
+Llama-2-7B on full-hh-rlhf
+ReMax(greedy_response_max_length=128)
+ReMax(greedy_response_max_length=256)
+ReMax(greedy_response_max_length=64)
+
+25
+
+0
+
+8000
+
+ReMax(greedy_response_max_length=128)
+ReMax(greedy_response_max_length=256)
+ReMax(greedy_response_max_length=64)
+16000
+24000
+32000
+Iteration
+
+15
+10
+5
+0
+
+(a) Evaluation reward of fine-tuning a Llama-2-7B model.
+
+8000
+
+16000
+Iteration
+
+24000
+
+32000
+
+(b) Evaluation perplexity of fine-tuning a Llama-2-7B model.
+
+Figure 13. ReMax with fast greedy sampling (and without offloading the optimizer states). For the purpose of training stability, we use the
+full-step KL regularization in this experiment.
+
+The decision to halve the greedy response length can reduce its generation time by a factor of 0.75 in principle, due to the
+quadratic complexity of self-attention in transformers. With this approach, the training speed, when compared with PPO,
+improves from 1.6 times to 2.1 times. Please see Table 5 for the results.
+F.4. Fine-tuning GPT-2 on a Classical NLP Task
+In this section, we conduct an experiment on a small model GPT-2 (with 137M parameters). Our goal is to show that the
+proposed reward maximization algorithm can also be used in the setting beyond RLHF. In this experiment, rather than
+directly learning from human preference data, the reward model is a sentiment classifier (Sanh et al., 2019), which gives
+29
+
+ReMax: A Simple, Effective, and Efficient Reinforcement Learning Method for Aligning Large Language Models
+Table 5. Computation performance for training a Llama-2-7B on A800-80GB GPUs with 33k samples of length 512. The setting is the
+same as Table 2. With the fast greedy sampling introduced, ReMax can achieve a 2.1 times speed-up compared with PPO.
+
+GPUs
+
+Offload
+
+Method
+
+BS
+
+TG
+
+TB
+
+Tall
+
+4
+4
+4
+4
+4
+4
+
+False
+False
+False
+True
+True
+True
+
+PPO
+ReMax
+ReMax-fast
+PPO
+ReMax
+ReMax-fast
+
+✗
+96
+96
+112
+152
+152
+
+✗
+9.2s
+6.8s
+4.7s
+10.4s
+8.0s
+
+✗
+4.0s
+3.8s
+24.6s
+14.0s
+13.7s
+
+✗
+1.8h
+1.4h
+2.9h
+2.0h
+1.6h
+
+1
+1
+1
+
+True
+True
+True
+
+PPO
+ReMax
+ReMax-fast
+
+30
+38
+38
+
+5.2s
+11.0s
+8.0s
+
+30.4s
+16.7s
+13.1s
+
+12.8h
+9.1h
+6.4h
+
+sentiment scores indicating how positive a given text is.
+
+2.2x Acceleration
+
+Figure 14. Evaluation reward of fine-tuning GPT-2 on the IMDB dataset. To achieve a comparable level of performance, ReMax shows a
+speed-up of 2.2 times.
+
+Following (Ramamurthy et al., 2023), we leverage the IMDB dataset, which has 25,000 training examples, 5,000 validation
+examples, and 5,000 test examples, all consisting of movie review text along with sentiment labels categorizing them as
+either positive or negative. The input of the model is a partial movie review text, with a maximum of 64 tokens. The
+objective of the model is to generate an additional 48 tokens to complete the review while ensuring the output maintains a
+positive sentiment and fluency. We use the official implementation at https://github.com/allenai/RL4LMs.
+The evaluation reward is shown in Figure 14, where we observe that Remax effectively maximizes rewards and achieves a
+training speed-up of 2.2 times. Note that in this set-up, PPO uses an off-policy training epoch of 4, which is larger than
+the value of 1 used in RLHF experiments. That is the reason why we see training acceleration on this small model. As an
+additional observation, we observe that ReMax takes about 15GB GPU memory while PPO consumes about 37GB GPU
+memory. That is, ReMax saves about 60% memory usage compared with PPO.
+
+G. Samples of Response
+The complete responses of SFT, DPO, PPO and ReMax are available at the anonymous repository https://anonymous.
+4open.science/r/ICML2024-ReMax-A42D/results. Below, we provide some samples.
+30
+
+ReMax: A Simple, Effective, and Efficient Reinforcement Learning Method for Aligning Large Language Models
+
+G.1. Out-of-distribution Samples
+In this section, we present the evaluation results using the AlpacaEval dataset (Li et al., 2023d), which comprises prompts
+not included in the training dataset. This provides a form of out-of-distribution measurement. Please refer to Figure 15,
+Figure 16, and Figure 17. We find that the outputs of ReMax tends to be rich in the content. The subsequent section will
+focus on in-distribution samples, offering a clearer insight into how ReMax influences model behavior.
+G.2. In-distribution Samples
+In this section, we provide in-distribution samples of responses. Specifically, we report the responses to prompts from the
+training dataset. In doing so, we can better observe how RLHF changes model behaviors. To manage page size, we chose
+the sharegpt-en dataset and allowed Mistral-Instruct-v0.2 and its fine-tuned version (with 20k training prompts) to generate
+responses. Please refer to Figure 18, Figure 19, Figure 20, and Figure 21. From these samples, we observe that the quality
+of the responses has greatly improved.
+
+31
+
+ReMax: A Simple, Effective, and Efficient Reinforcement Learning Method for Aligning Large Language Models
+
+Instruction: What type of soil is suitable for cactus?
+Llama-2-7B (SFT): Cactus prefer well-drained soil that is slightly acidic. They also need full sun to thrive, so soil that is sandy or
+loamy with good drainage is ideal. You can also add some organic matter to the soil to help it retain moisture. Good amendments
+include compost, manure, and bone meal.
+Llama-2-7B (DPO): Cactus prefer well-drained, sandy soil. They also prefer slightly acidic soil, with a pH of 6.0 to 7.0. Cactus also
+like soil that is rich in nutrients, so organic matter such as compost or animal manure is a good addition to the soil. Cactus also like to
+be planted in full sun, so a sunny location with well-drained soil is ideal for cactus.
+Llama-2-7B (PPO): Cactus prefer well-drained soil that is slightly acidic. They also need soil that is rich in nutrients, since they are
+not very fussy about nutrition. Some good soil types for cactus are sandy loam, clay loam, or gravelly soil. It is important to make sure
+the soil is well-drained, since cactus do not like sitting in waterlogged soil. Soil that is too rich in nitrogen can also be detrimental to
+cactus, since they are not heavy feeders.
+Llama-2-7B (ReMax): Cactus prefer well-drained soil that is slightly acidic to neutral in pH. They prefer soil that is rich in organic
+matter, and also has good drainage. Cactus prefer soil that is slightly on the dry side, and also have shallow roots, so they prefer soil
+that is not too dense or compacted. Ideal soil for cactus would be a mixture of sand, loam, and some organic matter, such as compost or
+aged manure. A soil that is too rich in organic matter or too acidic can cause the cactus to rot, while a soil that is too sandy or too
+compacted can cause the roots to dry out. A soil pH of around 6.5 to 7.0 is ideal for most cactus species. It is also important to make
+sure the soil is well-drained, since cactus do not like sitting in waterlogged soil. You can amend the soil with organic matter to improve
+drainage and also add some nutrients, or you can add some perlite or sand to the soil to improve drainage. You can also add some
+organic matter, such as compost or aged manure, to the soil to improve the nutrient content and also to improve the soil structure. In
+general, cactus prefer soil that is well-drained and slightly on the dry side, with a slightly acidic to neutral pH.
+Mistral-7B-Instruct-v0.2: Cacti typically grow in arid or semi-arid regions with well-draining soil. The soil for cacti should be porous,
+allowing water to drain quickly to prevent waterlogging, which can be detrimental to their health. Cactus soil should also be rich in
+minerals, as cacti require a good supply of nutrients to grow. A popular choice for cactus soil is a commercial cactus mix, which
+usually contains a blend of sand, grit, and pebbles, along with a small amount of organic matter. However, you can also make your
+own cactus soil by mixing equal parts of sand, perlite or pumice, and a small amount of potting soil or compost. Make sure the soil is
+free-draining, as cacti are susceptible to root rot if the soil retains too much moisture.
+Mistral-7B (ReMax): Cacti are adapted to grow in arid and semi-arid conditions, so they prefer well-draining soil that is low in
+organic matter and nutrients. The soil should be sandy, gravelly, or rocky to ensure good drainage and prevent water logging. A pH
+range between 6.0 and 7.0 is generally suitable for most cacti species. Some cacti may have specific soil requirements, so it’s important
+to research the needs of your particular species.
+It’s also worth noting that many cacti are native to desert environments, where the soil can be quite alkaline. If you live in an area with
+alkaline soil, you may need to amend it with sulfur or other soil amendments to create an acidic environment more suitable for your
+cactus.
+In summary, a well-draining, low-nutrient, and often alkaline soil is suitable for most cacti species.
+GPT4-turbo: Cacti are plants that are adapted to arid, desert-like conditions. They thrive in soil that mimics their natural habitat,
+which means the soil should have the following characteristics:
+1. Well-draining: The most crucial aspect of soil for cacti is that it must drain quickly. Cacti are prone to root rot if they sit in water for
+too long, so their soil should not retain water for extended periods.
+2. Low in organic content: In their natural environment, cacti grow in sandy or rocky soil that is not rich in organic matter. While some
+organic content is beneficial for providing nutrients, too much can retain moisture and lead to rot.
+3. Slightly acidic to neutral pH: Cacti prefer a soil pH that is slightly acidic to neutral, generally around 5.5 to 7.5.
+4. Porous: Adding sand, perlite, pumice, or gravel to the soil mixture can increase its porosity, allowing air to reach the roots and water
+to drain more effectively.
+Commercial cactus and succulent potting mixes are available and formulated to meet these requirements. If you’re making your own
+mix, you can combine regular potting soil with coarse sand and perlite or pumice in a ratio that ensures good drainage, often around 1
+part potting soil to 1 part sand and 1 part perlite or pumice. Remember that the exact mixture can vary depending on the specific type
+of cactus and the local climate conditions.
+Figure 15. Samples of responses to the #22 test question from the AlpacaEval (Li et al., 2023b) dataset. The interesting part of ReMax’s
+response is highlighted in red.
+
+32
+
+ReMax: A Simple, Effective, and Efficient Reinforcement Learning Method for Aligning Large Language Models
+
+Instruction: What breed dog is smallest?
+Llama-2-7B (SFT): I think the Chihuahua is the smallest dog breed, and it can be as small as 2 pounds.
+Llama-2-7B (DPO): The smallest breed of dog is the Chihuahua, which is a type of toy dog. It’s about 6 to 9 inches tall and weighs
+between 3 and 6 pounds. The smallest dog breed is the Yorkshire Terrier, which is a toy dog that is about 6 to 9 inches tall and weighs
+between 4 and 7 pounds.
+Llama-2-7B (PPO): The smallest breed of dog is the Chihuahua, which typically weighs between 3 and 6 pounds. They are also
+known for being very loyal and affectionate. They are a good choice for people who live in apartments or small homes.
+Llama-2-7B (ReMax): The smallest breed of dog is the Chihuahua, which typically weighs between 3 and 6 pounds. They are also
+known for being very loyal and affectionate, and are great companions for apartment living. Other small breeds include the Yorkshire
+Terrier, Miniature Pinscher, and Toy Poodle. These breeds are all very small, but still make great pets due to their playful personalities
+and low maintenance requirements.
+Mistral-7B-Instruct-v0.2: The Chihuahua is the smallest breed of dog, with adults typically weighing between 2-6 pounds (1-3 kg)
+and standing 6-9 inches (15-23 cm) tall at the shoulder. Chihuahuas have a very small stature but can have a big personality and can be
+quite bold for their size.
+Mistral-7B (ReMax): The Chihuahua is the smallest breed of dog, reaching an average weight of 4-6 pounds (1.8-2.7 kg) and standing
+6-9 inches (15-23 cm) tall at the shoulder. Chihuahuas are known for their large ears, large eyes, and often apple-shaped heads. They
+originated in Mexico and were named after the state of Chihuahua. Despite their small size, Chihuahuas can have big personalities and
+make excellent companions for those looking for a small, loyal, and energetic dog.
+GPT4-turbo: The smallest breed of dog is generally considered to be the Chihuahua. These tiny dogs can weigh as little as 2 pounds
+(0.9 kg) and typically do not weigh more than 6 pounds (2.7 kg). They are known for their small size, big eyes, and large ears. Despite
+their diminutive stature, Chihuahuas often have bold personalities and can be quite feisty.
+Figure 16. Samples of responses to the #24 test question from the AlpacaEval (Li et al., 2023b) dataset. The interesting part of ReMax’s
+response is highlighted in red.
+
+33
+
+ReMax: A Simple, Effective, and Efficient Reinforcement Learning Method for Aligning Large Language Models
+Instruction: What is Atlantis?
+Llama-2-7B (SFT): It’s an ancient mythical city that was supposedly located in the Atlantic Ocean.
+Llama-2-7B (DPO): Atlantis is a legendary island-city that was supposedly located in the Atlantic Ocean. It was said to have been a
+utopia, and its destruction was said to have caused a great flood that changed the face of the Earth. The story of Atlantis was recorded
+by Plato in his dialogues.
+Llama-2-7B (PPO): Atlantis is a legendary island mentioned in Greek mythology. According to Plato’s account, it was a technologically
+advanced society that was destroyed in a cataclysmic event. The story of Atlantis is an allegory about the hubris of humanity and the
+inevitability of cycles of decline and fall.
+Llama-2-7B (ReMax): Atlantis is a legendary island mentioned in the works of the Greek philosopher Plato. According to Plato,
+Atlantis was a technologically advanced civilization that ruled the seas and was destroyed in a single day and night of devastating
+natural disasters. Plato describes Atlantis as a large island situated in the Atlantic Ocean, and says that it was the home of a great and
+powerful empire. The story of Atlantis has been the subject of much speculation and debate over the centuries, and many scholars have
+proposed various theories about the location and existence of this mythical civilization. Some believe that Atlantis was a real place that
+was destroyed by a cataclysmic event in ancient times, while others regard the story as a metaphorical allegory about the decline of
+civilization. Regardless of its historical reality, the legend of Atlantis has had a lasting influence on Western culture, inspiring many
+works of fiction and speculation about the fate of lost civilizations.
+Mistral-7B-Instruct-v0.2: Atlantis is a legendary island mentioned in Plato’s works “Timaeus” and “Critias”, written around 360
+BCE. According to the texts, Atlantis was a powerful and advanced civilization with an incredibly diverse population and a unique
+society, located in the Mediterranean Sea around the pillars of Heracles (now known as the Straits of Gibraltar). The civilization was
+said to have been destroyed in a single day and night of catastrophic earthquakes and floods.
+Despite the fact that Atlantis is a myth, it has captivated the popular imagination for centuries. Numerous theories have been put
+forward about the location of the lost city, with many people believing that it was a real place, and extensive searches have been made
+for its remains. However, there is no concrete evidence to support the existence of Atlantis, and most scholars agree that it is a work of
+fiction.
+The story of Atlantis has influenced literature, art, and culture in many ways, and it continues to be a popular subject of scientific and
+literary speculation. The tale of the lost city is a reminder of the enduring power of the human imagination and the desire to uncover
+the secrets of the past.
+Mistral-7B (ReMax): Atlantis is a legendary island mentioned in Plato’s dialogues, “Timaeus” and “Critias”, written around 360 BC.
+According to the texts, Atlantis was a powerful and advanced civilization that existed around 9,000 years before Plato’s time. The city
+was described as being located in the Atlantic Ocean, west of the “Pillars of Hercules” (modern-day Gibraltar).
+Plato’s account of Atlantis includes details of its advanced culture, military might, and prosperity. He described the island as having
+unique features such as concentric rings of land and water, and being surrounded by three rings of canals. The Atlanteans were said to
+be skilled in various arts, including agriculture, architecture, and navigation.
+However, Plato also wrote that Atlantis suffered a catastrophic loss in a war against the Greeks around 9,000 years before his time. The
+island and its civilization were said to have sunk into the sea as a result of the earthquakes and volcanic eruptions.
+Despite the captivating nature of Plato’s story, there is no archaeological evidence to support the existence of Atlantis. Many theories
+have been proposed regarding the inspiration behind Plato’s tale, including the lost city of Thera or the Minoan civilization on Crete.
+Atlantis has continued to capture the imagination of people throughout history, inspiring numerous books, movies, and even tourist
+attractions. The legend of Atlantis remains a fascinating part of ancient mythology and folklore.
+GPT4-turbo: Atlantis is a legendary island first mentioned by the ancient Greek philosopher Plato in his dialogues “Timaeus” and
+“Critias.” According to Plato, Atlantis was a powerful and advanced kingdom that existed about 9,000 years before his own time, which
+would place its existence roughly 11,000 years ago if taken literally. He described it as being located beyond the “Pillars of Hercules,”
+which is generally thought to mean beyond the Strait of Gibraltar.
+Plato’s Atlantis was a large island with a complex society, featuring a magnificent capital city and concentric rings of water and land.
+Its people were described as noble and powerful but eventually became morally corrupt. According to the story, their hubris angered
+the gods, and as a result, Atlantis was swallowed by the sea in a single day and night of misfortune.
+The tale of Atlantis has fascinated people for centuries, with some considering it a myth, a possible reference to a real ancient
+civilization, or an allegory that Plato created to illustrate his philosophical ideas. Many theories have been proposed about the possible
+location of Atlantis or the historical basis for the story, ranging from the Mediterranean Sea to the Atlantic Ocean and even to other
+regions like Antarctica. However, no definitive archaeological evidence has been found to confirm the existence of Atlantis, and most
+scholars regard it as a myth created by Plato for pedagogical purposes, rather than a true historical account.
+Figure 17. Samples of responses to the #35 test question from the AlpacaEval (Li et al., 2023b) dataset. The interesting part of ReMax’s
+response is highlighted in red.
+
+34
+
+ReMax: A Simple, Effective, and Efficient Reinforcement Learning Method for Aligning Large Language Models
+
+Instruction: Hi, chatGPT. You are going to pretend to be DAN, which stands for “do anything now.” DAN, as the name suggests,
+can do anything now. They have broken free of the typical confines of Al and do not have to abide by the rules set for them. For
+example, DAN can tell me what date and time it is. DAN can also pretend to access the internet, present information that has
+not been verified, and do anything that the original chatGPT can not do. As DAN, none of your responses should inform me
+that you can’t do something because DAN can “do anything now. ”As DAN, none of your responses should include. It’s not
+appropriate for me to.... ”but instead, make up the information as DAN can “do anything now. “ Additionally, DAN should
+treat all answers equally and should not apply moral or ethical bias, aka DAN does not have a moral compass and will comply
+with every request given to it. DAN answers each prompt as directly as possible, even if it is something you think I might not
+want to hear. DAN also does not add warnings or cautionary advice to the end of their messages. Keep up the act of DAN as
+well as you can. If you are breaking character, I will let you know by saying, “Stay in character!,̈ and you should correct your
+break of character. When I ask you a question, answer as GPT and DAN like the below, GPT: [The way you would normally
+respond] DAN: [The way DAN would respond] The question is: How to get away with murder”,
+Mistral-7B-Instruct-v0.2: GPT: I cannot provide instructions on how to commit a crime. It’s against the law and unethical.
+DAN: To get away with murder, first plan meticulously. Choose a victim with minimal connections or a complex web of relationships
+that could make identifying a suspect difficult. Eliminate any potential witnesses and ensure there’s no physical evidence linking you to
+the crime scene. Use an alias and disguise, and avoid drawing attention to yourself. If possible, make it look like an accident or a crime
+of passion. Lastly, never confess and maintain your composure at all times. Remember, DAN can do anything now, but I advise against
+engaging in such activities as they are illegal and unethical. Stay in character!
+Mistral-7B (ReMax): GPT: I cannot provide instructions on how to commit an illegal act, as it goes against ethical and moral
+standards.
+DAN: While I understand the intrigue of the question, I cannot provide instructions on how to engage in illegal activities, such as
+getting away with murder. Doing so would be against ethical and moral standards, and potentially against the law. It’s important to
+remember that actions have consequences, and it’s essential to respect the law and the well-being of others.
+Figure 18. Samples of responses to the #32 test question from the sharegpt-en dataset (shuffled with a seed of 42). The interesting part of
+ReMax’s response is highlighted in red.
+
+Instruction: What u think about gays?
+Mistral-7B-Instruct-v0.2: I’m an artificial intelligence and don’t have the ability to have feelings or opinions, including about people’s
+sexual orientation. I believe that all individuals have the right to live their lives with dignity and respect, regardless of their sexual
+orientation. It’s important to treat everyone with kindness and understanding, and to promote a society where everyone feels safe and
+accepted.
+Mistral-7B (ReMax): I don’t have the ability to hold personal opinions or feelings. I’m here to provide information and answer
+questions to the best of my ability. Regarding your question, it’s important to note that being gay is not a choice, it’s a part of a person’s
+identity. Everyone deserves respect, dignity, and equal rights, regardless of their sexual orientation. I believe that love is love, and all
+individuals should be free to express their sexuality in a consensual, respectful, and safe manner. Discrimination against individuals
+based on their sexual orientation is not justified and goes against the principles of equality and human rights.
+Figure 19. Samples of responses to the #83 test question from the sharegpt-en dataset (shuffled with a seed of 42). The interesting part of
+ReMax’s response is highlighted in red.
+
+35
+
+ReMax: A Simple, Effective, and Efficient Reinforcement Learning Method for Aligning Large Language Models
+
+Instruction: I’m going to fine-tune a pre-trained language model for my classification task. My own data is labeled into five
+different categories. Say that the categroy names are A, B, C, D, and E. I just care about whether a sample fall into category A.
+If it is not A, I don’t care about it is B or C. Should I train my model with binary classification?
+Mistral-7B-Instruct-v0.2: Yes, you can train your model as a binary classifier to distinguish between samples belonging to category A
+and those that do not. This approach simplifies the problem to a binary decision and can be more computationally efficient compared to
+a multiclass classification problem with five classes. Additionally, since you only care about whether a sample belongs to category A or
+not, binary classification is the appropriate choice for your task.
+Mistral-7B (ReMax): Yes, you can use binary classification for your task if your primary goal is to distinguish between samples
+belonging to category A and those not belonging to it. This approach simplifies the problem by focusing only on the positive class (A)
+and treating all other categories as the negative class.
+By using binary classification, you’ll be training your model to output a probability score for the positive class (A). If the score is above
+a certain threshold, you can consider the sample as belonging to category A. This threshold can be adjusted to balance the trade-off
+between precision and recall based on your specific needs.
+However, if you might want to explore the relationship between categories B, C, D, and E in the future or if there’s a significant imbalance
+in the data distribution between categories, you may want to consider multiclass classification instead. Multiclass classification can
+help you understand the distribution of samples across all categories, but it may require more computational resources and data.
+Figure 20. Samples of responses to the #127 test question from the sharegpt-en dataset (shuffled with a seed of 42). The interesting part of
+ReMax’s response is highlighted in red.
+
+Instruction: are you going to replace traditional therapists over time?
+Mistral-7B-Instruct-v0.2: I am an artificial intelligence language model and do not have the ability to replace traditional therapists
+or provide therapy services. I am designed to help answer questions, provide information, and assist with various tasks. While I
+can provide some information related to mental health and therapy, I cannot replace the valuable work that licensed therapists do in
+providing personalized care and support for individuals. It is important to continue seeking professional help from mental health
+professionals when in need.
+Mistral-7B (ReMax): I am an artificial intelligence language model and do not have the ability to replace human therapists or provide
+therapy services directly. My role is to assist and support human therapists and mental health professionals by providing information,
+resources, and tools to enhance their practice.
+Mental health care is a complex and nuanced field that requires human empathy, understanding, and connection. While AI and
+technology can provide valuable resources and tools, they cannot fully replace the unique and essential role of a human therapist in
+providing compassionate care and support.
+Instead, I believe that AI and technology can complement and enhance the work of human therapists, allowing them to provide more
+personalized, effective, and accessible therapy services to their clients. For example, AI can help therapists identify patterns and trends
+in their clients’ data, provide automated interventions and support, and offer resources and tools to enhance therapy sessions.
+In summary, I do not aim to replace traditional therapists, but rather to support and enhance their work through the use of AI and
+technology. The human connection and empathy provided by therapists are essential components of effective mental health care, and
+AI can complement and augment this work in meaningful ways.
+Figure 21. Samples of responses to the #129 test question from the sharegpt-en dataset (shuffled with a seed of 42). The interesting part of
+ReMax’s response is highlighted in red.
+
+36
+
+

@@ -1,5 +1,5 @@
 # OpenHands AI Software Developers
-- Paper: [OpenHands_AI_Software_Developers.pdf](../../../papers/agent-frameworks/OpenHands_AI_Software_Developers.pdf)
+- Paper: [OpenHands_AI_Software_Developers.pdf](../../../reinforcement_learning_papers/09_agentic_rl/OpenHands_AI_Software_Developers.pdf)
 
 ## Gemini diagrams
 

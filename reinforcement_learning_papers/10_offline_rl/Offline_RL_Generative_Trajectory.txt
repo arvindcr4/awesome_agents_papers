@@ -1,0 +1,3126 @@
+Preprint
+
+O FFLINE R EINFORCEMENT L EARNING WITH G ENERA TIVE T RAJECTORY P OLICIES
+Xinsong Feng1 , Leshu Tang2 , Chenan Wang1 , Haipeng Chen1
+1
+William & Mary, 2 UCLA
+xfeng06@wm.edu, leshutang@ucla.edu, cwang33@wm.edu, hchen23@wm.edu
+
+arXiv:2510.11499v1 [cs.LG] 13 Oct 2025
+
+A BSTRACT
+Generative models have emerged as a powerful class of policies for offline reinforcement learning (RL) due to their ability to capture complex, multi-modal
+behaviors. However, existing methods face a stark trade-off: slow, iterative models
+like diffusion policies are computationally expensive, while fast, single-step models
+like consistency policies often suffer from degraded performance. In this paper, we
+demonstrate that it is possible to bridge this gap. The key to moving beyond the limitations of individual methods, we argue, lies in a unifying perspective that views
+modern generative models—including diffusion, flow matching, and consistency
+models—as specific instances of learning a continuous-time generative trajectory
+governed by an Ordinary Differential Equation (ODE). This principled foundation
+provides a clearer design space for generative policies in RL and allows us to
+propose Generative Trajectory Policies (GTPs), a new and more general policy
+paradigm that learns the entire solution map of the underlying ODE. To make this
+paradigm practical for offline RL, we further introduce two key theoretically principled adaptations. Empirical results demonstrate that GTP achieves state-of-the-art
+performance on D4RL benchmarks – it significantly outperforms prior generative
+policies, achieving perfect scores on several notoriously hard AntMaze tasks.
+
+1
+
+I NTRODUCTION
+
+In offline reinforcement learning (RL), an agent needs to learn a policy from a pre-collected dataset
+without any further interaction with the environment. This setting creates a fundamental challenge:
+the agent is asked to generalize from limited, often narrow, experience to an unpredictable world.
+At the heart of this challenge lies the need for policy expressiveness - the capacity to capture rich,
+often multi-modal patterns of behavior present in real-world datasets. Traditional offline RL methods
+rely on simple function approximators and are prone to distribution shift, as the learned policy may
+choose actions not present in the dataset, leading to inaccurate value estimates (Fujimoto et al., 2019;
+Wu et al., 2019; Kumar et al., 2020). This has sparked growing interest in generative models - from
+generative adversarial networks (GANs), variational autoencoders (VAEs), to Energy-Based Models
+(EBMs) - as powerful tools to model the full complexity and diversity of RL policies (Ho & Ermon,
+2016; Ha & Schmidhuber, 2018; Ho et al., 2020; Brahmanage et al., 2023; Messaoud et al., 2024).
+Most recently, diffusion-based policies have emerged as a powerful paradigm due to their exceptional
+ability to represent complex, multi-modal distributions (Wang et al., 2023; Janner et al., 2022; Pearce
+et al., 2023). However, their expressive power comes at a steep price: the slow, iterative sampling
+process required for generation imposes a significant computational burden, hindering their practical
+utility. To resolve this, subsequent work has employed consistency-based models to accelerate
+inference, often enabling one or two-step generation (Ding & Jin, 2024). While remarkably fast, this
+simplification frequently leads to degraded policy quality, with performance saturating quickly.
+This demonstrates a fundamental trade-off between expressiveness and efficiency for generative
+policies. The research question in this work is: Is it possible to design a policy class that can achieve
+both policy expressiveness and computational efficiency?
+A key insight of our work is that the path to resolving this trade-off lies in a general principle
+that unifies a family of powerful modern generative models. We observe that a spectrum of recent
+advancements, including diffusion models (Song & Ermon, 2019; Song et al., 2021b), Consistency
+1
+
+Preprint
+
+Models (Song et al., 2023), Consistency Trajectory Models (CTMs) (Kim et al., 2024), and various
+forms of Flow Matching (Frans et al., 2025; Geng et al., 2025), can all be understood through the lens
+of a continuous-time generative trajectory governed by an Ordinary Differential Equation (ODE).
+This unified perspective provides the theoretical foundation for our work, enabling us to conceptualize
+a policy itself as a full trajectory and thereby design a new class of expressive and efficient policies.
+Building on this foundation, we introduce Generative Trajectory Policies (GTPs), a new policy
+paradigm that learns the entire solution map of the underlying ODE. By learning the full trajectory,
+GTPs are not confined to either slow, high-fidelity sampling or fast, low-fidelity shortcuts. Instead,
+they enable flexible, multi-step, deterministic generation that can achieve high performance even with
+a few sampling steps.
+Our key contributions include: i) We propose GTP, a new and highly expressive policy paradigm
+for offline RL, derived from a unifying framework that connects a family of modern generative
+models to continuous-time ODE trajectories. ii) We make a practical implementation of the GTP
+paradigm by developing two key theoretically-grounded adaptations that address computational cost,
+training instability, and misaligned objectives, including a score approximation and a variational
+framework for value-driven policy improvement. iii) We empirically validate GTP on the D4RL
+benchmarks, where it achieves state-of-the-art performance, outperforming prior generative and
+offline RL methods. Notably, our approach achieves perfect scores on several notoriously challenging
+AntMaze tasks, demonstrating its ability to strike a more favorable balance between expressiveness
+and efficiency. Our code is included in the supplementary and will be released upon paper acceptance.
+
+2
+
+R ELATED W ORK
+
+We briefly introduce the related work. A more detailed discussion is provided in Appendix A.
+Expressive Policies in Offline RL. Offline RL depends on policies that are expressive enough to
+capture the diverse, often multi-modal behaviors present in datasets. Conventional choices like
+Gaussian policies are easy to train but struggle to represent such complexity. Much of the literature
+has instead advanced from the critic side, regularizing value functions to guard against overestimation
+(Fujimoto et al., 2019; Wu et al., 2019; Kumar et al., 2020; Kostrikov et al., 2022). While effective,
+these methods leave the policy class itself underpowered, motivating a complementary line of research:
+actor-centric approaches that adopt generative models. Early explorations with GANs/VAEs (Ho &
+Ermon, 2016) and energy-based policies (Messaoud et al., 2024) showed promise, but were often
+hampered by training instabilities and did not achieve the sample quality of modern generative
+paradigms, leaving the need for a truly robust and expressive policy class as a key open problem.
+Continuous-Time Generative Models. A new generation of powerful tools for this task has
+emerged from the generative modeling community. A spectrum of recent advancements can be
+understood through the unifying lens of learning a continuous-time trajectory governed by an
+Ordinary Differential Equation (ODE). This includes score-based diffusion models (Song et al.,
+2021b), Flow Matching (FM) (Lipman et al., 2023; Frans et al., 2025), Consistency Models (CMs)
+(Song et al., 2023) and Consistency Trajectory Models (CTMs) (Kim et al., 2024). While this
+evolution has produced a powerful toolbox of trajectory-based generative models, their potential has
+not yet been fully realized in the RL domain. The challenge of adapting these powerful but complex
+models to the specific constraints and objectives of offline RL remains a significant barrier.
+The Trade-off in Generative Policies. Researchers have begun to apply these powerful generative
+tools as policies in offline RL. Early work with diffusion-based policies demonstrated their immense
+potential to model complex action distributions (Wang et al., 2023; Janner et al., 2022; Pearce et al.,
+2023), but at the cost of slow, iterative inference. In response, consistency-based policies were
+introduced to accelerate sampling, often to one or two steps (Ding & Jin, 2024), but this frequently
+resulted in degraded policy performance. This work has established a new and critical trade-off
+between expressiveness and efficiency. How to properly adapt the underlying principles of these
+powerful generative models to create a policy class that is both high-performing and efficient in the
+demanding offline RL setting remains a key open problem that our work aims to address.
+2
+
+Preprint
+
+3
+
+ODE-BASED G ENERATIVE M ODELING
+
+A cornerstone of many modern generative models is the idea of reversing a process that gradually
+perturbs data into noise. The reverse process can be described by a general ODE, providing a unifying
+framework for this class of models (Song et al., 2021b):
+dxt
+= f (xt , t),
+(1)
+dt
+where the vector field f (x, t) defines a deterministic trajectory from a point xT sampled from a
+simple prior distribution to a data sample x0 , and t ∈ [0, T ].
+Innovation within this framework has advanced along two complementary axes: (1) defining the
+vector field f , as in diffusion-based approaches (Song et al., 2021b) and flow matching (Lipman et al.,
+2023); and (2) solving the ODE efficiently, which is a central challenge since standard numerical
+solvers require hundreds of discretization steps, leading to slow inference and accumulated errors
+(Song et al., 2023; Kim et al., 2024). While the first axis has largely matured, the second remains a
+bottleneck and has inspired a new class of methods that directly learn the ODE’s solution map.
+3.1
+
+D EFINING THE V ECTOR F IELD
+
+The choice of the vector field f (xt , t) is crucial, as it determines the exact generative path from noise
+to data. Prominent methods for defining these dynamics include:
+Diffusion Models. Originating from diffusion-based modeling, this class of methods defines the
+vector field indirectly. The dynamics are determined by the score function, ∇xt log pt (xt ), which is
+the gradient of the log-density of the noisy data distribution. In the corresponding Probability Flow
+(PF) ODE (Song et al., 2021b), a neural network is trained to approximate this score (or an equivalent
+denoising function), thereby implicitly specifying the vector field that governs the generative process.
+Flow Matching. In contrast, Flow Matching (FM) (Lipman et al., 2023) provides a more direct
+and general framework for learning the vector field. This method involves training a neural network
+fθ (xt , t) by directly regressing it against a known target vector field that connects the data and prior
+distributions. This direct regression offers a stable and often more efficient training objective.
+3.2
+
+E FFICIENTLY S OLVING THE ODE BY L EARNING THE S OLUTION M AP
+
+To overcome the limitations of numerical solvers, a powerful alternative paradigm has emerged:
+bypassing the iterative process to directly learn the ODE’s solution map. At the heart of this paradigm
+is the ODE’s true solution map, or flow map, Φ(xt , t, s), which maps the state at time t to the
+corresponding state at time s. We observe that its integral form naturally provides a unifying
+representation for this entire family of models:
+Z s
+xs = Φ(xt , t, s) = xt +
+f (xτ , τ )dτ.
+(2)
+t
+
+(See Appendix E for an illustration of the unified framework.) Viewing through the lens of this unified
+framework, we will show in the following that classic frameworks such as Consistency Models (Song
+et al., 2023), Consistency Trajectory Models (Kim et al., 2024), and most recent models such as
+Shortcut Models (Frans et al., 2025), and Mean Flows (Geng et al., 2025) can all be re-interpreted as
+instances of learning the flow map. For example, the denoiser target in diffusion models corresponds
+to the infinitesimal form of Φ, while the self-consistency principle in Consistency Models aligns with
+the compositional property of Φ.
+3.3
+
+A U NIFIED F RAMEWORK FOR L EARNING ODE T RAJECTORIES
+
+As introduced in Eq.(2), the cornerstone of our framework is the ideal ODE flow map Φ(xt , t, s).
+While this represents the target, its integral form is not directly amenable to neural network training.
+Inspired by the reparameterization trick in (Kim et al., 2024), we introduce a related function
+ϕ(xt , t, s) that is more practical to learn and provides deeper connections to existing methods:
+Z s
+t
+ϕ(xt , t, s) = xt +
+f (xτ , τ )dτ.
+(3)
+t−s t
+3
+
+Preprint
+
+The ideal flow map Φ can then be recovered from ϕ and the initial state xt via a linear interpolation:
+
+s
+s
+ϕ(xt , t, s) + xt .
+(4)
+Φ(xt , t, s) = 1 −
+t
+t
+The function ϕ(xt , t, s) has a direct and intuitive interpretation: it can be understood as an estimate
+of the final data point, x0 , extrapolated from the current state xt using the average velocity of the
+trajectory over the interval [s, t]. To learn the flow map, we find that models in this family can be
+trained by optimizing two fundamental objectives:
+1. The Instantaneous Flow Loss. This objective ensures the learned map is correct for infinitesimal
+steps by enforcing a boundary condition at the limit s → t:
+lim ϕ(xt , t, s) = xt − tf (xt , t).
+
+s→t
+
+(5)
+
+For convenience, we denote ϕinst (xt , t) := ϕ(xt , t, t) and refer to it as the Inst Map. This condition
+provides a powerful connection to prominent generative modeling paradigms: the right-hand side
+recovers the denoiser D(xt , t) (i.e., E[x0 | xt ]) in diffusion models and the velocity field target
+in flow matching, f (xt , t) = (xt − ϕinst (xt , t))/t. In practice, ϕinst
+θ (xt , t) is the model prediction,
+trained with task-specific targets: for diffusion, the target is the clean sample x0 ; for flow matching,
+the target becomes xt − t(x1 − x0 ). In this sense, the Inst Map acts as a local anchor, unifying
+diffusion-style denoising and flow-matching velocity estimation under a single principle.
+2. The Trajectory Consistency Loss. This objective enforces correctness across long, multi-step
+jumps by requiring self-consistency:
+Φ(xt , t, s) ≈ Φ(Φ(xt , t, u), u, s),
+
+for t > u > s.
+
+(6)
+
+where u denotes an intermediate time between t and s. Here, the displacement over [t, s] must equal
+the sum of displacements over [t, u] and [u, s]. In practice, the right-hand side is treated as the target:
+Φ(xt , t, u) is obtained using an ODE solver (or its learned approximation), and then composed
+forward to s. The loss is then defined by the discrepancy between the left- and right-hand sides of
+Eq. (6). This serves as a global regulator, enforcing coherence of long trajectories with the additive
+structure of ODEs.
+Taken together, the two objectives are complementary: the instantaneous loss enforces fidelity in
+local dynamics, while the trajectory consistency loss guarantees global coherence across time. A
+more detailed analysis of how this framework connects to prior models is provided in Appendix B.1.
+
+4
+
+G ENERATIVE T RAJECTORY P OLICIES FOR O FFLINE RL
+
+In the previous section, we established a unified ODE trajectory framework that offers an elegant
+lens for understanding a family of modern generative models. This lays a theoretical foundation for
+designing expressive generative trajectory policies. We define a Generative Trajectory Policy (GTP)
+as a policy class that generates actions by learning the solution map of a continuous-time generative
+ODE. However, translating these insights into a functional offline RL algorithm is hindered by three
+practical challenges:
+Prohibitive Computational Burden. Learning an ODE trajectory requires on-trajectory supervision.
+As discussed in Section 3.3, this is obtained by numerically solving the ODE backward from t to
+an intermediate point u using multiple discrete steps (e.g., Euler, Heun), an operation we denote
+as Solver(xt , t, u). When scaled to offline RL, where millions of updates are needed, repeatedly
+performing this inner-loop solving for every sample makes the overall computation quickly intractable.
+Inherent Training Instability. Unlike distillation methods, our framework must learn the entire
+ODE trajectory from scratch. Central to this process is the Inst Map ϕinst (xt , t), which specifies the
+ODE’s right-hand side through f (xt , t) = (xt − ϕinst (xt , t))/t. Early in training, the Inst Map is
+highly inaccurate; yet its outputs are immediately fed back into the solver to generate supervision.
+This bootstrapping quickly forms a vicious cycle that resembles TD learning (Sutton, 1988)—bad
+targets yield bad updates—that destabilizes the Actor–Critic loop and often hinders convergence.
+Misaligned Generative Objective. The default objective of generative models is to match the data
+distribution, which in offline RL reduces to behavior cloning (BC). While BC is a reasonable baseline,
+4
+
+Preprint
+
+Data
+
+BC Trajectory
+Self-Supervised
+Target Trajectory
+Optimal Action
+
+GTP Trajectory
+
+Approximate Score
+
+Noise
+(a) Stable Score Approximation
+
+(b) Value-Driven Guidance
+
+Figure 1: The two core techniques of the GTP implementation: (a) Stable Score Approximation: the
+target trajectory (green) is contrasted with a reference (red) computed by a multi-step ODE solver (red
+dashed arrow). The blue dashed arrow denotes a single-step update obtained from our approximate
+score, which yields the blue trajectory without multi-step integration. (b) Value-Driven Guidance: the
+BC trajectory (green) is shifted toward high-value regions so that the learned GTP trajectory (blue)
+approaches the optimal action while remaining aligned with the data.
+it cannot achieve policy improvement—the central goal of offline RL. Thus, a key challenge is to
+design a value-aware objective that leverages the generative process not only to imitate observed
+actions but also to emphasize those leading to higher returns.
+To address these challenges, we introduce two key techniques tailored to the practical implementation
+of GTP, as illustrated in Figure 1. The following subsections detail these techniques and show how
+they jointly enable stable, efficient, and value-driven training.
+4.1
+
+E FFICIENT AND S TABLE T RAINING VIA S CORE A PPROXIMATION
+
+A central difficulty in our framework is the reliance on self-referential supervision: the model must
+repeatedly supply ϕinst (xt , t) (score estimates) at each solver time point1 , which the ODE solver
+integrates over many iterations. This approach is not only computationally demanding, but also
+fragile—early-stage errors in the learned vector field immediately corrupt the supervision signals.
+To address it, we replace ϕinst (xt , t) with a closed-form surrogate anchored to the offline sample,
+f˜(xt , t) = (xt − x)/t. The theorem below shows that this yields a training loss asymptotically
+equivalent to the ideal one.
+Theorem 1. Fix a time horizon T > 0, let x ∼ pdata , z ∼ N (0, I), and define xt = x + tz.
+t]
+Define the vector fields f ⋆ , f˜ : Rd × (0, T ] → Rd by f ⋆ (xt , t) := xt −E[x|x
+and f˜(xt , t) := xt t−x .
+t
+Assume f ⋆ (·, t) is Lipschitz in x. Let t = τ0 > τ1 > · · · > τK = u be a sequence of time points with
+step sizes ∆k = τk+1 − τk and maximal step h = maxk |∆k |. For a p-th order, zero-stable one-step
+solver S∆k [f ] : Rd → Rd , define the multi-step propagation from t to u as
+Ψsol
+t→u [f ] := S∆K−1 [f ] ◦ · · · ◦ S∆0 [f ].
+
+(7)
+
+Assume further that for each u > s, Φθ (·, u, s) : Rd → Rd is Lipschitz in x, and that solver states
+admit bounded second moments independent of h. Define the ideal and practical training objectives
+h
+ 2i
+⋆
+Lideal (θ) := E Φθ (xt , t, s) − Φθ− Ψsol
+,
+(8)
+t→u [f ](xt ), u, s
+h
+i
+ 2
+˜
+Lprac (θ) := E Φθ (xt , t, s) − Φθ− Ψsol
+,
+(9)
+t→u [f ](xt ), u, s
+where Φθ− denotes the exponentially moving averaged model. Then
+Lprac (θ) − Lideal (θ) = O(hp ).
+
+(10)
+
+In particular, as h → 0, the two objectives coincide in expectation.
+1
+Throughout the paper we use the term score for consistency with prior literature, although in our framework
+it is formally the Inst Map ϕinst .
+
+5
+
+Preprint
+
+Proof Sketch. The only difference between the two objectives is that the solver uses the surrogate f˜
+instead of the true field f ⋆ . Since both are Lipschitz and the solver is p-th order and zero-stable, the
+propagated states differ by O(hp ) in mean square. By Lipschitz continuity of Φθ , this discrepancy
+transfers directly to the objectives, giving the stated bound. Details are deferred to Appendix B.3.
+Theorem 1 shows that using the closed-form surrogate f˜ changes the objective only by O(hp ),
+providing theoretical support for our formulation. This replacement makes GTP training both efficient
+and robust in offline RL, which is further validated empirically by our ablation study (Section 5.3).
+Further intuition is given in Appendix B.4, where we relate this formulation to consistency training
+and flow matching.
+Remark 1 (Computational Efficiency). Using the surrogate score removes the need for multi-step
+ODE integration. Intermediate points xu for the trajectory consistency loss are obtained directly as
+xu = x + u · z,
+
+z ∼ N (0, I),
+
+(11)
+
+a one-step perturbation instead of a costly numerical solver.
+Remark 2 (Training Stability). Anchoring supervision to offline data avoids the instability of selfgenerated targets. The model no longer relies on imperfect early-stage estimates of its own vector
+field, but instead receives a stable analytical signal tied directly to x. This breaks the cycle of error
+propagation and ensures consistent learning from the very beginning of training.
+4.2
+
+VALUE -D RIVEN G UIDANCE FOR P OLICY I MPROVEMENT
+
+To address the misaligned generative objective and unify generative imitation with value-based policy
+improvement, we formalize a value-weighted training objective for our GTP in Theorem 2, with the
+detailed derivation provided in Appendix B.5.
+Theorem 2 (Advantage-Weighted Objective). Consider the KL-regularized policy optimization
+problem in offline RL. Its optimal solution can be written as
+
+π ∗ (a|s) ∝ πBC (a|s) exp ηA(s, a) ,
+(12)
+where A(s, a) = Q(s, a) − V (s) is the advantage. Training a generative policy πθ to match π ∗ is
+therefore equivalent to solving the weighted generative training objective
+
+
+
+max E(s,a)∼D exp ηA(s, a) ℓgen (πθ ; a|s) ,
+(13)
+θ
+
+where ℓgen denotes the standard generative loss (e.g., diffusion loss, or flow-matching loss).
+Theorem 2 confirms that exponential advantage weighting is the theoretically correct way to incorporate value guidance into generative training.
+Remark 3 (Practical Implementation). For numerical stability, we normalize the advantage weights
+and truncate negatives:
+
+
+max(0, A(s, a))
+w(s, a) = exp η ·
+.
+(14)
+std(A) + ϵ
+This ensures stable optimization while allowing GTP to preferentially imitate high-advantage actions,
+thereby preserving the robustness of standard generative training.
+4.3
+
+T HE GTP O PTIMIZATION F RAMEWORK
+
+Having introduced the two key techniques for the practical implementation of our GTP paradigm, we
+now integrate them into a complete actor-critic algorithm. The actor is our Generative Trajectory
+Policy, πθ , represented by the learned solution map Φθ . The critic is a standard double Q-network,
+Qφ , trained to estimate state-action values.
+Policy Representation and Action Sampling. The actor Φθ (s, at , t, τ ) learns to map a noisy action
+at at time t to a cleaner action aτ at time τ ≤ t, conditioned on a state s. At inference time, an
+action is generated by starting with pure Gaussian noise aT ∼ N (0, T 2 I) and iteratively applying
+the learned map over a sequence of timesteps T = t0 > t1 > ... > tK = 0:
+ati+1 = Φθ (s, ati , ti , ti+1 ),
+6
+
+for i = 0, . . . , K − 1.
+
+(15)
+
+Preprint
+
+The final denoised sample a0 is the action executed by the policy, i.e., πθ (s) := a0 .
+Critic Training. We use a standard double Q-network parameterized by ϕ to mitigate the overestimation bias. The critic is trained to minimize the temporal-difference (TD) error using a batch of
+transitions (s, a, r, s′ ) from the offline dataset:
+
+2 
+′
+′
+Lcritic = E r + γ · minj=1,2 Qφ− (s , πθ′ (s )) − Qφj (s, a)
+(16)
+j
+
+where φ− and θ − are the target networks for the critic and actor, respectively, updated via exponential
+moving average (EMA).
+Actor Training. The GTP actor is trained by combining the two fundamental objectives in Eqs.(5)(6) introduced in our unified framework. These objectives are directly modified to incorporate our
+key adaptations for offline RL. To enable policy improvement, both loss components are weighted
+by the advantage-based term w(s, a), thereby prioritizing high-value actions. Simultaneously, to
+ensure computational feasibility and training stability, the supervision targets are generated using our
+efficient score approximation instead of a costly ODE solver. First, the Trajectory Consistency Loss,
+LConsistency , enforces the global self-consistency of the learned flow map Φθ :
+h
+i
+2
+LConsistency = E(s,a)∼D Et,τ,u Ez∼N (0,I) w(s, a) ∥Φθ (s, at , t, τ ) − Φθ− (s, ãu , u, τ )∥2 . (17)
+where at = a + t · z, and the teacher’s intermediate action ãu = a + u · z. Second, the Instantaneous
+Flow Loss, LFlow , anchors the model’s local dynamics. As established in Section 3.3, this objective
+enforces that the learned Inst Map behaves as a correct denoiser in the infinitesimal limit. We
+implement it by penalizing the prediction error of ϕinst
+θ :
+h
+i
+2
+LFlow = E(s,a)∼D Et w(s, a) a − ϕinst
+(s,
+a
+,
+t)
+.
+(18)
+t
+θ
+2
+The total actor loss is then a weighted sum of the two components: Lactor = LConsistency + λFlow · LFlow .
+The full training pipeline is outlined in Algorithm 1.
+Algorithm 1 Training Generative Trajectory Policy (GTP)
+1: Initialize actor Φθ , critic Qφ , target networks θ − ← θ, φ− ← φ
+2: for iteration i = 1 to Niter do
+3:
+Sample batch (s, a, r, s′ ) ∼ D
+4:
+Update critic Qφ using Eq. (16)
+5:
+Compute advantage weights w(s, a) using the trained critic
+6:
+Sample time pairs t > u > τ , and noise z ∼ N (0, I)
+7:
+Generate noisy actions via score approx.: at = a + t · z, ãu = a + u · z
+8:
+Update actor Φθ using the weighted loss in Eq. (18)
+9:
+Update target networks: θ − ← τ θ + (1 − τ )θ − , φ− ← τ φ + (1 − τ )φ−
+10: end for
+
+5
+
+E XPERIMENTAL R ESULTS
+
+In this section, we empirically validate our central claims through experiments. Our evaluation is
+designed to answer three core questions: (i) whether GTP provides a more expressive generative
+model for imitating complex behaviors than prior approaches; (ii) whether our two key techniques
+(Section 4) effectively translate into stable policy improvement that surpasses state-of-the-art offline
+RL algorithms; and (iii) whether GTP resolves the tension between expressiveness and efficiency.
+We evaluate our method on a suite of challenging offline reinforcement learning tasks from the D4RL
+benchmark (Fu et al., 2020), including the Gym and AntMaze domains. Following the standard
+setting of Ding & Jin (2024), we evaluate each policy over 10 episodes for Gym tasks and 100
+episodes for all other tasks. Unless otherwise noted, diffusion policies and our GTP use K = 5
+sampling steps, and consistency policies use K = 2. Hyperparameters are provided in Appendix C.1.
+Due to space limit, we only show major results in the following. Additional ablations and visualizations in a multi-goal environment are deferred to Appendix D, which provide further evidence of the
+effectiveness and efficiency of GTP.
+7
+
+Preprint
+
+5.1
+
+E XPRESSIVENESS AS A B EHAVIOR C LONING P OLICY
+
+To assess the intrinsic modeling capacity of our policy architecture, we first conduct experiments
+in a pure behavior cloning (BC) setting. By setting the value-guidance coefficient η = 0, the
+objective reduces to a purely generative supervised loss, so the policy is trained only to match the
+data distribution without policy improvement.
+Baselines. We compare our method, GTP-BC, against a diverse set of baselines, which includes
+classic behavior cloning (a Gaussian policy), several strong offline RL methods such as AWAC (Nair
+et al., 2020) and TD3+BC (Fujimoto & Gu, 2021), and importantly, other generative policies in a BC
+setting: Diffusion-BC (D-BC) (Wang et al., 2023) and Consistency-BC (C-BC) (Ding & Jin, 2024).
+Results and Analysis. As shown in Table 1, our method achieves strong results across a broad
+spectrum of tasks, from basic locomotion to complex sparse-reward environments, achieving state-ofthe-art performances in 11 out of 15 tasks. This strong overall performance is reflected in the average
+scores across both major task suites. In the Gym tasks, our model’s average return of 82.3 significantly
+surpasses both D-BC (76.3) and C-BC (69.7). This highlights the superior modeling capacity of
+learning the full trajectory map. The performance is even more striking in the notoriously difficult
+AntMaze suite, where long-horizon planning and multimodality are critical. Here, GTP-BC (66.3)
+dramatically outperforms all other methods, including the next-best generative approach, C-BC (44.1).
+This substantial gap suggests that our model’s ability to learn the full continuous-time trajectory
+provides a powerful inductive bias for capturing the complex, temporally extended behaviors required
+for success. These results confirm the strong expressiveness inherent to the GTP architecture itself.
+Table 1: Behavior cloning performances on D4RL. We report the mean and standard deviation of
+normalized scores over 5 random seeds. Bold indicates the best performance among all methods.
+Gym
+halfcheetah-m
+hopper-m
+walker2d-m
+halfcheetah-mr
+hopper-mr
+walker2d-mr
+halfcheetah-me
+hopper-me
+walker2d-me
+Average
+AntMaze
+antmaze-u
+antmaze-ud
+antmaze-mp
+antmaze-md
+antmaze-lp
+antmaze-ld
+Average
+
+5.2
+
+BC
+42.6
+52.9
+75.3
+36.6
+18.1
+26.0
+55.2
+52.5
+107.5
+51.9
+BC
+54.6
+45.6
+0.0
+0.0
+0.0
+0.0
+16.7
+
+AWAC
+43.5
+57.0
+72.4
+40.5
+37.2
+27.0
+42.8
+55.8
+74.5
+50.1
+AWAC
+56.7
+49.3
+0.0
+0.7
+0.0
+1.0
+18.0
+
+Diffuser
+44.2
+58.5
+79.7
+42.2
+96.8
+61.2
+79.8
+107.2
+108.4
+75.3
+Diffuser
+78.9
+55.0
+0.0
+0.0
+6.7
+2.2
+23.8
+
+MoRel
+42.1
+95.4
+77.8
+40.2
+93.6
+49.8
+53.3
+108.7
+95.6
+72.9
+MoRel
+73.0
+61.0
+0.0
+8.0
+0.0
+0.0
+23.7
+
+Onestep RL
+48.4
+59.6
+81.8
+38.1
+97.5
+49.5
+93.4
+103.3
+113.0
+76.1
+Onestep RL
+64.3
+60.7
+0.3
+0.0
+0.0
+0.0
+20.9
+
+TD3+BC
+48.3
+59.3
+83.7
+44.6
+60.9
+81.8
+90.7
+98.0
+110.1
+75.3
+TD3+BC
+78.6
+71.4
+10.6
+3.0
+0.2
+0.0
+27.3
+
+DT
+42.6
+67.6
+74.0
+36.6
+82.7
+66.6
+86.8
+107.6
+108.1
+74.7
+DT
+59.2
+53.0
+0.0
+0.0
+0.0
+0.0
+18.7
+
+D-BC
+45.4
+65.3
+81.2
+41.7
+67.3
+77.5
+90.8
+107.6
+108.9
+76.3
+D-BC
+71.8
+61.2
+43.4
+29.8
+14.6
+26.6
+41.2
+
+C-BC
+31.0
+71.7
+83.1
+34.4
+99.7
+73.3
+32.7
+90.6
+110.4
+69.7
+C-BC
+75.8
+77.6
+56.8
+31.6
+10.2
+12.8
+44.1
+
+GTP-BC (Ours)
+48.6±0.3
+83.7±4.0
+77.1±1.7
+46.3±0.6
+100.5±0.3
+83.4±1.8
+91.3±0.5
+109.6±1.9
+100.2±2.1
+82.3
+GTP-BC (Ours)
+84.2±6.6
+79.2±3.2
+74.4±6.5
+85.0±6.6
+34.4±5.1
+40.8 ±6.3
+66.3
+
+F ROM I MITATION TO I MPROVEMENT: GTP IN O FFLINE RL
+
+Having established GTP’s strong performance as an imitation learning agent, we now evaluate the
+full actor-critic algorithm, GTP, to assess whether our variational policy optimization framework
+(Section 4.2) can effectively translate this expressiveness into state-of-the-art policy improvement.
+Baselines. We compare GTP against a suite of strong offline RL algorithms, including CQL (Kumar
+et al., 2020), IQL (Kostrikov et al., 2021), χ-QL (Garg et al., 2023), ARQ (Goo & Niekum, 2022),
+IDQL-A (Hansen-Estruch et al., 2023), and the two most relevant generative policy competitors:
+Diffusion-QL (D-QL) (Wang et al., 2023), QGPO (Lu et al., 2023), BDM (Chen et al., 2024b), and
+Consistency-AC (C-AC) (Ding & Jin, 2024).
+Results and Analysis. Table 2 demonstrates that GTP sets a new state-of-the-art for generative
+policies in offline RL. On the Gym tasks, our method achieves the highest average return (89.0),
+outperforming the previous best, D-QL (87.9). The gains are even more pronounced in the challenging
+AntMaze suite, where GTP (80.6) significantly surpasses both Diffusion-QL (69.6) and QGPO (78.3).
+Notably, on the antmaze-umaze task, our method achieves a perfect score of 100.0. These results
+provide strong evidence that our principled, advantage-weighted learning objective successfully
+8
+
+Preprint
+
+leverages the critic’s signal to guide the powerful generative policy beyond simple imitation, enabling
+robust and effective policy improvement.
+Table 2: Offline RL results on D4RL (mean ± std over 5 random seeds). Bold indicates best result.
+Gym
+halfcheetah-m
+hopper-m
+walker2d-m
+halfcheetah-mr
+hopper-mr
+walker2d-mr
+halfcheetah-me
+hopper-me
+walker2d-me
+Average
+AntMaze
+antmaze-u
+antmaze-ud
+antmaze-mp
+antmaze-md
+antmaze-lp
+antmaze-ld
+Average
+
+5.3
+
+CQL
+44.0
+58.5
+72.5
+45.5
+95.0
+77.2
+91.6
+105.4
+108.8
+77.6
+CQL
+74.0
+84.0
+61.2
+53.7
+15.8
+14.9
+50.6
+
+IQL
+47.4
+66.3
+78.3
+44.2
+94.7
+73.9
+86.7
+91.5
+109.6
+77.0
+IQL
+87.5
+62.2
+71.2
+70.0
+39.6
+47.5
+63.0
+
+χ-QL
+48.3
+74.2
+84.2
+45.2
+100.7
+82.2
+94.2
+111.2
+112.7
+83.7
+χ-QL
+93.8
+82.0
+76.0
+73.6
+46.5
+49.0
+70.1
+
+ARQ
+45
+61
+81
+42
+81
+66
+91
+110
+109
+76.2
+ARQ
+97
+62
+80
+82
+37
+58
+69.3
+
+IDQL-A
+51.0
+65.4
+82.5
+45.9
+92.1
+85.1
+95.9
+108.6
+112.7
+82.1
+IDQL-A
+94.0
+80.2
+84.2
+84.8
+63.5
+67.9
+79.1
+
+D-QL
+51.1
+90.5
+87.0
+47.8
+101.3
+95.5
+96.8
+111.1
+110.1
+87.9
+D-QL
+93.4
+66.2
+76.6
+78.6
+46.4
+56.6
+69.6
+
+QGPO
+54.1
+98.0
+86.0
+47.6
+96.9
+84.4
+93.5
+108.0
+110.7
+86.6
+QGPO
+96.4
+74.4
+83.6
+83.8
+66.6
+64.8
+78.3
+
+BDM
+57.0
+98.4
+87.4
+51.6
+92.7
+89.2
+93.2
+104.9
+111.1
+87.3
+BDM
+93.0
+81.0
+79.0
+84.0
+-
+
+C-AC
+69.1
+80.7
+83.1
+58.7
+99.7
+79.5
+84.3
+100.4
+110.4
+85.1
+C-AC
+75.8
+77.6
+56.8
+-
+
+GTP (Ours)
+53.9±0.1
+90.3±2.7
+89.5±0.6
+50.8±0.4
+101.7±0.3
+94.2±0.3
+93.8±0.8
+112.2±0.6
+114.2±0.3
+89.0
+GTP (Ours)
+100±0
+81.9±4.4
+83.3±8.1
+94.2±2.0
+53.5±2.2
+71.0 ±4.9
+80.6
+
+A BLATION S TUDY
+
+We conduct ablations to evaluate the contribution of two key components of GTP: the score approximation scheme (Section 4.1) and the variational value guidance mechanism (Section 4.2).
+Score Approximation. Replacing our score approximation with signals generated directly by an
+ODE solver leads to substantially longer training time and weaker performance, even when the solver
+is limited to at most three steps. Without approximation, training suffers from high variance and slow
+convergence due to the need for numerical integration at each iteration. In contrast, our approximation
+provides an efficient surrogate that closely aligns with the desired consistency condition, enabling
+faster optimization and stronger policies.
+Variational Guidance. We compare GTP with a baseline that combines the generative loss with a
+linear Q-learning actor loss. As shown in Table 3, this baseline is highly brittle: for typical coefficients
+(λ = 0.1 or 1.0), training diverges due to exploding critic gradients. Even with λ = 0.01, the baseline
+occasionally achieves returns close to ours, but this setting is highly sensitive to the critic scale and
+does not transfer across tasks. In contrast, our variational guidance normalizes and clips critic signals
+into stable importance weights, yielding consistently high returns across seeds without per-task
+hyperparameter tuning. Further details and extended comparisons are provided in Appendix B.6.
+Table 3: Ablation results on hopper-medium-expert-v2 (mean ± std over 5 random seeds).
+Training time is wall-clock hours per run. Baselines with λ = 0.1 or 1.0 consistently diverged.
+Method
+
+6
+
+Training Time
+
+Score
+
+GTP (ours)
+w/o score approximation (ODE solver)
+
+4.26 h
+5.23 h
+
+112.2 ± 0.6
+99.7 ± 1.7
+
+GTP-BC + linear Q-term (λ = 0.01)
+GTP-BC + linear Q-term (λ = 0.1)
+GTP-BC + linear Q-term (λ = 1.0)
+
+5.08 h
+Diverged
+Diverged
+
+111.4 ± 0.9
+–
+–
+
+C ONCLUSION
+
+In this work, we introduced Generative Trajectory Policies, a new paradigm for offline RL that
+leverages our proposed unifying perspective of continuous-time generative ODEs. We show that
+while this framework offers immense expressive power, its direct application is hindered by critical
+9
+
+Preprint
+
+challenges of computational cost, training instability, and objective misalignment. We overcame these
+obstacles through two theoretically principled adaptations: score approximation for efficient, stable
+training and a variational, advantage-weighted objective to bridge the gap between imitation and
+policy improvement. Our empirical results on the D4RL benchmarks validate this approach, showing
+that GTP establishes a new state-of-the-art for generative policies in offline RL. This work opens a
+promising direction for harnessing continuous-time dynamics in RL. While inference is fast, reducing
+the substantial training time of this model class remains an important avenue for future research.
+
+R EFERENCES
+Abbas Abdolmaleki, Jost Tobias Springenberg, Yuval Tassa, Remi Munos, Nicolas Heess, and Martin
+Riedmiller. Maximum a posteriori policy optimisation. In International Conference on Learning
+Representations, 2018.
+Janaka Brahmanage, Jiajing Ling, and Akshat Kumar. Flowpg: action-constrained policy gradient
+with normalizing flows. In Advances in Neural Information Processing Systems, volume 36, pp.
+20118–20132, 2023.
+Onur Celik, Zechu Li, Denis Blessing, Ge Li, Daniel Palenicek, Jan Peters, Georgia Chalvatzaki,
+and Gerhard Neumann. Dime: Diffusion-based maximum entropy reinforcement learning. In
+International Conference on Machine Learning, 2025.
+Huayu Chen, Cheng Lu, Zhengyi Wang, Hang Su, and Jun Zhu. Score regularized policy optimization
+through diffusion behavior. In International Conference on Learning Representations, 2024a.
+Huayu Chen, Kaiwen Zheng, Hang Su, and Jun Zhu. Aligning diffusion behaviors with q-functions
+for efficient continuous control. In Advances in Neural Information Processing Systems, volume 37,
+pp. 119949–119975, 2024b.
+Tianyu Chen, Zhendong Wang, and Mingyuan Zhou. Diffusion policies creating a trust region for
+offline reinforcement learning. In Advances in Neural Information Processing Systems, 2024c.
+Cheng Chi, Zhenjia Xu, Siyuan Feng, Eric Cousineau, Yilun Du, Benjamin Burchfiel, Russ Tedrake,
+and Shuran Song. Diffusion policy: Visuomotor policy learning via action diffusion. The
+International Journal of Robotics Research, 43(1):3–24, 2023. doi: 10.1177/02783649241273668.
+Shutong Ding, Ke Hu, Zhenhao Zhang, Kan Ren, Weinan Zhang, Jingyi Yu, Jingya Wang, and
+Ye Shi. Diffusion-based reinforcement learning via q-weighted variational policy optimization. In
+Advances in Neural Information Processing Systems, 2024.
+Zihan Ding and Chi Jin. Consistency models as a rich and efficient policy class for reinforcement
+learning. In International Conference on Learning Representations, 2024.
+Kevin Frans, Danijar Hafner, Sergey Levine, and Pieter Abbeel. One step diffusion via shortcut
+models. In International Conference on Learning Representations, 2025.
+Justin Fu, Aviral Kumar, Ofir Nachum, George Tucker, and Sergey Levine. D4rl: Datasets for deep
+data-driven reinforcement learning, 2020.
+Scott Fujimoto and Shixiang Shane Gu. A minimalist approach to offline reinforcement learning. In
+Advances in Neural Information Processing Systems, volume 34, pp. 20132–20145, 2021.
+Scott Fujimoto, David Meger, and Doina Precup. Off-policy deep reinforcement learning without
+exploration. In International conference on machine learning, pp. 2052–2062, 2019.
+Divyansh Garg, Joey Hejna, Matthieu Geist, and Stefano Ermon. Extreme q-learning: Maxent rl
+without entropy. In International Conference on Learning Representations, 2023.
+Zhengyang Geng, Mingyang Deng, Xingjian Bai, J Zico Kolter, and Kaiming He. Mean flows for
+one-step generative modeling. In Advances in Neural Information Processing Systems, 2025.
+Wonjoon Goo and Scott Niekum. Know your boundaries: The necessity of explicit behavioral cloning
+in offline rl. arXiv preprint arXiv:2206.00695, 2022.
+10
+
+Preprint
+
+David Ha and Jürgen Schmidhuber. World models. arXiv preprint arXiv:1803.10122, 2018.
+Tuomas Haarnoja, Haoran Tang, Pieter Abbeel, and Sergey Levine. Reinforcement learning with
+deep energy-based policies. In International conference on machine learning, pp. 1352–1361,
+2017.
+Philippe Hansen-Estruch, Ilya Kostrikov, Michael Janner, Jakub Grudzien Kuba, and Sergey Levine.
+Idql: Implicit q-learning as an actor-critic method with diffusion policies. arXiv preprint
+arXiv:2304.10573, 2023.
+Jonathan Ho and Stefano Ermon. Generative adversarial imitation learning. In Advances in Neural
+Information Processing Systems, volume 29, 2016.
+Jonathan Ho, Ajay Jain, and Pieter Abbeel. Denoising diffusion probabilistic models. In Advances in
+neural information processing systems, volume 33, pp. 6840–6851, 2020.
+Michael Janner, Yilun Du, Joshua Tenenbaum, and Sergey Levine. Planning with diffusion for
+flexible behavior synthesis. In International Conference on Machine Learning, pp. 9902–9915,
+2022.
+Bingyi Kang, Xiao Ma, Chao Du, Tianyu Pang, and YAN Shuicheng. Efficient diffusion policies for
+offline reinforcement learning. In Advances in Neural Information Processing Systems, 2023.
+Dongjun Kim, Chieh-Hsin Lai, Wei-Hsiang Liao, Naoki Murata, Yuhta Takida, Toshimitsu Uesaka,
+Yutong He, Yuki Mitsufuji, and Stefano Ermon. Consistency trajectory models: Learning probability flow ode trajectory of diffusion. In International Conference on Learning Representations,
+2024.
+Diederik Kingma, Tim Salimans, Ben Poole, and Jonathan Ho. Variational diffusion models. In
+Advances in Neural Information Processing Systems, volume 34, pp. 21696–21707, 2021.
+Ilya Kostrikov, Ashvin Nair, and Sergey Levine. Offline reinforcement learning with implicit
+q-learning. In Advances in Neural Information Processing Systems, 2021.
+Ilya Kostrikov, Ashvin Nair, and Sergey Levine. Offline reinforcement learning with implicit
+q-learning. In International Conference on Learning Representations, 2022.
+Aviral Kumar, Aurick Zhou, George Tucker, and Sergey Levine. Conservative q-learning for offline
+reinforcement learning. In Advances in Neural Information Processing Systems, volume 33, pp.
+1179–1191, 2020.
+Sascha Lange, Thomas Gabel, and Martin Riedmiller. Batch reinforcement learning. In Reinforcement
+learning: State-of-the-art, pp. 45–73. Springer, 2012.
+Yaron Lipman, Ricky TQ Chen, Heli Ben-Hamu, Maximilian Nickel, and Matt Le. Flow matching
+for generative modeling. In International Conference on Learning Representations, 2023.
+Xu-Hui Liu, Tian-Shuo Liu, Shengyi Jiang, Ruifeng Chen, Zhilong Zhang, Xinwei Chen, and Yang
+Yu. Energy-guided diffusion sampling for offline-to-online reinforcement learning. In International
+Conference on Machine Learning, pp. 31541–31565, 2024.
+Cheng Lu and Yang Song. Simplifying, stabilizing and scaling continuous-time consistency models.
+In International Conference on Learning Representations, 2025.
+Cheng Lu, Huayu Chen, Jianfei Chen, Hang Su, Chongxuan Li, and Jun Zhu. Contrastive energy
+prediction for exact energy-guided diffusion sampling in offline reinforcement learning. In
+International Conference on Machine Learning, 2023.
+Haitong Ma, Tianyi Chen, Kai Wang, Na Li, and Bo Dai. Soft diffusion actor-critic: Efficient online
+reinforcement learning for diffusion policy. In International Conference on Machine Learning,
+2025.
+Safa Messaoud, Billel Mokeddem, Zhenghai Xue, Linsey Pang, Bo An, Haipeng Chen, and Sanjay
+Chawla. S2 ac: Energy-based reinforcement learning with stein soft actor critic. In International
+Conference on Learning Representations, 2024.
+11
+
+Preprint
+
+Ashvin Nair, Abhishek Gupta, Murtaza Dalal, and Sergey Levine. Awac: Accelerating online
+reinforcement learning with offline datasets. arXiv preprint arXiv:2006.09359, 2020.
+Alexander Quinn Nichol and Prafulla Dhariwal. Improved denoising diffusion probabilistic models.
+In International Conference on Machine Learning, pp. 8162–8171, 2021.
+Tim Pearce, Tabish Rashid, Anssi Kanervisto, Dave Bignell, Mingfei Sun, Raluca Georgescu, Sergio
+Valcarcel Macua, Shan Zheng Tan, Ida Momennejad, Katja Hofmann, and Sam Devlin. Imitating
+human behaviour with diffusion models. In International Conference on Learning Representations,
+2023.
+Xue Bin Peng, Aviral Kumar, Grace Zhang, and Sergey Levine. Advantage-weighted regression:
+Simple and scalable off-policy reinforcement learning. arXiv preprint arXiv:1910.00177, 2019.
+Jan Peters, Katharina Mulling, and Yasemin Altun. Relative entropy policy search. In Proceedings of
+the AAAI Conference on Artificial Intelligence, volume 24, pp. 1607–1612, 2010.
+Allen Z Ren, Justin Lidard, Lars L Ankile, Anthony Simeonov, Pulkit Agrawal, Anirudha Majumdar,
+Benjamin Burchfiel, Hongkai Dai, and Max Simchowitz. Diffusion policy policy optimization. In
+International Conference on Learning Representations, 2025.
+Jiaming Song, Chenlin Meng, and Stefano Ermon. Denoising diffusion implicit models. In International Conference on Learning Representations, 2021a.
+Yang Song and Prafulla Dhariwal. Improved techniques for training consistency models. In International Conference on Learning Representations, 2024.
+Yang Song and Stefano Ermon. Generative modeling by estimating gradients of the data distribution.
+In Advances in neural information processing systems, volume 32, 2019.
+Yang Song, Jascha Sohl-Dickstein, Diederik P Kingma, Abhishek Kumar, Stefano Ermon, and Ben
+Poole. Score-based generative modeling through stochastic differential equations. In International
+Conference on Learning Representations, 2021b.
+Yang Song, Prafulla Dhariwal, Mark Chen, and Ilya Sutskever. Consistency models. In International
+Conference on Machine Learning, pp. 32211–32252, 2023.
+Richard S Sutton. Learning to predict by the methods of temporal differences. Machine learning, 3
+(1):9–44, 1988.
+Zhendong Wang, Jonathan J. Hunt, and Mingyuan Zhou. Diffusion policies as an expressive policy
+class for offline reinforcement learning. In International Conference on Learning Representations,
+2023.
+Yifan Wu, George Tucker, and Ofir Nachum. Behavior regularized offline reinforcement learning.
+arXiv preprint arXiv:1911.11361, 2019.
+
+12
+
+Preprint
+
+C ONTENTS
+1
+
+Introduction
+
+1
+
+2
+
+Related Work
+
+2
+
+3
+
+ODE-Based Generative Modeling
+
+3
+
+3.1
+
+Defining the Vector Field . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+
+3
+
+3.2
+
+Efficiently Solving the ODE by Learning the Solution Map . . . . . . . . . . . . .
+
+3
+
+3.3
+
+A Unified Framework for Learning ODE Trajectories . . . . . . . . . . . . . . . .
+
+3
+
+4
+
+5
+
+6
+
+Generative Trajectory Policies for Offline RL
+
+4
+
+4.1
+
+Efficient and Stable Training via Score Approximation . . . . . . . . . . . . . . .
+
+5
+
+4.2
+
+Value-Driven Guidance for Policy Improvement . . . . . . . . . . . . . . . . . . .
+
+6
+
+4.3
+
+The GTP Optimization Framework . . . . . . . . . . . . . . . . . . . . . . . . . .
+
+6
+
+Experimental Results
+
+7
+
+5.1
+
+Expressiveness as a Behavior Cloning Policy . . . . . . . . . . . . . . . . . . . .
+
+8
+
+5.2
+
+From Imitation to Improvement: GTP in Offline RL . . . . . . . . . . . . . . . . .
+
+8
+
+5.3
+
+Ablation Study . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+
+9
+
+Conclusion
+
+9
+
+A Related Work
+
+14
+
+B Theoretical Insights
+
+15
+
+B.1 A Unified View of Prior Generative Models . . . . . . . . . . . . . . . . . . . . .
+
+15
+
+B.2 Derivation of a Continuous-Time Training Objective . . . . . . . . . . . . . . . .
+
+16
+
+B.3 Proof of Theorem 1 . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+
+17
+
+B.4 Theoretical Rationale for the Score Function Approximation . . . . . . . . . . . .
+
+19
+
+B.5 Derivation of the Advantage-Weighted Objective . . . . . . . . . . . . . . . . . .
+
+21
+
+B.6 Additional Discussion on Actor Loss Formulations . . . . . . . . . . . . . . . . .
+
+22
+
+C Implementation Details
+
+23
+
+C.1 Experimental Hyperparameters . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+
+23
+
+C.2 Dynamic Timestep Scheduling for Robust Trajectory Learning . . . . . . . . . . .
+
+23
+
+D Additional Results
+
+24
+
+D.1 Ablation Study: Efficiency–Performance Trade-off at Inference . . . . . . . . . . .
+
+24
+
+D.2 Ablation on Actor Loss Formulation . . . . . . . . . . . . . . . . . . . . . . . . .
+
+24
+
+D.3 Visualizing Expressiveness and Efficiency in Multi-Goal Environments . . . . . . .
+
+25
+
+E Additional Illustrations
+
+26
+13
+
+Preprint
+
+A
+
+R ELATED W ORK
+
+Expressive Policies in Offline RL Offline RL seeks to learn policies from static datasets, but
+suffers from extrapolation error when actions fall outside the dataset distribution. Early work such
+as Lange et al. (2012) laid the foundations for batch RL, while subsequent studies introduced more
+expressive policy classes, including energy-based formulations (Haarnoja et al., 2017). A major line
+of research has emphasized conservatism, aiming to constrain policy behavior to dataset-supported
+regions. Batch-Constrained Q-Learning (BCQ) (Fujimoto et al., 2019) explicitly restricted the policy
+to actions close to the behavior data, whereas BEAR (Wu et al., 2019) imposed a Maximum Mean
+Discrepancy penalty to softly align the learned policy with the dataset. Conservative Q-Learning
+(CQL) (Kumar et al., 2020) further advanced this idea by penalizing Q-values on out-of-distribution
+actions, mitigating overestimation at the cost of tuning sensitivity. In parallel, regression-based
+approaches sought to improve expressiveness while retaining stability. Advantage-Weighted ActorCritic (AWAC) (Peng et al., 2019) biased behavior cloning toward high-advantage actions, while
+Implicit Q-Learning (IQL) (Kostrikov et al., 2022) simplified training by implicitly aligning value
+estimates with policy improvement, avoiding explicit constraints but limiting the ability to fully
+capture multimodal behaviors. Overall, these approaches highlight a persistent trade-off: policies that
+are more expressive tend to risk instability, while more conservative methods achieve robustness at
+the cost of limited representational power.
+Continuous-Time Generative Models. Diffusion models have significantly advanced generative
+modeling capabilities. Ho et al. (2020) introduced Denoising Diffusion Probabilistic Models (DDPM),
+utilizing forward and reverse diffusion processes to produce high-quality samples, albeit slowly.
+To address computational efficiency, Song et al. (2021a) developed Denoising Diffusion Implicit
+Models (DDIM), reducing required steps but encountering stability issues when overly accelerated.
+To enhance training stability, Kingma et al. (2021) integrated variational inference into diffusion
+models, yet this approach added complexity and computational overhead. Providing a continuoustime formulation, Song et al. (2021b) proposed modeling diffusion through Stochastic Differential
+Equations (SDEs), increasing flexibility but at considerable computational expense. Nichol &
+Dhariwal (2021) improved DDPM architectures and noise schedules, enhancing sample quality while
+still necessitating multiple denoising steps. Song et al. (2023) subsequently introduced Consistency
+Models, achieving faster sampling through trajectory consistency but potentially risking mode
+collapse and reduced diversity. Building on this, Kim et al. (2024) developed Consistency Trajectory
+Models, directly modeling diffusion trajectories via Ordinary Differential Equations (ODEs), refining
+sampling consistency and quality. Lastly, Frans et al. (2025) extended flow-matching models by
+introducing adjustable step sizes, further improving sampling efficiency without compromising
+quality. While this evolution has produced a powerful toolbox of trajectory-based generative models,
+their potential has not yet been fully realized in the RL domain.
+The Trade-off in Generative Policies Integrating generative models into RL allows for highly
+expressive policies capable of capturing complex, multimodal action distributions. Diffusion policies,
+first introduced by Wang et al. (2023), exemplify this potential but inherit the slow, iterative sampling
+of their generative counterparts. This has created a central trade-off between policy expressiveness
+and inference speed. One line of research aims to guide the generative process toward high-reward
+regions. This is achieved by incorporating energy functions (Liu et al., 2024), leveraging contrastive
+energy prediction (Lu et al., 2023), or weighting the diffusion objective with Q-values (Ding et al.,
+2024). Another major effort focuses on accelerating inference. This includes developing more
+efficient sampling schemes (Kang et al., 2023), distilling the diffusion policy into a fast, deterministic
+one (Chen et al., 2024a), and leveraging consistency models to enable few-step action generation
+(Ding & Jin, 2024). Recent work has focused on tightly integrating these generative policies into
+established RL algorithms. Examples include IDQL (Hansen-Estruch et al., 2023), which combines
+a diffusion policy with an IQL critic, and DPPO (Ren et al., 2025), which enables policy gradient
+fine-tuning. Further refinements include advanced entropy estimation techniques (Celik et al., 2025;
+Ma et al., 2025), trust-region guided sampling (Chen et al., 2024c), and applications to complex
+domains like visuomotor control (Chi et al., 2023). Despite their potential for balancing quality and
+speed, this emerging class of trajectory-based generative models remains largely unexplored as a
+policy framework, motivating our work.
+14
+
+Preprint
+
+B
+
+T HEORETICAL I NSIGHTS
+
+B.1
+
+A U NIFIED V IEW OF P RIOR G ENERATIVE M ODELS
+
+With this framework of the flow map Φ, the reparameterization ϕ, and the two fundamental training
+objectives, we can now clearly position and unify prior work:
+Consistency Models (CMs) Consistency Models (CMs) (Song et al., 2023) can be viewed as a
+specialized case of Eq. (2), where the flow map is restricted to Φ(xt , t, 0) that always targets the data
+origin. Their self-consistency loss corresponds directly to a Trajectory Consistency Loss: the model’s
+prediction at time t is constrained to match the prediction at a slightly earlier time t − ∆t along the
+same trajectory. Formally,
+LCM = ||Φθ (xt , t, 0) − Φθ′ (xt−∆t , t − ∆t, 0)||2 ,
+
+(19)
+
+where Φ−
+θ is the EMA model with delayed weights. Interestingly, this bootstrapping mechanism is
+
+conceptually analogous to Temporal Difference (TD) learning (Sutton, 1988), where an estimate for
+the present is updated to be more consistent with an estimate from the future.
+
+Consistency Trajectory Models (CTMs) CTMs (Kim et al., 2024) provide a representative
+example of how our unified framework manifests in prior work. Although originally motivated from
+a diffusion-based perspective with a PF ODE backbone, their essence lies in directly parameterizing
+the time-conditional flow map Φ(xt , t, s) in Eq. (2). The training objective can also be naturally
+interpreted through our lens: the self-consistency objective used in CTMs corresponds exactly to the
+Trajectory Consistency Loss, albeit in a specialized form where trajectories are first mapped to an
+intermediate time s and then further mapped to the terminal time 0/ϵ. This design ensures that all
+supervision signals are anchored at the same reference time, keeping the loss consistent. In addition,
+the auxiliary diffusion loss serves the role of the Instantaneous Flow Loss, enforcing local fidelity
+along trajectories. Thus, under our framework, CTMs emerge not as an isolated construction, but as a
+concrete instantiation of Eq. (2) that integrates both of the fundamental training principles.
+Shortcut Models The work on Shortcut Models (Frans et al., 2025) also fits squarely within our
+unified framework in Eq.(2), focusing on learning the ”average velocity” of the underlying ODE.
+This approach parameterizes a dedicated stepping function, s(xt , t, d), which is trained to predict the
+average velocity over a future time interval of duration d, i.e., [t, t + d]. Mathematically, it learns:
+Z
+1 t+d
+s(xt , t, d) =
+f (xτ , τ )dτ
+(20)
+d t
+While Shortcut Models define their process forward in time (e.g., from t = 0 noise to t = 1 data),
+the principle is directly analogous to our backward-in-time formulation. Their average velocity s
+provides a direct way to approximate our flow map ϕ(xt , t, t − d) = xt − t · s(xt , t, d) (adjusting
+for the time direction).
+Their training objectives can be understood as specific applications of our two proposed losses. First,
+the requirement that the learned average velocity must collapse to the instantaneous velocity in the
+limit (d → 0) is a direct application of our Instantaneous Flow Loss. This is implemented with a
+flow-matching objective that regresses the instantaneous velocity s(xt , t, 0) against the velocity of a
+simple straight-line path connecting noise x0 and data x1 :
+||sθ (xt , t, 0) − (x1 − x0 )||22
+
+(21)
+
+Second, they employ a Trajectory Consistency Loss by enforcing self-consistency between steps of
+different durations. A step of size 2d is constrained to match the composition of two consecutive
+steps of size d:
+||sθ (xt , t, 2d) − starget ||22
+(22)
+where the target starget is constructed by bootstrapping from the model’s own (stop-gradient) predictions for the two smaller steps.
+However, a crucial difference in methodology emerges here. In practice, the right-hand side of
+Eq. (6) is treated as the supervision signal: Φ(xt , t, u) is obtained via an ODE solver (or its learned
+15
+
+Preprint
+
+approximation) and then composed forward to s. Our GTP framework incorporates an explicit
+“teacher” in this process to provide stable on-trajectory information. In contrast, Shortcut Models rely
+purely on self-consistency, where the model generates its own targets without external guidance. The
+viability and trade-offs of learning without such a teacher remain a critical design question, which we
+directly investigate through a targeted ablation study in Appendix D.2.
+Mean Flows Similar to Shortcut Models, the more recent Mean Flow framework (Geng et al.,
+2025) is also centered on learning the average velocity of the ODE. However, Mean Flows offer
+another perspective on our unified framework, this time through a particularly direct, first-principles
+formulation. At the core of this approach is the average velocity field
+Z t
+1
+f (xτ , τ ), dτ,
+(23)
+u(xt , r, t) =
+t−r r
+which can be seen as a reparameterization of the integral term in our flow map Φ. Through this lens,
+the function ϕ in Eq. (3) can be expressed simply as ϕ(xt , t, s) = xt − t · u(xt , t, s), making Mean
+Flows a natural instantiation of our framework.
+The crucial difference lies in the training philosophy. Rather than enforcing an explicit multistep consistency loss, Mean Flows are trained by satisfying a derived MeanFlow Identity: a local
+differential equation linking the average velocity u to the instantaneous velocity f . This identity-based
+view is closely related to recent continuous-time consistency models (Lu & Song, 2025), which also
+replace explicit trajectory simulation with a local identity constraint implemented via Jacobian–vector
+products, thereby avoiding the need for ODE solvers. By construction, satisfying this local identity
+ensures that global trajectory consistency emerges as an inherent property, eliminating the need for
+explicit multi-step supervision.
+Within our framework, this identity-based approach offers a principled alternative to consistencybased training. We therefore derive the corresponding identity for our own formulation in Appendix B.2, and empirically compare these two training philosophies—consistency versus identity—in
+our ablation study (Appendix D.2).
+B.2
+
+D ERIVATION OF A C ONTINUOUS -T IME T RAINING O BJECTIVE
+
+In this section, we derive an alternative training objective for our function ϕ, inspired by the methodology of continuous-time consistency models Lu & Song (2025) and Mean Flows (Geng et al., 2025).
+This results in a self-contained identity that can be used for training, relying only on the function ϕ
+itself and its derivatives.
+We begin with the definition of ϕ(xt , t, s) from our unified framework:
+Z s
+t
+ϕ(xt , t, s) = xt +
+f (xτ , τ )dτ.
+t−s t
+Rearranging the terms, we can isolate the integral expression:
+Z s
+
+s
+1−
+(ϕ(xt , t, s) − xt ) =
+f (xτ , τ )dτ.
+t
+t
+We differentiate both sides with respect to t. Then we have:
+
+
+
+s  dϕ(xt , t, s)
+s
+(ϕ(xt , t, s) − xt ) + 1 −
+− f (xt , t) = −f (xt , t).
+t2
+t
+dt
+
+(24)
+
+(25)
+
+(26)
+
+Solving Equation 26 for ϕ(xt , t, s) yields a new identity relating the function to its own total derivative
+and the instantaneous vector field:
+ 2
+
+t
+dϕ(xt , t, s)
+ϕ(xt , t, s) = xt −
+−t
+− tf (xt , t).
+(27)
+s
+dt
+This identity can be made fully self-referential by using the boundary condition from our Instantaneous
+Flow Loss, which states ϕ(xt , t, t) = xt − tf (xt , t). We use this to substitute out the tf (xt , t) term:
+ 2
+
+t
+dϕ(xt , t, s)
+ϕ(xt , t, s) = ϕ(xt , t, t) −
+−t
+.
+(28)
+s
+dt
+16
+
+Preprint
+
+For a practical implementation, the total derivative dϕ
+dt is expanded using the chain rule, noting that
+dxt
+dt = f (xt , t):
+dϕ(xt , t, s)
+dxt
+=
+∂x ϕ + ∂t ϕ = f (xt , t)∂x ϕ + ∂t ϕ.
+(29)
+dt
+dt
+Substituting the vector field f (xt , t) = (xt − ϕ(xt , t, t))/t into Equation 29 and then into Equation
+28 gives the final, fully-expanded form:
+ 2
+
+
+t
+xt − ϕ(xt , t, t)
+ϕ(xt , t, s) = ϕ(xt , t, t) −
+−t
+∂x ϕ + ∂ t ϕ .
+(30)
+s
+t
+This final expression provides a self-contained regression target for ϕ(xt , t, s). A model ϕθ can be
+trained to satisfy this identity by minimizing the L2 distance between the left-hand and right-hand
+sides. The terms on the right-hand side involving ϕ are evaluated using the model ϕθ itself (typically
+with a stop-gradient), and the required partial derivatives can be computed efficiently via automatic
+differentiation, such as with Jacobian-vector products (JVPs).
+B.3
+
+P ROOF OF T HEOREM 1
+
+We provide a detailed proof of Theorem 1. Recall that we fix a finite time horizon T > 0, let
+x ∼ pdata , z ∼ N (0, I), and define xt = x + tz. The vector fields f ⋆ , f˜ : Rd × (0, T ] → Rd are
+given by
+xt − x
+xt − E[x | xt ]
+, f˜(xt , t) =
+.
+(31)
+f ⋆ (xt , t) =
+t
+t
+The ideal and surrogate solver trajectories are denoted by
+⋆
+Xk+1
+= S∆k [f ⋆ ](Xk⋆ ),
+d
+
+ek+1 = S∆ [f˜](X
+ek ),
+X
+k
+
+e0 = xt .
+X0⋆ = X
+
+(32)
+
+d
+
+Here S∆k [f ] : R → R is a one-step method of order p with step size ∆k = τk+1 − τk . The
+multi-step propagation from t to u is written as
+Ψsol
+t→u [f ] := S∆K−1 [f ] ◦ · · · ◦ S∆0 [f ],
+
+(33)
+
+with maximal step h = maxk |∆k |. We assume throughout that f ⋆ (·, t) is Lipschitz in x, the solver is
+zero-stable, the decoder maps Φθ (·, t, s) and Φθ− (·, u, s) are Lipschitz in x, and solver states admit
+bounded second moments independent of h.
+Lemma 1 (Conditional unbiasedness). For all t ∈ (0, T ] and x ∈ Rd with xt = x,
+
+
+h
+i
+xt − x
+xt − E[x | xt ]
+E f˜(xt , t) xt = E
+xt =
+= f ⋆ (xt , t).
+(34)
+t
+t
+Proof. This follows immediately from the definitions of f˜ and f ⋆ .
+Lemma 2 (One-step local bias). Let x ∈ Rd be the state at time τk . If the solver has order p, then
+
+S∆k [f˜](x) − S∆k [f ⋆ ](x) = ∆k f˜(x, τk ) − f ⋆ (x, τk ) + O(|∆k |p+1 ).
+(35)
+Consequently, conditioning on xτk = x and using Lemma 1,
+h
+i
+E S∆k [f˜](x) − S∆k [f ⋆ ](x) xτk = x = O(|∆k |p+1 ).
+
+(36)
+
+Proof. By definition of an order-p one-step solver, for any drift f ,
+S∆k [f ](x) = x + ∆k f (x, τk ) + O(|∆k |p+1 ).
+
+(37)
+
+Subtracting the two cases f = f˜ and f = f ⋆ gives
+
+S∆k [f˜](x) − S∆k [f ⋆ ](x) = ∆k f˜(x, τk ) − f ⋆ (x, τk ) + O(|∆k |p+1 ).
+
+(38)
+
+Taking conditional expectation w.r.t. xτk = x and using Lemma 1 shows that the linear term vanishes,
+leaving
+h
+i
+E S∆k [f˜](x) − S∆k [f ⋆ ](x) xτk = x = O(|∆k |p+1 ).
+(39)
+
+17
+
+Preprint
+
+Proposition 1 (Global state error). Let the solver trajectories be
+ek+1 = S∆ [f˜](X
+ek ),
+X
+k
+
+⋆
+Xk+1
+= S∆k [f ⋆ ](Xk⋆ ),
+
+e0 = xt .
+X0⋆ = X
+
+(40)
+
+′
+
+⋆
+
+If f (·, τ ) is Lipschitz in x and the solver is zero-stable, then there exist constants C, C (independent
+of h) such that
+⋆
+ek+1 ∥ ≤ (1 + C|∆k |) E∥Xk⋆ − X
+ek ∥ + C ′ |∆k |p+1 .
+E∥Xk+1
+−X
+
+(41)
+
+Consequently, over the finite horizon [0, T ],
+⋆
+eK ∥ ≤ CT hp ,
+E∥XK
+−X
+
+(42)
+
+where CT depends on T and the Lipschitz/stability constants but not on h.
+Proof. We start from the standard decomposition
+
+
+⋆
+ek+1 = S∆ [f ⋆ ](Xk⋆ ) − S∆ [f ⋆ ](X
+ek ) + S∆ [f ⋆ ](X
+ek ) − S∆ [f˜](X
+ek ) .
+Xk+1
+−X
+k
+k
+k
+k
+
+(43)
+
+⋆
+
+By Lipschitz regularity of f and zero-stability of the scheme, there exists C > 0 such that
+∥S∆k [f ⋆ ](x) − S∆k [f ⋆ ](y)∥ ≤ (1 + C|∆k |) ∥x − y∥,
+
+∀ x, y ∈ Rd .
+
+(44)
+
+For instance, for explicit Euler S∆ [f ](x) = x + ∆f (x, τk ) and thus
+∥S∆ [f ⋆ ](x) − S∆ [f ⋆ ](y)∥ = ∥(x − y) + ∆(f ⋆ (x, τk ) − f ⋆ (y, τk ))∥ ≤ (1 + Lf |∆|)∥x − y∥. (45)
+General one-step methods admit the same bound with a (method-dependent) constant C.
+By Lemma 2 and the law of total expectation,
+ek ) − S∆ [f˜](X
+ek ) = O(|∆k |p+1 ).
+E S∆k [f ⋆ ](X
+k
+
+(46)
+
+Combining the two parts and taking expectations yields the recursion
+⋆
+ek+1 ∥ ≤ (1 + C|∆k |) E∥Xk⋆ − X
+ek ∥ + C ′ |∆k |p+1 .
+E∥Xk+1
+−X
+
+(47)
+
+ek ∥, ak := C|∆k |, bk := C ′ |∆k |p+1 . Then
+Denote Ek := E∥Xk⋆ − X
+Ek+1 ≤ (1 + ak )Ek + bk .
+
+(48)
+
+K−1
+
+
+X  K−1
+Y
+(1 + aj ) E0 +
+(1 + aj ) bi .
+
+(49)
+
+Unrolling the recursion gives
+EK ≤
+
+ K−1
+Y
+j=0
+
+i=0
+
+j=i+1
+
+Since E0 = 0, the first term vanishes. For the product term, use 1 + x ≤ ex to obtain
+K−1
+Y
+
+ K−1
+
+ K−1
+
+X
+X
+(1 + aj ) ≤ exp
+aj = exp C
+|∆j | ≤ exp(CT ) =: CT .
+
+j=i+1
+
+j=i+1
+
+(50)
+
+j=i+1
+
+For the sum, note |∆i |p+1 ≤ hp |∆i |, hence
+K−1
+X
+
+bi ≤ C ′
+
+i=0
+
+K−1
+X
+
+|∆i |p+1 ≤ C ′ hp
+
+i=0
+
+K−1
+X
+
+|∆i | = C ′ hp (t − u) ≤ C ′ T hp .
+
+(51)
+
+i=0
+
+Combining the two bounds,
+EK ≤ CT
+
+K−1
+X
+
+bi ≤ (CT C ′ T ) hp =: C̃T hp ,
+
+i=0
+
+which proves the claim.
+18
+
+(52)
+
+Preprint
+
+Proposition 2 (Decoder discrepancy). If Φθ− (·, u, s) is Lipschitz in x with constant L, then
+⋆
+⋆
+eK , u, s)∥ ≤ L E∥XK
+eK ∥ = O(hp ),
+E∥Φθ− (XK
+, u, s) − Φθ− (X
+−X
+
+(53)
+
+and, by Jensen and bounded moments,
+⋆
+eK , u, s)∥2 = O(h2p ).
+E∥Φθ− (XK
+, u, s) − Φθ− (X
+
+(54)
+
+Proof sketch. Immediate from the Lipschitz property of Φθ− , Proposition 1, and Jensen’s inequality.
+Proposition 3 (Objective gap). Define
+⋆
+, u, s)
+Lideal (θ) := E Φθ (xt , t, s) − Φθ− (XK
+
+2
+
+eK , u, s)
+Lprac (θ) := E Φθ (xt , t, s) − Φθ− (X
+
+2
+
+,
+
+(55)
+
+.
+
+(56)
+
+Then
+Lprac (θ) − Lideal (θ) = O(hp ).
+
+(57)
+
+Proof. Subtracting the two objectives yields
+Lprac (θ) − Lideal (θ) =
+h
+i
+eK , u, s)∥2 − ∥Φθ (xt , t, s) − Φθ− (X ⋆ , u, s)∥2 .
+E ∥Φθ (xt , t, s) − Φθ− (X
+K
+
+(58)
+
+Expanding the difference gives
+⋆
+eK , u, s)∥2 − ∥Φθ (xt , t, s) − Φθ− (XK
+∥Φθ (xt , t, s) − Φθ− (X
+, u, s)∥2 =
+⋆
+eK , u, s) − 2Φθ (xt , t, s) .
+eK , u, s), Φθ− (X ⋆ , u, s) + Φθ− (X
+, u, s) − Φθ− (X
+Φθ− (XK
+K
+(59)
+
+Applying the Cauchy–Schwarz inequality yields
+Lprac (θ) − Lideal (θ) ≤
+q
+q
+⋆ , u, s) − Φ − (X
+⋆ , u, s) + Φ − (X
+2 ·
+e
+eK , u, s) − 2Φθ (xt , t, s)∥2 .
+E∥Φθ− (XK
+,
+u,
+s)∥
+E∥Φθ− (XK
+K
+θ
+θ
+(60)
+The second factor is O(1) uniformly in h by the bounded-moment assumption, while the first factor
+is O(hp ) by Proposition 2. Hence the product is O(hp ).
+Combining Propositions 1–3 proves that
+Lprac (θ) − Lideal (θ) = O(hp ).
+
+(61)
+
+which is the claim of Theorem 1.
+B.4
+
+T HEORETICAL R ATIONALE FOR THE S CORE F UNCTION A PPROXIMATION
+
+Theorem 1 formally establishes that replacing the true vector field f ⋆ with the surrogate f˜ changes
+the learning objective only by O(hp ). Here we complement this result with intuition, showing why
+such an approximation is both natural and conceptually aligned with existing frameworks.
+The core challenge when training our GTP from scratch is providing stable, on-trajectory supervision.
+The ideal consistency objective is to enforce that predictions from any two points on the same true
+ODE trajectory are identical. In principle, the model could generate these points itself by acting as its
+own ”teacher” and numerically solving its learned ODE. However, when learning from scratch, this
+self-supervision process is inherently unstable. The initially random model produces highly inaccurate
+estimates of the underlying vector field, which are then used to generate its own supervision. This
+creates a vicious cycle where flawed targets lead to poor updates, causing further error propagation.
+In contrast to our formulation with an explicit Inst Map, Consistency Training (Song et al., 2023)
+compensates for the missing teacher by introducing a simple analytical supervision path (a straight
+line) from which paired samples can be drawn. The process, illustrated in Figure 3a, is as follows:
+19
+
+Preprint
+
+1. A simple, straight-line supervision path (the white line) is constructed via xt = x0 + t · z
+by sampling a data point x0 and noise z.
+2. A point xt is sampled from this path. The ideal objective would require us to pair it with the
+corresponding point xt−∆t on the same true ODE trajectory (the green curve). However,
+obtaining this point is intractable without a teacher model.
+3. To create a practical objective, Consistency Training instead samples the second point, which
+we denote x′t−∆t , directly from the simple white line.
+4. Each of these points now lies on its own true (but unknown) PF ODE trajectory. The green
+curve is the true trajectory passing through xt while the blue curve is the true trajectory
+passing through xt−∆t .
+5. The model Φ is then tasked with predicting the data origin from each of these starting points,
+yielding x̂0 = Φ(xt , t, 0) and x̂′0 = Φ(xt−∆t , t − ∆t, 0). The consistency loss enforces
+that these two predictions must match, even though they originated from different points on
+different true trajectories:
+LCT = E[||x̂0 − x̂′0 ||22 ]
+(62)
+The profound implication of this objective can be understood intuitively: the model is being asked to
+produce the same output (x0 ) from two different inputs (xt and x′t−∆t ). For the model to succeed
+at this task across all possible data points x0 and noise vectors z, it cannot learn any specific set
+of curved trajectories. Its only viable strategy is to learn a vector field whose solution paths are,
+on average, straight lines that align with the simple xt = x0 + t · z supervision structure. This
+effectively ”tames” the learning problem, forcing the model to learn a consistent mapping from any
+point on a noisy line back to its origin.
+This leads to the deeper theoretical justification. A given noisy point xt is ambiguous; it could have
+been generated by many different pairs of (x0 , z). To minimize the consistency loss on average over
+the entire dataset, the model’s output Φ(xt , t, 0) cannot learn to predict any single x0 . Instead, it is
+implicitly forced to learn the optimal Bayes estimator: the conditional expectation E[x0 |xt ]. This
+learned denoiser is precisely the component needed to define the true, underlying PF ODE. This
+process, where the model learns a single deterministic trajectory by averaging over all possible linear
+paths that could generate a point xt , is conceptually illustrated in Figure 2.
+To make this connection concrete, Figure 3b illustrates the training objective of our GTP framework.
+While Consistency Training supervises the model indirectly by enforcing agreement between predictions from two noisy samples, our GTP formulation directly parameterizes the entire solution
+map Φ(xt , t, s) and enforces its self-consistency across intervals. Conceptually, this is nothing
+but the same principle as in Consistency Training: both objectives ensure that different ways of
+tracing back a noisy point must yield the same underlying origin. The key difference is one of
+perspective—Consistency Training views the model as a local denoiser (learning the map to t = 0),
+whereas GTP treats the model as the generator of a global trajectory solution (learning the map to
+any s). Thus, the two formulations are theoretically equivalent in spirit, with GTP offering a more
+direct and integral-level realization of the same consistency idea.
+A subtle point concerns the role of the step size. In Consistency Training (Song et al., 2023), the
+theoretical justification is given in the limit ∆t → 0, ensuring locally correct supervision. In our
+setting, the step size parameter h is defined as the maximum interval between adjacent time points,
+so the requirement h → 0 is directly analogous to their ∆t → 0 condition. The difference is that
+our Theorem 1 makes this correspondence explicit by proving that, even for finite h, the surrogate
+objective deviates from the ideal one only by O(hp ). Thus the infinitesimal-step reasoning of
+Consistency Training can be viewed as a special case of our more general analysis.
+Finally, this principle is not an isolated finding but a direct instantiation of the same powerful idea that
+underpins the Flow Matching framework (Lipman et al., 2023). Both approaches learn the complex,
+non-linear vector field of the true ODE by supervising it with a target derived from the conditional
+expectation of simple, analytical paths. They differ only in what the neural network explicitly learns:
+while Flow Matching trains a network to regress against this expected velocity, our GTP framework
+learns to approximate the solution map Φ(xt , t, s) itself (the integral). This deep connection confirms
+that our training strategy is not an ad-hoc simplification but a principled and theoretically sound
+method for learning the correct generative dynamics.
+20
+
+Preprint
+
+training objective
+
+fixed (𝒙0 , 𝐳)
+
+different (𝒙0 , 𝐳)
+
+learned trajectory
+
+𝒙𝑡
+
+Figure 2: Illustration of the learning process. A given point xt can be formed by many different
+linear paths (corresponding to different pairs of (x0 , z)). The model is trained to learn a single,
+deterministic ”learned trajectory” that represents the conditional expectation of these paths. This
+forces the model to learn the true underlying generative dynamics.
+𝒙𝑡−∆𝑡
+
+𝒙𝑢
+
+ෝ
+𝒙0
+
+ෝ
+𝒙0
+
+𝒙′𝑡−∆𝑡
+𝒙0
+
+𝒙0
+
+ෝ
+𝒙′0
+
+ෝ
+𝒙′0
+
+(a) Illustration of the Consistency Training objective. The process uses a simple, analytical supervision path (white line) defined by xt = x0 + t · z.
+Two points, xt and x′t−∆t , are sampled from this
+path. Each lies on its own true (but unknown) PF
+ODE trajectory (green and blue curves). The consistency loss enforces that the model’s predictions
+for the data origin, x̂0 and x̂′0 , must match, even
+when starting from different points on different
+trajectories.
+
+𝒙𝑠
+
+𝒙′𝑢
+
+𝒙′𝑠
+
+(b) Illustration of the GTP Training objective. The
+process mirrors that of standard Consistency Training but is generalized for an arbitrary target time
+s. A student model’s direct prediction from xt to
+a target point xs (green path) is trained to match
+a target model’s two-step prediction via an intermediate point xu (blue path). This generalization
+allows the model to learn the full solution map
+Φ(xt , t, s), not just the specialized map to the origin.
+
+Figure 3: Comparison of training objectives. (a) Standard Consistency Training supervises predictions
+back to the origin. (b) GTP extends this principle by enforcing self-consistency across arbitrary
+intervals, enabling direct learning of the solution map.
+B.5
+
+D ERIVATION OF THE A DVANTAGE -W EIGHTED O BJECTIVE
+
+This section provides the detailed theoretical derivation for the advantage-weighted learning objective
+presented in Section 4.2.
+Our starting point is a standard objective in offline RL that seeks to maximize the Q-function
+while regularizing the learned policy π to stay close to the dataset’s behavior policy πBC via a
+KL-divergence constraint:
+
+
+1
+max Ea∼π(·|s) Q(s, a) − DKL (π(·|s)||πBC (·|s))
+(63)
+π
+η
+As shown by prior work in variational RL (Peters et al., 2010; Abdolmaleki et al., 2018; Kumar et al.,
+2020), the optimal solution π ∗ for this problem takes the form of the behavior policy, re-weighted by
+the exponentiated Q-function. For greater conceptual clarity and numerical stability, this solution is
+typically expressed using the advantage function A(s, a) = Q(s, a) − V (s):
+π ∗ (a|s) =
+
+1
+πBC (a|s) exp(ηA(s, a)),
+Z(s)
+
+(64)
+
+where Z(s) is the state-dependent normalization term. This π ∗ represents the ideal, value-improved
+target policy we wish our model to learn. The task now becomes how to train our expressive generative
+21
+
+Preprint
+
+policy πθ to match this optimal target π ∗ . The natural way to do so is to minimize the KL-divergence
+between them:
+min DKL (π ∗ (·|s)||πθ (·|s)) = max Ea∼π∗ (·|s) [log πθ (a|s)]
+(65)
+θ
+
+θ
+
+To compute this expectation, we use importance sampling to switch from the intractable target distribution π ∗ to the tractable dataset distribution πBC . The importance weight is π ∗ (a|s)/πBC (a|s) =
+exp(ηA(s, a))/Z(s). Substituting this into our objective gives:
+
+
+exp(ηA(s, a))
+max E(s,a)∼D
+log πθ (a|s)
+(66)
+θ
+Z(s)
+Here we arrive at the final crucial step. The normalization term Z(s) is also independent of our
+optimization variable θ. Therefore, when taking the gradient with respect to θ, Z(s) acts as a
+constant scaling factor and does not affect the location of the optimum. We can thus drop it from the
+optimization objective, which yields the final, practical form:
+max E(s,a)∼D [exp(ηA(s, a)) log πθ (a|s)]
+(67)
+θ
+
+While we write the loss here in terms of log-likelihood for clarity, the same exponential advantage
+weighting directly applies to any generative training loss, including diffusion and flow-matching
+objectives. This confirms that applying an exponential advantage weight to the log-likelihood
+objective of our generative policy is the theoretically correct implementation of the variational policy
+optimization framework.
+B.6
+
+A DDITIONAL D ISCUSSION ON ACTOR L OSS F ORMULATIONS
+
+In Section 5.3, we compared our variational guidance against a baseline that linearly combines the
+generative loss with a Q-learning actor loss. Here we provide a more detailed discussion.
+Formulation.
+
+The baseline takes the form
+Lactor = LBC + λ LQ ,
+while our method instead adopts a weighted behavior cloning objective:
+
+
+Lweighted-BC = E(s,a)∼D w(s, a) LBC ,
+
+(68)
+(69)
+
+where w(s, a) is given in Equation 14.
+Lemma 3. When LBC (π; πβ ) is instantiated as a KL divergence DKL (πβ (·|s) ∥ π(·|s)), the linearcombination objective corresponds to a KL-regularized policy improvement whose optimizer
+
+1
+π ∗ (a|s) = Z(s)
+πβ (a|s) exp λ Q(s, a) .
+(70)
+Training a parametric policy πθ to match π ∗ then leads to a weighted-BC update
+
+
+
+max Ea∼πβ (·|s) exp λ Q(s, a) log πθ (a|s) ,
+θ
+
+(71)
+
+i.e., weighted behavior cloning with weights w(s, a) ∝ exp(λQ(s, a)).
+Proof Sketch. By definition,
+Lactor = LBC + λ LQ .
+(72)
+When LBC is instantiated as a KL divergence and LQ as the negative Q-expectation, this becomes
+h
+i
+
+Lactor = Es∼D DKL πβ (·|s) ∥ π(·|s) − λ Ea∼π(·|s) [Q(s, a)] .
+(73)
+Optimizing over π yields
+
+1
+π ∗ (a|s) = Z(s)
+πβ (a|s) exp λQ(s, a) ,
+
+(74)
+
+which is exactly the same Boltzmann form derived in Appendix B.5. Minimizing the KL divergence
+between π ∗ and the parametric policy πθ is therefore equivalent to weighted BC with exponential
+weights.
+Remark. Replacing Q(s, a) with the advantage A(s, a) = Q(s, a) − V (s) makes the weights
+invariant to affine shifts of Q; the state-value term is absorbed into Z(s), leaving the training
+objective unchanged.
+22
+
+Preprint
+
+original data distribution value-guided distribution
+
+Figure 4: Illustration of weighted behavior cloning. The empirical dataset distribution (black)
+is reweighted into a value-guided distribution (red), which emphasizes high-value regions while
+remaining strictly within the data support.
+
+Discussion. This result shows that, when the behavior cloning loss is instantiated as a KL divergence,
+the linear-combination baseline and our weighted-BC approach are consistent through the underlying
+KL-regularized policy improvement. For other choices of LBC , this connection is less direct. In
+practice, however, the raw linear form is highly sensitive to the scale of λ and critic values, whereas
+our normalized and clipped weighting provides stable and robust training across settings.
+Beyond this theoretical connection, the linear combination can be viewed as a more direct engineering
+heuristic. Its practical challenge lies in the choice of λ, which controls the relative strength of the
+gradient signals. Since our LBC is already composed of multiple components, the magnitudes of
+LBC and LQ can differ by orders of magnitude. Stabilizing this baseline thus requires careful tuning
+of λ—often by matching empirical gradient norms during training—otherwise one may encounter
+exploding critic gradients or vanishing actor updates.
+A further drawback is that the direct gradient from LQ can steer the policy toward out-of-distribution
+(OOD) actions because it relies on critic estimates for actions with little or no dataset support. In
+practice, this extrapolation error propagates through the bootstrapped TD targets, inflating temporaldifference residuals and often causing the critic loss to explode—a phenomenon we frequently
+observed in implementation. By contrast, our weighted-BC formulation never changes the data itself:
+the policy is always trained on in-distribution samples, but their effective frequency (or density) is
+adjusted according to value estimates. This reweighting not only shifts probability mass toward
+high-value regions of the dataset (Figure 4), but also makes gradient magnitudes easier to control,
+thereby greatly reducing the occurrence of critic loss explosions in practice.
+
+C
+
+I MPLEMENTATION D ETAILS
+
+C.1
+
+E XPERIMENTAL H YPERPARAMETERS
+
+Unless otherwise noted, all ablation studies were executed on the RTX 4090 + i9-13900K workstation;
+the other machines were used for main-figure experiments. All experiments are implemented in
+Python and conducted on five machines: one with an RTX 4090 and i9-13900K CPU (24 cores / 32
+threads); three with dual A40 GPUs and dual EPYC 7313 CPUs (16 cores / 32 threads each); and one
+with an RTX 3050 and i7-13700H CPU (14 cores / 20 threads). RAM ranges from 24 GB to 128 GB
+across machines.
+C.2
+
+DYNAMIC T IMESTEP S CHEDULING FOR ROBUST T RAJECTORY L EARNING
+
+In our implementation, to address the trade-off between computational cost and approximation
+accuracy inherent in selecting the number of discretization steps N , we adopt a dynamic scheduling
+strategy inspired by Song & Dhariwal (2024). Rather than fixing N , the schedule gradually increases
+the number of steps as training progresses. This curriculum exposes the model to trajectories of
+varying resolutions, which prevents overfitting to a specific discretization and promotes a more
+faithful understanding of the underlying continuous-time dynamics. Consequently, the learned policy
+23
+
+Preprint
+
+Table 4: The hyperparameters in offline (including BC, η = 0) training on D4RL Gym, AntMaze,
+Adroit and Kitchen tasks.
+Tasks
+halfcheetah-medium-v2
+hopper-medium-v2
+walker2d-medium-v2
+halfcheetah-medium-replay-v2
+hopper-medium-replay-v2
+walker2d-medium-replay-v2
+halfcheetah-medium-expert-v2
+hopper-medium-expert-v2
+walker2d-medium-expert-v2
+antmaze-umaze-v0
+antmaze-umaze-diverse-v0
+antmaze-medium-play-v0
+
+Hyperparameters
+Q norm max Q backup
+False
+False
+False
+False
+False
+False
+False
+False
+False
+False
+False
+False
+False
+False
+False
+False
+False
+False
+False
+False
+False
+True
+False
+True
+
+η
+5.0
+1.0
+5.0
+5.0
+5.0
+5.0
+5.0
+0.5
+5.0
+5.0
+1.0
+5.0
+
+learning rate
+3 × 10−4
+3 × 10−4
+3 × 10−4
+3 × 10−4
+3 × 10−4
+3 × 10−4
+3 × 10−4
+3 × 10−4
+3 × 10−4
+3 × 10−4
+3 × 10−4
+1 × 10−3
+
+gradient norm
+9.0
+9.0
+1.0
+2.0
+4.0
+4.0
+7.0
+5.0
+5.0
+2.0
+3.0
+2.0
+
+becomes robust to the choice of inference steps, maintaining strong performance even with a small
+number of sampling steps at deployment.
+Formally, the number of steps at iteration k is given by:
+
+
+!
+N (k) = min s0 · 2
+
+k
+K′
+
+, s1
+
++ 1,
+
+where K ′ =
+
+$
+
+K
+log2 ss10 + 1
+
+%
+.
+
+(75)
+
+Here K is the total number of training iterations, s0 = 10 and s1 = 1280 are the minimum and
+maximum number of discretization steps, respectively. The schedule doubles the step count every K ′
+iterations until the maximum s1 is reached, starting with short, computationally efficient rollouts and
+progressively refining toward longer, more accurate trajectories.
+
+D
+
+A DDITIONAL R ESULTS
+
+D.1
+
+A BLATION S TUDY: E FFICIENCY –P ERFORMANCE T RADE - OFF AT I NFERENCE
+
+A core claim of our work is that GTP resolves the trade-off between expressiveness and efficiency.
+To validate this, we compare inference-time efficiency across different generative policy classes on
+halfcheetah-medium-expert-v2. Specifically, we sample 100 trajectories and report the
+average wall-clock time per inference step together with final policy performance. We benchmark
+GTP against diffusion policies with T = 5 sampling steps and consistency models with T = 2 steps,
+while also evaluating GTP with T = 5 steps to ensure a fair comparison in terms of sampling cost.
+Results and Analysis. Table 5 summarizes the results. We find that GTP with T = 5 achieves
+slightly faster inference than diffusion with the same number of steps, while delivering substantially
+better performance. Compared to consistency models with T = 2, our method is moderately
+slower but significantly more expressive, closing the gap between efficiency and policy quality. This
+demonstrates that GTP provides a favorable balance between efficiency and performance, resolving a
+long-standing limitation of prior generative policies.
+D.2
+
+A BLATION ON ACTOR L OSS F ORMULATION
+
+We further examined whether our explicit teacher is truly necessary by testing two teacher-free
+philosophies: (i) the self-consistency principle underlying Shortcut Models (Frans et al., 2025), and
+(ii) the identity-based formulation of continuous consistency models and Mean Flows (Lu & Song,
+2025; Geng et al., 2025). Both yield a continuous-time actor loss that is theoretically elegant and
+fully self-referential, requiring no external supervision.
+Results and Analysis. In practice, however, both variants were unsatisfactory. The identity-based
+loss demanded repeated JVPs in PyTorch, leading to prohibitive memory and runtime overhead.
+24
+
+Preprint
+
+Table 5: Ablation results on halfcheetah-medium-expert-v2. Inference time is averaged
+over 100 sampled trajectories. GTP achieves a superior trade-off, being faster than diffusion while
+outperforming consistency.
+Method
+
+Inference Time (ms)
+
+Diffusion Policy (T = 5)
+Consistency Model (T = 2)
+GTP (T = 5)
+
+1.16
+0.55
+0.94
+
+Table 6: Ablation results on hopper-medium-expert-v2 (mean ± std over 5 random seeds).
+Teacher-free objectives are either too costly (Mean Flows) or unstable (Shortcut), while our teacherbased formulation achieves the best trade-off.
+Method
+
+Training Time
+
+Score
+
+4.58 h
+6.03 h
+4.26 h
+
+76.1 ± 5.7
+Diverged
+112.2 ± 0.6
+
+Shortcut Models (no teacher)
+Mean Flows (identity)
+GTP (ours)
+
+Despite multiple attempts and stabilization tricks, all identity-based runs eventually encountered
+severe divergence, with either actor loss blowing up or critic loss exploding due to OOD data.
+We nevertheless completed several such runs: one experiment took 6.03 hours to finish but still
+collapsed in performance. We suspect this discrepancy arises because the original Mean Flows were
+implemented on TPUs with specialized auto-differentiation, while PyTorch+GPU implementations
+incur heavy JVP costs and suffer from numerical instability—issues that are especially problematic
+in RL, where stable training is crucial. The self-consistency variant, while computationally lighter,
+also produced unstable targets and degraded policy quality.
+In contrast, our teacher-guided score approximation provided stable, efficient training and consistently
+stronger policies. These results highlight that while teacher-free objectives are conceptually appealing,
+they are not yet practical under standard GPU-based RL settings. We leave further improvements in
+this direction as an interesting avenue for future work.
+V ISUALIZING E XPRESSIVENESS AND E FFICIENCY IN M ULTI -G OAL E NVIRONMENTS
+
+(b) Diffusion-QL (48 mins)
+
+60
+
+48
+
+8
+
+12
+
+12
+
+0
+
+2
+
+4
+
+6
+
+(c) Consistency-AC (35 mins)
+
+12
+
+16
+
+G4
+
+40
+
+48
+
+44
+52
+56
+
+4
+
+6
+
+40
+
+60
+
+8
+
+32 36
+
+4
+
+2
+
+0
+
+2
+
+4
+
+60
+
+32
+
+6
+
+20
+
+24
+
+28
+
+28
+
+28
+
+2
+
+60
+
+40
+
+4
+
+4
+
+48
+
+44
+52
+56
+
+4
+
+6
+
+8
+
+8
+
+12
+48
+
+60
+
+8
+
+6
+
+G4
+
+40
+
+G1
+12
+
+4
+
+32 36
+
+48
+
+40
+28
+
+48
+
+60
+
+40
+28
+
+48
+
+8
+
+12
+
+12
+
+28
+
+8
+
+8
+
+12
+
+12
+
+60
+
+8
+
+4
+
+6
+
+16
+
+20
+
+24
+32
+
+4
+
+20
+
+2
+
+16
+
+4
+
+2
+
+24
+
+0
+
+4
+
+G2
+
+44
+52
+56
+
+2
+
+8
+
+0
+
+36
+
+4
+
+12
+
+28
+
+44
+52
+56
+
+4
+
+6
+
+8
+
+12
+16
+
+20
+
+(a) Original Dataset
+
+48
+
+60
+
+8
+
+4
+
+16
+
+2
+
+G1
+
+24
+
+6
+
+16
+
+20
+
+44
+52
+56
+
+4
+
+4
+
+32 36
+
+G4
+
+40
+
+2
+
+36
+
+2
+
+6
+
+40
+
+60
+
+48
+
+28
+
+8
+
+32
+
+20
+
+0
+
+16
+
+24
+
+28
+
+44
+52
+56
+
+2
+
+4
+
+24
+
+20
+
+44
+52
+56
+
+24
+
+36
+
+4
+
+8
+
+4
+
+36
+
+44
+52
+56
+
+4
+
+6
+
+28
+
+60
+
+28
+
+48
+
+60
+
+48
+40
+
+8
+
+16
+
+20
+
+12
+
+36
+
+48
+60
+
+8
+
+4
+
+32 36
+
+G4
+
+40
+
+2
+
+28
+
+24
+20
+
+16
+
+G2
+
+24
+
+16
+
+24
+
+28
+
+6
+
+8
+
+0
+
+56
+52
+44
+
+4
+
+16
+
+8
+
+4
+32
+
+2
+
+G1
+
+32
+
+20
+
+16
+
+4
+
+20
+
+12
+
+G2
+
+20
+
+4
+
+20
+
+2
+
+28
+
+12
+
+60
+48
+
+40
+
+G3
+
+36 32
+
+4
+
+16
+
+56
+52
+44
+
+20
+
+8
+
+0
+
+6
+
+32
+
+24
+20
+
+16
+
+G1
+
+36
+
+2
+
+16
+
+G2
+
+24
+
+4
+
+56
+52
+44
+
+28
+
+12
+
+40
+
+G3
+
+Multigoal Environment
+
+8
+60
+48
+
+36 32
+
+4
+
+16
+
+56
+52
+44
+
+16
+
+8
+
+0
+
+32
+
+24
+20
+
+6
+
+20
+
+2
+
+12
+
+36
+
+4
+4
+
+16
+
+40
+
+G3
+
+Multigoal Environment
+
+8
+60
+48
+
+36 32
+
+28
+
+24
+20
+
+24
+
+32
+
+56
+52
+44
+
+56
+52
+44
+
+G3
+
+6
+
+16
+
+40
+
+20
+
+36
+
+24
+
+4
+
+60
+
+48
+
+36 32
+
+Multigoal Environment
+
+8
+
+56
+52
+44
+
+16
+
+56
+52
+44
+
+20
+
+6
+
+40
+
+Multigoal Environment
+
+8
+
+40
+
+D.3
+
+6
+
+(d) GTP (Ours) (37 mins)
+
+Figure 5: Policy visualization in a 2D multi-goal environment.
+To provide an intuitive, visual confirmation of our claims, we design a 2D multi-goal environment
+where the optimal policy is inherently multi-modal. As shown in Figure 5, our GTP model accurately
+captures the four distinct modes of the data, learning a policy that successfully reaches all goals.
+In contrast, while Diffusion-QL also captures the modes, it does so at a higher computational cost.
+Consistency-AC is faster but fails to capture all modes, suffering from degraded policy quality. This
+visualization provides a clear illustration of our method’s central achievement: successfully modeling
+diverse, multi-modal behaviors without sacrificing computational efficiency.
+25
+
+Preprint
+
+E
+
+A DDITIONAL I LLUSTRATIONS
+
+Error Accumulation
+Slow Inference
+
+s
+
+0
+
+Data Distribution
+
+Direct Jump
+Learned Flow Map Φ𝜃 𝒙𝑡 , 𝑡, 𝑠
+
+T
+
+t
+Noise Distribution
+
+𝒙𝑇
+
+𝒙0
+
+Figure 6: Illustration of the unified solution map Φ(xt , t, s). Iterative solvers (blue) suffer from slow
+inference and error accumulation, whereas the learned flow map (red) enables direct jumps from the
+noise distribution xT to the data distribution x0 , providing an intuitive view of our unified framework.
+
+26
+
+

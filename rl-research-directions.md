@@ -18,14 +18,22 @@ pip install gymnasium[box2d] stable-baselines3 pettingzoo d3rlpy transformers tr
 
 | Direction | Analogy | Best For... |
 |-----------|---------|-------------|
-| **Applied RL** | The Builder | Solving specific business/physics problems |
+| **Applied RL** | The World Builder | Solving specific business/physics problems |
 | **Algorithm Research** | The Architect | Custom neural architectures, faster learning |
 | **Offline RL** | The Historian | Healthcare, Robotics (where failure is expensive) |
-| **Multi-Agent RL** | The Coordinator | Traffic control, economics, swarms |
+| **Multi-Agent RL** | The Social Coordinator | Traffic control, economics, swarms |
 | **RLHF** | The Aligner | Chatbots, writing, creative tasks |
 | **Generalization** | The Dungeon Master | Sim-to-Real transfer, robustness, preventing memorization |
 | **Agentic RL** | The Operator | Web automation, software testing, digital assistants |
 | **Systems RL** | The Mechanic | Massive scale training, custom algorithm design |
+| **Model-Based RL** | The Navigator | Sample efficiency, long-horizon planning |
+| **Imitation Learning** | The Apprentice | Learning from experts, difficult exploration |
+| **Safe RL** | The Safety Engineer | Reliable deployment, risk constraints |
+| **Exploration** | The Explorer | Sparse rewards, unsupervised skill acquisition |
+| **Hierarchical RL** | The Strategist | Complex tasks, temporal abstraction |
+| **Meta/Continual RL** | The Time Traveler | Fast adaptation, lifelong learning |
+| **Multi-Objective RL** | The Arbiter | Competing objectives, trade-offs |
+| **Causal/Explainable RL** | The Detective | Trustworthiness, robustness under intervention |
 
 ---
 
@@ -33,7 +41,6 @@ pip install gymnasium[box2d] stable-baselines3 pettingzoo d3rlpy transformers tr
 
 ### The Gist
 You aren't trying to invent a smarter brain; you are **simulating reality**.
-
 Most industry research (Finance, Logistics, Robotics) falls here. Your contribution is creating a `gymnasium` environment that accurately represents a specific problem (e.g., "Optimizing cooling in a data center").
 
 ### Research Goal
@@ -63,15 +70,15 @@ class SolarBatteryEnv(gym.Env):
     def step(self, action):
         battery, sun, price = self.state
         reward = 0
-
+        
         # Logic: Buy low, sell high
-        if action == 1:  # Discharge/Sell
-            reward = price * 1.0
+        if action == 1: # Discharge/Sell
+            reward = price * 1.0 
             battery -= 10
-
+            
         # Update State (Simplified)
         self.state = np.array([battery, np.random.rand(), np.random.rand()*20], dtype=np.float32)
-
+        
         # Check termination
         done = battery <= 0
         return self.state, reward, done, False, {}
@@ -87,10 +94,10 @@ model = PPO("MlpPolicy", env, verbose=1).learn(total_timesteps=1000)
 ## 2. The "Architect" (Algorithm Research)
 
 ### The Gist
-You want to build a **better brain**. You take a standard algorithm (like PPO) and modify its **Neural Network Architecture**.
+You want to build a better brain. You take a standard algorithm (like PPO) and modify its **Neural Network Architecture**.
 
 ### Research Goal
-> Does adding a 'Memory' unit or an 'Attention' mechanism allow the agent to learn faster?
+> "Does adding a 'Memory' unit or an 'Attention' mechanism allow the agent to learn faster?"
 
 ### The Code: Customizing the Policy Network in Stable-Baselines3
 
@@ -130,8 +137,7 @@ model.learn(total_timesteps=5000)
 ## 3. The "Historian" (Offline RL)
 
 ### The Gist
-In high-stakes fields (Healthcare, Autonomous Driving), you **cannot** let the AI learn by "Trial and Error" (you can't crash a car 1,000 times).
-
+In high-stakes fields (Healthcare, Autonomous Driving), you cannot let the AI learn by "Trial and Error" (you can't crash a car 1,000 times).
 **Offline RL** learns purely from datasets of past history, without ever practicing in the real world.
 
 ### Research Goal
@@ -182,12 +188,12 @@ env.reset()
 # 2. The Interaction Loop
 for agent in env.agent_iter():
     observation, reward, termination, truncation, info = env.last()
-
+    
     if termination or truncation:
         action = None
     else:
         # In research, this is where your Multi-Agent Policy goes
-        action = env.action_space(agent).sample()
+        action = env.action_space(agent).sample() 
 
     # 3. Step for ONE specific agent
     env.step(action)
@@ -198,7 +204,7 @@ for agent in env.agent_iter():
 ## 5. The "Aligner" (RLHF)
 
 ### The Gist
-This is the tech behind ChatGPT. Sometimes there is **no math score** for "Good Job." Instead, we ask a human to pick the better response ("A is better than B"). We train a model to learn these preferences, then run RL against that model.
+This is the tech behind ChatGPT. Sometimes there is no math score for "Good Job." Instead, we ask a human to pick the better response ("A is better than B"). We train a model to learn these preferences, then run RL against that model.
 
 ### Research Goal
 > AI Safety, Alignment, and learning from subjective feedback.
@@ -225,11 +231,11 @@ trainer = DPOTrainer(
     model=model,
     train_dataset=data,
     args=TrainingArguments(output_dir="dpo_model"),
-    beta=0.1,  # How strictly to follow the preference
-    tokenizer=...  # (Load your tokenizer here)
+    beta=0.1, # How strictly to follow the preference
+    tokenizer=... # (Load your tokenizer here)
 )
 
-# trainer.train()  # Uncomment to run
+# trainer.train() # Uncomment to run
 ```
 
 ---
@@ -247,7 +253,6 @@ Standard RL agents often "memorize" a specific level rather than learning a skil
 ```python
 import gymnasium as gym
 # pip install procgen
-
 # Unlike standard Gym, this generates a NEW level layout every reset.
 # start_level=0, num_levels=0 means "infinite unique levels"
 env = gym.make("procgen:procgen-coinrun-v0", start_level=0, num_levels=0, distribution_mode="hard")
@@ -256,13 +261,13 @@ obs, _ = env.reset()
 done = False
 
 while not done:
-    # The agent faces terrain it has NEVER seen before.
-    # It cannot rely on memory; it must rely on visual generalization.
-    action = env.action_space.sample()
-    obs, reward, done, truncated, info = env.step(action)
-
-    if done:
-        print("Level finished. The next level will be a completely new world.")
+   # The agent faces terrain it has NEVER seen before.
+   # It cannot rely on memory; it must rely on visual generalization.
+   action = env.action_space.sample()
+   obs, reward, done, truncated, info = env.step(action)
+  
+   if done:
+       print("Level finished. The next level will be a completely new world.")
 ```
 
 ---
@@ -270,7 +275,7 @@ while not done:
 ## 7. The "Operator" (Agentic RL & Tool Use)
 
 ### The Gist
-Traditional RL controls motors ("muscles"); this direction **controls software**. The agent's actions are clicking buttons, typing text, or calling APIs. This bridges RL with Human-Computer Interaction (HCI) and LLMs, enabling agents to browse the web, book flights, or use calculators.
+Traditional RL controls motors ("muscles"); this direction controls software. The agent's actions are clicking buttons, typing text, or calling APIs. This bridges RL with Human-Computer Interaction (HCI) and LLMs, enabling agents to browse the web, book flights, or use calculators.
 
 ### Research Goal
 > **Grounding.** How do I map a high-level instruction ("Buy a ticket to Paris") to a sequence of discrete UI actions (Click, Scroll, Type) using visual or DOM-based observations?
@@ -283,26 +288,23 @@ from gymnasium import spaces
 import numpy as np
 
 class WebBrowserEnv(gym.Env):
-    def __init__(self):
-        super().__init__()
-        # Actions: 0=Click Element, 1=Type Text, 2=Scroll
-        self.action_space = spaces.Discrete(3)
-        # Observation: A simplified DOM Tree or Screenshot embedding
-        self.observation_space = spaces.Box(low=-1.0, high=1.0, shape=(512,), dtype=np.float32)
+   def __init__(self):
+       super().__init__()
+       # Actions: 0=Click Element, 1=Type Text, 2=Scroll
+       self.action_space = spaces.Discrete(3)
+       # Observation: A simplified DOM Tree or Screenshot embedding
+       self.observation_space = spaces.Box(low=-1.0, high=1.0, shape=(512,), dtype=np.float32)
 
-    def step(self, action):
-        # The agent interacts with a virtual browser (e.g., via Selenium/Playwright)
-        reward = 0
-        if action == 0:
+   def step(self, action):
+       # The agent interacts with a virtual browser (e.g., via Selenium/Playwright)
+       reward = 0
+       if action == 0:
             # Logic to click the predicted element ID
-            print("Action: Clicked 'Submit'")
-            reward = 1.0  # Success
-
+           print("Action: Clicked 'Submit'")
+           reward = 1.0 # Success
+      
         # New state is the updated webpage
-        return np.zeros(512, dtype=np.float32), reward, False, False, {}
-
-    def reset(self, seed=None, options=None):
-        return np.zeros(512, dtype=np.float32), {}
+       return np.zeros(512, dtype=np.float32), reward, False, False, {}
 
 # Usage:
 env = WebBrowserEnv()
@@ -314,7 +316,7 @@ env = WebBrowserEnv()
 ## 8. The "Mechanic" (Systems & Modular RL)
 
 ### The Gist
-Academic code (like a single `ppo.py` script) crashes at industrial scale. This direction focuses on **RL Infrastructure**: breaking the algorithm into atomic, reusable blocks (Collectors, Buffers, Loss Modules) to run on clusters of hundreds of GPUs. It is less about the math and more about the **engineering of data throughput**.
+Academic code (like a single ppo.py script) crashes at industrial scale. This direction focuses on **RL Infrastructure**: breaking the algorithm into atomic, reusable blocks (Collectors, Buffers, Loss Modules) to run on clusters of hundreds of GPUs. It is less about the math and more about the engineering of data throughput.
 
 ### Research Goal
 > **Efficiency and Scalability.** How to decouple data collection (Actors) from training (Learners) to scale linearly with hardware?
@@ -330,10 +332,10 @@ from torchrl.data import ReplayBuffer, LazyTensorStorage
 # Decouples the Environment loop from the Training loop
 env_maker = lambda: GymEnv("CartPole-v1")
 collector = SyncDataCollector(
-    env_maker,
-    policy=None,  # Insert your Random or Learned Policy here
-    frames_per_batch=1000,
-    total_frames=10000
+   env_maker,
+   policy=None, # Insert your Random or Learned Policy here
+   frames_per_batch=1000,
+   total_frames=10000
 )
 
 # 2. Modular Replay Buffer (The "Storage")
@@ -342,79 +344,247 @@ buffer = ReplayBuffer(storage=LazyTensorStorage(max_size=10000))
 
 # 3. The "Mechanic's" Pipeline
 for batch in collector:
-    buffer.extend(batch)
-    print(f"System collected batch of shape: {batch.shape}")
-    # A separate "Learner" process would sample from 'buffer' here
+   buffer.extend(batch)
+   print(f"System collected batch of shape: {batch.shape}")
+   # A separate "Learner" process would sample from 'buffer' here
 ```
 
 ---
 
-## Key Concepts by Direction
+## 9. The "Navigator" (Model-Based RL & World Models)
 
-### Applied RL (World Builder)
-- **State/Observation Design** - What the agent perceives
-- **Reward Shaping** - Guiding learning without gaming
-- **Domain Knowledge Encoding** - Physics, constraints, rules
+### The Gist
+Learn a model of the environment (dynamics + rewards) and then plan inside that model instead of only learning by trial and error.
 
-### Algorithm Research (Architect)
-- **Feature Extraction** - CNNs, Transformers, Graph Networks
-- **Memory Mechanisms** - LSTMs, Transformers, External Memory
-- **Attention** - Focus on relevant state features
+### Research Goal
+> **Sample efficiency and long-horizon planning** via imagination and model-based control.
 
-### Offline RL (Historian)
-- **Distribution Shift** - Training vs deployment mismatch
-- **Conservative Estimation** - Avoid overconfident Q-values
-- **Behavior Regularization** - Stay close to data distribution
+### The Code: World Models, MuZero, and Dreamer-style agents
 
-### Multi-Agent RL (Coordinator)
-- **Centralized Training, Decentralized Execution (CTDE)**
-- **Credit Assignment** - Who contributed to team reward?
-- **Emergent Communication** - Learned protocols
+```python
+import subprocess
 
-### RLHF (Aligner)
-- **Reward Modeling** - Learning preferences from comparisons
-- **KL Divergence Constraints** - Don't drift too far from base model
-- **Constitutional AI** - Rule-based alignment
-
-### Generalization (Dungeon Master)
-- **Domain Randomization** - Visual/physics variation
-- **Curriculum Learning** - Easy to hard progression
-- **Zero-Shot Transfer** - Solve unseen instances
-
-### Agentic RL (Operator)
-- **Grounding** - Language to actions mapping
-- **Tool Use** - API calls, calculators, search
-- **Hierarchical Actions** - High-level plans, low-level execution
-
-### Systems RL (Mechanic)
-- **Actor-Learner Separation** - Parallel data collection
-- **Vectorized Environments** - Batch simulation
-- **Distributed Training** - Multi-GPU, multi-node
+# Run MBPO from mbrl-lib examples (Hydra configs)
+subprocess.run(
+    ["python", "-m", "mbrl.examples.main", "algorithm=mbpo", "overrides=mbpo_halfcheetah"],
+    check=True,
+)
+```
 
 ---
 
-## Getting Started by Direction
+## 10. The "Apprentice" (Imitation & Inverse RL)
 
-| If you want to... | Start with... | Key Library |
-|-------------------|---------------|-------------|
-| Solve a business problem | Custom Gym environment | `gymnasium` |
-| Improve neural architectures | Custom policy networks | `stable-baselines3` |
-| Learn from historical data | Offline RL algorithms | `d3rlpy` |
-| Train multiple agents | Multi-agent environments | `pettingzoo` |
-| Align LLMs with preferences | RLHF/DPO training | `trl` |
-| Build robust agents | Procedural generation | `procgen` |
-| Automate software tasks | Web/UI environments | `playwright`, custom |
-| Scale to production | Modular RL systems | `torchrl`, `rllib` |
+### The Gist
+Learn from expert demonstrations or infer the reward function an expert is optimizing.
 
----
+### Research Goal
+> **High performance** when exploration is costly or unsafe.
 
-## Further Reading
+### The Code: Behavior Cloning, GAIL, and Inverse RL pipelines
 
-- **Sutton & Barto** - Reinforcement Learning: An Introduction (2nd Ed.)
-- **Spinning Up in Deep RL** - OpenAI's educational resource
-- **CleanRL** - Single-file implementations for learning
-- **Hugging Face Deep RL Course** - Interactive tutorials
+```python
+import d3rlpy
+
+# Behavior cloning with d3rlpy
+dataset, env = d3rlpy.datasets.get_dataset("cartpole-random")
+
+bc = d3rlpy.algos.BC()
+bc.fit(dataset, n_steps=5000)
+```
 
 ---
 
-*A practical companion to the RL Agent Universe paper collection.*
+## 11. The "Safety Engineer" (Safe / Constrained / Risk-Sensitive RL)
+
+### The Gist
+Optimize reward while obeying strict safety constraints or limiting risk exposure.
+
+### Research Goal
+> **Reliable real-world deployment** without catastrophic failures.
+
+### The Code: Constrained Policy Optimization, Lagrangian methods, and shielded RL
+
+```python
+import omnisafe
+
+env_id = "SafetyPointGoal1-v0"
+agent = omnisafe.Agent("PPOLag", env_id)
+agent.learn()
+```
+
+---
+
+## 12. The "Explorer" (Curiosity & Intrinsic Motivation)
+
+### The Gist
+Add internal rewards that drive discovery when external rewards are sparse or deceptive.
+
+### Research Goal
+> **Efficient exploration** and unsupervised skill acquisition.
+
+### The Code: ICM, RND, and intrinsic reward modules
+
+```python
+from ray import tune
+
+config = {
+    "env": "CartPole-v1",
+    "framework": "torch",
+    "exploration_config": {
+        "type": "Curiosity",
+        "eta": 1.0,
+        "lr": 0.001,
+        "feature_dim": 256,
+        "inverse_net_hiddens": [64],
+        "inverse_net_activation": "relu",
+        "forward_net_hiddens": [64],
+        "forward_net_activation": "relu",
+    },
+}
+
+tune.run("PPO", config=config, stop={"training_iteration": 5})
+```
+
+---
+
+## 13. The "Strategist" (Hierarchical RL & Options)
+
+### The Gist
+Decompose long-horizon tasks into reusable sub-policies and temporal abstractions.
+
+### Research Goal
+> **Solve complex tasks** by learning subgoals and option policies.
+
+### The Code: Options framework, Option-Critic, and Feudal RL
+
+```python
+import gymnasium as gym
+from gymnasium import spaces
+import numpy as np
+from ray import tune
+from ray.rllib.env.multi_agent_env import MultiAgentEnv
+
+class HierEnv(MultiAgentEnv):
+    def __init__(self):
+        self.observation_space = spaces.Box(-1.0, 1.0, shape=(4,), dtype=np.float32)
+        self.action_space = spaces.Discrete(4)
+        self.t = 0
+
+    def reset(self, *, seed=None, options=None):
+        self.t = 0
+        return {"manager": self.observation_space.sample()}, {}
+
+    def step(self, action_dict):
+        self.t += 1
+        obs, rew = {}, {}
+        if "manager" in action_dict:
+            obs["worker"] = self.observation_space.sample()
+            rew["manager"] = 0.0
+        if "worker" in action_dict:
+            obs["worker"] = self.observation_space.sample()
+            rew["worker"] = 1.0
+        done = {"__all__": self.t > 10}
+        return obs, rew, done, {}
+
+def policy_mapping_fn(agent_id, *args, **kwargs):
+    return "manager" if agent_id == "manager" else "worker"
+
+env = HierEnv()
+obs_space, act_space = env.observation_space, env.action_space
+
+config = {
+    "env": HierEnv,
+    "multiagent": {
+        "policies": {
+            "manager": (None, obs_space, act_space, {}),
+            "worker": (None, obs_space, act_space, {}),
+        },
+        "policy_mapping_fn": policy_mapping_fn,
+    },
+}
+
+tune.run("PPO", config=config, stop={"training_iteration": 5})
+```
+
+---
+
+## 14. The "Time Traveler" (Meta-RL, Transfer, Continual RL)
+
+### The Gist
+Learn how to learn across tasks and adapt quickly without catastrophic forgetting.
+
+### Research Goal
+> **Fast adaptation and lifelong learning** in changing environments.
+
+### The Code: MAML, RL^2, and continual RL benchmarks
+
+```python
+import torch
+import torch.nn as nn
+import learn2learn as l2l
+
+model = nn.Linear(20, 10)
+maml = l2l.algorithms.MAML(model, lr=0.01)
+opt = torch.optim.SGD(maml.parameters(), lr=0.001)
+
+for _ in range(5):
+    opt.zero_grad()
+    clone = maml.clone()
+    X = torch.randn(5, 20)
+    y = torch.randn(5, 10)
+    loss = ((clone(X) - y) ** 2).mean()
+    clone.adapt(loss)
+    loss2 = ((clone(X) - y) ** 2).mean()
+    loss2.backward()
+    opt.step()
+```
+
+---
+
+## 15. The "Arbiter" (Multi-Objective RL)
+
+### The Gist
+Optimize several competing objectives (safety, cost, speed) instead of a single reward.
+
+### Research Goal
+> **Pareto-optimal tradeoffs** for real-world constraints.
+
+### The Code: MORL algorithms and Pareto front optimization
+
+```python
+import numpy as np
+import mo_gymnasium as mo_gym
+
+env = mo_gym.make("minecart-v0")
+obs, info = env.reset()
+obs, vector_reward, terminated, truncated, info = env.step(env.action_space.sample())
+
+# Optional scalarization to use single-objective algorithms
+env = mo_gym.wrappers.LinearReward(env, weight=np.array([0.8, 0.2, 0.2]))
+```
+
+---
+
+## 16. The "Detective" (Causal & Explainable RL)
+
+### The Gist
+Use causal structure and interpretability to make decisions robust and understandable.
+
+### Research Goal
+> **Generalization under interventions** and trustworthy policies.
+
+### The Code: Causal RL and Explainable RL methods
+
+```python
+import torch
+import torch.nn as nn
+from captum.attr import IntegratedGradients
+
+policy = nn.Sequential(nn.Linear(4, 64), nn.ReLU(), nn.Linear(64, 2))
+obs = torch.rand(1, 4)
+
+ig = IntegratedGradients(policy)
+attr = ig.attribute(obs, target=0)
+print(attr)
+```

@@ -1,5 +1,5 @@
 # Qwen QwQ Reasoning Model
-- Paper: [Qwen_QwQ_Reasoning_Model.pdf](../../../papers/rl-finetuning/Qwen_QwQ_Reasoning_Model.pdf)
+- Paper: [Qwen_QwQ_Reasoning_Model.pdf](../../../reinforcement_learning_papers/02_rlhf_alignment/Qwen_QwQ_Reasoning_Model.pdf)
 
 ## Gemini diagrams
 

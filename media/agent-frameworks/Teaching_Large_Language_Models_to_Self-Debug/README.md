@@ -1,5 +1,5 @@
 # Teaching Large Language Models to Self-Debug
-- Paper: [Teaching_Large_Language_Models_to_Self-Debug.pdf](../../../papers/agent-frameworks/Teaching_Large_Language_Models_to_Self-Debug.pdf)
+- Paper: [Teaching_Large_Language_Models_to_Self-Debug.pdf](../../../reinforcement_learning_papers/09_agentic_rl/Teaching_Large_Language_Models_to_Self-Debug.pdf)
 
 ## Gemini diagrams
 

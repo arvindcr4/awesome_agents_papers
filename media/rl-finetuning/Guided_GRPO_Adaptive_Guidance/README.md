@@ -1,5 +1,5 @@
 # Guided GRPO Adaptive Guidance
-- Paper: [Guided_GRPO_Adaptive_Guidance.pdf](../../../papers/rl-finetuning/Guided_GRPO_Adaptive_Guidance.pdf)
+- Paper: [Guided_GRPO_Adaptive_Guidance.pdf](../../../reinforcement_learning_papers/02_rlhf_alignment/Guided_GRPO_Adaptive_Guidance.pdf)
 
 ## Gemini diagrams
 

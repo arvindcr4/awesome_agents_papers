@@ -1,5 +1,5 @@
 # Paper2Agent Research Papers as AI Agents
-- Paper: [Paper2Agent_Research_Papers_as_AI_Agents.pdf](../../../papers/agent-frameworks/Paper2Agent_Research_Papers_as_AI_Agents.pdf)
+- Paper: [Paper2Agent_Research_Papers_as_AI_Agents.pdf](../../../reinforcement_learning_papers/09_agentic_rl/Paper2Agent_Research_Papers_as_AI_Agents.pdf)
 
 ## Gemini diagrams
 

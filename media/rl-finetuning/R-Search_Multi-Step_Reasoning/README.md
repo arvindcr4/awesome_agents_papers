@@ -1,5 +1,5 @@
 # R-Search Multi-Step Reasoning
-- Paper: [R-Search_Multi-Step_Reasoning.pdf](../../../papers/rl-finetuning/R-Search_Multi-Step_Reasoning.pdf)
+- Paper: [R-Search_Multi-Step_Reasoning.pdf](../../../reinforcement_learning_papers/02_rlhf_alignment/R-Search_Multi-Step_Reasoning.pdf)
 
 ## Gemini diagrams
 

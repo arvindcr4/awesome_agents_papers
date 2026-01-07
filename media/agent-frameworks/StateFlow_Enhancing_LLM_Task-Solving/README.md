@@ -1,5 +1,5 @@
 # StateFlow Enhancing LLM Task-Solving
-- Paper: [StateFlow_Enhancing_LLM_Task-Solving.pdf](../../../papers/agent-frameworks/StateFlow_Enhancing_LLM_Task-Solving.pdf)
+- Paper: [StateFlow_Enhancing_LLM_Task-Solving.pdf](../../../reinforcement_learning_papers/09_agentic_rl/StateFlow_Enhancing_LLM_Task-Solving.pdf)
 
 ## Gemini diagrams
 

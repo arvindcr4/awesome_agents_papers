@@ -1,5 +1,5 @@
 # RL Fine-tuning Instruction Following
-- Paper: [RL_Fine-tuning_Instruction_Following.pdf](../../../papers/rl-finetuning/RL_Fine-tuning_Instruction_Following.pdf)
+- Paper: [RL_Fine-tuning_Instruction_Following.pdf](../../../reinforcement_learning_papers/02_rlhf_alignment/RL_Fine-tuning_Instruction_Following.pdf)
 
 ## Gemini diagrams
 

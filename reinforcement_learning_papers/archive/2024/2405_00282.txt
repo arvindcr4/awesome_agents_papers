@@ -1,0 +1,4347 @@
+MF-OML: Online Mean-Field Reinforcement Learning with Occupation
+Measures for Large Population Games
+Anran Hu ∗†
+
+Junzi Zhang ‡
+
+arXiv:2405.00282v2 [math.OC] 3 Sep 2025
+
+Abstract
+Reinforcement learning for multi-agent games has attracted lots of attention recently. However, given
+the challenge of solving Nash equilibria, existing works with guaranteed polynomial complexities either focus on variants of zero-sum and potential games, or aim at solving (coarse) correlated equilibria, or require
+access to simulators, or rely on certain assumptions that are hard to verify. This work proposes MF-OML
+(Mean-Field Occupation-Measure Learning), an online mean-field reinforcement learning algorithm for
+computing approximate Nash equilibria of large population sequential symmetric games. MF-OML is the
+first fully polynomial multi-agent reinforcement learning algorithm for provably solving Nash equilibria
+(up to mean-field approximation gaps that vanish as the number of players N goes to infinity) beyond
+variants of zero-sum and potential games. When evaluated by the cumulative deviation from Nash equilibria, the algorithm is shown to achieve a high probability regret bound of Õ(M 3/4 + N −1/2 M ) for
+games with the strong Lasry-Lions monotonicity condition, and a regret bound of Õ(M 11/12 + N −1/6 M )
+for games with only the Lasry-Lions monotonicity condition, where M is the total number of episodes
+and N is the number of agents of the game. As a by-product, we also obtain the first tractable globally
+convergent computational algorithm for computing approximate Nash equilibria of monotone mean-field
+games.
+Key words. mean-field games, symmetric N -player games, Nash equilibrium, occupation measure, multi-agent
+reinforcement learning, operator splitting
+
+1
+
+Introduction
+
+In the domain of game theory, multi-agent systems present both profound opportunities and formidable
+challenges. These systems, where multiple agents interact under a set of strategic decision-making rules,
+are pivotal in fields ranging from economics [48] to autonomous vehicle navigation [77]. The inherent
+complexity and dynamic nature of these interactions pose significant challenges, primarily due to the scale
+of agent populations and the complexity of each agent’s strategy space [68, 76].
+Introduced by the seminal work of [35] and [42], mean-field games (MFGs) provide an ingenious way
+of finding the approximate Nash equilibrium solution to the otherwise notoriously hard N -player stochastic
+games. It offers a powerful framework to tackle the complexities of multi-agent systems. MFGs simplify the
+analysis of large populations by considering the limit where the number of agents approaches infinity, allowing
+for the modeling of each agent’s interaction with the average effect of the rest of the population instead of
+individual agents. This limiting regime has been shown to provide both analytical and computational tools
+for finding approximate Nash equilibria for symmetric N -player games, especially when the number of agents
+√
+N is large. It has been established that the Nash equilibria of MFGs can be used to construct O(1/ N )Nash equilibria for the corresponding N -player game [35, 42, 17, 58]. This approach has been extensively
+∗
+
+Department of IEOR, Columbia University. Email: ah4277@columbia.edu
+This work was carried out primarily while the author was at the Mathematical Institute, University of Oxford, supported
+by a Hooke Fellowship.
+‡
+Citadel Securities. Email: junzizmath@gmail.com
+†
+
+1
+
+explored in the literature, with applications noted in areas such as financial markets, crowd dynamics, and
+large-scale social networks.
+In recent years, there is a surge of interest in introducing reinforcement learning (RL) to solving MFGs,
+which then serves as a tool for multi-agent reinforcement learning (MARL) [67, 62, 26].
+Reinforcement Learning. Reinforcement Learning is a segment of machine learning where an agent
+learns to make decisions by performing actions and receiving feedback in the form of rewards or penalties.
+This learning paradigm enables agents to learn optimal policies through trial-and-error interactions with a
+dynamic environment. RL has been successfully applied to various problems, including complex games like
+Go and practical applications such as robotics and sequential decision-making tasks. RL can be categorized
+into three settings: simulator setting, online setting and offline setting. Offline RL involves learning from
+a fixed dataset without the ability to gather new data [40, 73, 53]. In the simulator setting, one is allowed
+to have access to some simulator that can provide samples of next state and reward given any current
+state, any current action at any time [24, 59]. Online RL, on the other hand, does not have such access.
+One needs to interact with the environment in real-time to collect samples by adopting certain strategies
+[8, 9, 37, 1]. Online RL emphasizes the need for algorithms that can efficiently balance exploration (i.e.,
+trying new actions to discover potentially better strategies) and exploitation (i.e., leveraging known strategies
+to maximize rewards), a balance that is critical in dynamic and uncertain environments. Compared to the
+simulator setting, online RL usually faces larger challenges in the design and analysis of the algorithms
+due to the fact that one can not modify the underlying system/environment and observe samples that are
+beneficial to the learning procedure. However, in many applications, it is hard to build reliable simulators,
+where designing online RL algorithms becomes crucial.
+MARL and mean-field RL. The integration of RL with multi-agent settings has garnered significant
+interest in the recent decade. However, given the difficulties of finding Nash equilibrium in the general
+multi-agent systems, extending algorithms and analyses to the RL setting imposes further challenges. The
+theoretical works on MARL either focus on variants of zero-sum games [10, 46, 39, 3] and potential games
+[44, 18, 31], or aim at solving (coarse) correlated equilibria [38, 60, 52, 50] or subjective equilibria [72]. For
+general multi-agent systems, RL algorithms for finding Nash equilibrium usually suffer from exponential
+computational complexities [32, 41, 16]. Another stream of works on MARL deals with RL in MFGs
+to potentially tackle the curse of many agents in the traditional MARL literature. Most of these works
+propose and analyze RL algorithms that require access to mean-field simulators, under either contractivity
+assumptions [26, 4, 15, 66, 27, 22, 74], monotonicity assumptions [56, 55, 43, 21, 75], or access to a finite
+model class which contains the true model [34, 33]. For the online setting (with N -player environments),
+[67, 63, 64] propose Nash Q-learning based mean-field RL algorithms that require some stringent oracle
+assumptions inherited from [32]. More recently, [69] studies independent learning in regularized contractive
+N -player mean-field games but suffers from an inherent gap in addition to the mean-field approximation
+error due to the heavy regularization needed for the contractive convergence analysis framework; [70] removes
+such inherent gaps by focusing on monotone N -player mean-field games but is restricted to stage games.
+Our work and contributions. In this work, we aim to solve online reinforcement learning for a class of
+large population sequential symmetric games that adhere to the classical Lasry-Lions monotonicity condition. In Section 3, we introduce the MF-OMI-FBS (Mean-Field-Occupation Measure Inclusion with ForwardBackward Splitting) algorithm. This algorithm is designed to find Nash equilibrium of the limiting MFG by
+transforming the Nash equilibrium search into a monotone inclusion problem over occupation measures. We
+establish convergence results for this algorithm when the MFG model is fully known. Then, in Section 4, we
+propose MF-OML (Mean-Field-Occupation Measure Learning) which is extended from the MF-OMI-FBS algorithm to address N -player models where the models are unknown. To address the exploration-exploitation
+trade-off in the online RL setting, in each episode, we randomly select one agent to follow a fully exploratory
+2
+
+policy, while the remaining agents implement policies derived from the normalized updates of an approximated version of MF-OMI-FBS. We are able to show that when evaluated by the cumulative deviation from
+Nash equilibria, the algorithm achieves a high probability regret bound of Õ(M 3/4 + N −1/2 M ) for games
+with the strong Lasry-Lions monotonicity condition, where M is the total number of episodes and N is the
+number of agents of the game. This bound includes two components: the first, Õ(M 3/4 ), arises from the
+learning procedure itself, while the second, Õ(N −1/2 M ), results from the mean-field approximation error.
+For games that only satisfy the basic Lasry-Lions monotonicity condition, our algorithm exhibits a regret
+bound of Õ(M 11/12 + N −1/6 M ).
+To sum up, the contributions of this paper are two-fold:
+• We propose MF-OMI-FBS, the first tractable globally convergent computational algorithm with fully
+polynomial iteration complexities for solving the Nash equlibrium of (monotone) MFGs without certain
+uniqueness assumptions or introducing (non-vanishing) regularization. Moreover, MF-OMI-FBS is simple
+and efficient to implement and naturally lends itself to generic MFGs that are beyond those studied
+under our theoretical framework. Empirical benchmarks against existing algorithms demonstrate that
+MF-OMI-FBS consistently outperforms the baselines.
+• We propose MF-OML, the first fully polynomial online MARL algorithm for provably solving Nash
+equilibrium, up to mean-field approximation gaps that vanish as the number of players N goes to
+infinity, beyond variants of zero-sum and potential games. We conduct numerical experiments to
+verify the sub-linear growth of regret and performance improvement as N grows.
+Technical challenges and novelties. Our method diverges significantly from most existing literature
+on RL for MFGs, which typically updates directly on policies. By converting the problem of finding a Nash
+equilibrium into one of identifying the corresponding occupation measure, our approach facilitates the use
+of optimization tools from the broader literature. Moreover, it is crucial to effectively transfer from the
+space of occupation measures back into the policy space when designing online RL algorithms. This dual
+transformation is key to our approach and underscores its novelty.
+In addition, the presence of dynamics introduces inherent new difficulties in online RL compared to
+stage games [70] as it introduces an unknown constraint set over occupation measures that needs to be
+estimated/learned. It is well-known that optimization problems are sensitive to the perturbations of constraint sets, making the analysis of learning algorithms difficult. To resolve this issue, we identify a nearly
+unconstrained reformulation of the projection onto the set of the occupation measures (cf. Lemma 10) and
+obtain a robust optimization problem which facilitates the analysis.
+Other related works. The idea of transforming the problem of finding Nash equilibria to an optimization
+problem over occupation measures follows from [30], which obtains an optimization framework for solving
+Nash equilibria for MFGs and establishes local convergence results for the projected gradient descent algorithm. Our work focuses on a special class of monotone MFGs and designs algorithms based on operator
+splitting that achieve global convergence, which is further extended to the online RL setting. The idea of
+utilizing occupation measure has also been adopted in continuous time MFGs to obtain new existence results for relaxed Nash equilibria and computational benefits [11, 19]. It is later used to study the sensitivity
+analysis of Stackelberg MFGs [28]. The method of monotone operator splitting is also used in [47, 13, 54] to
+design computational algorithms for solving Nash equilibria in continuous-time monotone MFGs with fully
+known models.
+The computation of Nash equilibrium for (discrete-time) MFGs have been widely studied in the literature.
+However, existing works in the literature either establish convergence results only for the continuous-time
+limits of the proposed algorithms [56, 55], require certain uniqueness assumptions [26, 5, 6, 65, 7] and (non-
+
+3
+
+vanishing) regularization [14, 66, 75]1 , make stringent oracle assumptions that the Nash equilibrium of the
+stage mean-field games in all iterations can be solved exactly [52], or focus on potential games [23] or the
+much easier (coarse) correlated equilibrium instead of Nash equilibrium [50]. In contrast, MF-OMI-FBS does
+not suffer from these limitations and neatly tackles all these restrictions.
+Outline. The paper begins by introducing the setting of N -player games and mean-field games (MFGs) in
+Section 2. In Section 3, we present the mean-field occupation measure inclusion framework for solving MFGs
+and establish the convergence properties of Algorithm 1 in Theorem 6. Section 4 extends this framework to
+an online learning setting for N -player games, culminating in Algorithm 4 and the regret analysis provided
+in Theorem 14.
+
+N -player games and mean-field games
+
+2
+
+Problem setup. We consider symmetric Markov N -player games, with a common finite state space S =
+{1, . . . , S}, a common finite action space A = {1, . . . , A}, a finite planning horizon T ≥ 1 and an initial state
+N
+profile s0 = (s10 , . . . , sN
+0 ) ∈ S . Being symmetric, the rewards and dynamics of any agent in the game depend
+only on the state-action pair of the agent, and the set of state-action pairs of the population (regardless of
+the order), or equivalently the empirical state-action distribution of the population. More precisely, at time
+t ∈ T := {0, . . . , T − 1}, each agent i ∈ [N ] := {1, . . . , N } receives a random reward rt (sit , ait , LN
+t ) (with its
+expectation denoted as Rt (sit , ait , LN
+))
+when
+the
+game
+is
+at
+state
+profile
+s
+and
+taking
+action
+profile
+at , and
+t
+t
+transitions to state sit+1 independently (over the N agents) with transition probability Pt (sit+1 |sit , ait ), where
+1 P
+i
+i
+N
+1
+N
+N
+N
+st = (s1t , . . . , sN
+t ) ∈ S , at = (at , . . . , at ) ∈ A , and Lt (s, a) = N
+i∈[N ] 1{st = s, at = a} (s ∈ S, a ∈ A)
+is the empirical distribution of the population.
+For any agent i ∈ [N ], an admissible strategy/policy πt (t ∈ T ) is a mapping from S to ∆(A), where
+∆(X ) is the set of probability distributions over X . We denote the set of all such strategy/policy sequences
+π = {πt }t∈T as Π. When agent i takes policy π i ∈ Π (i ∈ [N ]), at each time t ∈ T , given the agent states sit
+(i ∈ [N ]), the actions ait ∼ πti (sit ) (i ∈ [N ]) of all agents are taken independently. Note that here we consider
+the case where all agents take randomized/relaxed local policies depending only on their own local state,
+which is suitable for decentralized execution that is efficient in the large-population settings we focus on.
+For notational flexibility, we use πt (at |st ) and πt (st , at ) exchangeably to denote the at -th dimension of the
+probability vector πt (st ). The goal is to find a Nash equilibrium (NE) of the game, which is defined below.
+Definition 2.1 (Nash equilibrium (NE) of a N -player game). A strategy profile π = {π i }i∈[N ] with π i =
+{πti }t∈T ∈ Π is called a Nash equilibrium (NE) of the N -player game if and only if NashConv(π) = 0. Here
+NashConv is defined as
+
+
+1 X
+i 1
+i
+N
+i
+NashConv(π) :=
+max V (π , . . . , π̃ , . . . , π ) − V (π) ,
+(1)
+i∈[N ] π̃ i ∈Π
+N
+
+P
+i i
+N
+i
+where V i (π) := Eπ
+t∈T rt (st , at , Lt ) is the expected cumulative reward of agent i (with initial state s0 ),
+and the expectation is over the trajectory of states and actions when the agents take independent actions
+ajt ∼ πt (sjt ) for j ∈ [N ] (t ∈ T ).
+At this equilibrium point, no player has the incentive to unilaterally deviate from their chosen strategy,
+given the strategies chosen by the others. Intuitively, NashConv characterizes the aggregated single-agent
+side sub-optimality of a strategy profile, and an NE is a strategy profile with no such sub-optimality. It is
+well-known that showing the existence of NEs and finding them are difficult for general N -player games [58].
+To alleviate this, a relaxation of the Nash equilibrium concept is introduced.
+1
+
+Note that [14, 66] suffers from inherent gaps due to the need for heavy regularization to ensure contractivity. In contrast,
+the analysis of [75] is based on monotonicity and hence the regularization effect is less inherent. Nevertheless, the distance
+metric adopted in [75] is a pseudo-metric given that the (unique regularized) Nash equilibrium mean-field distribution is not
+necessarily all positive, and hence cannot really guarantee convergence of the computed policies in general.
+
+4
+
+Definition 2.2 (ϵ-Nash equilibrium of an N -player game). A strategy profile π is called a ϵ-Nash equilibrium
+(NE) if NashConv(π) ≤ ϵ.
+For notational simplicity, when the strategy profile π = {π i }i∈[N ] is symmetric, namely π i = π ∈ Π for
+all i ∈ [N ], we also denote NashConv(π) := NashConv(π). We say that π is an (ϵ-)NE of the N -player game
+if and only if the strategy profile π := {π i }i∈[N ] with π i = π is an (ϵ-)NE.
+Mean-field games. As an approximate and limiting model of the aforementioned symmetric Markov N player game with a large population size N , we introduce a mean-field game (MFG) with the same finite
+time horizon T < ∞, finite state space S and finite action space A. Such a game consists of an infinite
+number of symmetric/anonymous players, and a representative player independently starts with an initial
+1 P
+i
+N
+state s0 ∼ µN
+0 ∈ ∆(S), where µ0 (s) = N
+i∈[N ] 1{s0 = s} (s ∈ S) is the empirical initial state distribution
+of the aforementioned N -player game being approximated. For any policy sequence π ∈ Π, we denote by
+Lπ = {Lπt }t∈T as the mean-field flow induced from π, defined recursively as
+Lπ0 (s, a) = µN
+0 (s)π0 (a|s),
+X
+Lπt+1 (s′ , a′ ) = πt+1 (a′ |s′ )
+
+Pt (s′ |s, a)Lπt (s, a),
+
+t ∈ {0, . . . , T − 2}.
+
+(2)
+
+s∈S,a∈A
+
+Namely, Lπt denotes the joint state-action distribution among all players at time t, and can be viewed as
+an approximation of the empirical state-action distribution LN
+t of the population under policy sequence
+π. In each time step t ∈ T , the representative player takes an action at ∈ A following the randomized
+policy πt (·|st ) ∈ ∆(A), receives a reward rt (st , at , Lπt ) and moves to a new state st+1 following the transition
+probabiltiy Pt (·|st , at ). Similar to the N -player games being approximated, we can define the (mean-field)
+Nash equilibrium (NE) solution concept of the MFG here. A policy sequence π = {πt }t∈T is an NE of the
+MFG if and only if its exploitability Expl(π) = 0, where the exploitabilty is defined as
+′
+
+Expl(π) = max
+V π (Lπ ) − V π (Lπ ).
+′
+π ∈Π
+
+(3)
+
+Here given any mean-field flow L = {Lt }t∈T ⊆ ∆(S × A), V π (L) is defined as the expected total reward
+of π of the L-induced Markov decision process (MDP) M(L) with rewards r̃tL (st , at ) := rt (st , at , Lt ) and
+transitions Pt (st+1 |st , at ). Similarly, a policy sequence π is called an ϵ-NE if and only if Expl(π) ≤ ϵ.
+Intuitively, the exploitability of a policy sequence characterizes the room for unilateral improvement of any
+representative player, mimicking the counterpart definition for N -player games. Note that the exploitability
+is always non-negative by definition.
+Outstanding assumptions and approximation guarantees. Throughout this paper, we consider the
+following assumptions of Lipschitz continuity and monotonicity (on the expected rewards).
+Assumption 1. The expected rewards are CR -Lipschitz continuous in Lt ∈ ∆(S × A) for any s ∈ S, a ∈
+(1)
+(2)
+(1)
+(2)
+(1)
+(2)
+A, t ∈ T , namely |Rt (s, a, Lt ) − Rt (s, a, Lt )| ≤ CR ∥Lt − Lt ∥1 for any Lt , Lt ∈ ∆(S × A). Furthermore, we also assume that the random rewards are a.s. bounded, i.e., |rt (s, a, L)| ≤ Rmax < ∞ a.s. for all
+s ∈ S, a ∈ A, t ∈ T , L ∈ ∆(S × A).
+Assumption 2. The expected rewards are λ-Lasry-Lions monotone2 (λ ≥ 0) in the sense that for any
+(1)
+(2)
+{Lt }t∈T , {Lt }t∈T ⊆ ∆(S × A), we have
+X
+X
+(1)
+(2)
+(1)
+(2)
+(1)
+(2)
+(Rt (s, a, Lt ) − Rt (s, a, Lt ))(Lt (s, a) − Lt (s, a)) ≤ −λ
+(Lt (s, a) − Lt (s, a))2 .
+t∈T ,s∈S,a∈A
+
+t∈T ,s∈S,a∈A
+
+2
+
+We call it Lasry-Lions monotone as it was first introduced in the seminal work of [42] on mean-field games. This is also to
+distinguish it from another commonly adopted monotone assumption in the differentiable normal-form/stage games literature
+[45], which assumes monotonicity of the reward gradients w.r.t. actions.
+
+5
+
+Note that when λ > 0, the property in Assumption 2 is typically referred to as strongly (Lasry-Lions)
+monotone. When λ = 0, Assumption 2 is a slight generalization of the standard (Lasry-Lions) monotonicity
+assumption in the MFG literature. More precisely, except for being implicitly adopted in [30], the literature
+P
+on monotone MFGs are largely restricted to rewards that depend on µt := a∈A Lt (·, a) [20, 56, 55, 23, 75].
+Furthermore, throughout the paper, whenever Assumption 2 is assumed, we can indeed replace it with a
+weaker assumption that only require that the expected rewards are monotone on “reachable” (or induced)
+mean-field flows in the sense that for any two policies π 1 , π 2 ∈ Π, we have
+X
+1
+2
+1
+2
+(Rt (s, a, Lπt ) − Rt (s, a, Lπt ))(Lπt (s, a) − Lπt (s, a)) ≤ 0.
+t∈T ,s∈S,a∈A
+
+But for clarity, we stick to slightly stronger Assumption 2 which has a more consistent form compared to
+the monotonicity assumptions in the literature.
+Under Assumption 1, it can be shown that an NE solution exists for the MFG [58, 14, 30]. In addition,
+we also have the following approximation guarantees of the approximating MFG for the original N -player
+game. The proof can be found in Section 5.1.
+′
+Theorem 1. Suppose that Assumption 1 holds. Then
+r if π ∈ Π is an ϵ-NE of the MFG, it is also an ϵ -NE
+√
+π
+SAT / N + CR SAT /N .
+of the original N -player game, where ϵ′ = ϵ + 2CR
+2
+
+Remark 1. The approximation guarantees of MFGs have been widely studied in the literature [58, 14, 70, 69].
+We provide the result and the proof here for self-containedness. We remark that here we do not need the
+assumption that players in the N -player game have i.i.d. initial state distributions which is commonly
+assumed in the literature. In addition, by utilizing the structure that the dynamics of the players are decoupled
+from each other (cf. [56, 55, 23] for the same assumption), the approximation error we obtain depends linearly
+on the time horizon T , which is in sharp contrast to the exponential growth in the general setting [71].
+
+3
+
+Solving mean-field Nash equilibria via occupation-measure inclusion
+
+In this section, we first study computational algorithms for finding the NEs of the MFG that is used to
+approximate the NEs of the original symmetric Markov N -player game, assuming full knowledge of the
+MFG. This serves as the stepping stone for designing the mean-field RL algorithm for solving the original
+N -player game in the episodic online RL setup in the next section. Throughout this section, to better
+conform to the MFG literature, we slightly relax the model assumption to allow the initial state to follow
+an arbitrary (fixed) distribution µ0 ∈ ∆(S), with the empirical distribution µN
+0 as the special case.
+
+3.1
+
+Representing mean-field NE with occupation measure
+
+Motivated by the appearance of the induced MDP in the definition of mean-field NE in (3), we first recall
+the classical result that an MDP can be represented as a linear program of the occupation measure. Such
+an observation is first noted in [49] in the context of (single-agent) MDPs, and more recently applied to
+MFGs in [30] to propose an optimization-framework called MF-OMO (Mean-Field Occupation-Measure
+Optimization) for computing mean-field NEs. However, due to the inherent non-convexity of the quadratic
+penalty formulation, convergence of algorithms under the MF-OMO framework to NE solutions is only
+shown when the initialization is sufficiently close. In this work, we instead propose a monotone inclusion
+framework of occupation measures, called MF-OMI (Mean-Field Occupation-Measure Inclusion) to exploit
+the underlying monotonicity of the MFG, which eventually leads to globally convergent algorithms to NEs.
+Occupation measure. We begin by introducing a new variable dt (s, a) for any t ∈ T , s ∈ S, a ∈ A, which
+represents the occupation measure of the representative agent under some policy sequence π = {πt }t∈T in an
+6
+
+MDP with transition kernel Pt (st+1 |st , at ) and initial state distribution µ0 , i.e., dt (s, a) = P(st = s, at = a),
+with s0 ∼ µ0 , st+1 ∼ Pt (·|st , at ), at ∼ πt (·|st ) for t = 0, . . . , T − 2. By definition, we have dt (s, a) = Lπt (s, a).
+Given the occupation measure d = {dt }t∈T , define a set-valued mapping Normalize that retrieves the policy
+from the occupation measure. This mapping Normalize maps from a sequence {dt }t∈T ⊆ RSA
+≥0 to a set of
+P dt (s,a) ′
+policy sequences {πt }t∈T : for any {dt }t∈T ⊆ RSA
+≥0 , π ∈ Normalize(d) if and only if πt (a|s) =
+a′ ∈A dt (s,a )
+P
+P
+when a′ ∈A dt (s, a′ ) > 0, and πt (·|s) is an arbitrary probability distribution over A when a′ ∈A dt (s, a′ ) = 0.
+
+Compact notation. To facilitate the presentation below, hereafter we define vectors cR (L) ∈ RSAT and
+b ∈ RST as
+
+
+
+
+0
+−R0 (·, ·, L0 )
+ .. 
+
+
+ . 
+..
+cR (L) = 
+,
+b
+=
+(4)
+
+,
+
+.
+ 0 
+−RT −1 (·, ·, LT −1 )
+µ0
+with the subscript R = {Rt }t∈T denoting the dependency on the expected rewards, and Rt (·, ·, Lt ) ∈ RSA
+being a flattened vector (with column-major order) of the expected rewards Rt (s, a, Lt ). In addition, we
+define the matrix AP ∈ RST ×SAT as
+
+
+W0 −Z
+0
+0 ···
+0
+0
+ 0 W1 −Z
+0 ···
+0
+0 
+
+
+ 0
+0
+W2 −Z · · ·
+0
+0 
+
+
+AP =  .
+.
+(5)
+..
+..
+..
+..
+.. 
+..
+ ..
+
+.
+.
+.
+.
+.
+.
+
+
+ 0
+0
+0
+0 · · · WT −1 −Z 
+Z
+
+0
+
+0
+
+0
+
+···
+
+0
+
+0
+
+Here the subscript P = {Pt }t∈T denotes the dependency on the transition probabilities, Wt ∈ RS×SA is the
+matrix with the s-th row (s = 1, . . . , S) being the flattened vector [Pt (s|·, ·)] ∈ RSA (with column-major
+order), and the matrix Z is defined as
+A
+
+z }| {
+Z := [IS , . . . , IS ] ∈ RS×SA ,
+
+(6)
+
+where IS is the identity matrix with dimension S. In addition, we also represent the mapping from π to Lπ
+in (2) as Γ(π; P ) to make the dependency on P explicit.
+For notational brevity, we alternatively use c(L), A and Lπ to denote cR (L), AP and Γ(π; P ) under the
+ground-truth rewards R and transitions P , and mainly highlight the dependencies on R and P when they
+are replaced with their approximations. With slight abuse of notation, we also use d ∈ RSAT to denote the
+flattened/vectorized in the same order as c(L) from the original vector sequence {dt }t∈T ⊆ RSA . Accordingly,
+hereafter both d = {dt }t∈T and L = {Lt }t∈T are viewed as flattened vectors (with column-major order) in
+RSAT or a sequence of T flattened vectors (with column-major order) in RSA , depending on the context,
+and we use Lt (s, a) and Ls,a,t (resp. dt (s, a) and ds,a,t ) alternatively.
+In [30], it is shown that π ⋆ ∈ Π is an NE of the MFG if and only if ∃d⋆ , L⋆ ∈ RSAT , such that
+π ⋆ ∈ Normalize(d⋆ ) and that the following two conditions hold: (A) d⋆ solves the linear program which
+minimizes c(L⋆ )⊤ d subject to Ad = b, d ≥ 0; (B) L⋆ = d⋆ . Note that condition (A) is exactly the well-known
+occupation-measure linear program reformulation of the L⋆ -induced MDP, as introduced at the beginning
+of this section.
+Last but not least, we adopt the following notation. For any vector x ∈ Rn , we use xi:j ∈ Rj−i+1
+to denote the sub-vector containing its i-th to j-th elements. For any closed convex set C ⊆ Rn , its
+normal cone operator NC (·) is defined as a set-valued mapping with NC (u) = ∅ for u ∈
+/ C and NC (u) =
+{v ∈ Rn |v ⊤ (w − u) ≤ 0, ∀w ∈ C} for u ∈ C. In addition, the dual cone of C is defined as the set
+C ∗ = {y ∈ Rn |y ⊤ x ≥ 0, ∀x ∈ C}.
+7
+
+MF-OMI: Mean-field occupation-measure inclusion. We now introduce MF-OMI, an inclusion problem formulation of MFGs with occupation-measure variables, which we will utilize to exploit the underlying
+monotonicity of the MFGs to obtain globally convergent algorithms to NE solutions.
+Theorem 2 (MF-OMI). Finding an NE solution to the MFG is equivalent to solving the following inclusion
+problem, referred to as MF-OMI (Mean-Field Occupation-Measure Inclusion):
+Find d such that 0 ∈ c(d) + N{x|Ax=b,x≥0} (d),
+
+(MF-OMI)
+
+More precisely, if d is a solution to (MF-OMI), then any π ∈ Normalize(d) is an NE of the original MFG.
+And if π is an NE of the original MFG, then Lπ is a solution to (MF-OMI).
+We now show that when the original MFG exhibits monotonicity properties, then MF-OMI is a monotone
+inclusion, namely both c and the normal cone operator N{x|Ax=b,x≥0} are monotone. Before we proceed, let
+us first recall the following definitions of monotonicity properties from the generic operator theory [57].
+Definition 3.1 (Monotone operator). An operator/mapping G : Rq → Rq (q ∈ N) is said to be monotone
+on X ⊆ Rq if for any two x1 , x2 ∈ X , (G(x1 ) − G(x2 ))⊤ (x1 − x2 ) ≥ 0. It is said to be ρ-strongly monotone
+on X if for any two x1 , x2 ∈ X , (G(x1 ) − G(x2 ))⊤ (x1 − x2 ) ≥ ρ∥x1 − x2 ∥22 for some ρ > 0.
+Now we are ready to show the monotonicity of (MF-OMI) under Assumption 2. Since {x|Ax = b, x ≥ 0}
+is a convex, closed and non-empty set, the normal cone operator N{x|Ax=b,x≥0} is always monotone [57]. Now
+note that by the definition of c(L) in (4) (as a concatenation of flattened vectors of negative rewards), we see
+that Assumption 2 holds if and only if (c(L1 )−c(L2 ))⊤ (L1 −L2 ) ≥ λ∥L1 −L2 ∥22 for any L1 , L2 ∈ (∆(S ×A))T ,
+i.e., c(L) is monotone (and λ-strongly monotone if λ > 0) on (∆(S × A))T .
+Moreover, for any ϵ > 0, let us define a perturbed reward r̂tϵ (s, a, Lt ) := rt (s, a, Lt ) − ϵLt (s, a) (s ∈ S, a ∈
+A, t ∈ T , Lt ∈ ∆(S × A)), with the expected rewards being R̂ϵ = {R̂tϵ }t∈T . Then cR̂ϵ (L) = c(L) + ϵL, and
+since
+(cR̂ϵ (L1 ) − cR̂ϵ (L2 ))⊤ (L1 − L2 ) = (c(L1 ) − c(L2 ))⊤ (L1 − L2 ) + ϵ∥L1 − L2 ∥22 ,
+we have that Assumption 2 holds if and only if (cR̂ϵ (L1 ) − cR̂ϵ (L2 ))⊤ (L1 − L2 ) ≥ (λ + ϵ)∥L1 − L2 ∥22 for any
+L1 , L2 ∈ (∆(S × A))T , i.e., cR̂ϵ (L) is (λ + ϵ)-strongly monotone on (∆(S × A))T .
+This implies that one can perturb the reward of any monotone model with a negative linear term to
+obtain a strongly monotone model. This observation is essential for the design of the algorithms to tackle
+MFGs that are not strongly monotone.
+
+3.2
+
+Solving MF-OMI with forward-backward splitting (FBS)
+
+We now introduce computational algorithms for solving MF-OMI, which also serve as the basis for the
+learning algorithm in the next section. There are numerous operator splitting algorithms that can be
+adopted to solve monotone inclusion problems in the form of MF-OMI. Here we choose FBS (Forward
+Backward Splitting) [57, §7.1], a simple yet efficient workhorse algorithm that is essentially a generalization
+of the projected descent algorithm to inclusion problems. FBS on such an inclusion problem proceeds as
+follows: in each iteration k,
+dk+1 = Proj{x|Ax=b,x≥0} (dk − αc(dk )),
+(7)
+where α > 0 is the step-size for which appropriate ranges are specified below. Unfortunately, in general
+merely the monotonicity of c is insufficient to guarantee convergence of FBS, and strong monotonicity is
+needed [57, §7.1]. Motivated by the discussion at the end of the previous section, we consider η-perturbed
+rewards for some perturbation coefficient η > 0. Expanding (7) for MF-OMI with such perturbations,
+we obtain Algorithm 1, which solves (MF-OMI) via FBS with projection onto the set of occupation measures/consistency, i.e., {x|Ax = b, x ≥ 0}. Note that the consistency projection step in Algorithm 1 is
+a convex quadratic program and can hence be solved efficiently via ADMM (e.g., via popular convex QP
+solvers such as OSQP [61]) and Frank-Wolfe [36] (where each linearized sub-problem can be exactly solved
+as an MDP) based algorithms.
+8
+
+Algorithm 1 MF-OMI-FBS: MF-OMI with Forward-Backward Splitting
+1: Input: initial policy sequence π 0 ∈ Π, step-size α > 0, and perturbation coefficient η ≥ 0.
+0
+
+2: Compute d0 = Lπ .
+3: for k = 0, 1, . . . do
+
+Update d˜k+1 = dk − α(c(dk ) + ηdk ).
+Compute dk+1 as the solution to the convex quadratic program:
+
+4:
+5:
+
+minimize ∥d − d˜k+1 ∥22 subject to Ad = b, d ≥ 0.
+6: end for
+
+3.3
+
+Convergence analysis of the MF-OMI-FBS algorithm
+
+Below we analyze the convergence of Algorithm 1 in terms of exploitability, which, together with Theorem
+1 leads to convergence rates of NashConv in the original N -player game. To account for the perturbation
+caused by η regularization, we first prove the following result stating the Lipschitz continuity of exploitability
+as well as its robustness to reward perturbation. To facilitate the presentation, we denote the exploitability
+of a policy sequence π ∈ Π for an MFG with perturbed expected rewards R̂ = {R̂t }t∈T as Expl(π; R̂) (when
+everything else including transitions, etc. is fixed to the true model associated with the original N -player
+game). When R̂ = {R̂t }t∈T = {Rt }t∈T = R, i.e., the rewards are also fixed to the true model, we still use
+Expl(π) to represent the exploitability.
+Lemma 3. Suppose that Assumption 1 holds. Then for any d1 , d2 ∈ {x|Ax = b, x ≥ 0} and any policy
+sequences π 1 ∈ Normalize(d1 ) and π 2 ∈ Normalize(d2 ), then we have that for any ϵ ≥ 0,
+Expl(π 1 ; R̂ϵ ) − Expl(π 2 ; R̂ϵ ) ≤ (2T CR + Rmax + (2T + 1)ϵ)∥d1 − d2 ∥1 ,
+where R̂ϵ = {R̂tϵ }t∈T is the expectation of the perturbed reward r̂tϵ (s, a, Lt ) := rt (s, a, Lt ) − ϵLt (s, a) (s ∈
+S, a ∈ A, t ∈ T , Lt ∈ ∆(S × A)).
+In addition, for any ϵ ≥ 0 and any policy sequence π ∈ Π, we have
+Expl(π) − Expl(π; R̂ϵ ) ≤ 2T ϵ.
+In order to prove Lemma 3, the following lemma is needed, which demonstrates the dual transformation
+between policies and occupation measures. The proof can be found in Section 5.3.
+P
+Lemma 4. Let P̂ = {P̂t }t∈T be an arbitrary transition model, namely P̂t (s′ |s, a) ≥ 0 and s′ ∈S P̂t (s′ |s, a) =
+1. Suppose that x ∈ RSAT is such that AP̂ x = b, x ≥ 0. Then for any π ∈ Normalize(x), we have
+Γ(π; P̂ ) = x. In addition, for any π ∈ Π, we also have AP̂ Γ(π; P̂ ) = b, Γ(π; P̂ ) ≥ 0.
+We are now ready to prove Lemma 3.
+1
+
+Proof of Lemma 3. Firstly, by Lemma 4 (applied to P̂ = P , in which case Γ(π; P̂ ) = Lπ ), we have Lπ = d1
+2
+and Lπ = d2 . Note that
+X
+′
+′
+′
+V π (Lπ ) =
+R̂ϵ (s, a, Lπt )Lπt (s, a) = −(cR̂ϵ (Lπ ))⊤ Lπ .
+s∈S,a∈A,t∈T
+
+Therefore for i = 1, 2,
+
+
+
+
+πi ⊤ π′
+πi ⊤ πi
+i ⊤ π′
+Expl(π i ; R̂ϵ ) = max
+−(c
+(L
+))
+L
++
+(c
+(L
+))
+L
+=
+max
+−(c
+(d
+))
+L
++ (cR̂ϵ (di ))⊤ di ,
+ϵ
+ϵ
+ϵ
+R̂
+R̂
+R̂
+′
+′
+π ∈Π
+
+π ∈Π
+
+9
+
+which implies
+Expl(π 1 ; R̂ϵ ) − Expl(π 2 ; R̂ϵ )
+
+1
+2 ⊤ π′
+≤ max
+−
+c
+(d
+)
+−
+c
+(d
+)
+L + (cR̂ϵ (d1 ))⊤ (d1 − d2 ) + (cR̂ϵ (d1 ) − cR̂ϵ (d2 ))⊤ d2
+ϵ
+ϵ
+R̂
+R̂
+′
+π ∈Π
+
+≤ T cR̂ϵ (d1 ) − cR̂ϵ (d2 ) ∞ + (Rmax + ϵ)∥d1 − d2 ∥1 + T cR̂ϵ (d1 ) − cR̂ϵ (d2 ) ∞
+≤ (2T CR + Rmax + (2T + 1)ϵ)∥d1 − d2 ∥1 .
+Finally, we also have
+Expl(π) − Expl(π; R̂ϵ )
+
+
+
+
+π ⊤ π′
+π ⊤ π
+π ⊤ π′
+= max
+−(c(L
+))
+L
++
+(c(L
+))
+L
+−
+max
+−(c
+(L
+))
+L
+− (cR̂ϵ (Lπ ))⊤ Lπ
+ϵ
+R̂
+′
+′
+π ∈Π
+
+π ∈Π
+
+⊤ ′
+≤ max
+− c(Lπ ) − cR̂ϵ (Lπ ) Lπ +
+′
+π ∈Π
+
+c(Lπ ) − cR̂ϵ (Lπ )
+
+⊤
+
+Lπ ≤ 2T ϵ.
+
+This completes the proof.
+The following lemma is key to the proof of the convergence of Algorithm 1, which states the equivalence
+between the fixed-points of the MF-OMI-FBS iterations and the NEs of the MFG. Let Fα,η be the mapping
+from dk to dk+1 in Algorithm 1, namely Fα,η (d) = Proj{x|Ax=b,x≥0} (d − α(c(d) + ηd)). The proof of the
+following lemma can be found in Section 5.4.
+Lemma 5. For any η ≥ 0, the set of fixed points of Fα,η is independent of α > 0. Now suppose that
+α > 0 and η ≥ 0. Moreover, If π ∈ Π is an NE of the MFG with the η-perturbed rewards r̂tη (s, a, Lt ) =
+rt (s, a, Lt ) − ηLt (s, a), then d = Lπ is a fixed point of Fα,η , namely Fα,η (d) = d. Finally, if d is a fixed point
+of Fα,η , then Ad = b, d ≥ 0 and any π ∈ Normalize(d) is an NE of the MFG with the η-perturbed rewards
+r̂tη (s, a, Lt ), and d = Lπ .
+We are now ready to state the main convergence result of the proposed MF-OMI-FBS algorithm.
+Theorem 6. Suppose that Assumptions 1 and 2 hold. Then we have the following convergence results.
+2 S 2 A2 + 2ϵ2 ) and the
+• When λ = 0 in Assumption 2, for any ϵ > 0, if we adopt the step-size α = ϵ/(2CR
+perturbation coefficient η = ϵ, then for any π k ∈ Normalize(dk ) with dk from Algorithm 1, we have
+
+√
+k
+Expl(π k ) ≤ 2T ϵ + 2 SAT (2T 2 CR + Rmax T ) (1 − κϵ ) 2 ,
+
+2 S 2 A2 + 2ϵ2 ∈ (0, 1).
+where κϵ := ϵ2 / 2CR
+2 S 2 A2 ) and η = 0, then for any π k ∈
+• When λ > 0 in Assumption 2, if we adopt α = λ/(2CR
+k
+k
+Normalize(d ) with d from Algorithm 1, we have
+
+√
+k
+Expl(π k ) ≤ 2 SAT (2T 2 CR + Rmax T ) (1 − κ) 2 ,
+2
+
+where κ := 2C 2λS 2 A2 ∈ (0, 1).
+R
+
+Proof. We prove the convergence result for generic λ and η with λ + η > 0 and λ ̸= η, and then specialize
+it to λ = 0, η > 0 and λ > 0, η = 0, resp. to derive the claimed conclusions.
+Firstly, by Assumption 1, we have that for any d1 , d2 ∈ (∆(S × A))T ,
+s
+X
+1
+2
+∥c(d ) − c(d )∥2 =
+(Rt (s, a, d1t ) − Rt (s, a, d2t ))2
+s∈S,a∈A,t∈T
+
+10
+
+≤
+
+s
+
+sX
+√
+2 ∥d1 − d2 ∥2 = C
+SA
+CR
+∥d1t − d2t ∥21
+R
+t
+t 1
+
+X
+
+s∈S,a∈A,t∈T
+
+≤ CR
+
+√
+
+(8)
+
+t∈T
+
+sX
+SA∥d1t − d2t ∥22 ≤ CR SA∥d1 − d2 ∥2 .
+SA
+t∈T
+
+Now let d⋆ be a fixed-point of Fα,η 3 , which exists by Lemma 5 and the existence of mean-field NE (as
+guaranteed by Assumption 1). Then we have that for any d ∈ (∆(S × A))T
+(a)
+
+∥Fα,η (d) − Fα,η (d⋆ )∥22 ≤ ∥d − d⋆ − α(c(d) − c(d⋆ ) + η(d − d⋆ ))∥22
+= ∥d − d⋆ ∥22 + α2 ∥c(d) − c(d⋆ ) + η(d − d⋆ ))∥22
+− 2α (c(d) − c(d⋆ ) + η (d − d⋆ )))⊤ (d − d⋆ )
+(b)
+
+2 2 2
+≤ 1 + α2 2CR
+S A + 2η 2
+
+(9)
+
+∥d − d⋆ ∥22 − 2α(λ + η)∥d − d⋆ ∥22
+
+2 2 2
+= 1 − 2α(λ + η) + 2α2 CR
+S A + η 2 ∥d − d⋆ ∥22 ,
+
+
+where (a) is by the non-expansiveness of projections onto closed convex sets, and (b) is by (8) and Assumption
+2. Note that (9) indeed holds when d⋆ is an arbitrary mean-field flow in (∆(S × A))T .
+2 S 2 A2 + 2η 2 ), we have that 4
+Hence for α = (λ + η)/(2CR
+q
+2 S 2 A2 + 2η 2 ))∥d − d⋆ ∥ .
+∥Fα,η (d) − Fα,η (d⋆ )∥2 ≤ (1 − (λ + η)2 /(2CR
+(10)
+2
+Note that for any d1 , d2 ∈ (∆(S × A))T ,
+λ∥d1 − d2 ∥22 ≤ (c(d1 ) − c(d2 ))⊤ (d1 − d2 ) ≤ ∥c(d1 ) − c(d2 )∥2 ∥d1 − d2 ∥2 ≤ CR SA∥d1 − d2 ∥22 ,
+which implies that λ ≤ CR SA. In addition, λ ̸= η implies
+2 2 2
+(λ + η)2 < 2λ2 + 2η 2 ≤ 2CR
+S A + 2η 2 .
+2 S 2 A2 + 2η 2 ) < 1 whenever λ ̸= η.
+Therefore 0 < (λ + η)2 /(2CR
+Hence we have
+(k) 0
+(k) ⋆
+∥dk − d⋆ ∥2 = ∥Fα,η
+(d ) − Fα,η
+(d )∥2
+2 2 2
+≤ 1 − (λ + η)2 / 2CR
+S A + 2η 2
+
+ k
+2
+
+2 2 2
+∥d0 − d⋆ ∥2 ≤ 2T 1 − (λ + η)2 / 2CR
+S A + 2η 2
+
+ k
+2
+
+,
+
+k times
+z
+}|
+{
+(k)
+where Fα,η := Fα,η ◦ Fα,η ◦ · · · ◦ Fα,η (d) denotes the self composition of Fα,η by k times, and we make use
+of the fact that Fα,η (d⋆ ) = d⋆ . Note that here we made use of the simple fact that
+
+∥d0 − d⋆ ∥2 ≤ ∥d0 − d⋆ ∥1 =
+
+X
+t∈T
+
+∥d0t − d⋆t ∥1 ≤
+
+X
+t∈T
+
+(∥d0t ∥1 + ∥d⋆t ∥1 ) = 2T.
+
+Finally, for any π k ∈ Normalize(dk ), let π ⋆ ∈ Normalize(d⋆ ), then by Lemma 5 we have Expl(π ⋆ ; R̂η ) =
+0. Therefore Lemma 3 implies
+Expl(π k ) ≤ |Expl(π k ) − Expl(π ⋆ )| + |Expl(π ⋆ ) − Expl(π ⋆ ; R̂η )|
+≤ (2T CR + Rmax )∥dk − d⋆ ∥1 + 2T η
+√
+ k
+2 2 2
+S A + 2η 2 2 .
+≤ 2T η + 2 SAT (2T 2 CR + Rmax T ) 1 − (λ + η)2 / 2CR
+Finally, the proof is complete by taking η = ϵ > 0 when λ = 0 and η = 0 when λ > 0.
+3
+
+Note that d⋆ in general varies as η changes, but here we are considering a fixed η and so we choose not to make the
+dependency explicit in the notation to keep it simple.
+4
+Note that this also implies that for such an α and when λ + η > 0 and λ ̸= η, Fα,η is a contraction mapping on (∆(S × A))T
+and hence the fixed point d⋆ is unique.
+
+11
+
+The following corollary shows the iteration complexity of Algorithm 1 for achieving a target tolerance of
+exploitability in a more explicit manner. Particularly, we will see that to achieve an ϵ exploitability, (nonstrong) Lasry-Lions monotonicity has a polynomial iteration complexity of O(ϵ−2 log(1/ϵ)) and requires
+taking the target tolerance ϵ as an input for the algorithm parameter choices, while strong Lasry-Lions
+monotonicity leads to a logarithmic iteration complexity of O(log(1/ϵ)) without needing to specify an input
+target tolerance. The proof can be found in Section 5.5.
+Corollary 7. Suppose that Assumptions 1 and 2 hold. Then we have the following iteration complexities.
+2 S 2 A2 T +ϵ2 /(2T ))
+• When λ = 0 in Assumption 2, for any target tolerance ϵ > 0, if we adopt α = ϵ/(8CR
+−2
+5
+k
+and η = ϵ/(4T ), then for any k = Ω(ϵ log(1/ϵ)), we have Expl(π ) ≤ ϵ for any π k ∈ Normalize(dk )
+with dk from Algorithm 1.
+
+• When λ > 0 in Assumption 2, if we adopt α = 2C 2 λS 2 A2 and η = 0, then for any k = Ω(log(1/ϵ)), we
+R
+
+have Expl(π k ) ≤ ϵ for any π k ∈ Normalize(dk ) with dk from Algorithm 1.
+
+4
+
+MF-OML: Online mean-field RL for Nash equilibria
+
+In this section, we consider the episodic online reinforcement learning setup where the N agents interact
+with each other and the environment repeatedly over episodes, without knowing the model. Each episode
+consists of the T -step N -player game defined at the beginning of Section 2. We propose MF-OML (MeanField Occupation-Measure Learning), an online mean-field RL algorithm for finding approximate NEs of
+symmetric N -player games based on the (MF-OMI) formulation and the MF-OMI-FBS algorithm proposed in
+the previous section.
+Nash regret. To measure the performance of the online RL algorithm producing a sequence of strategy
+profiles π m ∈ Π for each episode m ≥ 0, we define a quantity NashRegret(M ) to characterize the cumulative
+deviation from Nash equilibrium of the algorithm up to episode M − 1 (M ≥ 1), which is formally defined
+as the following:
+M
+−1
+X
+NashRegret(M ) :=
+NashConv(π m ).
+(11)
+m=0
+
+Overview of MF-OML. The design of MF-OML follows three steps. In the first step, in Section 4.1, we show
+that we can replace rewards R and transitions P at unreachable states (to be formally defined below) with
+arbitrarily specified default rewards (e.g., zero) and transitions (e.g., self-only transition), without changing
+the value of NashConv at any strategy profile π. This allows us to equivalently consider learning and solving
+the modified N -player game. This modification makes the model identifiable and thus is important in the
+learning procedure. We refer to the modified rewards and transitions as R̃ and P̃ for later reference.
+In the second step, we extend MF-OMI-FBS to MF-OMI-FBS-Approx in Section 4.2 to allow for inexact
+estimations of cR̃ (dk ) and P̃ in each iteration k ≥ 0. We provide the convergence analysis of this algorithm
+for any given estimation errors. Such an algorithm serves as a foundation for the final RL algorithm, where
+we provide concrete approximation procedures with statistical estimation guarantees.
+Then in the third step, we design an exploration scheme (cf. Algorithm 3) in Section 4.3 for the
+agents to learn the rewards and the transitions in each iteration k ≥ 0. To this end, in each iteration
+k of MF-OMI-FBS-Approx, we conduct nk rounds of sample collections, each time picking one agent uniformly at random for pure exploration, while having the remaining N − 1 agents executing the policy
+π k ∈ Normalize(dk ) induced from the current iteration. We establish the high probability bounds for the
+estimation errors of this exploration scheme.
+5
+
+Here the big-Ω notation hides problem-dependent constants S, A, T, CR , Rmax and is in the sense of ϵ → 0.
+
+12
+
+The final MF-OML algorithm, summarized in Algorithm 4, combines MF-OMI-FBS-Approx with the exploration and estimation procedures in the third step. We combine all the analyses in previous discussions and
+establish the regret bound for MF-OML in Section 4.4.
+To facilitate the presentation below, we use NashConv(π; R̃, P̃ ) to denote the NashConv of strategy profile
+π under the N -player game with modified rewards R̃ and transitions P̃ . Similarly, we use Expl(π; R̃, P̃ ) to
+denote the Expl of policy π under the MFG with modified rewards R̃ and transitions P̃ .
+
+4.1
+
+Uniform exploration and default modifications at unreachable states
+
+We begin by showing that modifying rewards and transitions at states that are unreachable under the uniform
+exploration policy sequence with default values will lead to equivalent games in the sense of NashConv. We
+first make the following definitions.
+exp
+
+Definition 4.1. The uniform/pure exploration policy sequence π exp ∈ Π is defined such that πt (s, a) =
+1/A (s ∈ S, a ∈ A, t ∈ T ). The unreachable states set Stunreach ⊂ S is defined as the subset of states that are
+exp
+not reachable at time step t ∈ T under the uniform policy π exp , namely Stunreach = {s ∈ S|Pπ (st = s) = 0},
+where Pπ denotes the agent state-action trajectory probability induced by following policy sequence π.
+Now we are ready to state the equivalence lemma for the modified models.
+Lemma 8. Define a modified transition model P̃ such that for any a ∈ A, P̃t (·|s, a) := Pt (·|s, a) when
+s∈
+/ Stunreach , while P̃t (·|s, a) is set to p0 (·), an arbitrary probability vector in ∆(S) when s ∈ Stunreach . Also
+define a modified reward R̃t (s, a, Lt ) which is R̃t (s, a, Lt ) = Rt (s, a, Lt ) for s ∈
+/ Stunreach and R̃t (s, a, Lt ) = 0
+otherwise. Then for any π ∈ Π, we have Γ(π; P ) = Γ(π; P̃ ) and Expl(π) = Expl(π; R, P ) = Expl(π; R̃, P̃ ).
+In addition, for any strategy profile π, we have NashConv(π) = NashConv(π; R, P ) = NashConv(π; R̃, P̃ ).
+Proof. Let dt be the occupation measure of policy π under the original transition model P (for an arbitrary
+agent i), namely d = Γ(π; P ). We first show that s ∈
+/ Stunreach for any s with dt (s, a) > 0 for some a ∈ A.
+We prove this by induction. Since s ∈
+/ S0unreach if and only if s0 = s, and d0 (s, a) > 0 implies s0 = s, the
+unreach and d
+statement holds when t = 0. Suppose the statement is true for time step t. If s ∈ St+1
+t+1 (s, a) > 0
+P
+π
+′
+for some a ∈ A, then P (st+1 = s) = a′ ∈A dt+1 (s, a ) > 0. On the other hand, note that
+X X exp
+exp
+Pπ (st+1 = s) =
+Pπ (st = s′ )π exp (a′ |s′ )Pt (s|s′ , a′ ).
+s′ ∈S a′ ∈A
+exp
+
+unreach implies Pπ (s = s′ )P (s|s′ , a′ ) = 0 for all
+Since π exp (a′ |s′ ) > 0 for all s′ ∈ S, a′ ∈ A, s ∈ St+1
+t
+t
+s′ ∈ S, a′ ∈ A, which further implies Pt (s|s′ , a′ ) = 0 for any s′ ∈
+/ Stunreach .
+Then since
+X X
+Pπ (st+1 = s) =
+dt (s′ , a′ )Pt (s|s′ , a′ ) > 0,
+s′ ∈S a′ ∈A
+
+there exists at least one pair of s′ , a′ ∈ S × A such that dt (s′ , a′ ) > 0 and Pt (s|s′ , a′ ) > 0. By induction,
+unreach and P (s|s′ , a′ ) > 0 leads to contradicdt (s′ , a′ ) > 0 implies s′ ∈
+/ Stunreach , which, together with s ∈ St+1
+t
+unreach for any s such that d
+tion. Then we have shown that s ∈
+/ St+1
+t+1 (s, a) > 0 for some a ∈ A, thus the
+induction is finished.
+We then prove that for any player, the same policy π induces the same occupation measures on theses
+two models, namely dt (s, a) = d˜t (s, a) for all s ∈ S, a ∈ A, t ∈ T , where d˜ = Γ(π; P̃ ) is the occupation
+measure of policy π under the modified transition model P̃ (for an arbitrary agent i). We show this by
+induction on time t. When t = 0, it is true by the same initialization. Suppose dt (s, a) = d˜t (s, a) for all
+(s, a) ∈ S × A, where dt and d˜t are the occupation measures under the original model and the modified
+model, respectively. Since
+dt+1 (s, a) = πt+1 (a|s)Pπ (st+1 = s),
+13
+
+d˜t+1 (s, a) = πt+1 (a|s)P̃π (st+1 = s),
+We only need to show Pπ (st+1 = s) = P̃π (st+1 = s). In fact,
+XX
+XX
+Pπ (st+1 = s) =
+dt (s′ , a)Pt (s|s′ , a) =
+d˜t (s′ , a)Pt (s|s′ , a)
+s′ ∈S a∈A
+
+=
+
+XX
+
+s′ ∈S a∈A
+′
+
+′
+
+d˜t (s , a)P̃t (s|s , a) = P̃π (st+1 = s),
+
+s′ ∈S a∈A
+
+where we use the fact that s′ ∈
+/ Stunreach for any s′ with dt (s′ , a) > 0 and Pt (s|s′ , a) = P̃t (s|s′ , a) for
+′
+unreach
+s ∈
+/ St
+. The induction is finished (and hence we have proved that Γ(π; P ) = d = d˜ = Γ(π; P̃ )).
+The last step is to prove the NashConv of the same strategy profile under these two N -player games
+are the same. This reduces to showing
+that for any i ∈ [N ], V i (π) = Ṽ i (π) for any strategy profile π.
+
+P
+i i
+N
+Here Ṽ i (π) = Ẽπ
+t∈T r̃t (st , at , Lt ) is the expected cumulative reward of agent i under the modified
+model. More precisely, the expectation Ẽπ is over the trajectory of states and actions when the agents take
+independent actions ajt ∼ πtj (sjt ) for j ∈ [N ] and t ∈ T under the modified rewards R̃ and transitions P̃ . Let
+djt (resp. d˜jt ) be the occupation measure of agent j ∈ [N ] under the original (resp. modified) model, who
+takes policy sequence π j . Then we have djt (s, a) = d˜jt (s, a) for any j ∈ [N ], s ∈ S, a ∈ A by the previous
+induction proof. In addition, we have
+#
+"
+X
+X
+Y j j j
+X
+i
+i i
+N
+R̃t (sit , ait , LN (st , at ))
+Ṽ (π) = Ẽπ
+r̃t (st , at , Lt ) =
+dt (st , at ),
+t∈T (st ,at )∈S N ×AN
+
+t∈T
+
+j∈[N ]
+
+where LN maps S N × AN to ∆(S × A), defined as
+LN (s, a)(s, a) :=
+
+1 X
+1(si = s, ai = a).
+N
+i∈[N ]
+
+Since we have proved that dit (sit , ait ) > 0 implies sit ∈
+/ Stunreach , therefore by definition we also have that
+R̃t (sit , ait , LN (st , at )) = Rt (sit , ait , LN (st , at )) when dit (sit , ait ) > 0. Hence we have
+X
+X
+Y j j j
+Ṽ i (π) =
+R̃t (sit , ait , LN (st , at ))
+d˜t (st , at )
+t∈T (st ,at )∈S N ×AN
+
+=
+
+X
+
+X
+
+j∈[N ]
+
+Rt (sit , ait , LN (st , at ))
+
+t∈T (st ,at )∈S N ×AN
+
+Y
+
+djt (sjt , ajt ) = V i (π).
+
+j∈[N ]
+
+The proof for exploitability is nearly identical and hence omitted. The proof is thus finished.
+
+4.2
+
+Convergence analysis with approximations
+
+We now propose Algorithm 2, namely MF-OMI-FBS-Approx, which is an inexact version of MF-OMI-FBS with
+approximation oracles ĉk and P̂ k for the reward vector cR̃ (dk ) and the transition model P̃ with default
+modifications defined in Lemma 8, respectively.
+The following theorem establishes the convergence of MF-OMI-FBS-Approx.
+Theorem 9. Suppose that Assumptions 1 and 2 hold, and in addition that for k ≥ 0,
+X
+∥ĉk − cR̃ (dk )∥2 ≤ ϵk1 ,
+max
+|P̂tk (s′ |s, a) − P̃t (s′ |s, a)| ≤ ϵk2 ,
+s∈S,a∈A,t=0,...,T −2
+
+s′ ∈S
+
+where ϵk1 , ϵk2 ≥ 0, ĉk ∈ RSAT with ∥ĉk ∥∞ ≤ Rmax , P̂ k = {P̂t }t∈T is a transition model, namely P̂tk (s′ |s, a) ≥ 0
+P
+and s′ ∈S P̂tk (s′ |s, a) = 1. Then we have the following convergence results.
+14
+
+Algorithm 2 MF-OMI-FBS-Approx: MF-OMI-FBS with Approximation Oracles
+1: Input: initial policy sequence π 0 ∈ Π, step-size α > 0, and perturbation coefficient η ≥ 0.
+0
+
+2: Compute d0 = Lπ .
+3: for k = 0, 1, . . . do
+4:
+5:
+6:
+
+Compute an approximation ĉk of cR̃ (dk ) and an approximate transition model P̂ k of P̃ , resp.
+Update d˜k+1 = dk − α(ĉk + ηdk ).
+Compute dk+1 as the solution to the convex quadratic program:
+
+minimize ∥d − d˜k+1 ∥22 subject to AP̂ k d = b, d ≥ 0.
+7: end for
+
+2 S 2 A2 + 2ϵ2 ) and the
+• When λ = 0 in Assumption 2, for any ϵ > 0, if we adopt the step-size α = ϵ/(2CR
+perturbation coefficient η = ϵ, then for any π k ∈ Normalize(dk ) with dk from Algorithm 2, we have
+
+
+k−1
+X
+√
+k
+k−j−1
+(1 − κϵ ) 2 ϵ̃j  ,
+Expl(π k ) ≤ 2T ϵ + SAT (2T 2 CR + Rmax T ) 2 (1 − κϵ ) 2 +
+j=0
+2 S 2 A2 + 2ϵ2 ) ∈ (0, 1) and
+where κϵ := ϵ2 /(2CR
+q
+T (T − 1) j
+ϵ2 + T (4 + 2αη + 2αRmax SA)(T − 1)ϵj2 + αϵj1 .
+ϵ̃j :=
+2
+2 S 2 A2 ) and η = 0, then for any π k ∈
+• When λ > 0 in Assumption 2, if we adopt α = λ/(2CR
+Normalize(dk ) with dk from Algorithm 2, we have
+
+
+k−1
+X
+√
+k
+k−j−1
+Expl(π k ) ≤ SAT (2T 2 CR + Rmax T ) 2 (1 − κ) 2 +
+(1 − κ) 2 ϵ̃j  ,
+j=0
+2 S 2 A2 ) ∈ (0, 1), and ϵ̃j is defined the same as above when λ = 0.
+where κ := λ2 /(2CR
+
+We will need the following lemmas to prove Theorem 9, the proof of which can be found in Section 5.6.
+Lemma 10. Let P̂ be an arbitrary transition model, and let d˜ ∈ RSAT be some arbitrary constant vector.
+˜ 2 over the set of d with A d = b, d ≥ 0. In addition, let π̂ be a
+Let dˆ be the solution to minimizing ∥d − d∥
+2
+P̂
+˜ 2 over π̂ ∈ Π. Then dˆ = Γ(π̂; P̂ ).
+solution to minimizing ∥Γ(π; P̂ ) − d∥
+Lemma 11. Let P̂ be an arbitrary transition model. Then we have that for any π ∈ Π,
+∥Γ(π; P̂ ) − Γ(π; P̃ )∥1 ≤
+
+X
+T (T − 1)
+max
+|P̂t (s′ |s, a) − P̃t (s′ |s, a)|.
+s∈S,a∈A,t=0,...,T −2 ′
+2
+s ∈S
+
+Proof of Theorem 9. As in the proof of Theorem 6, we prove the convergence result for generic λ and η with
+λ + η > 0 and λ ̸= η, and then specialize it to λ = 0, η > 0 and λ > 0, η = 0, resp. to derive the claimed
+conclusions.
+Firstly, notice that by Lemma 10, the projection step
+dk+1 = Proj{x|A k x=b,x≥0} (d˜k+1 ) = Proj{x|A k x=b,x≥0} (dk − α(ĉk + ηdk ))
+P̂
+
+P̂
+
+on Line 6 of Algorithm 2 can be denoted as dk+1 = Γ(π k+1 ; P̂ k ), where π k+1 minimizes ∥Γ(π; P̂ k ) − d˜k+1 ∥22
+over π ∈ Π.
+15
+
+Now we show that dk+1 is close to
+dk+1,⋆ := Proj{x|A x=b,x≥0} (d˜k+1 ) = Proj{x|A x=b,x≥0} (dk − α(ĉk + ηdk )).
+P̃
+
+P̃
+
+Again by Lemma 10, we have dk+1,⋆ = Γ(π k+1,⋆ ; P̃ ) where π k+1,⋆ minimizes ∥Γ(π; P̃ ) − d˜k+1 ∥22 over π ∈ Π.
+In addition, we have that for any π ∈ Π, by Lemma 11, we have
+T (T − 1) k
+∥Γ(π; P̃ ) − d˜k+1 ∥2 − ∥Γ(π; P̂ k ) − d˜k+1 ∥2 ≤ ∥Γ(π; P̃ ) − Γ(π; P̂ k )∥2 ≤ ∥Γ(π; P̃ ) − Γ(π; P̂ k )∥1 ≤
+ϵ2 .
+2
+Hence we have
+∥dk+1,⋆ − d˜k+1 ∥2 − ∥dk+1 − d˜k+1 ∥2 = inf ∥Γ(π; P ) − d˜k+1 ∥2 − inf ∥Γ(π; P̂ k ) − d˜k+1 ∥2
+π∈Π
+π∈Π
+
+
+
+
+= − sup −∥Γ(π; P ) − d˜k+1 ∥2 + sup −∥Γ(π; P̂ k ) − d˜k+1 ∥2
+π∈Π
+
+(12)
+
+π∈Π
+
+T (T − 1) k
+≤ sup ∥Γ(π; P ) − d˜k+1 ∥2 − ∥Γ(π; P̂ k ) − d˜k+1 ∥2 ≤
+ϵ2 .
+2
+π∈Π
+Now let π k+1 ∈ Normalize(dk+1 ) and then define dˆk+1,⋆ := Γ(π k+1 ; P ). Then noticing that dk+1 =
+Γ(π k+1 ; P̂ k ) by Lemma 4, we have by Lemma 11 that
+T (T − 1) k
+ϵ2 .
+∥dk+1 − dˆk+1,⋆ ∥2 ≤
+2
+
+(13)
+
+Next we show that dˆk+1,⋆ is feasible and O(ϵk2 )-sub-optimal for minimizing ∥d − d˜k+1 ∥22 subject to Ad =
+b, d ≥ 0. To see this, first notice that by Lemma 4, we have Adˆk+1,⋆ = b and dˆk+1,⋆ ≥ 0, and hence dˆk+1,⋆ is
+feasible for the aforementioned quadratic optimization problem. Then to show the sub-optimality gap, we
+simply notice that by (12) and (13),
+∥dˆk+1,⋆ − d˜k+1 ∥2 ≤ ∥dk+1 − d˜k+1 ∥2 + ∥dk+1 − dˆk+1,⋆ ∥2
+≤ ∥dk+1 − d˜k+1 ∥2 − ∥dk+1,⋆ − d˜k+1 ∥2 + ∥dk+1,⋆ − d˜k+1 ∥2 + ∥dk+1 − dˆk+1,⋆ ∥2
+
+(14)
+
+≤ ∥dk+1,⋆ − d˜k+1 ∥2 + T (T − 1)ϵk2 .
+Then by the strong convexity of the quadratic objective f (d) := ∥d − d˜k+1 ∥22 , we have
+f (dˆk+1,⋆ ) − f (dk+1,⋆ ) ≥ ∇f (dk+1,⋆ )⊤ (dˆk+1,⋆ − dk+1,⋆ ) + ∥dˆk+1,⋆ − dk+1,⋆ ∥22
+≥ ∥dˆk+1,⋆ − dk+1,⋆ ∥2 ,
+
+(15)
+
+2
+
+where the first inequality is by strong convexity, and for the second inequality, we make use of the property
+that dk+1,⋆ is the optimal solution to minimizing f (d) subject to Ad = b, d ≥ 0, and that dˆk+1,⋆ is also
+feasible in the sense that Adˆk+1,⋆ = b, dˆk+1,⋆ ≥ 0, and hence by the global optimality condition of convex
+constrained optimization problems [12, §4.2.3] we have ∇f (dk+1,⋆ )⊤ (dˆk+1,⋆ − dk+1,⋆ ) ≥ 0.
+Now since dk , dˆtk+1,⋆ and dk+1,⋆
+(t ∈ T ) are probability distributions over S × A due to Lemma 4 and
+t
+their definitions by Γ, and since d˜k+1 = dk − α(ĉk + ηdk ), we have
+∥dˆk+1,⋆ − d˜k+1 ∥2 + ∥dk+1,⋆ − d˜k+1 ∥2 ≤ ∥dˆk+1,⋆ − d˜k+1 ∥1 + ∥dk+1,⋆ − d˜k+1 ∥1
+≤ ∥dˆk+1,⋆ − (1 − αη)dk ∥1 + ∥dk+1,⋆ − (1 − αη)dk ∥1 + 2α∥ĉk ∥1
+≤ 2(2 + αη)T + 2αRmax SAT = (4 + 2αη + 2αRmax SA)T.
+Hence we have that by (14) and (15),
+∥dˆk+1,⋆ − dk+1,⋆ ∥22 ≤ ∥dˆk+1,⋆ − d˜k+1 ∥22 − ∥dk+1,⋆ − d˜k+1 ∥22
+16
+
+= (∥dˆk+1,⋆ − d˜k+1 ∥2 + ∥dk+1,⋆ − d˜k+1 ∥2 )(∥dˆk+1,⋆ − d˜k+1 ∥2 − ∥dk+1,⋆ − d˜k+1 ∥2 )
+≤ (4 + 2αη + 2αRmax SA)T 2 (T − 1)ϵk2 ,
+and hence together with (13), we have
+∥dk+1 − dk+1,⋆ ∥2 ≤ ∥dk+1 − dˆk+1,⋆ ∥2 + ∥dˆk+1,⋆ − dk+1,⋆ ∥2
+q
+T (T − 1) k
+≤
+ϵ2 + T (4 + 2αη + 2αRmax SA)(T − 1)ϵk2 .
+2
+
+(16)
+
+k (d) := Proj
+k
+Define F̂α,η
+{x|A k x=b,x≥0} (d − α(ĉ + ηd)). Then Algorithm 2 can be represented compactly
+P̂
+
+k (dk ). Now let d⋆ be a fixed-point of F
+as dk+1 = F̂α,η
+α,η , which exists by Lemma 5 (applied to R̃ and P̃ ) and
+the existence of mean-field NE (as guaranteed by Assumption 1). Then we have
+k
+∥dk+1 − d⋆ ∥2 = F̂α,η
+(dk ) − Fα,η (d⋆ )
+k
+
+2
+
+k
+
+≤ Proj{x|A k x=b,x≥0} (d − α(ĉ + ηdk )) − Proj{x|A x=b,x≥0} (dk − α(ĉk + ηdk ))
+P̃
+
+P̂
+
+k
+
+k
+
+k
+
+k
+
+k
+
+2
+k
+
++ Proj{x|A x=b,x≥0} (d − α(ĉ + ηd )) − Proj{x|A x=b,x≥0} (d − α(c(d ) + ηd ))
+P̃
+
+P̃
+
+k
+
+k
+
+k
+
++ Proj{x|A x=b,x≥0} (d − α(c(d ) + ηd )) − Fα,η (d )
+P̃
+
+= ∥d
+
+k+1
+
+k+1,⋆
+
+−d
+
+k
+
+2
+
+⋆
+
+2
+
+⋆
+
+∥2 + ∥Fα,η (d ) − Fα,η (d )∥2
+
++ Proj{x|A x=b,x≥0} (dk − α(ĉk + ηdk )) − Proj{x|A x=b,x≥0} (dk − α(c(dk ) + ηdk ))
+P̃
+P̃
+2
+q
+T (T − 1) k
+ϵ2 + T (4 + 2αη + 2αRmax SA)(T − 1)ϵk2
+≤
+2
+q
+2 S 2 A2 + 2η 2 ))∥dk − d⋆ ∥ + αϵk ,
++ (1 − (λ + η)2 /(2CR
+2
+1
+where the last step makes use of the contraction inequality (10) of Fα,η proved in Theorem 6 (applied to
+R̃ and P̃ here, which also satisfy Assumption 1 and Assumption 2 by the definitions of the modifications),
+(16) and the non-expansive property of projections.
+By telescoping over k, we conclude that
+k
+
+∥dk − d⋆ ∥2 ≤ (1 − κλ,η ) 2 ∥d0 − d⋆ ∥2 +
+
+k−1
+X
+k−j−1
+(1 − κλ,η ) 2 ϵ̃j
+j=0
+
+k
+
+≤ 2(1 − κλ,η ) 2 +
+
+k−1
+X
+k−j−1
+(1 − κλ,η ) 2 ϵ̃j ,
+j=0
+
+2 S 2 A2 + 2η 2 ) ∈ (0, 1) and
+where κλ,η := (λ + η)2 /(2CR
+q
+T (T − 1) j
+ϵ̃j :=
+ϵ2 + T (4 + 2αη + 2αRmax SA)(T − 1)ϵj2 + αϵj1 .
+2
+
+ˆ η (s, a, L ) := R̃ (s, a, L ) − ηL (s, a),
+Finally, as in the end of the proof of Theorem 6, by defining R̃
+t
+t
+t
+t
+for any π k ∈ Normalize(dk ), let π ⋆ ∈ Normalize(d⋆ ), then by Lemma 5 applied to R̃ and P̃ , we have
+ˆ η ; P̃ ) = 0, and hence by Lemma 3 applied to R̃, P̃ and R̃
+ˆ η , we have
+Expl(π ⋆ ; R̃
+ˆ η , P̃ )|
+Expl(π k ; R̃, P̃ ) ≤ |Expl(π k ; R̃, P̃ ) − Expl(π ⋆ ; R̃, P̃ )| + |Expl(π ⋆ ; R̃, P̃ ) − Expl(π ⋆ ; R̃
+≤ (2T CR + Rmax )∥dk − d⋆ ∥1 + 2T η
+
+
+k−1
+X
+√
+k
+k−j−1
+≤ 2T η + SAT (2T 2 CR + Rmax T ) 2 (1 − κλ,η ) 2 +
+(1 − κλ,η ) 2 ϵ̃j  .
+j=0
+
+17
+
+(17)
+
+Finally, by noticing that Expl(π k ) = Expl(π k ; R, P ) = Expl(π k ; R̃, P̃ ) thanks to Lemma 8, the proof is
+complete by taking η = ϵ > 0 when λ = 0 and η = 0 when λ > 0.
+
+4.3
+
+Exploration and estimations
+
+We now introduce the third step towards the final online mean-field RL algorithm. In this section, we design
+a sampling and exploration scheme and the associated estimation procedures of rewards and transitions
+(with default modification) to compute estimates ĉk and P̂ k and the associated estimation errors ϵk1 , ϵk2 for
+Algorithm 2 in Theorem 9.
+Sampling and exploration. The main idea for exploration is to conduct nk independent rounds of sample
+collections in each iteration k of Algorithm 2, each time randomly selecting one agent for pure exploration,
+while having the remaining N − 1 agents following the current policy π k ∈ Normalize(dk ). The algorithm
+for sampling and exploring at iteration k is summarized in Algorithm 3.6
+Algorithm 3 SampleExplore(π k , nk , k)
+1: for l = 0, 1, . . . , nk − 1 (independently) do
+
+Sample agent i0 (k, l) from [N ] uniformly. Let agent i0 (k, l) take the exploration policy sequence
+exp
+πt (s, a) = 1/A (s ∈ S, a ∈ A, t ∈ T ), and the other N − 1 agents all follow policy sequence π k .
+i (k,l) i0 (k,l) i0 (k,l) i0 (k,l)
+Collect trajectory data {(st0
+, at
+, rt
+, st+1 )}t∈T .
+3: end for
+i0 (k,l) i0 (k,l) i0 (k,l) i0 (k,l)
+4: Output: {(st
+, at
+, rt
+, st+1 )}t∈T ,l∈{0,...,nk −1} .
+
+2:
+
+i (j,l)
+
+i (j,l)
+
+i (j,l)
+
+i (j,l)
+
+0
+Estimations. Given the collected trajectory data {(st0 , at0 , rt0 , st+1
+)}t∈T ,l∈{0,...,nj −1},j≤k from
+Algorithm 3 up to iteration k, the estimated rewards and transition probabilities are then computed via
+(conditional) sample mean estimations based on the collected trajectories, with default values (0 for rewards
+and p0 for transitions, as stated in Lemma 8) used for states and actions that are not visited by the
+trajectories. More concretely, we compute estimated rewards and transitions at iteration k as follows.
+For any (s, a, t) ∈ S × A × T ,
+
+Pnk −1 i0 (k,l)
+1
+i (k,l) i0 (k,l)
+
+rt
+1{(st0
+, at
+) = (s, a)}, if nk (s, a, t) > 0,
+l=0
+k
+R̂t (s, a) = nk (s, a, t)
+(18)
+
+0,
+if nk (s, a, t) = 0.
+
+For any (s, a, s′ , t) ∈ S × A × S × T ,
+P
+Pnj −1
+i0 (j,l) i0 (j,l) i0 (j,l)
+
+, at
+, st+1 ) = (s, a, s′ )}
+t
+ j≤k l=0 1{(sP
+,
+P̂tk (s′ |s, a)) =
+nj (s, a, t)
+j≤k
+
+
+p0 (s′ ),
+
+if
+
+P
+
+if
+
+P
+
+j≤k nj (s, a, t) > 0,
+
+(19)
+
+j≤k nj (s, a, t) = 0.
+
+P k −1
+i (k,l)
+i (k,l)
+Here nk (s, a, t) = nl=0
+1{st0
+= s, at0
+= a}.
+Note that since the transition models do not depend on the mean-field terms dkt which vary over iterations,
+we collect all sample trajectories in the history (instead of only for iteration k as in the case of rewards
+estimations) for the estimations of the transition models.
+i (k,l),k,l
+
+6
+
+i (k,l),k,l
+
+i (k,l),k,l
+
+A more precise notation for the trajectory states, actions and rewards would be st0
+, at0
+and rt0
+, which
+would fully disambiguate the different episodes l and iterations k. But since k, l already appear in i0 (k, l), we simplify them to
+i (k,l)
+i (k,l)
+i (k,l)
+be st0
+, at0
+and rt0
+to facilitate the discussion below.
+
+18
+
+Finally, we concatenate the estimations into
+
+
+−R̂0k (·, ·)
+
+
+..
+SAT
+ĉk = 
+and P̂ k
+∈R
+.
+
+(20)
+
+−R̂Tk (·, ·)
+for use in iteration k of Algorithm 2.
+Statistical estimation errors. The following proposition establishes the statistical estimation errors of
+the reward estimations (18) and transition estimations (19) for each state, action and time step. We leave
+k
+k
+a remainder term CR ∥dkt − Lπt ∥1 with Lπt = Γ(π k ; P ) to better illustrate the components of the reward
+estimation errors. The explicit bound of the estimation errors is given in Corollary 13.
+Proposition 12. Suppose that Assumption 1 holds. For any s ∈ S, a ∈ A, t ∈ T and any δ > 0, if
+, then with probability at least 1 − (1 + S)δ, the following two bounds hold:
+nk > log(2/δ)
+2p2
+min
+
+R̂tk (s, a) − R̃t (s, a, dkt ) ≤ CR SA
+|
+
+
+
+1
++
+N
+{z
+
+r
+
+π
+2N
+
+s
+
+
++
+}
+
+mean-field approximation error
+
+2
+2Rmax
+log(4/δ)
+k
+p
++ CR ∥dkt − Ltπ ∥1 ,
+{z
+}
+pmin nk − log(2/δ)nk /2 |
+execution error
+|
+{z
+}
+concentration error
+
+v
+u
+u
+k ′
+′
+|P̂t (s |s, a) − P̃t (s |s, a)| ≤ t
+
+2 log(4/δ)
+q
+, for all s′ ∈ S.
+P
+P
+pmin j≤k nj − log(2/δ) j≤k nj /2
+|
+{z
+}
+
+(21)
+
+concentration error
+
+k
+
+exp
+
+exp
+
+π (s, a) > 0, where dπ
+Here Lπt = Γ(π k ; P ), pmin = mins∈S
+is the occupation measure under
+/ tunreach , t∈T dt
+exp
+exp
+the pure exploration policy π
+with πt (s, a) = 1/A (s ∈ S, a ∈ A, t ∈ T ).
+
+Remark 2. We briefly comment on the compositions of the reward estimation errors and transition estimation errors. Due to the dependency on the mean-field terms dkt , the reward estimation errors are combinations
+of mean-field approximation error similar to Theorem 1, concentration errors from the Hoeffding inequality,
+and execution errors resulting from the mapping from dkt to π k via Normalize. The symmetry aggregation
+effect of the mean-field terms also necessitates novel conditioning techniques that are not needed in the classical MARL literature. In contrast, the transition estimation errors consists of merely the concentration errors
+since the transition model is independent of the mean-field terms.
+1 P
+i,k,l
+= s, ai,k,l
+= a} (s ∈ S, a ∈ A, t ∈ T ), where si,k,l
+and ai,k,l
+t
+t
+t
+i∈[N ] 1{st
+N
+denote the state and action of agent i ∈ [N ] at time step t ∈ T in the l-th episode of trajectory collection
+i (k,l),k,l
+i (k,l)
+in SampleExporeEstimation(π k , nk , k). Particularly, recall from footnote 6 that st0
+= st0
+and
+i0 (k,l),k,l
+i0 (k,l)
+at
+= at
+.
+Proof. Let LN,k,l
+(s, a) =
+t
+
+k
+
+Part 1: Gap between R̂tk (s, a) and R̃t (s, a, dkt ). We first bound the gap between R̂tk (s, a) and R̃t (s, a, Lπt ).
+When s ∈ Stunreach , nk (s, a, t) = 0 a.s., and hence both R̂tk (s, a) and R̃t (s, a, Lπt ) are zero a.s.. Thus we only
+need to bound the gap for s ∈
+/ Stunreach .
+Pnk −1
+i (k,l)
+i (k,l)
+We first provide a high probability bound for nk (s, a, t). Since nk (s, a, t) = l=0
+1{st0
+= s, at0
+=
+i0 (k,l)
+i0 (k,l)
+a}, and since 1{st
+= s, at
+= a} (l = 0, . . . , nk − 1) are nk i.i.d. random variables with a.s. bound 1
+exp
+and expectation dt (s, a), by Hoeffding’s inequality we have for any s ∈
+/ Stunreach and ϵ > 0,
+
+exp
+P (nk (s, a, t) ≥ (pmin − ϵ)nk ) ≥ P nk (s, a, t) ≥ (dπt (s, a) − ϵ)nk
+
+≥ 1 − exp −2nk ϵ2 .
+19
+
+Therefore, for any δ > 0 and any s ∈
+/ Stunreach , with probability at least 1 − δ/2,
+
+
+s
+log(2/δ) 
+nk (s, a, t) ≥ pmin −
+nk > 0
+2nk
+since nk > log(2/δ)/(2p2min ).
+i (k,l) i0 (k,l)
+When nk (s, a, t) > 0, let Itk (s, a) = {l ∈ {0, . . . , nk − 1} : (st0
+, at
+) = (s, a)}. Note that
+k
+
+R̂tk (s, a) − R̃t (s, a, Lπt ) =
+
+≤
+
+1
+nk (s, a, t)
+
+i (k,l)
+
+X
+
+rt0
+
+k
+
+− R̃t (s, a, Lπt )
+
+l∈Itk (s,a)
+
+h
+i
+X  i (k,l)
+1
+k
+rt0
+− E R̃t (s, a, LN,k,l
+)|I
+(s,
+a)
+t
+t
+nk (s, a, t) k
+l∈It (s,a)
+{z
+}
+|
+J1
+
++
+
+i
+
+X  h
+1
+k
+E R̃t (s, a, LN,k,l
+)|Itk (s, a) − R̃t (s, a, Lπt )
+t
+nk (s, a, t) k
+l∈It (s,a)
+|
+{z
+}
+J2
+
+:= J1 + J2 .
+To bound J1 , notice that when nk (s, a, t) = |Itk (s, a)| > 0, conditioned on Itk (s, a), we have that7
+h
+i
+i (k,l)
+k
+rt0
+− E R̃t (s, a, LN,k,l
+)|I
+(s,
+a)
+(l ∈ Itk (s, a))
+t
+t
+are nk (s, a, t) bounded independent random variables with bound 2Rmax and conditional mean 0. Hence
+Hoeffding inequality implies that
+
+
+
+
+nk (s, a, t)ϵ2
+k
+,
+P J1 ≥ ϵ|It (s, a) ≤ 2 exp −
+2
+2Rmax
+and thus
+h h
+i
+i
+P(J1 ≥ ϵ|nk (s, a, t)) = E E 1{J1 ≥ ϵ}|Itk (s, a) nk (s, a, t)
+h
+i
+2
+= E P(J1 ≥ ϵ|Itk (s, a))|nk (s, a, t) ≤ 2 exp(−nk (s, a, t)ϵ2 /(2Rmax
+)).
+Hence we have
+
+
+
+
+s
+
+
+
+
+
+log(2/δ)  
+nk
+2nk
+
+
+ 
+s
+log(2/δ)
+ nk 
++ P J1 ≥ ϵ, nk (s, a, t) < pmin −
+2nk
+
+P (J1 ≥ ϵ) = P J1 ≥ ϵ, nk (s, a, t) ≥ pmin −
+
+≤
+
+∞
+X
+
+P (J1 ≥ ϵ|nk (s, a, t) = n) P (nk (s, a, t) = n) + δ/2
+
+n=n0k
+7
+
+This can be verified by the definition of independence via noticing that conditioning on Itk (s, a) is equivalent to conditioning
+i (k,l)
+i (k,l)
+nk −1
+on {1{(st0
+, at0
+) = (s, a)}}l=0
+.
+
+20
+
+∞
+X
+
+
+
+nϵ2
+P (nk (s, a, t) = n) + δ/2
+≤
+2 exp − 2
+2Rmax
+0
+n=nk
+
+
+
+n0k ϵ2
+≤ 2 exp − 2
+P nk (s, a, t) ≥ n0k + δ/2
+2Rmax
+
+
+ 
+q
+log(2/δ)
+2
+p
+−
+n
+ϵ
+min
+k 
+2nk
+
+ + δ/2,
+≤ 2 exp 
+−
+
+
+2
+2Rmax
+where n0k = ⌈(pmin −
+
+q
+
+log(2/δ)
+2nk )nk ⌉ > 0. Then with probability at least 1 − δ, J1 ≤
+
+r
+
+2
+2Rmax
+√ log(4/δ)
+.
+pmin nk − log(2/δ)nk /2
+
+To bound J2 , we have that a.s.,
+J2 ≤
+≤
+
+1
+nk (s, a, t)
+CR
+nk (s, a, t)
+
+i
+h
+k
+k
+)
+I
+(s,
+a)
+− R̃t (s, a, Lπt )
+E R̃t (s, a, LN,k,l
+t
+t
+
+X
+l∈Itk (s,a)
+
+h
+i
+πk
+k
+E ∥LN,k,l
+−
+L
+∥
+I
+(s,
+a)
+1
+t
+t
+t
+
+X
+l∈Itk (s,a)
+
+Note that
+h
+i
+k
+E LN,k,l
+(s, a) − Lπt (s, a) Itk (s, a)
+t
+
+
+ 
+1 X
+j,k,l
+πk
+k
+k
+1{sj,k,l
+=
+s,
+a
+=
+a}
+−
+L
+(s,
+a)
+I
+(s,
+a),
+i
+(k,
+l)
+I
+(s,
+a)
+=E E
+0
+t
+t
+t
+t
+t
+j∈[N ]
+N
+r
+1
+π
+≤ +
+.
+N
+2N
+= s, aj,k,l
+= a}
+Here we reuse the trick in the proof of Theorem 1: Conditioned on Itk (s, a) and i0 (k, l), 1{sj,k,l
+t
+t
+(j ∈ [N ]\{i0 (k, l)}) are bounded independent random variables with
+ X
+
+1
+k
+j,k,l
+j,k,l
+k
+E
+1{st = s, at = a} It (s, a), i0 (k, l) − Lπt (s, a) ≤ 1/N.
+j∈[N ]\{i0 (k,l)}
+N
+Hence again by Hoeffding inequality as in the proof of Theorem 1, we have that a.s.,
+r
+
+
+π
+1
++
+.
+J2 ≤ CR SA
+N
+2N
+Combining the upper bound of J1 and J2 , we have with probability at least 1 − δ,
+r
+ s
+
+2
+1
+π
+2Rmax
+log(4/δ)
+k
+p
+R̂tk (s, a) − R̃t (s, a, Lπt ) ≤ CR SA
++
++
+.
+N
+2N
+pmin nk − log(2/δ)nk /2
+k
+
+k
+
+And finally, since |R̃t (s, a, Lπt − R̃t (s, a, dkt )| ≤ CR ∥Lπt −dkt ∥1 by Assumption 1, the proof for the rewards
+estimation errors is complete.
+Part 2: Gap between P̂tk (s′ |s, a) and P̃t (s′ |s, a)|. Now we bound the gap |P̂tk (s′ |s, a) − P̃t (s′ |s, a)|. The
+major difference here is that since the transition models are mean-field independent, we can collect all
+samples in the history for the estimations. Similarly, if s ∈ Stunreach , then we have a.s. nk (s, a, t) = 0, and
+hence P̂tk (s′ |s, a) = p0 (s′ ) = P̃t (s′ |s, a). Therefore we only need to consider s ∈
+/ Stunreach . We first obtain a
+P
+similar high probability bound of j≤k nj (s, a, t). Again by Hoeffding inequality, for any ϵ > 0
+
+
+
+
+X
+X
+X
+X
+exp
+P
+nj (s, a, t) ≥ (pmin − ϵ)
+nj  ≥ P 
+nj (s, a, t) ≥ (dπt (s, a) − ϵ)
+nj 
+j≤k
+
+j≤k
+
+j≤k
+
+21
+
+j≤k
+
+
+
+
+
+≥ 1 − exp −2
+
+X
+
+nj ϵ2  .
+
+j≤k
+
+Therefore, for any δ > 0 and any s ∈
+/ Stunreach , with probability at least 1 − δ/2,
+!
+s
+X
+X
+log(2/δ)
+P
+nj (s, a, t) ≥ ñ0k := pmin −
+nj > 0
+2 j≤k nj
+j≤k
+
+since
+
+j≤k
+
+2
+j≤k nj ≥ nk > log(2/δ)/(2pmin ). Then when
+
+P
+
+′
+j≤k nj (s, a, t) > 0, for any s ∈ S
+
+P
+
+nj −1
+
+|P̂tk (s′ |s, a) − P̃t (s′ |s, a)| =
+
+XX
+1
+i (j,l) i (j,l) i0 (j,l)
+P
+1{(st0 , at0 , st+1
+) = (s, a, s′ )}
+n
+(s,
+a,
+t)
+j
+j≤k
+j≤k l=0
+
+i (j,l) i (j,l)
+−P̃t (s′ |s, a)1{(st0 , at0 ) = (s, a)}
+1
+j≤k nj (s, a, t)
+
+where
+
+
+
+X
+
+= P
+
+i (j,l)
+
+0
+1{st+1
+
+= s′ } − P̃t (s′ |s, a)
+
+
+
+,
+
+(j,l)∈I˜tk (s,a)
+
+i (j,l) i (j,l)
+I˜tk (s, a) = {(j, l) : j = 1, . . . , k, l = 0, . . . , nj , (st0 , at0 ) = (s, a)}.
+
+Note that conditioned on I˜tk (s, a),
+i (j,l)
+
+0
+1{st+1
+
+= s′ } − Pt (s′ |s, a),
+
+(j, l) ∈ I˜tk (s, a)
+
+P
+are j≤k nj (s, a, t) independent random variables with values in [−1, 1] and conditional expectation 0. Then
+similar to the bound of J1 above, using Hoeffding inequality one can get
+
+
+
+
+X
+X
+1
+nj (s, a, t) .
+P |P̂tk (s′ |s, a) − P̃t (s′ |s, a)| ≥ ϵ
+nj (s, a, t) ≤ 2 exp − ϵ2
+2
+j≤k
+
+j≤k
+
+Hence similarly
+
+
+
+X
+P |P̂tk (s′ |s, a) − P̃t (s′ |s, a)| ≥ ϵ = P |P̂tk (s′ |s, a) − P̃t (s′ |s, a)| ≥ ϵ,
+nj (s, a, t) ≥ ñ0k 
+
+
+j≤k
+
+
+
+
+
++ P |P̂tk (s′ |s, a) − P̃t (s′ |s, a)| ≥ ϵ,
+
+X
+
+nj (s, a, t) < ñ0k 
+
+j≤k
+
+
+≤ 2 exp −
+
+
+ñ0k ϵ2
+2
+
++ δ/2.
+
+Therefore with probability at least 1 − δ,
+v
+u
+
+u
+|P̂tk (s′ |s, a) − P̃t (s′ |s, a)| ≤ t
+
+pmin
+
+P
+
+Combining the two statements finishes the proof.
+
+22
+
+2 log(4/δ)
+q
+.
+P
+n
+−
+log(2/δ)
+n
+/2
+j≤k j
+j≤k j
+
+, then with probability at least 1 − (1 + S)SAT δ,
+Corollary 13. For each k > 0 and δ > 0, if nk > 2 log(2/δ)
+p2
+min
+
+the sample estimations from (20) satisfy the following bounds:
+X
+∥ĉk − cR̃ (dk )∥2 ≤ ϵk1 ,
+max
+|P̂tk (s′ |s, a) − P̃t (s′ |s, a)| ≤ ϵk2 ,
+s∈S,a∈A,t=0,...,T −2
+
+s′ ∈S
+
+where
+√
+ϵk1 = SAT
+s
+ϵk2 =2S
+
+
+CR SA
+
+1
++
+N
+
+r
+
+π
+2N
+
+s
+
+
++2
+
+2
+Rmax
+log(4/δ)
+pmin nk
+
+!
+
+s
+2
+
++ CR S AT (T − 1)
+
+log(4/δ)
+P
+
+pmin
+
+j≤k nj
+
+,
+
+log(4/δ)
+P
+.
+pmin j≤k nj
+
+(22)
+(23)
+
+, then with probability at least 1 − (1 + S)SAT δ,
+Proof. By Proposition 12, for any δ > 0, if nk > log(2/δ)
+2p2
+min
+
+the inequalities in (21) hold for all s ∈ S,a ∈ A, and t ∈ T , which implies
+
+X
+
+max
+
+s∈S,a∈A,t=0,...,T −2
+
+s′ ∈S
+
+v
+u
+u
+|P̂tk (s′ |s, a) − P̃t (s′ |s, a)| ≤ S t
+
+and
+πk
+
+∥ĉk − cR̃ (L )∥2 ≤
+
+√
+
+
+SAT
+
+CR SA
+
+1
++
+N
+
+r
+
+π
+2N
+
+pmin
+
+P
+
+s
+
+
++
+
+2 log(4/δ)
+q
+,
+P
+log(2/δ) j≤k nj /2
+j≤k nj −
+
+2
+2Rmax
+log(4/δ)
+p
+pmin nk − log(2/δ)nk /2
+
+!
+.
+
+k
+
+In addition, when these inequalities hold, since Lemma 8 implies that Lπ = Γ(π k ; P ) = Γ(π k ; P̃ ), by Lemma
+4 and Lemma 11,
+X
+T (T − 1)
+max
+|P̂tk (s′ |s, a) − P̃t (s′ |s, a)|
+s∈S,a∈A,t=0,...,T −2 ′
+2
+s ∈S
+v
+u
+ST (T − 1) u
+2 log(4/δ)
+q
+,
+≤
+t
+P
+P
+2
+nj /2
+pmin
+nj − log(2/δ)
+
+k
+
+∥dk − Lπ ∥1 ≤
+
+(24)
+
+j≤k
+
+j≤k
+
+thus by Lipschitz continuity,
+k
+
+k
+
+k
+
+∥cR̃ (dk ) − cR̃ (Lπ )∥2 ≤ ∥cR̃ (dk ) − cR̃ (Lπ )∥1 ≤ CR SA∥dk − Lπ ∥1
+v
+CR S 2 AT (T − 1) u
+2 log(4/δ)
+u
+q
+≤
+.
+t
+P
+P
+2
+pmin j≤k nj − log(2/δ) j≤k nj /2
+Combining all the statements above finishes the proof.
+
+4.4
+
+MF-OML and regret analysis
+
+In this section, we put together the ingredients from the previous sections into the final online mean-field
+RL algorithm, MF-OML. The algorithm plugs Algorithm 3 and the associated estimation procedures into the
+iterations of Algorithm 2 that is applied to the rewards and transitions with default modifications. The final
+algorithm is summarized as Algorithm 4.
+The following theorem establishes the regret bounds of MF-OML for both strongly Lasry-Lions monotone
+and (non-strongly) Lasry-Lions monotone settings.
+23
+
+Algorithm 4 MF-OML: Single-Phase Mean-Field Occupation-Measure Learning
+1: Input: d0 ∈ (∆(S × A))T , α > 0, η > 0, {nk }k≥0 .
+2: Compute π 0 ∈ Normalize(d0 ).
+
+3: for k = 0, 1, . . . , do
+4:
+5:
+6:
+7:
+
+i (k,l)
+
+i (k,l)
+
+i (k,l)
+
+i (k,l)
+
+0
+Collect {(st0
+, at0
+, rt0
+, st+1
+)}t∈T ,l∈{0,...,nk −1} = SampleExplore(π k , nk , k).
+Compute estimated rewards and transitions from the collected data with (18) and (19), and then
+construct ĉk and P̂ k with (20).
+Update d˜k+1 = dk − α(ĉk + ηdk ).
+Compute dk+1 as the solution to the convex quadratic program:
+
+minimize ∥d − d˜k+1 ∥22 subject to AP̂ k d = b, d ≥ 0.
+Extract policy π k+1 ∈ Normalize(dk+1 ).
+9: end for
+8:
+
+Theorem 14. Suppose that Assumptions 1 and 2 hold. Then we have the following regret bounds for MF-OML.
+2 S 2 A2 + 2η 2 ) with η =
+• When λ = 0, for a given number of episodes M , if we adopt α = η/(2CR
+−1/6
+−1/12
+3
+max{N
+,M
+} and nk = k , then we have that with probability at least 1 − π 2 (1 + S)SAT δ/6,
+ 2 2 3
+
+p
+S A T M
+2
+9/2
+11/12
+5/4
+NashRegret(M ) = O
+log(1/δ) .
++ S AT M
+(log M )
+N 1/6
+2 S 2 A2 ), η = 0, n = k 3 , then we have that with probability at
+• When λ > 0, if we adopt α = λ/(2CR
+k
+2
+least 1 − π (1 + S)SAT δ/6, for all M ≥ 1 we have
+
+ 2 2 3
+p
+S A T M
+2
+9/2
+3/4
+5/4
+√
+NashRegret(M ) = O
++ S AT M (log M )
+log(1/δ) .
+N
+i0 (k,l)-th
+
+z}|{
+π exp , . . . , π k ) executed
+in the l-th episode (l = 0, . . . , nk − 1) of iteration k of MF-OML to the symmetric strategy profile π k =
+(π k , . . . , π k ). Here we fix/condition on iteration k and the picked agent index i0 (k, l) for the following
+lemma.
+We need the following lemma to connect the strategy profile π k,l = (π k , . . . ,
+
+Lemma 15. Suppose that Assumption 1 holds. Then we have
+k,l
+
+r
+
+k
+
+|NashConv(π ) − Expl(π )| ≤ 2CR SAT
+
+π
+6CR SAT
++
+.
+2N
+N
+
+The proof is mostly identical to the proof Theorem 1 except for having at most two agents deviating
+from the policy π k in the analysis, and is hence omitted.
+We are now ready to prove Theorem 14.
+Proof of Theorem 14. Once again, as in the proof of Theorem 6 and Theorem 9, we prove the regret bounds
+for generic λ and η with λ + η > 0 and λ ̸= η, and then specialize it to λ = 0, η > 0 and λ > 0, η = 0, resp.
+to derive the claimed conclusions.
+log k
+k)
+Let δk := δ/k 2 for k ≥ 1. By Corollary 13, for any k ≥ 1 with nk = k 3 > 2 log(2/δ
+= 2 log(2/δ)+4
+, we
+p2
+p2
+min
+
+min
+
+have that with probability at most (1 + S)SAT δk , the inequalities of rewards and transitions estimations in
+
+24
+
+(22) and (23) (with δ replaced by δk ) will not all be satisfied. Note that since log k ≤ k − 1 < k hold for any
+√
+p2
+3
+k > 0, we have log k < k ≤ min
+8 k hold for any k ≥ 2 2/pmin . Hence for any
+(
+
+ )
+√
+4 log(2/δ) 1/3
+δ
+k ≥ kmin := max 2 2/pmin ,
+,
+p2min
+we have
+
+2 log(2/δk )
+2 log(2/δ) + 4 log k
+2 log(2/δ)
+=
+<
++ k 3 /2 ≤ k 3 .
+p2min
+p2min
+p2min
+P
+2
+2
+Hence by union bound and the fact that ∞
+k=1 1/k = π /6, for any δ > 0, we have that (22) and (23)
+δ
+δ ,
+(with δ replaced by δk ) hold for all k ≥ kmin
+with probability at least 1 − π 2 (1 + S)SAT δ/6. For k < kmin
+k
+k
+the following naive bounds hold automatically a.s. by the definitions of ĉ and P̂ :
+X
+√
+max
+|P̂tk (s′ |s, a) − P̃t (s′ |s, a)| ≤ 2.
+∥ĉk − cR̃ (dk )∥2 ≤ 2Rmax SAT ,
+s∈S,a∈A,t=0,...,T −1
+
+s′ ∈S
+
+Hence by Lemma 15, Theorem 9 (cf. (17)), Corollary 13 and Lemma 8, we have that with probability
+at least 1 − π 2 (1 + S)SAT δ/6, for all k ≥ 0,
+r
+√
+π
+k,l
+k
+SAT / N + 6CR SAT /N
+NashConv(π ) ≤ Expl(π ) + 2CR
+2
+r
+√
+π
+k
+SAT / N + 6CR SAT /N
+= Expl(π ; R̃, P̃ ) + 2CR
+2
+r
+√
+π
+SAT / N + 6CR SAT /N
+≤ 2CR
+2
+
+
+k−1
+X
+√
+k
+k−j−1
++ 2T η + SAT (2T 2 CR + Rmax T ) 2 (1 − κλ,η ) 2 +
+(1 − κλ,η ) 2 ϵ̃j  ,
+j=0
+
+q
+T (T − 1) j
+ϵ2 + T (4 + 2αη + 2αRmax SA)(T − 1)ϵj2 + αϵj1 ,
+2
+2 S 2 A2 + 2η 2 ), ϵk = (22) and ϵk = (23) (with δ replaced by δ ) for k ≥ k δ , and
+α = (λ + η)/(2C
+k
+1
+2
+min
+R
+√
+k = 2 otherwise.
+ϵk1 = 2Rmax SAT
+and
+ϵ
+2
+p
+p
+Since 1/(1 − 1 − κλ,η ) = (1 + 1 − κλ,η )/κλ,η ≤ 2/κλ,η , we have by the fact that nk = k 3 is increasing
+as k grows,
+2 S 2 A2 + 2η 2 ), ϵ̃j :=
+where κλ,η := (λ + η)2 /(2CR
+
+K
+X
+k=0
+
+and also
+
+nk
+
+k−1
+K−1
+K
+K−1
+X
+X
+X
+X 2nK
+p
+k−j−1
+(1 − κλ,η ) 2 ϵ̃j =
+ϵ̃j
+nk ( 1 − κλ,η )k−j−1 ≤
+ϵ̃k
+,
+κλ,η
+j=0
+
+j=0
+
+k=j+1
+
+k=0
+
+PK
+
+p
+k
+k=0 nk ( 1 − κλ,η ) = 2nK /κλ,η . Hence the Nash regret is bounded by
+
+NashRegret(M ) ≤
+
+K nX
+k −1
+X
+
+NashConv(π k,l )
+
+k=0 l=0
+
+r
+
+X
+K
+π
+6CR SAT
+≤ 2CR SAT
++
++ 2T η
+nk
+2N
+N
+k=0
+
+
+K
+k−1
+K
+X
+X
+X
+√
+k
+k−j−1
++ SAT (2T 2 CR + Rmax T ) 2
+nk (1 − κλ,η ) 2 +
+nk
+(1 − κλ,η ) 2 ϵ̃j 
+k=0
+
+r
+
+ 2
+π
+6CR SAT
+K (K + 1)2
+= 2CR SAT
++
++ 2T η
+2N
+N
+4
+25
+
+k=0
+
+j=0
+
+√
+
+XK−1 
+2 SAT K 3 (2T 2 CR + Rmax T )
+ϵ̃k ,
+2+
++
+k=0
+κλ,η
+PK−1
+P
+where K is the smallest integer with which K
+k=0 nk =
+k=0 nk ≥ M . This immediately implies that
+√
+2
+2
+4
+1/4
+1/4
+1/4
+(K − 1) K /4 < M , and hence (K − 1) < 4M . Thus K < (4M ) + 1 ≤ 2(4M )
+= 2 2M
+for any
+M ≥ 1 (since (4M )1/4 > 1 for any M ≥ 1), and similarly for any M ≥ 1, we have
+K
+X
+
+nk =
+
+k=0
+
+((4M )1/4 + 1)2 ((4M )1/4 + 2)2
+(2(4M )1/4 )2 × (3(4M )1/4 )2
+K 2 (K + 1)2
+<
+≤
+= 36M.
+4
+4
+4
+
+Hence it remains to bound
+K−1
+X
+
+k
+
+ϵ̃ =
+
+δ
+⌈kmin
+⌉−1 
+
+X
+
+k=0
+
+PK−1 k
+k=0 ϵ̃ , for which we have
+
+T (T − 1) + 2T
+
+
+p
+√
+(2 + αη + αRmax SA)(T − 1) + 2αRmax SAT
+
+k=0
+K−1
+X
+
+s
+
+s
+
+!
+log(4k 2 /δ)
+P
++α
+SAT CR SA
++ 2Rmax
++ CR S AT (T − 1)
+pmin j≤k nj
+δ
+k=⌈kmin ⌉
+
+s
+!1/4 
+K−1
+2
+2
+X
+p
+log(4k /δ)
+log(4k /δ)
+
+T (T − 1)S
+P
+P
++ 2T (2S + αηS + αRmax S 2 A)(T − 1)
++
+p
+n
+p
+n
+min
+j
+min
+j
+j≤k
+j≤k
+δ
+k=⌈kmin
+⌉
+!
+( √ 
+1/3 )
+
+
+p
+√
+2
+4
+log(2/δ)
+2
+,
++1
+≤ T 2 + 2T 3/2 2 + αη + αRmax SA + 2αRmax SAT
+max
+pmin
+p2min
+√
+r
+
+
+K−1 p
+K−1 p
+√
+π
+2αRmax SAT X log(4k 2 /δ) 2αCR S 2 AT 2 X log(4k 2 /δ)
+1
+3/2 3/2
++ αCR S A
++
++
+TK
++
+√
+√
+N
+2N
+pmin
+pmin
+k2
+k 3/2
+k=1
+k=1
+p
+K−1 p
+K−1
+2ST 2 X log(4k 2 /δ) 2T 3/2 4S + 2αηS + 2αRmax S 2 A X (log(4k 2 /δ))1/4
++
++√
+1/4
+pmin
+k2
+k
+p
+√
+
+k=1
+
+= O (T 2 +
+
+
+
+1
++
+N
+
+r
+
+π
+2N
+
+
+
+!
+
+2
+
+k=1
+
+min
+
+√
+
+log(4k 2 /δ)
+pmin nk
+
+M 1/4
+
+SAT )(log(1/δ))1/3 + S 3/2 A3/2 T 1/2 √
+
+N
+
+p
++S 2 AT 2 log(1/δ) + SA1/2 T 3/2 (log M )5/4 (log(1/δ))1/4
+
+Finally, putting all these together, we have that
+r
+
+
+π
+216CR SAT
+NashRegret(M ) ≤ 72CR SAT
++
++ 72T η M
+2N
+N
+√
+
+XK−1 
+2 SAT K 3 (2T 2 CR + Rmax T )
++
+2+
+ϵ̃k
+k=0
+κλ,η
+√
+r
+
+
+π
+216CR SAT
+32 2SAT M 3/4 (2T 2 CR + Rmax T )
++
++ 72T η M +
+≤ 72CR SAT
+2N
+N
+κλ,η
+√
+K−1
+16 2SAT M 3/4 (2T 2 CR + Rmax T ) X k
++
+ϵ̃
+κλ,η
+k=0
+!
+!
+2
+2
+3
+2
+9/2
+p
+S A T
+S AT
+3/4
+5/4
+√ + Tη M +
+=O
+M (log M )
+log(1/δ) .
+κλ,η
+κλ,η N
+Finally, taking η = max{N −1/6 , M −1/12 } when λ = 0 and η = 0 when λ > 0 finishes the proof.
+26
+
+5
+
+Additional technical proofs
+
+In this section, we provide some additional technical proofs of our results.
+
+5.1
+
+Proof of Theorem 1
+
+Proof. It suffices to show that for any policy sequence π ∈ Π, we have
+r
+√
+π
+SAT / N + 2CR SAT /N.
+|Expl(π) − NashConv(π)| ≤ 2CR
+2
+
+(25)
+
+The key is to bound the differences between Lπt and LN,π
+for t ∈ T , where LN,π
+denotes the empirical statet
+t
+action distribution of the N -player game under the policy sequence π. Thanks to the decoupled dynamics
+P (sit+1 |sit , ait ) of the N -player game, the state-action trajectories {sit , ait }t∈T (induced by π) are independent
+across i ∈ [N ]. Moreover, if we denote Is0 := {i ∈ [N ]|si0 = s0 }, then for any s0 ∈ S, the state-action
+trajectories {sit , ait }t∈T are indeed i.i.d. across i ∈ Is0 . We now show by induction that for any i ∈ [N ] and
+t∈T,
+1 X
+P(sit = s, ait = a) = Lπt (s, a),
+∀s ∈ S, a ∈ A.
+(26)
+N
+i∈[N ]
+
+For t = 0, equality (26) holds by the fact that P(si0 = s, ai0 = a) = π0 (a|s) if s = si0 and P(si0 = s, ai0 = a) = 0
+otherwise, which immediately leads to
+1 X
+1 X
+π
+P(si0 = s, ai0 = a) =
+1{si0 = s}π0 (a|s) = µN
+0 (s)π0 (a|s) = L0 (s, a).
+N
+N
+i∈[N ]
+
+i∈[N ]
+
+Now if equality (26) holds for t, then
+Lπt+1 (s′ , a′ ) = πt+1 (a′ |s′ )
+
+X
+s∈S,a∈A
+
+1 X
+=
+N
+
+X
+
+Pt (s′ |s, a)
+
+1 X
+P(sit = s, ait = a)
+N
+i∈[N ]
+
+P(sit = s, ait = a)Pt (sit+1 = s′ |sit = s, ait = a)πt+1 (a′ |s′ )
+
+i∈[N ] s∈S,a∈A
+
+=
+
+1 X
+P(sit+1 = s′ )P(ait+1 = a′ |sit+1 = s′ )
+N
+i∈[N ]
+
+1 X
+P(sit+1 = s′ , ait+1 = a′ ).
+=
+N
+i∈[N ]
+
+This completes the induction. Now we are ready to bound the differences between Lπt and LN,π
+(t ∈ T ).
+t
+Firstly, notice that by (26), we have
+h
+i
+1 X
+P(sit = s, ait = a) = Lπt (s, a),
+∀s ∈ S, a ∈ A.
+E LN,π
+(s, a) =
+t
+N
+i∈[N ]
+
+By Hoeffding’s inequality, we have that
+
+
+X
+1
+2
+P
+1{sit = s, ait = a} − Lπt (s, a) ≥ ϵ ≤ 2e−2N ϵ .
+N
+i∈[N ]
+
+Hence by the fact that E|X| =
+
+R∞
+
+P(|X| ≥ ϵ)dϵ for any random variable X, we have that
+r
+Z ∞
+Z ∞
+1
+π
+N,π
+π
+−2N ϵ2
+−x2
+E Lt (s, a) − Lt (s, a) ≤ 2
+e
+dϵ = √
+e dx =
+.
+2N
+2N −∞
+0
+0
+
+27
+
+Hence we have
+LN,π
+− Lπt
+t
+
+E
+
+1
+
+=
+
+E LN,π
+(s, a) − Lπt (s, a)
+t
+
+X
+
+r
+≤
+
+s∈S,a∈A
+
+√
+π
+SA/ N .
+2
+
+i
+
+,π
+Similarly, let LN,i,π
+be the empirical state-action distribution of the N -player game when agent i takes
+t
+i
+policy sequence π while the other agents take policy sequence π. Note that E|X − c| = E|Y − c| if X
+i ,π
+and Y have the same distribution and c is deterministic. Since LN,i,π
+(s, a) has the same distribution as
+t
+1
+i = s, ai = a} + 1 1{(si )′ = s, (ai )′ = a}, where si and ai are the state and action of the
+LN,π
+(s,
+a)
+−
+1{s
+t
+t
+t
+t
+t
+t
+t
+N
+N
+i )′ and (ai )′ are the state and action of the i-th agent taking
+i-th agent taking policy π in LN,π
+,
+while
+(s
+t
+t
+t
+i ,π
+policy π i in LN,i,π
+,
+we
+have
+t
+i
+
+,π
+E LN,i,π
+− Lπt
+t
+
+1
+1
+1{sit = s, ait = a} + 1{(sit )′ = s, (ait )′ = a} − Lπt (s, a)
+N
+N
+1
+s∈S,a∈A
+r
+√
+π
+≤ E∥LN,π
+− Lπt ∥1 + 2SA/N ≤
+SA/ N + 2SA/N.
+t
+2
+=E
+
+LN,π
+(s, a) −
+t
+
+X
+
+Next, we rewrite NashConv and Expl by utilizing the (empirical) mean-field flows. In fact, by the
+definitions and the occupation measure representation of (single-agent) MDP value functions, we have
+"
+#
+X
+1 X
+1 X
+N,i,π i ,π
+i i
+i i
+max V (π , π) =
+max Eπi ,π
+rt (st , at , Lt
+) ,
+N
+N
+π i ∈Π
+π i ∈Π
+t∈T
+i∈[N ]
+i∈[N ]
+"
+#
+X
+X
+′
+π′
+π
+π
+V (L ) = Eπ′
+rt (st , at , Lt ) =
+dπt (s, a)Rt (s, a, Lπt )
+t∈T
+
+=
+
+X
+
+s∈S,a∈A,t∈T
+
+s0 ∈S
+
+=
+
+s∈S,a∈A,t∈T
+
+X 1 X
+s0 ∈S
+
+′
+dst 0 ,π (s, a)Rt (s, a, Lπt )
+
+X
+
+µN
+0 (s0 )
+
+N
+
+1 X
+=
+N
+
+′
+
+dst 0 ,π (s, a)Rt (s, a, Lπt )
+
+X
+
+1{si0 = s0 }
+
+s∈S,a∈A,t∈T
+
+i∈[N ]
+
+si0 ,π ′
+
+X
+
+dt
+
+(s, a)Rt (s, a, Lπt ),
+
+i∈[N ] s∈S,a∈A,t∈T
+
+where Eπ′ denotes the expectation over the trajectory {st , at }t∈T resulted from taking policy sequence π ′ in an
+π′
+MDP with transitions Pt (st+1 |st , at ) and initial state distribution µN
+0 , and dt (s, a) := P(st = s, at = a) and
+′
+dst 0 ,π (s, a) := P(st = s, at = a|s0 ) denote the (initial-state conditioned) state-action occupation-measures of
+P
+′
+s0 ,π ′
+the aforementioned trajectory, with dπt (s, a) = s0 ∈S µN
+(s, a).
+0 (s0 )dt
+P
+si0 ,π ′
+Moreover, since s∈S,a∈A,t∈T dt (s, a)Rt (s, a, Lπt ) is the expected value of taking policy π ′ with initial
+state si0 in the previously mentioned Lπ -induced MDP, and from the dynamic programming theory of MDP
+we know that there exists a policy sequence π ⋆ that achieves the optimal expected value for arbitrary initial
+states, we have that for this policy sequence π ⋆ ,
+X
+
+si ,π ⋆
+
+dt 0
+
+π ∈Π
+
+s∈S,a∈A,t∈T
+
+si ,π ′
+
+X
+
+(s, a)Rt (s, a, Lπt ) = max
+′
+
+dt 0
+
+(s, a)Rt (s, a, Lπt ),
+
+∀si0 ∈ S,
+
+s∈S,a∈A,t∈T
+
+which immediately implies that
+max
+′
+π ∈Π
+
+X
+
+X
+
+si ,π ′
+
+dt 0
+
+(s, a)Rt (s, a, Lπt ) =
+
+i∈[N ] s∈S,a∈A,t∈T
+
+X
+i∈[N ]
+
+28
+
+max
+π i ∈Π
+
+X
+s∈S,a∈A,t∈T
+
+si ,π i
+
+dt 0
+
+(s, a)Rt (s, a, Lπt )
+
+Hence we have
+"
+#
+X
+X
+1 X
+1
+′
+′
+max V i (π i , π) − max
+V π (Lπ ) ≤
+max Eπi ,π
+Rt (sit , ait , Lπt ) − max
+V π (Lπ )
+′
+′
+i
+i
+π ∈Π
+π ∈Π
+N
+N
+π ∈Π
+π ∈Π
+i∈[N ]
+
+t∈T
+
+i∈[N ]
+
+"
+
+
+X
+1 X
+N,i,π i ,π
+i i
+i i
+π
++
+max Eπi ,π
+Rt (st , at , Lt
+) − Rt (st , at , Lt )
+N
+π i ∈Π
+
+#
+
+t∈T
+
+i∈[N ]
+
+"
+
+#
+X
+1 X
+1 X
+i i
+π
+max Eπi ,π
+≤
+Rt (st , at , Lt ) − max
+π ′ ∈Π N
+N
+π i ∈Π
+
+si ,π ′
+
+dt 0
+
+(s, a)Rt (s, a, Lπt )
+
+i∈[N ] s∈S,a∈A,t∈T
+
+t∈T
+
+i∈[N ]
+
+X
+
+X
+i ,π
+1 X
++
+max CR
+E∥LN,i,π
+− Lπt ∥1
+t
+N
+π i ∈Π
+t∈T
+
+i∈[N ]
+
+=
+
+X
+X
+1 X
+1 X
+si ,π i
+si ,π i
+max
+max
+dt 0 (s, a)Rt (s, a, Lπt ) −
+dt 0 (s, a)Rt (s, a, Lπt )
+i
+i
+N
+N
+π ∈Π
+π ∈Π
+s∈S,a∈A,t∈T
+s∈S,a∈A,t∈T
+i∈[N ]
+i∈[N ]
+|
+{z
+}
+=0
+r
+
+√
+π
++ CR T
+SA/ N + 2SA/N .
+2
+
+Similarly, we have
+1 X i
+V (π, π) − V π (Lπ ) ≤ CR
+N
+i∈[N ]
+
+r
+
+√
+π
+SAT / N .
+2
+
+Finally, putting together the two mean-field flow approximation errors, we have
+r
+√
+π
+|Expl(π) − NashConv(π)| ≤ 2CR
+SAT / N + 2CR SAT /N.
+2
+This completes the proof.
+
+5.2
+
+Proof of Theorem 2
+
+Proof. The proof is a direct application of [30, Lemma 3], which states that if π ⋆ ∈ Π is an NE of the MFG,
+then ∃d⋆ ∈ RSAT , such that π ⋆ ∈ Normalize(d⋆ ) and that d⋆ solves the linear program which minimizes
+c(d⋆ )⊤ d subject to Ad = b, d ≥ 0; and conversely, if d⋆ solves the linear program which minimizes c(d⋆ )⊤ d
+subject to Ad = b, d ≥ 0, then any π ⋆ ∈ Normalize(d⋆ ) is an NE of the original MFG. Hence it suffices
+to show that d⋆ solves the linear program which minimizes c(d⋆ )⊤ d subject to Ad = b, d ≥ 0 if and only
+if 0 ∈ c(d⋆ ) + N{x|Ax=b,x≥0} . To see this, it suffices to observe that d⋆ solves the linear program which
+minimizes c(d⋆ )⊤ d subject to Ad = b, d ≥ 0 if and only if Ad⋆ = b, d⋆ ≥ 0, and in addition, for any d
+such that Ad = b, d ≥ 0, we have c(d⋆ )⊤ d ≥ c(d⋆ )⊤ d⋆ . This is exactly −c(d⋆ ) ∈ N{x|Ax=b,x≥0} (d⋆ ) by the
+definition of normal cones.
+
+5.3
+
+Proof of Lemma 4
+
+Proof. Firstly, by the definition of AP̂ and b, we have that
+X
+
+xt (s, a)Pt (s′ |s, a) =
+
+s∈S,a∈A
+
+X
+
+x0 (s, a) = µ0 (s),
+
+X
+
+xt+1 (s′ , a′ ),
+
+∀s′ ∈ S, t ∈ {0, . . . , T − 2},
+
+xt (s, a) ≥ 0,
+
+∀s ∈ S, a ∈ A, t ∈ T .
+
+a′ ∈A
+
+∀s ∈ S,
+
+a∈A
+
+29
+
+(27)
+
+Then by the definition of Γ, for any π ∈ Π, if we denote L̂π = Γ(π; P̂ ), we have
+(28)
+
+L̂π0 (s, a) = µ0 (s)π0 (a|s),
+X
+L̂πt+1 (s′ , a′ ) = πt+1 (a′ |s′ )
+
+Pt (s′ |s, a)L̂πt (s, a),
+
+t ∈ {0, . . . , T − 2}.
+
+s∈S,a∈A
+
+And in addition, we also have by the definition of Normalize that
+X
+πt (a|s)
+xt (s, a′ ) = xt (s, a), ∀s ∈ S, a ∈ A, t ∈ T .
+
+(29)
+
+a′ ∈A
+
+P
+Hence for t = 0, we have by (27), (28) and (29) that L̂π0 (s, a) = π0 (a|s) a′ ∈A x0 (s, a′ ) = x0 (s, a) for any
+s ∈ S, a ∈ A. Now suppose that we have L̂πt (s, a) = xt (s, a) for any s ∈ S, a ∈ A. Then for t + 1, again we
+have by (27), (28) and (29) that
+X
+X
+L̂πt+1 (s′ , a′ ) = πt+1 (a′ |s′ )
+Pt (s′ |s, a)xt (s, a) = πt+1 (a′ |s′ )
+xt+1 (s′ , a′′ ) = xt+1 (s′ , a′ ).
+a′′ ∈A
+
+s∈S,a∈A
+
+Hence by induction, we have that Γ(π; P̂ ) = L̂π = x.
+Now we prove the second claim. For any π ∈ Π, if we again denote L̂π = Γ(π; P̂ ), then by (27) and (28),
+we have that
+X
+X
+L̂π0 (s, a) =
+µ0 (s)π0 (a|s) = µ0 (s),
+a∈A
+
+X
+
+a∈A
+
+L̂πt+1 (s′ , a′ ) =
+
+a′ ∈A
+
+X
+
+πt+1 (a′ |s′ )
+
+a′ ∈A
+
+X
+
+=
+
+X
+
+Pt (s′ |s, a)L̂πt (s, a)
+
+s∈S,a∈A
+′
+
+Pt (s |s, a)L̂πt (s, a),
+
+t ∈ {0, . . . , T − 2},
+
+s∈S,a∈A
+
+namely AP̂ Γ(π; P̂ ) = b. Finally, the non-negativity of Γ(π; P̂ ) is trivial by the non-negativity of P , µ0 and
+π in (28).
+
+5.4
+
+Proof of Lemma 5
+
+Proof. Let d be a fixed point of Fα,η . Then by the fact that for a closed convex set X in some Euclidean
+space, ProjX = (I + αNX )−1 for any α > 0 (cf. [57, §6.1]), we have
+d − α(c(d) + ηd) ∈ (I + αN{x|Ax=b,x≥0} )(d) = d + αN{x|Ax=b,x≥0} (d),
+and hence
+−(c(d) + ηd) ∈ N{x|Ax=b,x≥0} (d).
+
+(30)
+
+Hence for any β > 0, we also have
+d − β(c(d) + ηd) ∈ d + βN{x|Ax=b,x≥0} (d) = (I + βN{x|Ax=b,x≥0} )(d),
+and hence
+Proj{x|Ax=b,x≥0} (d − β(c(d) + ηd)) = d,
+namely d is a fixed point of Fβ,η . This shows that the set of fixed points of Fα,η is independent of α > 0 for
+a given η ≥ 0.
+Now suppose that π ∈ Π is an NE of the η-perturbed MFG. Then by Theorem 2, we have that
+−α(c(d) + ηd) ∈ αN{x|Ax=b,x≥0} (d),
+30
+
+and hence
+d − α(c(d) + ηd) ∈ (I + αN{x|Ax=b,x≥0} )(d),
+which, given that α > 0 and hence again Proj{x|Ax=b,x≥0} = (I + αN{x|Ax=b,x≥0} )−1 as explained above,
+implies that
+Proj{x|Ax=b,x≥0} (d − α(c(d) + ηd)) = d,
+and hence d is a fixed point of Fα,η .
+Finally, suppose that Fα,η (d) = d. Then by (30) and Theorem 2, we immediately conclude that any
+π ∈ Normalize(d) is an NE of the MFG with the η-perturbed rewards r̂tη . In addition, by Lemma 4, we also
+have d = Lπ = Γ(π; P ) and Ad = b, d ≥ 0.
+
+5.5
+
+Proof of Corollary 7
+
+Proof. We prove the results for λ = 0 and λ > 0 separately below.
+Case 1: λ = 0. The choices of α and η are simply replacing ϵ with ϵ/(4T ) in Theorem 6 in the case when
+λ = 0, and hence we have
+
+k
+√
+2
+,
+Expl(π k ) ≤ ϵ/2 + 2 SAT (2T 2 CR + Rmax T ) 1 − κ 4Tϵ
+
+2 S 2 A2 T 2 + 2ϵ2 . Hence to achieve Expl(π k ) ≤ ϵ, it suffices to have
+where κ 4Tϵ = ϵ2 / 32CR
+√
+4 SAT (2T 2 CR + Rmax T )
+k ≥ 2 log
+/ log(1/(1 − κ 4Tϵ )).
+ϵ
+Since log(1 − κ 4Tϵ ) ≤ −κ 4Tϵ (as κ 4Tϵ ∈ (0, 1)), it suffices to have
+√
+2 S 2 A2 T 2 + 4ϵ2
+64CR
+4 SAT (2T 2 CR + Rmax T )
+× log
+,
+k≥
+ϵ2
+ϵ
+
+namely k = Ω ϵ−2 log(1/ϵ) .
+Case 2: λ > 0. By Theorem 6, we have that Expl(π k ) ≤ ϵ if
+√
+2 SAT (2T 2 CR + Rmax T )(1 − κ)k/2 ≤ ϵ,
+√
+2 SAT (2T 2 CR + Rmax T )
+which is equivalent to k ≥ log
+/ log(1/(1 − κ)). Hence to have Expl(π k ) ≤ ϵ, it
+ϵ
+suffices to have
+√
+√
+2 S 2 A2
+2CR
+2 SAT (2T 2 CR + Rmax T )
+2 SAT (2T 2 CR + Rmax T )
+k ≥ log
+/κ =
+log
+,
+ϵ
+λ2
+ϵ
+namely k = Ω(log(1/ϵ)).
+
+5.6
+
+Proof of Lemmas 10 and 11
+
+ˆ then Γ(π̄; P̂ ) = d.
+ˆ In addition, by the same lemma,
+Proof of Lemma 10. By Lemma 4, let π̄ ∈ Normalize(d),
+we also have AP̂ Γ(π̂; P̂ ) = b, Γ(π̂; P̂ ) ≥ 0. Hence by the optimality π̂, we have that
+˜ 2 = ∥Γ(π̄; P̂ ) − d∥
+˜ 2 ≥ ∥Γ(π̂; P̂ ) − d∥
+˜ 2,
+∥dˆ − d∥
+and also by the optimality of dˆ and the feasibility of Γ(π̂; P̂ ) for the constraint AP̂ d = b, d ≥ 0, we have
+˜ 2 ≥ ∥dˆ − d∥
+˜ 2.
+∥Γ(π̂; P̂ ) − d∥
+˜ 2 = ∥dˆ− d∥
+˜ 2 . By the uniqueness of the solution to strongly convex optimization
+Hence we have ∥Γ(π̂; P̂ ) − d∥
+2
+˜
+problem of minimizing ∥d − d∥2 over the set of d with AP̂ d = b, d ≥ 0 (or by the uniqueness of projection
+onto a closed convex set), we conclude that dˆ = Γ(π̂; P̂ ).
+31
+
+Proof of Lemma 11. Let L̂π = Γ(π; P̂ ) and Lπ = Γ(π; P̃ ). Then by the definition of Γ, we have
+L̂πt+1 (s′ , a′ ) − Lπt+1 (s′ , a′ ) = πt+1 (a′ |s′ )
+
+
+
+X
+
+P̂t (s′ |s, a)L̂πt (s, a) − P̃t (s′ |s, a)Lπt (s, a)
+
+
+
+,
+
+s∈S,a∈A
+
+and hence
+
+
+X
+
+∥L̂πt+1 − Lπt+1 ∥1 ≤
+
+
+P̂t (s′ |s, a) − P̃t (s′ |s, a) L̂πt (s, a) + L̂πt (s, a) − Lπt (s, a) P̃t (s′ |s, a)
+
+s′ ∈S,s∈S,a∈A
+
+≤ max
+
+s∈S,a∈A
+
+X
+
+|P̂t (s′ |s, a) − P̃t (s′ |s, a)| + ∥L̂πt − Lπt ∥1 ,
+
+s′ ∈S
+
+which, together with the fact that L̂π0 (s, a) = µ0 (s)π0 (a|s) = Lπ0 (s, a), implies that
+X
+∥L̂πt − Lπt ∥1 ≤ t
+max
+|P̂t (s′ |s, a) − P̃t (s′ |s, a)|,
+s∈S,a∈A,t=0,...,T −2
+
+and hence
+∥L̂π − Lπ ∥1 ≤
+
+s′ ∈S
+
+X
+T (T − 1)
+|P̂t (s′ |s, a) − P̃t (s′ |s, a)|.
+max
+s∈S,a∈A,t=0,...,T −2 ′
+2
+s ∈S
+
+This completes the proof.
+
+6
+
+Implementation and experiments
+
+In this section, we highlight some notable implementation details for both MF-OMI-FBS (Algorithm 1) and
+MF-OML (Algorithm 4). We then evaluate the performance of MF-OMI-FBS (which we also sometimes refer
+to as OccupationMeasureInclusion in the numerical experiments below) and compare it with the baseline
+algorithms in the MFG literature, including Online Mirror Descent (OMD) [55], Fictitious Play (FP) [56],
+Prior Descent (PD) [14], and MF-OMO [29]. Our implementations are based on MFGLib [25].
+In all the experiments, we always set η = 0 for MF-OMI-FBS as it turns out to consistently outperform
+η > 0 choices in practice. For each algorithm, we tune their hyper-parameters via both optuna [2] (via its
+support in MFGLib) and manual grid search, and show the best performing choice for each algorithm in
+the final plots for clarity. It turned out that MF-OMI-FBS works perfectly with only optuna tuning, while all
+other baselines generally requires further manual gridding.
+
+6.1
+
+Implementation tips
+
+In this section, we explain some implementation details of MF-OMI-FBS and MF-OML, which demonstrate how
+the projection step in each iteration can be made efficient and how the algorithm is extended to more general
+settings where the transition probabilities are mean field dependent.
+Rewriting consistency projection for OSQP interface. To utilize OSQP [61], we rewrite the projection step into the following stand-form:
+1 ⊤
+minimized
+d P d + q⊤d
+2
+subject to l ≤ Ad ≤ u,
+ 
+ 
+b
+b
+k+1
+where P := 2I, q = −2d˜ , l =
+,u=
+.
+0
+∞
+In the implementation, we set the OSQP solution precision to 1e-8. This is extremely fast in general
+and is sufficient to guarantee the fast convergence of MF-OMI-FBS. However, it would be interesting to study
+the trade-off between per-iteration costs involved in the projection steps and the accuracies as we vary the
+precision of OSQP.
+32
+
+Warmstart for OSQP. As iterations proceed and solutions converge, it is natural to warm-start the
+inner optimization of the quadratic programs (QP) for consistency projections, as the projected iterates
+of consecutive outer iterations would be closer and closer. We hence enable warm-start of the primal and
+dual variables from previous QP iterations in OSQP. We have found that such a simple implementation
+level optimization consistently improves the per-iteration runtime, and in the best case (e.g., in the building
+evacuation example below) achieves up to four times acceleration.
+Mean-field dependent dynamics. To handle generic mean-field dependent dynamics, we replace A with
+Ad˜k+1 . With this simple change, the projection step remains a convex quadratic program and hence can
+be solved by passing the aforementioned standard form (with A replaced by Ad˜k+1 ) to OSQP. As we will
+see in the empirical results below, this trick turns out to work extremely well in practice. Figuring out the
+underlying mechanism and establishing theoretical guarantees for this heuristic implementation for generic
+mean-field dependent dynamics would be a very interesting future work.
+Speed-up compared to MF-OMO. The per-iteration cost of MF-OMI-FBS significantly improves over MF-OMO
+as the latter requires gradient computations while the former does not. The only slight speed uncertainty
+comes from the OSQP subproblem solving time, and we leave it as an interesting future problem to study
+the best scheduling of the OSQP target accuracies, etc. as iterations proceed.
+Tips for online RL. The cubic growth of nk = k 3 in Theorem 14 turns out to be too aggressive and
+we found that in general even constant choices of nk work very well in practice. Particularly, in our online
+RL experiments, we choose nk = 20. The choice of p0 in the default modification is simply chosen as the
+uniform distribution over states. For simplicity, we use only samples from outer iteration k in MF-OML for
+estimating P̂ k , which turns out to suffice in practice. On the other hand, it would be interesting to compare
+the effect of data reuse and to explore function approximation to allow for more efficient reusing of samples
+for both transition and dynamics. We leave this for future work.
+
+6.2
+
+Empirical evaluation of MF-OMI-FBS
+
+In this section, we show the performance of MF-OMI-FBS against OMD, FP, PD and MF-OMO on three
+different problems, including both MFGs with monotone rewards and mean-field-independent dynamics,
+as studied in the paper, as well as more general MFGs that lack monotone rewards and have transition
+probabilities that depend on the mean field. The implementation of all environments and baseline algorithms
+can be found in https://github.com/radar-research-lab/MFGLib. Additionally, problem dimensions can
+be found on the top title of each plot (and the meanings of each dimension parameter can be found in MFGLib).
+Building evacuation. This problem involves a multilevel building where a crowd of agents aims to evacuate by descending to the ground floor as quickly as possible while maintaining social distancing. Each floor
+features two staircases located at opposite corners, requiring agents to traverse the entire floor to reach the
+next staircase. Agents can move in four cardinal directions (up, down, left, right), stay in place, or transition
+between floors when positioned on a staircase. Each agent in the crowd aims to descend to the bottom floor
+as quickly as possible, while minimizing crowding.
+Random linear. This environment is designed with rewards and transition probabilities defined as random
+affine functions of the mean-field. To ensure the validity of transition probabilities, a softmax function is
+applied to the output of the affine functions.
+SIS. This problem studies a simple pandemic model. At each time step, agents choose between social
+distancing or going out. Susceptible agents who go out risk infection with a probability proportional to the
+33
+
+Figure 1: Building evacuation. Left: comparison on number of iterations. Right: comparison on runtime.
+
+Figure 2: Random linear. Left: comparison on number of iterations. Right: comparison
+on runtime.
+
+number of infected agents, while those who social distance remain healthy. Infected agents recover with a
+fixed probability per time step. Agents aim to minimize their costs associated with social distancing and
+infection. The parameters are chosen the same as in [14].
+Observations. Among all the three problems, building evacuation involves a monotone MFG with meanfield independent dynamics that satisfies the assumption of our paper. The MFGs of the other two problems,
+however, do not satisfy the monotonicity assumption and have mean-field dependent transition probabilities.
+From Figures 1, 2, and 3, we observe that MF-OMI-FBS rapidly achieves an exploitability of 10−6 or lower
+across all problems, consistently outperforming all baseline algorithms in both convergence rate and runtime.
+The only minor exception is the runtime for the building evacuation problem, where Prior Descent (PD)
+performs slightly faster. However, this appears to be primarily due to the absence of further implementationlevel optimizations in our current setup. In particular, as noted in Section 6.1, enabling warm-starting in
+OSQP has already reduced the per-iteration runtime of MF-OMI-FBS by a factor of four. We believe that with
+more advanced quadratic programming solvers and additional implementation improvements, the efficiency
+
+34
+
+Figure 3: SIS. Left: comparison on number of iterations. Right: comparison on runtime.
+
+of the inner projection step can be further enhanced, potentially eliminating the remaining performance gap.
+
+6.3
+
+Online RL
+
+In this section, we evaluate the performance of MF-OML in the online RL setup. Here we consider the SIS
+environment again, with T = 4 for simplicity. We set α = 0.02 and consider N = 3, 6, 20 number of players
+and run MF-OML for 50 outer iterations (so a total of 1000 episodes given that we take nk = 20). To account
+for the randomness, we run 10 simulations for each instance of N and plot the 95% confidence intervals.
+Note that since evaluating NashConv for N -player games involves calculating the distribution of the empirical distribution of the N players, which has exponential complexity, it is hence challenging to numerically
+demonstrate the performance of the MF-OML algorithm in the N -player RL setting. As a surrogate, we show
+the performance of MF-OML in terms of exploitability for MFGs instead of NashConv for N -player games.
+The regret of exploitability captures the performance of the algorithm up to the inherent and algorithm indeP −1
+m
+pendent mean-field approximation error. More precisely, if we define ExplRegret(M ) := M
+m=0 Expl(π ),
+then we have
+r
+
+
+π
+96CR SAT
+bound of NashRegret(M ) = ExplRegret(M) + 72CR SAT
++
+M
+2N
+N
+√
+= ExplRegret(M) + O(M/ N ).
+To the best of our knowledge, accurately evaluating NashConv for N -player games is still an open problem
+in the multi-agent RL literature except for very small problems [51], and is hence left for future work.
+From Figure 4, we can see that the regret indeed grows sub-linearly (and the mean-field approximation
+error internal to ExplRegret which comes from Proposition 12 that grows linearly is dominated). In addition,
+we can see that as N grows, the regret gradually decreases. These validate our theoretical claims of the
+regret bounds of MF-OML.
+
+35
+
+Figure 4: SIS exploitability regret
+
+36
+
+References
+[1] Alekh Agarwal, Sham M Kakade, Jason D Lee, and Gaurav Mahajan. On the theory of policy gradient
+methods: Optimality, approximation, and distribution shift. Journal of Machine Learning Research,
+22(98):1–76, 2021.
+[2] Takuya Akiba, Shotaro Sano, Toshihiko Yanase, Takeru Ohta, and Masanori Koyama. Optuna: A
+next-generation hyperparameter optimization framework. In Proceedings of the 25th ACM SIGKDD
+international conference on knowledge discovery & data mining, pages 2623–2631, 2019.
+[3] Ioannis Anagnostides, Ioannis Panageas, Gabriele Farina, and Tuomas Sandholm. Optimistic policy
+gradient in multi-player markov games with a single controller: Convergence beyond the minty property.
+In Proceedings of the AAAI Conference on Artificial Intelligence, volume 38(9), pages 9451–9459, 2024.
+[4] Berkay Anahtarci, Can Deha Kariksiz, and Naci Saldi. Fitted q-learning in mean-field games. arXiv
+preprint arXiv:1912.13309, 2019.
+[5] Andrea Angiuli, Jean-Pierre Fouque, and Mathieu Lauriere. Reinforcement learning for mean field
+games, with applications to economics. arXiv preprint arXiv:2106.13755, 2021.
+[6] Andrea Angiuli, Jean-Pierre Fouque, and Mathieu Laurière. Unified reinforcement q-learning for mean
+field game and control problems. Mathematics of Control, Signals, and Systems, 34(2):217–271, 2022.
+[7] Andrea Angiuli, Jean-Pierre Fouque, Mathieu Laurière, and Mengrui Zhang. Convergence of multiscale reinforcement q-learning algorithms for mean field game and control problems. arXiv preprint
+arXiv:2312.06659, 2023.
+[8] Peter Auer, Thomas Jaksch, and Ronald Ortner. Near-optimal regret bounds for reinforcement learning.
+Advances in neural information processing systems, 21, 2008.
+[9] Mohammad Gheshlaghi Azar, Ian Osband, and Rémi Munos. Minimax regret bounds for reinforcement
+learning. In International conference on machine learning, pages 263–272. PMLR, 2017.
+[10] Yu Bai, Chi Jin, and Tiancheng Yu. Near-optimal reinforcement learning with self-play. Advances in
+neural information processing systems, 33:2159–2170, 2020.
+[11] Géraldine Bouveret, Roxana Dumitrescu, and Peter Tankov. Mean-field games of optimal stopping: a
+relaxed solution approach. SIAM Journal on Control and Optimization, 58(4):1795–1821, 2020.
+[12] Stephen P Boyd and Lieven Vandenberghe. Convex optimization. Cambridge university press, 2004.
+[13] Luis Briceno-Arias, Dante Kalise, Ziad Kobeissi, Mathieu Lauriere, A Mateos González, and Francisco J
+Silva. On the implementation of a primal-dual algorithm for second order time-dependent mean field
+games with local couplings. ESAIM: Proceedings and Surveys, 65:330–348, 2019.
+[14] Kai Cui and Heinz Koeppl. Approximately solving mean field games via entropy-regularized deep
+reinforcement learning. In International Conference on Artificial Intelligence and Statistics, pages 1909–
+1917. PMLR, 2021.
+[15] Kai Cui and Heinz Koeppl. Learning graphon mean field games and approximate nash equilibria. arXiv
+preprint arXiv:2112.01280, 2021.
+[16] Qiwen Cui and Simon S Du. Provably efficient offline multi-agent reinforcement learning via strategywise bonus. Advances in Neural Information Processing Systems, 35:11739–11751, 2022.
+
+37
+
+[17] François Delarue, Daniel Lacker, and Kavita Ramanan. From the master equation to mean field game
+limit theory: a central limit theorem. 2019.
+[18] Dongsheng Ding, Chen-Yu Wei, Kaiqing Zhang, and Mihailo Jovanovic. Independent policy gradient
+for large-scale markov potential games: Sharper rates, function approximation, and game-agnostic
+convergence. In International Conference on Machine Learning, pages 5166–5220. PMLR, 2022.
+[19] Roxana Dumitrescu, Marcos Leutscher, and Peter Tankov. Linear programming fictitious play algorithm
+for mean field games with optimal stopping and absorption. ESAIM: Mathematical Modelling and
+Numerical Analysis, 57(2):953–990, 2023.
+[20] Romuald Elie, Julien Perolat, Mathieu Laurière, Matthieu Geist, and Olivier Pietquin. On the convergence of model free learning in mean field games. In Proceedings of the AAAI Conference on Artificial
+Intelligence, volume 34, pages 7143–7150, 2020.
+[21] Christian Fabian, Kai Cui, and Heinz Koeppl. Learning sparse graphon mean field games.
+International Conference on Artificial Intelligence and Statistics, pages 4486–4514. PMLR, 2023.
+
+In
+
+[22] Zuyue Fu, Zhuoran Yang, Yongxin Chen, and Zhaoran Wang. Actor-critic provably finds nash equilibria
+of linear-quadratic mean-field games. arXiv preprint arXiv:1910.07498, 2019.
+[23] Matthieu Geist, Julien Pérolat, Mathieu Lauriere, Romuald Elie, Sarah Perrin, Olivier Bachem, Rémi
+Munos, and Olivier Pietquin. Concave utility reinforcement learning: the mean-field game viewpoint.
+arXiv preprint arXiv:2106.03787, 2021.
+[24] Mohammad Gheshlaghi Azar, Rémi Munos, and Hilbert J Kappen. Minimax pac bounds on the sample
+complexity of reinforcement learning with a generative model. Machine learning, 91:325–349, 2013.
+[25] Xin Guo, Anran Hu, Matteo Santamaria, Mahan Tajrobehkar, and Junzi Zhang. Mfglib: A library for
+mean-field games. arXiv preprint arXiv:2304.08630, 2023.
+[26] Xin Guo, Anran Hu, Renyuan Xu, and Junzi Zhang. Learning mean-field games. Advances in Neural
+Information Processing Systems, 32, 2019.
+[27] Xin Guo, Anran Hu, Renyuan Xu, and Junzi Zhang. A general framework for learning mean-field
+games. Mathematics of Operations Research, 48(2):656–686, 2023.
+[28] Xin Guo, Anran Hu, and Jiacheng Zhang. Optimization frameworks and sensitivity analysis of stackelberg mean-field games. arXiv preprint arXiv:2210.04110, 2022.
+[29] Xin Guo, Anran Hu, and Junzi Zhang. MF-OMO: An optimization formulation of mean-field games.
+arXiv preprint arXiv:2206.09608, 2022.
+[30] Xin Guo, Anran Hu, and Junzi Zhang. Mf-omo: An optimization formulation of mean-field games.
+SIAM Journal on Control and Optimization, 62(1):243–270, 2024.
+[31] Xin Guo, Xinyu Li, Chinmay Maheshwari, Shankar Sastry, and Manxi Wu. Markov α-potential games:
+Equilibrium approximation and regret analysis. arXiv preprint arXiv:2305.12553, 2023.
+[32] Junling Hu and Michael P Wellman. Nash q-learning for general-sum stochastic games. Journal of
+machine learning research, 4(Nov):1039–1069, 2003.
+[33] Jiawei Huang, Niao He, and Andreas Krause. Model-based rl for mean-field games is not statistically
+harder than single-agent rl. arXiv preprint arXiv:2402.05724, 2024.
+
+38
+
+[34] Jiawei Huang, Batuhan Yardim, and Niao He. On the statistical efficiency of mean-field reinforcement
+learning with general function approximation. In International Conference on Artificial Intelligence and
+Statistics, pages 289–297. PMLR, 2024.
+[35] Minyi Huang, Roland P Malhamé, and Peter E Caines. Large population stochastic dynamic games:
+closed-loop mckean-vlasov systems and the nash certainty equivalence principle. 2006.
+[36] Martin Jaggi. Revisiting frank-wolfe: Projection-free sparse convex optimization. In International
+conference on machine learning, pages 427–435. PMLR, 2013.
+[37] Chi Jin, Zeyuan Allen-Zhu, Sebastien Bubeck, and Michael I Jordan. Is q-learning provably efficient?
+Advances in neural information processing systems, 31, 2018.
+[38] Chi Jin, Qinghua Liu, Yuanhao Wang, and Tiancheng Yu. V-learning–a simple, efficient, decentralized
+algorithm for multiagent rl. arXiv preprint arXiv:2110.14555, 2021.
+[39] Fivos Kalogiannis and Ioannis Panageas. Zero-sum polymatrix markov games: Equilibrium collapse
+and efficient computation of nash equilibria. Advances in Neural Information Processing Systems, 36,
+2024.
+[40] Aviral Kumar, Aurick Zhou, George Tucker, and Sergey Levine. Conservative q-learning for offline
+reinforcement learning. Advances in Neural Information Processing Systems, 33:1179–1191, 2020.
+[41] Marc Lanctot, Vinicius Zambaldi, Audrunas Gruslys, Angeliki Lazaridou, Karl Tuyls, Julien Pérolat,
+David Silver, and Thore Graepel. A unified game-theoretic approach to multiagent reinforcement
+learning. Advances in neural information processing systems, 30, 2017.
+[42] Jean-Michel Lasry and Pierre-Louis Lions.
+2(1):229–260, 2007.
+
+Mean field games.
+
+Japanese journal of mathematics,
+
+[43] Kiyeob Lee, Desik Rengarajan, Dileep Kalathil, and Srinivas Shakkottai. Reinforcement learning for
+mean field games with strategic complementarities. In International Conference on Artificial Intelligence
+and Statistics, pages 2458–2466. PMLR, 2021.
+[44] Stefanos Leonardos, Will Overman, Ioannis Panageas, and Georgios Piliouras. Global convergence of
+multi-agent policy gradient in markov potential games. arXiv preprint arXiv:2106.01969, 2021.
+[45] Tianyi Lin, Zhengyuan Zhou, Panayotis Mertikopoulos, and Michael Jordan. Finite-time last-iterate
+convergence for multi-agent learning in games. In International Conference on Machine Learning, pages
+6161–6171. PMLR, 2020.
+[46] Qinghua Liu, Tiancheng Yu, Yu Bai, and Chi Jin. A sharp analysis of model-based reinforcement
+learning with self-play. In International Conference on Machine Learning, pages 7001–7010. PMLR,
+2021.
+[47] Siting Liu and Levon Nurbekyan. Splitting methods for a class of non-potential mean field games. arXiv
+preprint arXiv:2007.00099, 2020.
+[48] Zhihan Liu, Miao Lu, Zhaoran Wang, Michael Jordan, and Zhuoran Yang. Welfare maximization
+in competitive equilibrium: Reinforcement learning for markov exchange economy. In International
+Conference on Machine Learning, pages 13870–13911. PMLR, 2022.
+[49] Alan S Manne. Linear programming and sequential decisions. Management Science, 6(3):259–267, 1960.
+
+39
+
+[50] Paul Muller, Romuald Elie, Mark Rowland, Mathieu Lauriere, Julien Perolat, Sarah Perrin, Matthieu
+Geist, Georgios Piliouras, Olivier Pietquin, and Karl Tuyls. Learning correlated equilibria in mean-field
+games. arXiv preprint arXiv:2208.10138, 2022.
+[51] Paul Muller, Shayegan Omidshafiei, Mark Rowland, Karl Tuyls, Julien Perolat, Siqi Liu, Daniel Hennes,
+Luke Marris, Marc Lanctot, Edward Hughes, et al. A generalized training approach for multiagent
+learning. arXiv preprint arXiv:1909.12823, 2019.
+[52] Paul Muller, Mark Rowland, Romuald Elie, Georgios Piliouras, Julien Perolat, Mathieu Lauriere,
+Raphael Marinier, Olivier Pietquin, and Karl Tuyls. Learning equilibria in mean-field games: Introducing mean-field psro. arXiv preprint arXiv:2111.08350, 2021.
+[53] Ofir Nachum, Bo Dai, Ilya Kostrikov, Yinlam Chow, Lihong Li, and Dale Schuurmans. Algaedice:
+Policy gradient from arbitrary experience. arXiv preprint arXiv:1912.02074, 2019.
+[54] Levon Nurbekyan, Siting Liu, and Yat Tin Chow. Monotone inclusion methods for a class of secondorder non-potential mean-field games. arXiv preprint arXiv:2403.20290, 2024.
+[55] Julien Perolat, Sarah Perrin, Romuald Elie, Mathieu Laurière, Georgios Piliouras, Matthieu Geist, Karl
+Tuyls, and Olivier Pietquin. Scaling up mean field games with online mirror descent. arXiv preprint
+arXiv:2103.00623, 2021.
+[56] Sarah Perrin, Julien Pérolat, Mathieu Laurière, Matthieu Geist, Romuald Elie, and Olivier Pietquin.
+Fictitious play for mean field games: Continuous time analysis and applications. Advances in Neural
+Information Processing Systems, 33:13199–13213, 2020.
+[57] Ernest K Ryu and Stephen Boyd. Primer on monotone operator methods. Appl. comput. math,
+15(1):3–43, 2016.
+[58] Naci Saldi, Tamer Basar, and Maxim Raginsky. Markov–Nash equilibria in mean-field games with
+discounted cost. SIAM Journal on Control and Optimization, 56(6):4256–4287, 2018.
+[59] Aaron Sidford, Mengdi Wang, Xian Wu, and Yinyu Ye. Variance reduced value iteration and faster
+algorithms for solving markov decision processes. Naval Research Logistics (NRL), 70(5):423–442, 2023.
+[60] Ziang Song, Song Mei, and Yu Bai. When can we learn general-sum markov games with a large number
+of players sample-efficiently? arXiv preprint arXiv:2110.04184, 2021.
+[61] Bartolomeo Stellato, Goran Banjac, Paul Goulart, Alberto Bemporad, and Stephen Boyd. Osqp: An
+operator splitting solver for quadratic programs. Mathematical Programming Computation, 12(4):637–
+672, 2020.
+[62] Jayakumar Subramanian and Aditya Mahajan. Reinforcement learning in stationary mean-field games.
+In Proceedings of the 18th International Conference on Autonomous Agents and MultiAgent Systems,
+pages 251–259, 2019.
+[63] Sriram Ganapathi Subramanian, Pascal Poupart, Matthew E Taylor, and Nidhi Hegde. Multi type
+mean field reinforcement learning. arXiv preprint arXiv:2002.02513, 2020.
+[64] Sriram Ganapathi Subramanian, Matthew E Taylor, Mark Crowley, and Pascal Poupart. Partially
+observable mean field reinforcement learning. arXiv preprint arXiv:2012.15791, 2020.
+[65] Sriram Ganapathi Subramanian, Matthew E Taylor, Mark Crowley, and Pascal Poupart. Decentralized
+mean field games. In Proceedings of the AAAI Conference on Artificial Intelligence, volume 36, pages
+9439–9447, 2022.
+40
+
+[66] Qiaomin Xie, Zhuoran Yang, Zhaoran Wang, and Andreea Minca. Learning while playing in meanfield games: Convergence and optimality. In International Conference on Machine Learning, pages
+11436–11447. PMLR, 2021.
+[67] Yaodong Yang, Rui Luo, Minne Li, Ming Zhou, Weinan Zhang, and Jun Wang. Mean field multi-agent
+reinforcement learning. In International Conference on Machine Learning, pages 5571–5580. PMLR,
+2018.
+[68] Yaodong Yang and Jun Wang. An overview of multi-agent reinforcement learning from game theoretical
+perspective. arXiv preprint arXiv:2011.00583, 2020.
+[69] Batuhan Yardim, Semih Cayci, Matthieu Geist, and Niao He. Policy mirror ascent for efficient and
+independent learning in mean field games. arXiv preprint arXiv:2212.14449, 2022.
+[70] Batuhan Yardim, Semih Cayci, and Niao He. Stateless mean-field games: A framework for independent
+learning with large populations. In Sixteenth European Workshop on Reinforcement Learning, 2023.
+[71] Batuhan Yardim, Artur Goldman, and Niao He. When is mean-field reinforcement learning tractable
+and relevant? arXiv preprint arXiv:2402.05757, 2024.
+[72] Bora Yongacoglu, Gürdal Arslan, and Serdar Yüksel. Independent learning in mean-field games: Satisficing paths and convergence to subjective equilibria. arXiv preprint arXiv:2209.05703, 2022.
+[73] Tianhe Yu, Garrett Thomas, Lantao Yu, Stefano Ermon, James Y Zou, Sergey Levine, Chelsea Finn,
+and Tengyu Ma. Mopo: Model-based offline policy optimization. Advances in Neural Information
+Processing Systems, 33:14129–14142, 2020.
+[74] Muhammad Aneeq Uz Zaman, Alec Koppel, Sujay Bhatt, and Tamer Basar. Oracle-free reinforcement
+learning in mean-field games along a single sample path. In International Conference on Artificial
+Intelligence and Statistics, pages 10178–10206. PMLR, 2023.
+[75] Fengzhuo Zhang, Vincent YF Tan, Zhaoran Wang, and Zhuoran Yang. Learning regularized monotone
+graphon mean-field games. arXiv preprint arXiv:2310.08089, 2023.
+[76] Kaiqing Zhang, Zhuoran Yang, and Tamer Başar. Multi-agent reinforcement learning: A selective
+overview of theories and algorithms. Handbook of reinforcement learning and control, pages 321–384,
+2021.
+[77] Ke Zhang, Fang He, Zhengchao Zhang, Xi Lin, and Meng Li. Multi-vehicle routing problems with
+soft time windows: A multi-agent reinforcement learning approach. Transportation Research Part C:
+Emerging Technologies, 121:102861, 2020.
+
+41
+
+

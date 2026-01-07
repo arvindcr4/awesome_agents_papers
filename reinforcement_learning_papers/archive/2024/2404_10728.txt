@@ -1,0 +1,10961 @@
+Randomized Exploration in Cooperative Multi-Agent
+Reinforcement Learning
+
+arXiv:2404.10728v2 [cs.LG] 3 Mar 2025
+
+Hao-Lun Hsu∗, Weixin Wang∗, Miroslav Pajic, Pan Xu
+Duke University
+{hao-lun.hsu,weixin.wang,miroslav.pajic,pan.xu}@duke.edu
+
+Abstract
+We present the first study on provably efficient randomized exploration in cooperative multi-agent reinforcement learning (MARL). We propose a unified algorithm
+framework for randomized exploration in parallel Markov Decision Processes
+(MDPs), and two Thompson Sampling (TS)-type algorithms, CoopTS-PHE and
+CoopTS-LMC, incorporating the perturbed-history exploration (PHE) strategy and
+the Langevin Monte Carlo exploration (LMC) strategy, respectively, which are
+flexible in design and easy to implement in practice. For a special class of parallel
+MDPs where the transition is (approximately) linear, we theoretically
+prove that
+√
+e 3/2 H 2 M K) regret bound
+both CoopTS-PHE and CoopTS-LMC achieve a O(d
+2
+e
+with communication complexity O(dHM
+), where d is the feature dimension, H
+is the horizon length, M is the number of agents, and K is the number of episodes.
+This is the first theoretical result for randomized exploration in cooperative MARL.
+We evaluate our proposed method on multiple parallel RL environments, including a deep exploration problem (i.e., N -chain), a video game, and a real-world
+problem in energy systems. Our experimental results support that our framework
+can achieve better performance, even under conditions of misspecified transition
+models. Additionally, we establish a connection between our unified framework
+and the practical application of federated learning.
+
+1
+
+Introduction
+
+Multi-Agent Reinforcement Learning (MARL) has emerged as a potent tool with wide-ranging
+applications in diverse fields including robotics [23, 54], gaming [74, 92, 84], and numerous realworld systems [10, 25, 85]. This is particularly evident in cooperative scenarios, where MARL’s
+effectiveness is enhanced through both direct and indirect communication channels among agents.
+This requires MARL algorithms to adeptly and flexibly coordinate communications to optimize
+the benefits of cooperation. One of the classic challenges in MARL is balancing exploration and
+exploitation so that agents effectively utilize existing information while acquiring new knowledge.
+Recent literature highlights the intricacies of this balance, focusing on cooperative exploration
+strategies [27] and dynamic exploitation tactics [68]. Achieving this equilibrium is crucial for the
+practical deployment of MARL systems in real-world scenarios, where unpredictability and the need
+for rapid adaptation are prevalent [27, 14, 55].
+Optimism in the Face of Uncertainty (OFU) is a popular strategy to address the explorationexploitation problem [1]. OFU strategy leads to numerous upper confidence bound (UCB)-type
+algorithms in contextual bandits [18, 1, 50], single-agent reinforcement learning [36, 76], and more
+recently multi-agent reinforcement learning [24, 56]. These algorithms compute statistical confidence
+regions for the model or the value function, given the observed history, and perform the greedy
+∗
+
+Equal contribution.
+
+38th Conference on Neural Information Processing Systems (NeurIPS 2024).
+
+policy with respect to these regions, or upper confidence bounds. Though UCB-based methods give
+out strong theoretical results, they often have poor performance in practice [61, 60]. For example,
+Wang et al. [76] demonstrates that computing the confidence bonus necessitates advanced sensitivity
+sampling and the expensive computation makes practical applications inefficient. It is worth noting
+that UCB is mostly constructed based on a linear structure [18, 36]. NeuralUCB is a notable attempt
+at a nonlinear version while it is infeasible in terms of computational complexity [94, 82].
+Inspired by Thompson Sampling (TS) [73], posterior sampling for reinforcement learning (PSRL) [7,
+95] involves maintaining a posterior distribution over the parameters of the Markov Decision Processes
+(MDP) model parameters. Although conceptually simple, most existing TS methods require the
+exact posterior or a good Laplacian approximation [83]. Recently, there have been advancements
+in randomized exploration with approximate sampling. One important method is perturb-history
+exploration (PHE) strategy, which involves introducing random perturbations in the action history
+of the agent [45, 47, 32]. This randomized exploration approach diversifies the agent’s experience,
+aiding in learning more robust strategies in environments with uncertainty and variability. Another
+effective method is Langevin Monte Carlo (LMC) method [83, 33, 31, 42, 58, 34]. Notably, Ishfaq
+et al. [33] maintains the simplicity and scalability of LMC, making it applicable in deep RL algorithms
+by approximating the posterior distribution of the Q function.
+Despite the aforementioned advancements of randomized exploration in bandits and single-agent
+RL, there remains a scarcity of research on randomized exploration within cooperative MARL,
+which motivates us to present the first investigation into provably efficient randomized exploration
+in cooperative MARL, with both theoretical and empirical evidence. We specifically focus on the
+applicability in parallel MDPs, aiming to facilitate faster learning and to improve policy optimization
+with the same state and action spaces, allowing for leveraging similarities across MDPs. We
+theoretically and empirically demonstrate that randomized exploration strategies can be extended to
+the multi-agent setting and the benefit of randomized exploration instead of UCB can be significant
+from single-agent to multi-agent setting.
+In summary, our contributions are as follows:
+• We propose a unified algorithm framework for learning parallel MDPs, and apply two TS-related
+strategies PHE and LMC for exploration, which leads to the CoopTS-PHE and CoopTS-LMC
+algorithms. Unlike conventional TS, which suffers from sampling errors due to Laplace approximation and expensive posterior computation [66, 46], our proposed algorithms only require adding
+standard Gaussian noises to the dataset (CoopTS-PHE) or the gradient (CoopTS-LMC) when
+performing Least-Square Value Iteration (LSVI), which is efficient in computation and avoids
+sampling bias due to the Laplace approximation. Notably, both algorithms are easily implementable
+which are more practical than UCB-based algorithms in deep MARL.
+• When reduced to linear parallel MDPs, we theoretically prove that both CoopTS-PHE
+√ and√CoopTSe d3/2 H 2 M dM γ +
+LMC with linear function approximation can achieve a regret bound O
+√ 
+
+e (d + K/γ)M H , where d is the feature dimension, H
+K with communication complexity O
+is the horizon length, M is the number of agents, K is the number of episodes for each agent, and
+γ is a parameter controlling
+the communication frequency. When γ = O(K/dM ), our algorithms
+√
+
+2
+e d3/2 H 2 M K regret with O(dHM
+e
+) communication complexity. This result matches
+attain O
+the best communication complexity in cooperative MARL [56], and the best regret bounds for
+randomized RL in the single-agent setting (M = 1) [32, 33]. A comprehensive comparison with
+baseline algorithms on episodic, non-stationary, linear MDPs is presented in Table 1.
+• We further extend our theoretical analysis to the misspecified setting where both the transition
+and reward are approximately linear up to an error ζ and the MDPs could be heterogeneous
+across agents,pwhich is a generalized notion of misspecification [36]. We theoretically prove
+when ζ = O d/M K , the cumulative regret for CoopTS-PHE matches the result in the linear
+p
+
+homogeneous MDP setting. Simultaneously, when ζ = O 1/M K , the cumulative regret for
+CoopTS-LMC matches the result in the linear homogeneous MDP setting. This result indicates that
+CoopTS-PHE has a slightly higher tolerance on the model misspecification than CoopTS-LMC.
+• We conduct extensive experiments on various benchmarks with comprehensive ablation studies,
+including N -chain that requires deep exploration, Super Mario Bros task in a misspecified setting,
+and a real-world problem in thermal control of building energy systems. Our empirical evaluation
+demonstrates that our randomized exploration strategies outperform existing deep Q-network
+
+2
+
+Table 1: Comparison on episodic, non-stationary, linear MDPs. We define the average regret as the
+cumulative regret divided by the total number of samples (transition pairs) used by the algorithm.
+Here d is the feature dimension, H is the episode length, K is the number of episodes, and M is the
+number of agents in a multi-agent setting.
+Setting
+
+Algorithm
+
+singleagent
+
+OPT-RLSVI [88]
+LSVI-UCB [36]
+LSVI-PHE [32]
+LMC-LSVI [33]
+LSVI-ASE [34]
+
+multiagent
+
+Coop-LSVI [24]
+Asyn-LSVI [56]
+CoopTS-PHE (Ours)
+CoopTS-LMC (Ours)
+
+Regret
+
+Average Regret
+
+√
+e 2 H 25 K)
+O(d
+√
+3
+2
+e 2 H K)
+O(d
+√
+3
+e 2 H 2 K)
+O(d
+√
+3
+2
+e
+O(d 2 H √ K)
+2
+e
+O(dH
+K)
+√
+3
+2
+e
+O(d 2 H √
+M K)
+e 32 H 2 K)
+O(d
+√
+e 23 H 2 M K)
+O(d
+√
+e 23 H 2 M K)
+O(d
+
+p
+e 2 H 32 1/K)
+O(d
+p
+3
+e 2 H 1/K)
+O(d
+p
+e 32 H 1/K)
+O(d
+p
+3
+e
+O(d 2 Hp 1/K)
+e
+O(dH
+1/K)
+p
+3
+e
+O(d 2 H p
+1/M K)
+e 32 H 1/K)
+O(d
+p
+e 32 H 1/M K)
+O(d
+p
+e 32 H 1/M K)
+O(d
+
+Randomized
+Exploration
+
+Generalizable
+to Deep RL
+
+Communication
+Complexity
+
+✓
+✗
+✓
+✓
+✓
+
+✗
+✗
+✓
+✓
+✓
+
+–
+–
+–
+–
+–
+
+✗
+✗
+✓
+✓
+
+✗
+✗
+✓
+✓
+
+
+e dHM 3
+O
+
+e dHM 2
+O
+
+2
+e
+O dHM
+
+e dHM 2
+O
+
+(DQN)-based baselines. We also show that these strategies in cooperative MARL can be adapted to
+the existing federated RL framework when data transitions are not shared.
+
+2
+
+Preliminary
+
+In parallel Markov Decision Processes (MDPs), M agents interact independently with their respective
+discrete-time MDPs, sharing the same but independent state and action spaces. Each agent might
+have its unique reward functions and transition kernels. Specifically, for agent m ∈ M, the associated
+MDP is defined by the tuple MDP(S, A, H, Pm , rm ). Here S and A are the state and action spaces,
+respectively, H is the horizon length, Pm = {Pm,h }h∈[H] and rm = {rm,h }h∈[H] are the sets of
+transition kernels and reward functions. For step h ∈ [H], Pm,h (·|s, a) is the probability measure in
+the next state given the current state-action pair (s, a), rm,h : S × A → [0, 1] is the deterministic
+reward function. The policy πm = {πm,h }h∈[H] is a sequence of decision rules, where πm,h : S → A
+is the deterministic policy at step h.
+For agent m ∈ M, given any policy π and transition
+P, to evaluate the policy effectiveness
+P
+ in the
+H
+π
+′
+′
+′
+mth MDP, we define value function Vm,h
+(s) := Eπ
+r
+(s
+,
+a
+)|s
+=
+s
+and Q
+′
+m,h
+m,h
+m,h
+h =h m,h
+ PH
+
+π
+′
+′
+′
+function Qm,h (s, a) := Eπ
+h′ =h rm,h (sm,h , am,h )|sm,h = s, am,h = a for any (h, s, a) ∈
+π∗
+
+∗
+∗
+m
+, and we denote Vm,h
+(s) = Vm,h
+(s). For each
+[H] × S × A. The optimal policy is defined as πm
+k ∈ [K], at the beginning of episode k, each agent m ∈ M receives the initial state skm,1 chosen
+arbitrarily by the environment. For each step h ∈ [H] in this episode, each agent m observes its current
+k
+state skm,h , selects an action akm,h based on policy πm,h
+, receives a reward rm,h (skm,h , akm,h ), and then
+k
+transitions to the next state sm,h+1 based on the transition probability measure Pm,h (·|skm,h , akm,h ).
+The reward defaults to 0 when the episode terminates at step H + 1. The goal of agents is to minimize
+the cumulative group regret after K episodes, which is defined as
+k
+
+
+P
+PK  ∗
+πm
+Regret(K) = m∈M k=1 Vm,1
+skm,1 − Vm,1
+skm,1 .
+
+3
+
+Algorithm Design
+
+In this section, we first present a unified algorithm framework for conducting randomized exploration
+in cooperative MARL. Then we introduce two practical randomized exploration strategies.
+3.1
+
+Unified Algorithm Framework
+
+A unified algorithm framework is presented in Algorithm 1, where each agent executes Least-Square
+Value Iteration (LSVI) in parallel and makes decisions based on collective data obtained from
+communication between each agent and the server. Before we describe the details of our algorithm,
+we first define notations about the datasets stored on each agent’s local machine and the server.
+3
+
+Algorithm 1 Unified Algorithm Framework for Randomized Exploration in Parallel MDPs
+loc
+1: Initialization: set Uhser (k), Um,h
+(k) = ∅.
+2: for episode k = 1, ..., K do
+3:
+for agent m ∈ M do
+4:
+Receive initial state skm,1 .
+k
+5:
+Vm,H+1
+(·) ← 0.
+k
+6:
+{Qm,h (·, ·)}H
+◁ Algorithm 2 or Algorithm 3
+h=1 ←Randomized Exploration
+7:
+for step h = 1, ..., H do
+8:
+akm,h ← argmaxa∈A Qkm,h (skm,h , a).
+9:
+Receive skm,h+1 and rm,h .
+
+S k
+loc
+loc
+10:
+Um,h
+(k) ← Um,h
+(k)
+sm,h , akm,h , skm,h+1 .
+11:
+if Condition then
+12:
+SYNCHRONIZE ← True.
+13:
+end if
+14:
+end for
+15:
+end for
+16:
+if SYNCHRONIZE then
+17:
+for step h = H, ..., 1 do
+loc
+18:
+∀ AGENT: Send Um,h
+(k) to SERVER.
+S
+loc
+loc
+19:
+SERVER: Uh (k) ← m∈M Um,h
+(k).
+S loc
+ser
+ser
+20:
+SERVER: Uh (k) ← Uh (k) Uh (k).
+21:
+SERVER: Send Uhser (k) to each AGENT.
+loc
+22:
+∀ AGENT: Set Um,h
+(k) ← ∅.
+23:
+end for
+24:
+end if
+25: end for
+
+Index notation We define ks (k) (denoted as ks when no ambiguity arises) as the last episode
+before episode k where synchronization happens. For episode k and step h, we define three datasets:
+
+
+Uhser (k) = sτn,h , aτn,h , sτn,h+1 n∈M,τ ∈[k ] ,
+(3.1a)
+s
+
+
+k−1
+loc
+Um,h
+(k) = sτm,h , aτm,h , sτm,h+1 τ =k +1 ,
+(3.1b)
+s
+[
+loc
+Um,h (k) = Uhser (k) Um,h
+(k).
+(3.1c)
+By definition, Uhser (k) is the dataset that is shared across all agents due to the latest synchronization at
+loc
+episode ks . Um,h
+(k) is the unique data collected by agent m since episode ks . Then Um,h (k) is the
+total dataset available for agent m at the current time. Let K(k) = |Um,h (k)| be the total number of
+data points. For the simplicity of notation, we also re-order the data points in Um,h (k), and rename
+SK(k)
+l
+l
+the tuple (sτm,h , aτm,h , sτm,h+1 ) as (sl , al , s′ ) such that we have Um,h (k) = l=1 (sl , al , s′ ). In
+fact, this can be done by the following one-to-one mapping
+
+(τ − 1)M + n τ ≤ ks ,
+lm,k (n, τ ) =
+(3.2)
+(M − 1)ks + τ ks < τ ≤ k − 1.
+Therefore, we use indices (s, a, s′ ) ∈ Um,h (k) and l ∈ [K(k)] interchangeably for the summation
+over set Um,h (k).
+Algorithm interpretation At a high level, each episode k in Algorithm 1 consists of two stages.
+The first stage (Lines 3-15) is parallelly executed by all agents and the second stage (Lines 16-24)
+involves the communication among agents and the server.
+In the first stage (Lines 3-15) of Algorithm 1, each agent m operates in two parts. The first part
+(Line 6) updates estimated Q functions {Qkm,h }H
+h=1 through LSVI with a randomized exploration
+strategy (Algorithm 2 or Algorithm 3, which will be introduced in Section 3.2). In particular, given
+k
+the estimated value functions Vm,h+1
+(·) = maxa∈A Qkm,h (·, a) at step h + 1, we perform one step
+4
+
+k
+k
+robust backward Bellman update to obtain Vm,h
+(·) at step h. And we initialize Vm,H+1
+(·) to be 0
+(Line 5). In the second part (Lines 7-14), after obtaining the estimated Q functions, in each step h
+we execute the greedy policy with respect to Qkm,h and collect new data points which are added to
+loc
+the local dataset Um,h
+(k) (Lines 8-10). Then we verify the synchronization condition (Lines 11-13).
+In this paper, we mainly use three types of synchronization rules. (1) We can synchronize every c
+episode where c is a user-defined constant, which is easy to implement in practice. (2) We can also
+synchronize at the episode of b1 , b2 , ..., bn , with b representing the base of the exponential function.
+This is guided by the intuition that agents require more transitions urgently at the early learning
+stages. (3) Additionally, if we have a feature mapping ϕ(s, a) : S × A → Rd , based on (3.1), we
+define the following empirical covariance matrices.
+
+⊤
+P
+ser k
+Λh = (sl ,al ,s′ l )∈U ser (k) ϕ sl , al ϕ sl , al ,
+h
+
+⊤
+P
+loc k
+Λm,h = (sl ,al ,s′ l )∈U loc (k) ϕ sl , al ϕ sl , al ,
+m,h
+
+Λkm,h = ser Λkh + loc Λkm,h + λI.
+We synchronize as long as the following condition is met:
+
+k
+det ser Λkh + loc Λm,h + λI
+γ
+log
+≥
+,
+
+k
+ser
+(k − ks )
+det Λh + λI
+
+(3.3)
+
+where γ is a communication control factor. In our experiments, we try all three rules and compare
+their performance, which is discussed in detail in Appendix K.1.
+The second stage (Lines 16-24) is executed only when the synchronization condition is satisfied.
+loc
+First, all the agents upload their local transition set Um,h
+(k), i.e., the newly collected local data after
+the last synchronization, to the server. Then, the server gathers all information together in Uhser (k)
+loc
+and sends it back to each agent. Finally, each agent resets the local transition set Um,h
+(k) ← ∅. Now
+S loc
+ser
+agent m can access the dataset Um,h (k) = Uh (k) Um,h (k), which contains the historical data of
+all agents up to last synchronization and its local dataset.
+3.2
+
+Randomized Exploration Strategies
+
+When we update the model parameter and estimate Q functions in Algorithm 1 (Line 6), we use
+exploration strategies to avoid suboptimal policies. Previous work adopted Upper Confidence Bound
+(UCB) exploration in the linear function class [24, 56] to estimate the Q function {Qkm,h }H
+h=1 .
+Although UCB-based methods come with strong theoretical guarantees, they often perform poorly
+in practice [16, 61, 60]. Moreover, UCB requires precise computation of the confidence set, which
+is usually hard to be implemented beyond the linear structure. In contrast, randomized exploration
+strategies offer more robust performance, flexibility in design, ease of implementation, and do not
+require a linear structure.
+We approximate the Q functions with the following function class F = {fw : S ×A → R|fw (s, a) =
+f (w; ϕ(s, a))}, where w ∈ Rd is the parameter and ϕ ∈ Rd is a feature mapping associated with
+state-action pairs. Now we define the loss function for estimating the Q functions.
+
+PK(k)
+l
+k
+Lkm,h (w) = l=1 L rhl + Vm,h+1
+(s′ ), f w; ϕl + λ∥w∥2 ,
+(3.4)
+
+
+where rhl = rh sl , al , ϕl = ϕ sl , al , and L is a user-specified loss function.
+Perturbed-History Exploration The first strategy we use in Algorithm 1 is called the perturbedhistory exploration [45, 47, 32], displayed in Algorithm 2. We refer to the resulting algorithm as
+CoopTS-PHE. In particular, we optimize the following randomized loss function, where we add
+random Gaussian noises to the rewards and regularizer in (3.4).
+
+
+′l
+l
+e k,n (w) = PK(k) L rl + ϵk,l,n + V k
+L
++ λ∥w + ξhk,n ∥2 ,
+(3.5)
+h
+m,h+1 (s ), f w; ϕ
+m,h
+l=1
+h
+i.i.d
+
+where ϵk,l,n
+∼ N (0, σ 2 ), ξhk,n ∼ N (0, σ 2 I), and n ∈ [N ]. Then we obtain the following perturbed
+h
+estimated parameter
+k,n
+e k,n (w).
+e m,h
+w
+= argminw∈Rd L
+m,h
+
+5
+
+(3.6)
+
+Note that we repeat the above steps for n = 1, . . . , N to obtain independent copies of parameters,
+which is referred to as the multi-sampling process [32, 33]. Then we obtain the estimated Q function
+Qkm,h based on Line 7 in Algorithm 2. Finally, by maximizing Qkm,h over action space A, we obtain
+k
+the estimated value function Vm,h
+.
+Algorithm 2 Perturbed-History Exploration
+1: Input: multi-sampling number N ∈ N+ , function class F = {fw : S × A → R|fw (s, a) =
+f (w; ϕ(s, a))}.
+2: for step h = H, ..., 1 do
+3:
+for n = 1, ..., N do
+i.i.d
+4:
+Sample {ϵk,l,n
+}l∈[K(k)] ∼ N (0, σ 2 ) and ξhk,n ∼ N (0, σ 2 I) independently.
+h
+k,n
+e m,h
+5:
+Solve w
+according to (3.6).
+6:
+end for
+
+
++
+k,n
+e m,h
+7:
+Qkm,h ← min maxn∈[N ] f w
+;ϕ ,H − h + 1 .
+k
+8:
+Vm,h
+(·) ← maxa∈A Qkm,h (·, a).
+9: end for
+k
+10: Output: {Qkm,h (·, ·), Vm,h
+(·)}H
+h=1 .
+
+Langevin Monte Carlo Exploration Next we introduce the Langevin Monte Carlo exploration
+strategy [83, 33] in Algorithm 3, which stems from the Langevin dynamics [67, 8, 19, 81, 96].
+Combining it with Algorithm 1 leads to our second proposed algorithm, CoopTS-LMC. Specifically,
+we update the model parameter iteratively. For iterate j = 1, . . . , Jk , the update is given by
+q
+k,j,n
+k,j−1,n
+k,j−1,n 
+−1 k,j,n
+ϵm,h ,
+(3.7)
+wm,h
+= wm,h
+− ηm,k ∇Lkm,h wm,h
++ 2ηm,k βm,k
+d
+where Lkm,h is defined in (3.4), ϵk,j,n
+m,h ∈ R is a standard Gaussian noise, ηm,k is the learning rate,
+and βm,k is the inverse temperature parameter. We similarly use the multi-sampling trick to obtain N
+independent estimators and estimate Q function Qkm,h by truncation based on Line 10 in Algorithm 3.
+
+Algorithm 3 Langevin Monte Carlo Exploration
+1: Input: multi-sampling number N ∈ N+ , function class F = {fw : S × A →
+R|fw (s, a) = f (w; ϕ(s, a))}, step sizes {ηm,k }m∈M,k∈[K] , inverse temperature parameters
+{βm,k }m∈M,k∈[K] .
+2: for step h = H, ..., 1 do
+3:
+for n = 1, ..., N do
+k−1,J
+,n
+k,0,n
+4:
+wm,h
+= wm,h k−1 .
+5:
+for j = 1, ..., Jk do
+i.i.d
+6:
+Sample ϵk,j,n
+m,h ∼ N (0, I).
+k,j,n
+Update wm,h
+by (3.7).
+end for
+end for
+
+
++
+k,Jk ,n
+Qkm,h ← min maxn∈[N ] f wm,h
+;ϕ ,H − h + 1 .
+k
+11:
+Vm,h
+(·) ← maxa∈A Qkm,h (·, a).
+12: end for
+k
+13: Output: {Qkm,h (·, ·), Vm,h
+(·)}H
+h=1 .
+
+7:
+8:
+9:
+10:
+
+4
+
+Theoretical Analysis
+
+4.1
+
+Homogeneous Parallel Linear MDPs
+
+We provide theoretical analyses of our algorithms in the linear structure under the assumption of
+linear function approximation and linear MDP setting. We first present the definition of linear MDPs.
+6
+
+Definition 4.1 (Linear MDP [36]). An MDP(S, A, H, P, r) is a linear MDP with feature map
+ϕ : S × A → Rd , if for any h ∈ [H], there exist d unknown measures µh = (µ1h , ..., µdh ) over S and
+an unknown vector θh ∈ Rd such that for any (s, a) ∈ S × A,
+Ph (·|s, a) = ϕ(s, a), µh (·) ,
+
+rh (s, a) = ϕ(s, a), θh .
+
+Without loss of generality,
+√ we assume that for all (s, a) ∈ S × A, ∥ϕ(s, a)∥ ≤ 1 and
+max{∥µh (S)∥, ∥θh ∥} ≤ d.
+Throughout the analyses in this section, we assume the homogeneous parallel MDPs setting where
+all agents share the same linear MDP defined in Definition 4.1. We also provide the results when
+the MDPs across agents are approximately linear and heterogeneous in Section 4.2. Under the
+linear MDP assumption, it is known that the Q-function admits a linear form [36, Proposition 2.3].
+Consequently, we choose the loss function L in (3.4) to be the l2 loss and approximate the Q function
+in the linear function class f (w; ϕl ) = w⊤ ϕl .
+Now we first present the regret bound for CoopTS-PHE.
+Theorem 4.2. Under Definition 4.1, choose L to be l2 loss and linear function class f (w; ϕl ) =
+e log(δ)/ log(c0 ) where
+w⊤ ϕl in (3.4). In CoopTS-PHE (Algorithm 1+Algorithm 2), let N = C
+e
+e
+C = O(d) and c0 = Φ(1), Φ(·) is the cumulative distribution function (CDF) of the standard normal
+distribution. Let λ = 1 and 0 < δ < 1. Under the determinant synchronization condition (3.3), we
+obtain the following cumulative regret
+p
+√ 
+√
+e d 23 H 2 M
+Regret(K) = O
+dM γ + K ,
+with probability at least 1 − δ.
+Remark 4.3. When we choose γ = O(K/dM ) in the
+√ synchronization condition (3.3), the cu3/2 2
+e
+mulative regret of CoopTS-PHE becomes O(d H M K),
+√ which matches the result of UCB
+e 3/2 H 2 K), which matches the existing best
+exploration [24]. When M = 1, the regret becomes O(d
+randomized single-agent result [32, 33]. Note that if there is no communication at all and agents act
+independently, √
+with the same number of learning rounds (or samples), the cumulative regret becomes
+3/2 2
+e
+O(M ·d H K). By incorporating communication,
+our regret bound in Theorem 4.2 is lower than
+√
+that of the independent setting by a factor M . A similar strategy called rare-switching update with
+a determinant synchronization condition has also been adopted in parallel bandit problems [69, 15].
+Similarly, we have the following result for CoopTS-LMC.
+Theorem 4.4. Under Definition 4.1, choose L to be l2 loss and linear function class f (w; ϕl ) =
+w⊤ ϕl in (3.4).
+1+Algorithm
+let N = C̄ log(δ)/ log(c′0 ) where
+√ 3),
+√ In CoopTS-LMC (Algorithm
+
+p
+′
+e
+e
+c0 = 1 − 1/2 2eπ and C̄ = O(d). Let 1/ βm,k = O H d for all m ∈ M, λ = 1, and 0 
+<δ<
+1. For any episode k ∈ [K] and agent m ∈ M, let the learning rate ηm,k = 1/ 4λmax Λkm,h , the
+
+
+update number Jk = 2κk log(4HKM d) where κk = λmax Λkm,h /λmin Λkm,h is the condition
+number of Λkm,h . Under the determinant synchronization condition (3.3), we have
+p
+√
+√ 
+e d 23 H 2 M
+dM γ + K ,
+Regret(K) = O
+with probability at least 1 − δ.
+Remark 4.5. Note that CoopTS-PHE and CoopTS-LMC have the same order of regret. Hence the
+discussion in Remark 4.3 also applies to CoopTS-LMC. We would also like to highlight that our
+results are the first rigorous regret bounds for randomized MARL algorithms.
+From the perspective of technical novelty, our analysis of randomized MARL algorithms is different
+from that of UCB-based algorithms [24] because the model prediction error here contains randomness,
+causing a more complex probability analysis and an additional approximation error. We would also
+like to point out that in proofs for both CoopTS-LMC and CoopTS-PHE , we use a new ε-covering
+technique to prove that the optimism lemma holds for all (s, a) ∈ S ×A instead of just the state-action
+pairs encountered by the algorithm, which is essential for the regret analysis. This was ignored
+by previous works [13] and its follow-up works [93, 33] that use the same regret decomposition
+technique. Furthermore, the multi-agent setting and the communications from synchronization in
+our algorithms also significantly increase the challenges in our analysis compared to randomized
+exploration in the single-agent setting [32, 33].
+7
+
+Next we present the communication complexity of Algorithm 1 with synchronization condition (3.3).
+Lemma 4.6. The total number of communication rounds between the agents and the server in
+e
+Algorithm 1 is bounded by CPX = O((d
++ K/γ)M H). Moreover, the total number of transferred
+random bits only has a logarithmic dependence on the number of episodes K.
+Remark 4.7. We provide a refined analysis in Appendix C to get this improved result based on that
+of [24], which studied the same communication procedure as ours. When we choose γ = O(K/dM ),
+2
+e
+the communication complexity reduces to O(dHM
+), which only has a logarithmic dependence on
+the number of episodes K. Additionally, we provide a rigorous analysis to show that the algorithm
+only needs to communicate logarithm number of random bits throughout the learning process.
+Note that Min et al. [56] studied the asynchronous
+setting where only one agent is active in each
+√
+2
+e 3/2 H 2 K) with the communication complexity O(dHM
+e
+episode, giving out the regret O(d
+). It is
+interesting to see that our algorithm, though in the synchronous setting, has the same communication
+complexity as the asynchronous variant. This implies that the asynchronous algorithm can only circumvent current communication by delaying it to the future but does not decrease the communication
+complexity. In fact, the synchronous setting can learn the policy better in our work, which is indicated
+by comparison of the average regret (the cumulative regret divided by the total number of samples
+used by the algorithm) in Table 1. By achieving a matched communication complexity, we find that
+synchronous and asynchronous settings have their own advantages and cannot replace each other.
+This phenomenon can help us better understand the properties of these two communication schemes.
+4.2
+
+Misspecified Setting
+
+In this part, we extend our theoretical analysis to the misspecified setting. In this setting, the transition
+functions Pm,h and the reward functions rm,h are heterogeneous across different MDPs, which
+is slightly more complicated than the homogeneous setting. Moreover, instead of assuming the
+transition and reward are linear, we only require each individual MDP is a ζ-approximate linear MDP
+[36] where both the transition and reward are approximately linear up to an controlled error ζ.
+Definition 4.8 (Misspecified Parallel MDPs). For any 0 < ζ ≤ 1, and for any agent m ∈ M,
+the corresponding MDP(S, A, H, Pm , rm ) is a ζ-approximate linear MDP with a feature map
+(1)
+(d) 
+ϕ : S × A → Rd , for any h ∈ [H], there exist d unknown (signed) measures µh = µh , . . . , µh
+over S and an unknown vector θh ∈ Rd such that for any (s, a) ∈ S × A, we have
+Pm,h (· | s, a) − ϕ(s, a), µh (·)
+
+TV
+
+≤ ζ,
+
+rm,h (s, a) − ⟨ϕ(s, a), θh ⟩ ≤ ζ,
+where ∥ · ∥TV
+Pis the total variation norm, for two distributions P1 and P2 , we define it as: ∥P1 −
+P2 ∥TV = 21 x∈Ω |P1 (x) − P2 (x)|. Without loss of generality, we assume that ∥ϕ(s, a)∥ ≤ 1 for
+√
+
+all (s, a) ∈ S × A, and max ∥µh (S)∥, ∥θh ∥ ≤ d for all h ∈ [H] and m ∈ M.
+Remark 4.9. Note that our misspecified setting defined in Definition 4.8 is a generalized notion of
+misspecification in [36]. Moreover, our misspecified setting is also more general and cover the small
+heterogeneous setting mentioned in [24]. The triangle inequality can easily be used to derive small
+heterogeneous setting from our misspecified setting, but not vice versa.
+Next we state our regret bound for CoopTS-PHE in the misspecified setting.
+Theorem 4.10 (Misspecified Regret Bound for CoopTS-PHE). In CoopTS-PHE (Algorithm 1+Algorithm 2), under Definition 4.8 and determinant synchronization condition (3.3), with the same
+initialization with Theorem 4.2, we obtain the following cumulative regret
+
+p
+√
+√ 
+√ p
+√  
+e d 32 H 2 M
+Regret(K) = O
+dM γ + K + dH 2 M K
+dM γ + K ζ ,
+with probability at least 1 − δ.
+p
+
+Remark 4.11. When we choose ζ = O d/M K , the cumulative regret becomes
+√
+√
+
+√
+e d 23 H 2 M dM γ + K . This matches the result of Theorem 4.2 in the linear MDP setting.
+O
+Similarly, we can have the following result for CoopTS-LMC.
+8
+
+Theorem 4.12 (Misspecified Regret Bound for CoopTS-LMC). In CoopTS-LMC (Algorithm 1+Algorithm 3), under Definition 4.8 and determinant
+√ condition
+√ (3.3),
+ with the same
+p synchronization
+e H d + H M Kdζ , we obtain the
+initialization with Theorem 4.4 except that 1/ βm,k = O
+following cumulative regret
+
+p
+√ 
+√  
+√
+√ p
+3
+e d 32 H 2 M
+dM γ + K + d 2 H 2 M K
+dM γ + K ζ ,
+Regret(K) = O
+with probability at least 1 − δ.
+
+p
+√
+
+√
+e d 32 H 2 M dM γ +
+Remark 4.13. When ζ = O 1/M K , the cumulative regret becomes O
+√ 
+K . This matches the result of Theorem 4.4 in the linear MDP setting. By comparing Theo√
+rems 4.10 and 4.12, we find the result of CoopTS-LMC has an√
+extra d factor worse than that of
+CoopTS-PHE, causing the chosen ζ in CoopTS-PHE has an extra d order over that in CoopTS-LMC.
+This indicates that CoopTS-PHE has better performance tolerance for the misspecified setting.
+
+5
+
+Experiments
+
+In this section, we present an empirical evaluation of our proposed randomized exploration strategies
+(i.e., CoopTS-PHE and CoopTS-LMC) with deep Q-networks (DQNs) [57] as the core algorithm
+on varying tasks under multi-agent settings compared with several baselines: vanilla DQN, Double
+DQN [28], Bootstrapped DQN [62], and Noisy-Net [26]). Given that all experiments are conducted
+under multi-agent settings unless explicitly specified as a single-agent or centralized scenario, we
+denote CoopTS-PHE as "PHE" and CoopTS-LMC as "LMC" in both experimental contexts and
+figures. Note that we run all our experiments on Nvidia RTX A5000 with 24GB RAM. The
+implementation of this work can be found at https://github.com/panxulab/MARL-CoopTS
+
+4
+2
+0 0
+
+PHE
+LMC
+DQN
+Bootstrapped DQN
+NoisyNet DQN
+DDQN
+500
+
+1000
+
+1500
+
+2000
+
+(a) m=2
+
+800
+
+700
+
+700
+
+600
+
+6
+4
+2
+
+Training Episodes per Agent
+
+900
+
+800
+
+0 0
+
+600
+
+500
+
+500
+
+1000
+
+500
+
+400
+
+PHE
+LMC
+DQN
+Bootstrapped DQN
+NoisyNet DQN
+DDQN
+
+300
+200
+100
+
+1500
+
+0 0
+
+2000
+
+Training Episodes per Agent
+
+(b) m=3
+
+Episode Return
+
+6
+
+900
+
+Episode Return
+
+8
+
+Episode Return
+
+10
+
+8
+
+Episode Return
+
+10
+
+PHE
+LMC
+DQN
+Bootstrapped DQN
+NoisyNet DQN
+DDQN
+200 400 600 800 1000 1200 1400 1600
+
+Training Episodes per Agent
+
+(c) Mario (Parallel)
+
+400
+300
+200
+100
+0 0
+
+PHE
+LMC
+DQN
+Bootstrapped DQN
+NoisyNet DQN
+DDQN
+200 400 600 800 1000 1200 1400 1600
+
+Training Episodes per Agent
+
+(d) Mario (Federated)
+
+Figure 1: Comparison among different exploration strategies in different environments. (a)-(b):
+N -chain with N = 25. (c)-(d): Super Mario Bros. All results are averaged over 10 runs and the
+shaded area represents the standard deviation.
+5.1
+
+N -chain
+
+The N -chain [62] comprises a sequence of N states denoted as {sl }N
+l=1 . Assuming the existence of
+m agents, all initiating their trajectories from s2 , this study explores the dynamics of their movement
+within the chain. At each time step, agents face the decision to move either left or right. Notably, each
+agent incurs a nominal reward of r = 0.001 upon reaching state s1 , while a more substantial reward
+of r = 1 is obtained upon reaching the terminal state sN . The illustration of N -chain environment is
+shown in Figure 3. With a horizon length of N +9, the optimal return is 10. We consider N = 25 with
+the communication among agents in Figure 1 following the synchronization approach in Algorithm 1.
+In Figure 1(a), we show that PHE and Bootstrapped DQN result in higher average episode return
+among all agents while LMC can also eventually converge to a similar reward.
+Upon increasing the number of agents to m = 3, we show in Figure 1(b) that our randomized
+exploration methods outperform all other baselines. Notably, the fluctuation in PHE is observed to be
+less pronounced against LMC. This observation lends support to our theoretical framework regarding
+performance tolerance in the misspecified setting, as detailed in Section 4.2. The complete results for
+N -chain and ablation studies can be found in Appendix K.1.
+5.2
+
+Super Mario Bros
+
+Environmental heterogeneity, arising from various sources, is a prevalent challenge in practical
+scenarios. In Section 4.2, we illustrate the extension of homogeneous parallel MDP to the misspecified
+9
+
+setting. In the Super Mario Bros task [74], we examine a scenario where four agents, denoted as
+m = 4, engage in learning within distinct environments. Despite these environments sharing the
+same state space S, action space A, and reward function, their characteristics are different described
+in Appendix K.2. The primary objective of the Super Mario Bros task is to train an agent capable
+of advancing as far-right and rapidly as possible without collisions or falls. Utilizing preprocessed
+images as input states, agents aim to select optimal actions from a set of 7 discrete actions.
+Figure 1(c) visually depicts that both randomized exploration strategies outperform other baselines
+in cooperative parallel learning. Notably, we observe that the superiority of LMC gets significant
+against PHE unlike the results in N -chain in Figures 1(a) and 1(b). In the case of PHE, Gaussian
+noise is introduced to the reward before applying the Bellman update, which can be viewed as a
+method empirically approximating the posterior distribution of the Q function using a Gaussian
+distribution. However, it is crucial to note that in practical scenarios, unlike the N -chain setting,
+Gaussian distributions may not always provide an accurate approximation of the true posterior of the
+Q function [33]. Here, transitions are shared among the four agents whenever the synchronization
+condition in (3.3) is met. We also conducted extra experiments in this task extending our proposed
+method to federated learning shown in Figure 1(d) with details in Appendix K.2.
+
+5.3
+
+Thermal Control of Building Energy Systems
+
+Finally, we assess the efficacy of our randomized exploration strategies through their application to
+a practical task within a sustainable energy system: BuildingEnv, as outlined in [85]. BuildingEnv
+is designed to manage the heating supply in a multi-zone building, which involves addressing realworld physical constraints and accounting for environmental shifts over time. The objective is to
+meet user-defined temperature specifications while simultaneously minimizing overall electricity
+consumption. We defer the environment details to Appendix K.3.
+
+Daily Return
+
+With the availability of different cities in varying
+10
+weather types, we conduct experiments on multiple
+cities in parallel and share their data following Al20
+gorithm 1 for each exploration strategy. During the
+30
+evaluation, we deploy those trained policies to the
+environment of each city/weather. We include all
+40
+methods as well as random action in Figure 2 for
+50
+a fair comparison. Specifically, we sample action
+Random
+PHE
+LMC
+DQN BootstrappedNoisyNet DDQN
+randomly from action space for random action. We
+Algorithm
+display the distribution of the return with probability density in violin plots, indicating that our PHE Figure 2: Evaluation performance at Tampa
+and LMC can perform better with a higher mean. (hot humid) in building energy systems. All
+Additional results for other cities can be found in results are averaged over 10 runs.
+Appendix K.3.
+
+6
+
+Conclusion
+
+We proposed a unified algorithm framework for provably efficient randomized exploration in parallel
+MDPs. By combining this unified algorithm framework with two TS-type randomized exploration
+strategies, PHE and LMC, we obtained two algorithms for parallel MDPs: CoopTS-PHE and CoopTSLMC. These two algorithms are both flexible in design and easy to implement in practice. Under the
+linear MDP setting, we derived the theoretical regret bounds and communication complexities of
+CoopTS-PHE and CoopTS-LMC. This is the first result for randomized exploration in cooperative
+MARL, matching the best existing regret bounds for single-agent RL [32, 33]. We also extended our
+theoretical analysis to the misspecified setting. Our experiments on diverse RL parallel environments
+verified that randomized exploration improves the balance between exploration and exploitation in
+both homogeneous and heterogeneous settings. Future research directions includes extending our
+randomized exploration algorithm to fully decentralized or federated learning settings. Additionally,
+developing a more communication-efficient algorithm to reduce the substantial communication costs
+in the general function class setting is another potential direction.
+10
+
+Acknowledgments
+We would like to thank the anonymous reviewers for their helpful comments. HH and MP were
+supported in part by the ONR under agreement N00014-23-1-2206, AFOSR under the award number
+FA9550-19-1-0169, and by the NSF under NAIAD Award 2332744 as well as the National AI
+Institute for Edge Computing Leveraging Next Generation Wireless Networks, Grant CNS-2112562.
+WW and PX were supported in part by the National Science Foundation (DMS-2323112) and the
+Whitehead Scholars Program at the Duke University School of Medicine. The views and conclusions
+in this paper are those of the authors and should not be interpreted as representing any funding agency.
+
+References
+[1] Y. Abbasi-Yadkori, D. Pál, and C. Szepesvári. Improved algorithms for linear stochastic bandits.
+Advances in neural information processing systems, 24, 2011. 1, 56, 57
+[2] M. Abeille and A. Lazaric. Linear thompson sampling revisited. In Artificial Intelligence and
+Statistics, pages 176–184. PMLR, 2017. 18
+[3] M. Abramowitz and I. A. Stegun. Handbook of mathematical functions with formulas, graphs,
+and mathematical tables, volume 55. US Government printing office, 1968. 57
+[4] P. Agrawal, J. Chen, and N. Jiang. Improved worst-case regret bounds for randomized leastsquares value iteration. In Proceedings of the AAAI Conference on Artificial Intelligence,
+volume 35, pages 6566–6573, 2021. 17
+[5] S. Agrawal and N. Goyal. Thompson sampling for contextual bandits with linear payoffs. In
+International Conference on Machine Learning, pages 127–135, 2013. 60
+[6] S. Agrawal and N. Goyal. Thompson sampling for contextual bandits with linear payoffs. In
+International conference on machine learning, pages 127–135. PMLR, 2013. 18
+[7] S. Agrawal and R. Jia. Optimistic posterior sampling for reinforcement learning: worst-case
+regret bounds. In Advances in Neural Information Processing Systems, volume 30, pages
+1184–1194, 2017. 2, 17
+[8] D. Bakry, I. Gentil, M. Ledoux, et al. Analysis and geometry of Markov diffusion operators,
+volume 103. Springer, 2014. 6
+[9] N. A. Bakshi, T. Gupta, R. Ghods, and J. Schneider. Guts: Generalized uncertainty-aware
+thompson sampling for multi-agent active search. In IEEE International Conference on Robotics
+and Automation (ICRA), pages 7735–7741. IEEE, 2023. 17
+[10] A. L. Bazzan. Opportunities for multiagent systems and multiagent reinforcement learning in
+traffic control. Autonomous Agents and Multi-Agent Systems, 18:342–375, 2009. 1
+[11] D. S. Bernstein, R. Givan, N. Immerman, and S. Zilberstein. The complexity of decentralized
+control of markov decision processes. Mathematics of Operations Research, 27(4):819–840,
+2002. 17
+[12] C. Boutilier. Planning, learning and coordination in multiagent decision processes. In Theoretical Aspects of Rationality and Knowledge, 1996. 17
+[13] Q. Cai, Z. Yang, C. Jin, and Z. Wang. Provably efficient exploration in policy optimization. In
+International Conference on Machine Learning, pages 1283–1294. PMLR, 2020. 7, 22
+[14] G. Chalkiadakis and C. Boutilier. Coordination in multiagent reinforcement learning: A
+bayesian approach. In Proceedings of the second international joint conference on Autonomous
+agents and multiagent systems, pages 709–716, 2003. 1
+[15] J. Chan, A. Pacchiano, N. Tripuraneni, Y. S. Song, P. Bartlett, and M. I. Jordan. Parallelizing
+contextual bandits. arXiv preprint arXiv:2105.10590, 2021. 7
+[16] O. Chapelle and L. Li. An empirical evaluation of thompson sampling. Advances in neural
+information processing systems, 24, 2011. 5, 18
+11
+
+[17] Y. Chen, P. Dong, Q. Bai, M. Dimakopoulou, W. Xu, and Z. Zhou. Society of agents: Regret
+bounds of concurrent thompson sampling. Advances in Neural Information Processing Systems,
+pages 7587–7598, 2022. 17
+[18] W. Chu, L. Li, L. Reyzin, and R. Schapire. Contextual bandits with linear payoff functions. In
+Proceedings of the Fourteenth International Conference on Artificial Intelligence and Statistics,
+pages 208–214. JMLR Workshop and Conference Proceedings, 2011. 1, 2
+[19] A. S. Dalalyan. Theoretical guarantees for approximate sampling from smooth and log-concave
+densities. Journal of the Royal Statistical Society Series B: Statistical Methodology, 79(3):
+651–676, 2017. 6
+[20] C. Dann, M. Mohri, T. Zhang, and J. Zimmert. A provably efficient model-free posterior sampling method for episodic reinforcement learning. Advances in neural information processing
+systems, 34, 2021. 17
+[21] M. Dimakopoulou and B. V. Roy. Coordinated exploration in concurrent reinforcement learning.
+Proceedings of the 35th International Conference on Machine Learning, pages 1271–1279,
+2018. 17
+[22] M. Dimakopoulou, I. Osband, and B. V. Roy. Scalable coordinated exploration in concurrent
+reinforcement learning. Advances in Neural Information Processing Systems, pages 4219–4227,
+2018. 17
+[23] G. Ding, J. J. Koh, K. Merckaert, B. Vanderborght, M. M. Nicotra, C. Heckman, A. Roncone,
+and L. Chen. Distributed reinforcement learning for cooperative multi-robot object manipulation.
+In Proceedings of the 2020 International Conference on Autonomous Agents and Multiagent
+Systems, AAMAS, pages 1831–1833. ACM, 2020. 1
+[24] A. Dubey and A. Pentland. Provably efficient cooperative multi-agent reinforcement learning
+with function approximation. arXiv preprint arXiv:2103.04972, 2021. 1, 3, 5, 7, 8, 17, 19, 22
+[25] Y. Fei and R. Xu. Cascaded gaps: Towards logarithmic regret for risk-sensitive reinforcement
+learning. In International Conference on Machine Learning, pages 6392–6417. PMLR, 2022. 1
+[26] M. Fortunato, M. G. Azar, B. Piot, et al. Noisy networks for exploration. In International
+Conference on Learning Representations, 2018. 9, 17, 58
+[27] J. Hao, T. Yang, H. Tang, C. Bai, J. Liu, Z. Meng, P. Liu, and Z. Wang. Exploration in deep
+reinforcement learning: From single-agent to multiagent domain. IEEE Transactions on Neural
+Networks and Learning Systems, 2023. 1
+[28] H. V. Hasselt, A. Guez, and D. Silver. Deep reinforcement learning with double qlearning. In
+Annual AAAI Conference on Artificial Intelligence (AAAI), 2016. 9, 58
+[29] E. Hillel, Z. S. Karnin, T. Koren, R. Lempel, and O. Somekh. Distributed exploration in
+multi-armed bandits. Advances in Neural Information Processing Systems, 26, 2013. 17
+[30] R. A. Horn and C. R. Johnson. Matrix analysis. Cambridge university press, 2012. 56
+[31] T. Huix, M. Zhang, and A. Durmus. Tight regret and complexity bounds for thompson sampling
+via langevin monte carlo. In F. Ruiz, J. Dy, and J.-W. van de Meent, editors, Proceedings
+of The 26th International Conference on Artificial Intelligence and Statistics, volume 206 of
+Proceedings of Machine Learning Research, pages 8749–8770. PMLR, 25–27 Apr 2023. URL
+https://proceedings.mlr.press/v206/huix23a.html. 2
+[32] H. Ishfaq, Q. Cui, V. Nguyen, A. Ayoub, Z. Yang, Z. Wang, D. Precup, and L. Yang. Randomized exploration in reinforcement learning with general value function approximation. In
+International Conference on Machine Learning, pages 4607–4616. PMLR, 2021. 2, 3, 5, 6, 7,
+10, 17, 56, 57
+[33] H. Ishfaq, Q. Lan, P. Xu, A. R. Mahmood, D. Precup, A. Anandkumar, and K. Azizzadenesheli.
+Provable and practical: Efficient exploration in reinforcement learning via langevin monte
+carlo. In The Twelfth International Conference on Learning Representations, 2024. URL
+https://openreview.net/forum?id=nfIAEJFiBZ. 2, 3, 6, 7, 10, 17, 22, 56, 59
+12
+
+[34] H. Ishfaq, Y. Tan, Y. Yang, Q. Lan, J. Lu, A. R. Mahmood, D. Precup, and P. Xu. More efficient
+randomized exploration for reinforcement learning via approximate sampling. Reinforcement
+Learning Journal, 3:1211–1235, 2024. 2, 3
+[35] M. Jafarnia-Jahromi, R. Jain, and A. Nayyar. A bayesian learning algorithm for unknown
+zero-sum stochastic games with an arbitrary opponent. In International Conference on Artificial
+Intelligence and Statistics, pages 3880–3888. PMLR, 2024. 17
+[36] C. Jin, Z. Yang, Z. Wang, and M. I. Jordan. Provably efficient reinforcement learning with
+linear function approximation. In Conference on Learning Theory, pages 2137–2143. PMLR,
+2020. 1, 2, 3, 7, 8, 17, 56
+[37] H. Jin, Y. Peng, W. Yang, S. Wang, and Z. Zhang. Federated reinforcement learning with
+environment heterogeneity. In International Conference on Artificial Intelligence and Statistics,
+pages 18–37. PMLR, 2022. 64
+[38] T. Jin, P. Xu, J. Shi, X. Xiao, and Q. Gu. Mots: Minimax optimal thompson sampling. In
+International Conference on Machine Learning, pages 5074–5083. PMLR, 2021. 17
+[39] T. Jin, P. Xu, X. Xiao, and A. Anandkumar. Finite-time regret of thompson sampling algorithms
+for exponential family multi-armed bandits. Advances in Neural Information Processing
+Systems, 35:38475–38487, 2022.
+[40] T. Jin, X. Yang, X. Xiao, and P. Xu. Thompson sampling with less exploration is fast and
+optimal. In International Conference on Machine Learning, pages 15239–15261. PMLR, 2023.
+17
+[41] T. Jin, H.-L. Hsu, W. Chang, and P. Xu. Finite-time frequentist regret bounds of multi-agent
+thompson sampling on sparse hypergraphs. In Annual AAAI Conference on Artificial Intelligence
+(AAAI), 2024. 17
+[42] A. Karbasi, N. L. Kuang, Y. Ma, and S. Mitra. Langevin thompson sampling with logarithmic
+communication: Bandits and reinforcement learning. In A. Krause, E. Brunskill, K. Cho,
+B. Engelhardt, S. Sabato, and J. Scarlett, editors, Proceedings of the 40th International Conference on Machine Learning, volume 202 of Proceedings of Machine Learning Research,
+pages 15828–15860. PMLR, 23–29 Jul 2023. URL https://proceedings.mlr.press/
+v202/karbasi23a.html. 2, 17
+[43] R. M. Kretchmar. Parallel reinforcement learning. In The 6th World Conference on Systemics,
+Cybernetics, and Informatics, 2002. 17
+[44] N. Kuang, M. Yin, et al. Posterior sampling with delayed feedback for reinforcement learning
+with linear function approximation. Advances in neural information processing systems, 2023.
+17
+[45] B. Kveton, C. Szepesvari, M. Ghavamzadeh, and C. Boutilier. Perturbed-history exploration in
+stochastic multi-armed bandits, 2019. 2, 5
+[46] B. Kveton, M. Zaheer, C. Szepesvari, L. Li, M. Ghavamzadeh, and C. Boutilier. Randomized
+exploration in generalized linear bandits. In International Conference on Artificial Intelligence
+and Statistics, pages 2066–2076. PMLR, 2020. 2, 18
+[47] B. Kveton, M. Zaheer, C. Szepesvari, L. Li, M. Ghavamzadeh, and C. Boutilier. Randomized
+exploration in generalized linear bandits. In S. Chiappa and R. Calandra, editors, Proceedings
+of the Twenty Third International Conference on Artificial Intelligence and Statistics, volume
+108 of Proceedings of Machine Learning Research, pages 2066–2076. PMLR, 26–28 Aug 2020.
+URL https://proceedings.mlr.press/v108/kveton20a.html. 2, 5
+[48] P. Landgren, V. Srivastava, and N. E. Leonard. On distributed cooperative decision-making in
+multiarmed bandits. In 2016 European Control Conference (ECC), pages 243–248. IEEE, 2016.
+17
+13
+
+[49] L. Li, W. Chu, J. Langford, and R. E. Schapire. A contextual-bandit approach to personalized
+news article recommendation. In Proceedings of the 19th international conference on World
+wide web, pages 661–670, 2010. 60
+[50] L. Li, Y. Lu, and D. Zhou. Provably optimal algorithms for generalized linear contextual bandits.
+In International Conference on Machine Learning, pages 2071–2080. PMLR, 2017. 1
+[51] T. Li, A. K. Sahu, M. Zaheer, M. Sanjabi, A. Talwalkar, and V. Smith. Federated optimization
+in heterogeneous networks. In Proceedings of Machine Learning and Systems, volume 2, pages
+429–450, 2020. 17
+[52] Z. Li, Y. Li, Y. Zhang, T. Zhang, and Z.-Q. Luo. Hyperdqn: A randomized exploration method
+for deep reinforcement learning. In International Conference on Learning Representations,
+2022. 17
+[53] J. Lidard, U. Madhushani, and N. E. Leonard. Provably efficient multi-agent reinforcement
+learning with fully decentralized communication. In 2022 American Control Conference (ACC),
+pages 3311–3316. IEEE, 2022. 17
+[54] B. Liu, L. Wang, and M. Liu. Lifelong federated reinforcement learning: a learning architecture
+for navigation in cloud robotic systems. IEEE Robotics and Automation Letters, 4(4):4555–4562,
+2019. 1
+[55] Z. Liu, J. Zhang, Z. Liu, H. Du, Z. Wang, D. Niyato, M. Guizani, and B. Ai. Cell-free xl-mimo
+meets multi-agent reinforcement learning: Architectures, challenges, and future directions.
+IEEE Wireless Communications, 31(4):155–162, 2024. 1
+[56] Y. Min, J. He, T. Wang, and Q. Gu. Cooperative multi-agent reinforcement learning: asynchronous communication and linear function approximation. In International Conference on
+Machine Learning, pages 24785–24811. PMLR, 2023. 1, 2, 3, 5, 8, 17
+[57] V. Mnih, K. Kavukcuoglu, D. Silver, et al. Human-level control through deep reinforcement
+learning. Nature, 518:529–533, 2015. 9, 58, 65
+[58] A. Mousavi-Hosseini, T. Farghly, Y. He, K. Balasubramanian, and M. A. Erdogdu. Towards a
+complete analysis of langevin monte carlo: Beyond poincaré inequality, 2023. 2
+[59] T. Nguyen-Tang and R. Arora. On sample-efficient offline reinforcement learning: Data diversity,
+posterior sampling and beyond. Advances in neural information processing systems, 2023. 17
+[60] I. Osband and B. Van Roy. Why is posterior sampling better than optimism for reinforcement
+learning? In International conference on machine learning, pages 2701–2710. PMLR, 2017. 2,
+5, 17
+[61] I. Osband, D. Russo, and B. Van Roy. (more) efficient reinforcement learning via posterior
+sampling. Advances in Neural Information Processing Systems, 26, 2013. 2, 5, 17
+[62] I. Osband, C. Blundell, A. Pritzel, and B. V. Roy. Deep exploration via bootstrapped dqn.
+Advances in neural information processing systems, 29, 2016. 9, 17, 58
+[63] I. Osband, B. Van Roy, and Z. Wen. Generalization and exploration via randomized value
+functions. In International Conference on Machine Learning, pages 2377–2386. PMLR, 2016.
+17
+[64] I. Osband, J. Aslanides, and A. Cassirer. Randomized prior functions for deep reinforcement
+learning. Advances in neural information processing systems, 31, 2018. 17
+[65] S. Qiu, Z. Dai, H. Zhong, Z. Wang, Z. Yang, and T. Zhang. Posterior sampling for competitive
+rl: Function approximation and partial observation. Advances in neural information processing
+systems, 2023. 17
+[66] C. Riquelme, G. Tucker, and J. Snoek. Deep bayesian bandits showdown: An empirical
+comparison of bayesian deep networks for thompson sampling. In International Conference on
+Learning Representations, 2018. 2, 18
+14
+
+[67] G. O. Roberts and R. L. Tweedie. Exponential convergence of langevin distributions and their
+discrete approximations. Bernoulli, pages 341–363, 1996. 6
+[68] C. Rojas-Córdova, A. J. Williamson, J. A. Pertuze, and G. Calvo. Why one strategy does not
+fit all: a systematic review on exploration–exploitation in different organizational archetypes.
+Review of Managerial Science, 17(7):2251–2295, 2023. 1
+[69] Y. Ruan, J. Yang, and Y. Zhou. Linear bandits with limited adaptivity and learning distributional
+optimal design. In Proceedings of the 53rd Annual ACM SIGACT Symposium on Theory of
+Computing, pages 74–87, 2021. 7
+[70] D. Russo. Worst-case regret bounds for exploration via randomized value functions. Advances
+in neural information processing systems, 32:14410–14420, 2019. 17
+[71] M. Strens. A bayesian framework for reinforcement learning. In International Conference on
+Machine Learning, pages 943–950. PMLR, 2000. 17
+[72] M. E. Taylor and P. Stone. Transfer learning for reinforcement learning domains: A survey.
+Journal of Machine Learning Research, 10(56):1633–1685, 2009. 17
+[73] W. R. Thompson. On the likelihood that one unknown probability exceeds another in view of
+the evidence of two samples. Biometrika, 25(3-4):285–294, 1933. 2, 17
+[74] J.-J. Tsay, C.-C. Chen, and J.-J. Hsu. Evolving intelligent mario controller by reinforcement
+learning. In International Conference on Technologies and Applications of Artificial Intelligence,
+pages 266–272, 2011. 1, 10
+[75] R. Vershynin. High-dimensional probability: An introduction with applications in data science,
+volume 47. Cambridge university press, 2018. 56
+[76] R. Wang, R. R. Salakhutdinov, and L. Yang. Reinforcement learning with general value function
+approximation: Provably efficient approach via bounded eluder dimension. Advances in Neural
+Information Processing Systems, 33:6123–6135, 2020. 1, 2
+[77] Y. Wang, J. Hu, X. Chen, and L. Wang. Distributed bandit learning: Near-optimal regret with
+efficient communication. In International Conference on Learning Representations, 2020. 17
+[78] Z. Wang and M. Zhou. Thompson sampling via local uncertainty. In International Conference
+on Machine Learning, pages 10115–10125. PMLR, 2020. 17
+[79] Q. Xie, Y. Chen, Z. Wang, and Z. Yang. Learning zero-sum simultaneous-move markov games
+using function approximation and correlated equilibrium. In Proceedings of Thirty Third
+Conference on Learning Theory, volume 125, pages 3674–3682. PMLR, 2020. 17
+[80] W. Xiong, H. Zhong, C. Shi, C. Shen, and T. Zhang. A self-play posterior sampling algorithm
+for zero-sum markov games. In International Conference on Machine Learning, pages 24496–
+24523. PMLR, 2022. 17
+[81] P. Xu, J. Chen, D. Zou, and Q. Gu. Global convergence of langevin dynamics based algorithms
+for nonconvex optimization. Advances in Neural Information Processing Systems, 31, 2018. 6
+[82] P. Xu, Z. Wen, H. Zhao, and Q. Gu. Neural contextual bandits with deep representation and
+shallow exploration. In International Conference on Learning Representations, 2021. 2
+[83] P. Xu, H. Zheng, E. V. Mazumdar, K. Azizzadenesheli, and A. Anandkumar. Langevin monte
+carlo for contextual bandits. In International Conference on Machine Learning, pages 24830–
+24850. PMLR, 2022. 2, 6, 17, 18
+[84] D. Ye, G. Chen, W. Zhang, S. Chen, B. Yuan, B. Liu, J. Chen, Z. Liu, F. Qiu, H. Yu, et al.
+Towards playing full moba games with deep reinforcement learning. Advances in Neural
+Information Processing Systems, 33:621–632, 2020. 1
+15
+
+[85] C. Yeh, V. Li, R. Datta, J. Arroyo, N. Christianson, C. Zhang, Y. Chen, M. Hosseini, A. Golmohammadi, Y. Shi, Y. Yue, and A. Wierman. Sustaingym: A benchmark suite of reinforcement
+learning for sustainability applications. In Thirty-seventh Conference on Neural Information
+Processing Systems Datasets and Benchmarks Track. PMLR, 2023. 1, 10, 65, 66
+[86] C. Yu, A. Velu, E. Vinitsky, J. Gao, Y. Wang, A. Bayen, and Y. Wu. The surprising effectiveness
+of PPO in cooperative multi-agent games. In Thirty-sixth Conference on Neural Information
+Processing Systems Datasets and Benchmarks Track, 2022. 17
+[87] C. Yu, X. Yang, J. Gao, J. Chen, Y. Li, J. Liu, Y. Xiang, R. Huang, H. Yang, Y. Wu, and Y. Wang.
+Asynchronous multi-agent reinforcement learning for efficient real-time multi-robot cooperative
+exploration. In Proceedings of the 2023 International Conference on Autonomous Agents and
+Multiagent Systems, AAMAS, pages 1107–1115. ACM, 2023. 17
+[88] A. Zanette, D. Brandfonbrener, E. Brunskill, M. Pirotta, and A. Lazaric. Frequentist regret
+bounds for randomized least-squares value iteration. In International Conference on Artificial
+Intelligence and Statistics, pages 1954–1964. PMLR, 2020. 3, 17
+[89] K. Zhang, Z. Yang, H. Liu, T. Zhang, and T. Başar. Fully decentralized multi-agent reinforcement
+learning with networked agents. In International Conference on Machine Learning, volume 80,
+pages 5872–5881. PMLR, 2018. 17
+[90] W. Zhang, D. Zhou, L. Li, and Q. Gu. Neural thompson sampling. In International Conference
+on Learning Representations, 2021. 60
+[91] Y. Zhang, G. Qu, P. Xu, Y. Lin, Z. Chen, and A. Wierman. Global convergence of localized
+policy iteration in networked multi-agent reinforcement learning. Proceedings of the ACM on
+Measurement and Analysis of Computing Systems, 7(1):1–51, 2023. 17
+[92] Y. Zhao, I. Borovikov, J. Rupert, C. Somers, and A. Beirami. On multi-agent learning in team
+sports games. arXiv preprint arXiv:1906.10124, 2019. 1
+[93] H. Zhong and T. Zhang. A theoretical analysis of optimistic proximal policy optimization in
+linear markov decision processes. Advances in Neural Information Processing Systems, 36,
+2023. 7
+[94] D. Zhou, L. Li, and Q. Gu. Neural contextual bandits with ucb-based exploration. In International Conference on Machine Learning, pages 11492–11502, 2020. 2, 60
+[95] Y. Zhou, J. Li, and J. Zhu. Posterior sampling for multi-agent reinforcement learning: solving extensive games with imperfect information. In International Conference on Learning
+Representations, 2019. 2, 17
+[96] D. Zou, P. Xu, and Q. Gu. Faster convergence of stochastic gradient langevin dynamics for
+non-log-concave sampling. In Uncertainty in Artificial Intelligence, pages 1152–1162. PMLR,
+2021. 6
+
+16
+
+A
+
+Related Work
+
+Cooperative Multi-Agent Reinforcement Learning Cooperative MARL is closely intertwined
+with the domain of multi-agent multi-armed bandits, exemplified by decentralized algorithms featuring
+communication across a network or hypergraphs [48, 91, 41] and distributed settings [29, 77].
+Cooperative MARL manifests primarily in two categories: multi-agent MDPs [12, 89, 79, 24] and
+parallel MDPs [11, 24, 53, 11, 56]. In the realm of cooperative multi-agent robotics, the former is
+employed to formulate optimal multi-agent policies across the distributed system [86, 87]. On the
+other hand, homogeneous parallel MDPs leverage inter-agent communication to expedite learning
+processes [43]. Additionally, heterogeneous parallel MDPs establish connections to heterogeneous
+federated learning [51] and exhibit improved generalizability in transfer learning scenarios [72].
+We focus on parallel MDPs in this paper, where agents interact with the environment simultaneously
+to tackle shared challenges within extensive and distributed systems [43]. Recently, Dubey and
+Pentland [24] proposed the Coop-LSVI algorithm, extending the LSVI-UCB algorithm [36] in singleagent RL to MARL with linear MDPs. In a parallel RL setting with asynchronous communication,
+Min et al. [56] builds upon Coop-LSVI while relinquishing compatibility with heterogeneous MDPs.
+Meanwhile, Lidard et al. [53] focuses on fully decentralized multi-agent UCB Q-learning in a tabular
+setting, maintaining polynomial space complexity even as the number of agents increases. However, it
+is worth noting that neither of the previous works [24, 56] in non-tabular cooperative MARL provides
+experimental validation for the efficacy of their proposed communication strategies. The gap arises
+from their reliance on LSVI-UCB as the core algorithm, wherein optimism is instantiated through
+UCB. Empirical evidence suggests that UCB-based approaches tend to underperform in practical
+scenarios [61, 60, 33]. Moreover, the computational demands of LSVI-UCB become untenable due
+to the necessity of recurrently computing the feature covariance matrix for updating the UCB bonus
+function. On the other hand, distributed applications of parallel MDPs in TS-based concurrent RL
+algorithms have been explored [21, 22, 17]. Specifically, Dimakopoulou and Roy [21] proposed a
+tabular model learning method based on seed sampling for coordinated exploration. This approach
+was further generalized to address intractable state spaces in [22] and supported by a Bayesian regret
+bound in [17]. However, none of these studies consider the communication complexity associated
+with efficient cooperative strategies. Therefore, randomized exploration in this work is critical to
+make these algorithm designs practical.
+
+Randomized Exploration The roots of randomized exploration, particularly TS, can be traced back
+to its success in bandit problems [73]. Randomized exploration strategies can typically exhibit superior
+performance in practical applications due to avoidance of early convergence to suboptimal actions
+[38–40]. Furthermore, these strategies demonstrate robustness in the face of noise and uncertainty,
+particularly within non-stationary environments [78, 9]. This success has extended to Langevin
+Monte Carlo Thompson Sampling (LMCTS), which has been applied to various domains, including
+linear bandits, generalized linear bandits, and neural contextual bandits [83]. The exploration of
+posterior sampling techniques in RL has gained prominence, building upon the foundation laid by
+TS [71, 7]. Randomized Least-Square Value Iteration (RLSVI) is an approach that leverages random
+perturbations to approximate the posterior, with frequentist regret analysis applied under the tabular
+MDP setting [63], inspiring subsequent works focusing on theoretical analyses aimed at improving
+worst-case regret under tabular MDPs [70, 4], with extensions to the linear setting [88, 32, 20]. In
+addition to theoretical advancements, several practical algorithms have been proposed based on
+RLSVI to approximate posterior samples of Q functions in deep RL. These approaches involve
+ensembles of randomly initialized neural networks [62, 64] and noise injection into the parameters
+of the neural network [26, 52]. With the success of LMCTS [83] in bandit domains, the exploration
+of randomized methods has expanded to alternative approaches like LMC in tabular RL [42] and
+linear MDPs with neural network approximation [33]. Further works delve into the realm of random
+exploration from the perspectives of delayed feedback [44] and offline RL [59].
+While posterior sampling demonstrates superiority in various contexts, its theoretical foundations in
+the multi-agent setting remain underexplored. Existing research predominantly focuses on two-player
+zero-sum games, considering both Bayesian [95, 35] and frequentist regrets [80, 65]. There is no
+existing work studying randomized exploration for cooperative multi-agent settings.
+17
+
+B
+
+Instantiation of the Proposed Algorithms in the Linear Function Class
+
+In this section, we specifically discuss our TS-related algorithms in the linear structure, which is
+under the assumption of linear function approximation and linear MDP setting.
+Recall from the loss function in (3.4), here we choose L to be l2 loss and linear function class
+f (w; ϕl ) = w⊤ ϕl . By solving this least-square regression problem, we obtain the unperturbed
+k
+b m,h
+regression estimator w
+. In the linear setting, we have the closed-form solution
+k
+b m,h
+w
+= (Λkm,h )−1 bkm,h ,
+
+(B.1)
+
+where Λkm,h and bkm,h are defined as follows
+K(k)
+
+Λkm,h =
+
+X
+
+
+⊤
+ϕ sl , al ϕ sl , al + λI,
+
+l=1
+K(k)
+
+X
+
+
+l 
+k
+bkm,h =
+rh sl , al + Vm,h+1
+s′ ϕ sl , al .
+l=1
+k
+b m,h
+A natural way of doing randomized exploration is to add a noise N (0, σ 2 (Λkm,h )−1 ) to w
+and
+k
+k
+get the estimated parameter w̄m,h . Then we can construct estimated Q function Qm,h (·, ·) =
+k
+min{ϕ(·, ·)⊤ w̄m,h
+, H − h + 1}+ . We call this method as CoopTS, which is aligned with other
+linear TS algorithms [6, 2]. In what follows, we theoretically show that our proposed algorithms are
+equivalent or approximately converge to the CoopTS algorithm in the linear function approximation
+setting.
+
+For CoopTS-PHE (Algorithm 1+Algorithm 2), let the function approximation in (3.5) be linear
+and choose L to be the squared loss. By solving this least-square regression problem, we obtain
+k,n
+e m,h
+the perturbed regression estimator w
+in CoopTS-PHE. The following proposition conveys that
+CoopTS-PHE is actually equivalent to CoopTS.
+k,n
+e m,h
+Proposition B.1 (Equivalent to CoopTS). The output w
+by CoopTS-PHE is equivalent to adding
+k,n
+k,n
+k
+k
+b m,h
+e m,h
+b m,h
+a Gaussian vector to the unperturbed regression estimator w
+, i.e., w
+=w
++ ζm,h
+, where
+k,n
+ζm,h
+∼ N (0, σ 2 (Λkm,h )−1 ).
+
+For CoopTS-LMC (Algorithm 1+Algorithm 3), let function approximation in (3.4) be linear and
+choose L to be l2 loss to get the loss function. Then after finishing the LMC update, we get the
+k,Jk ,n
+estimated parameter wm,h
+and construct the model approximation of Q function. The following
+k,Jk
+proposition conveys that the distribution of wm,h
+converges to the posterior distribution of Thompson
+Sampling exploration. The proof of this proposition is given in [83].
+Proposition B.2 (Approximately equivalent to CoopTS [83]). If the epoch length Jk in Alk,Jk
+gorithm 3 is sufficiently large, the distribution of wm,h
+converges to Gaussian distribution
+−1
+
+−1
+k
+b m,h
+N (w
+, βm,k
+(Λkm,h )
+
+).
+
+Propositions B.1 and B.2 indicate that the results of our two randomized exploration strategies
+are closely related to CoopTS. As we have mentioned above, in CoopTS, the estimated parameter
+k
+k
+b m,h
+w̄m,h
+is sampled from the normal distribution N (w
+, σ 2 (Λkm,h )−1 ). However, in practice, this
+k
+sampling is often executed in this way: we sample β ∼ N (0, I) first, then we calculate w̄m,h
+=
+1
+
+1
+−
+k
+b m,h
+w
++ σ(Λkm,h )− 2 β and obtain the estimated parameter. Nevertheless, computing Λkm,h 2
+can be computationally expensive, often requiring at least O(d3 ) operations with the Cholesky
+decomposition, making it impractical for high-dimensional machine learning challenges. Additionally,
+the Gaussian distribution used in Thompson Sampling may not effectively approximate the posterior
+distribution in more complex bandit models than the linear MDP due to their intricate structures.
+Moreover, as pointed out by recent work [16, 66, 46, 83], the Laplace approximation-based Thompson
+Sampling exhibits a constant approximation error in the estimation of the posterior distribution.
+Therefore, it necessitates a careful redesign of the covariance matrix to ensure effective performance.
+18
+
+− 1
+Advantages of PHE and LMC As mentioned above, computing Λkm,h 2 can be computationally
+expensive. However, Perturbed-History exploration and Langevin Monte Carlo exploration can avoid
+this. For PHE, by only adding i.i.d random Gaussian noise to perturb reward and regularizer, its
+performance will be equivalent to TS. For LMC, by only performing noisy gradient descent, we can
+do the randomized exploration, resulting in similar performance compared with TS. Additionally,
+these two methods can easily be implemented to general function class while Thompson Sampling
+usually cannot be generalized except for the linear setting. In summary, these two methods are both
+flexible in design and easy to implement in practice.
+Communication cost We emphasize that agents can just send compressed statistics to the server
+under the linear setting, which can largely reduce communication cost. In the linear function class,
+we can calculate the closed-form solution of the regression problem (B.1). In this case, when
+synchronization process is met, all the agents will only need to send their calculated local statistics
+loc k
+Λm,h and loc bkm,h to help solve the regression problem. This communication cost is much smaller
+because Λ is only a d×d matrix and b is only a d-dimensional vector, where d is the feature dimension
+in linear MDP assumption. This can also avoid privacy disclosure through communications.
+Nevertheless, in the general function class setting, our proposed algorithms still require sharing
+all the collected datasets, which will cause relatively large communication cost. Additionally, in
+Appendix K.2, we also propose a federated setting algorithm Algorithm 4. In this setting, instead of
+sharing collected datasets, agents can just share the weight of the collected estimated Q functions,
+which can largely reduce the communication cost.
+
+C
+
+Analysis of the Communication Complexity of Algorithm 1
+
+The proof of the communication complexity is largely inspired by that in [24]. However, we provide
+2
+e
+a refined analysis here, and thus obtain an improved communication complexity O(dHM
+), in
+3
+e
+contrast with the O(dHM ) complexity in their paper. We also discussed this in Remark 4.7 and
+showed that our result matches that of a recently proposed asynchronous algorithm. Moreover, we do
+a careful calculation of the total number of transferred random bits and show it only has a dependence
+on the number of episodes K.
+Proof of Lemma 4.6. We assume σ = {σ1 , . . . , σn } as the synchronization episodes, where σi ∈ [K],
+we also denote σ0 = 0. To bound the number of synchronization n, we separate σ into two parts with
+an undetermined term α
+I1 = {i ∈ [n]|σi − σi−1 ≤ α},
+I2 = {i ∈ [n]|σi − σi−1 > α}.
+Then we have n = |I1 | + |I2 |. Note that
+K ≥ σn =
+
+n
+X
+
+(σi − σi−1 ) ≥
+
+i=1
+
+X
+
+(σi − σi−1 ) > |I2 |α.
+
+i∈I2
+
+Then we have |I2 | < K/α. Then note that
+
+ X
+
+
+n
+i
+i
+X
+det(Λσm,h
+)
+det(Λσm,h
+)
+log
+≥
+log
+σi−1
+σi−1
+det(Λm,h
+)
+det(Λm,h
+)
+i=1
+i∈I1
+X
+γ
+≥
+σi − σi−1
+i∈I1
+
+γ
+≥ |I1 | .
+α
+Define ΛK
+h =
+hand, we have
+
+P
+
+m∈M
+
+PK
+
+k
+k=1 ϕ zm,h
+n
+X
+i=1
+
+
+log
+
+
+
+k
+ϕ zm,h
+
+⊤
+
+i
+det(Λσm,h
+)
+
+σ
+
+i−1
+det(Λm,h
+)
+
+(C.1)
+
+
+k
++ λI where zm,h
+= skm,h , akm,h . On the other
+
+
+
+
+= log
+
+19
+
+n
+det(Λσm,h
+)
+0
+det(Λσm,h
+)
+
+
+
+
+det(ΛK
+h )
+det(λI)
+≤ d log(1 + M K/d),
+
+
+≤ log
+
+(C.2)
+
+where the first inequality holds due to the trivial fact that A ≼ B ⇒ det(A) ≤ det(B), the second
+inequality follow from Lemma J.2 and the fact that ∥ϕ(·)∥2 ≤ 1. Combine (C.1) and (C.2), then we
+have |I1 | ≤ dα/γ log(1 + M K/d). Finally, we choose α = K/d, then we have
+
+
+K
+K
+MK 
+dα
+MK  
+n≤
+= d+
+log 1 +
+.
++
+log 1 +
+α
+γ
+d
+γ
+d
+When one synchronization occurs, communications between agents and the server will occur M
+times because we have M agents in total. Recall from Lines 16-24 in Algorithm 1, also note that
+in one synchronization episode, communications will happen H times between every agent and the
+server. Finally, the upper bound of communication complexity is
+
+e (d + K/γ)M H .
+CPX = O
+Next we consider the total number of transferred random bits. We first calculate the communication
+bits per round. Under the linear setting, we can calculate the closed-form solution of the regression
+k
+problem ŵm,h
+= (Λkm,h )−1 bkm,h , where
+
+
+l l
+l l ⊤
++ λI,
+l=1 ϕ s , a ϕ s , a
+
+
+PK(k)
+l
+k
+l l
+k
+bm,h = l=1 [rh s , a + Vm,h+1 (s′ )]ϕ sl , al .
+
+Λkm,h =
+
+PK(k)
+
+Note that l ∈ [K(k)] is equivalent to (s, a, s′ ) ∈ Um,h (k), and the index set Um,h (k) consists of
+loc
+Uhser (k) and Um,h
+(k). Therefore, the empirical covariance matrix Λkm,h and the vector bkm,h can
+be decomposed into the summation of the local matrices and vectors on each agent. When the
+synchronization occurs, agents just need to send their local statistics loc Λkm,h and loc bkm,h to the server
+to help solve the regression problem on each agent.
+For the local empirical covariance matrix loc Λkm,h
+loc
+
+Λkm,h =
+
+l l
+loc (k) ϕ s , a
+(sl ,al ,s′ l )∈Um,h
+
+P
+
+
+
+ϕ sl , al
+
+⊤
+
+,
+
+this is the summation of up to K d × d matrices. Note that ∥ϕ(s, a)∥ ≤ 1, thus it is easy to see that
+
+⊤
+the entries of each matrix, namely, ϕ sl , al ϕ sl , al , are bounded by 1. Therefore, the entries
+in loc Λkm,h are bounded by K. For each entry in this matrix, it suffices to use O(log K) bits to
+communicate between the server and the agent. Thus in each round, O(d2 log K) bits are needed to
+send the matrix loc Λkm,h .
+For the local vector loc bkm,h
+
+
+P
+l
+loc k
+k
+bm,h = (sl ,al ,s′ l )∈U loc (k) [rh sl , al + Vm,h+1
+(s′ )]ϕ sl , al ,
+m,h
+
+k
+this is a d-dimensional vector. Note that rh is bounded by 1, Vm,h+1
+is bounded by H and is linear
+k
+with ϕ by definition, which indicates we only need to communicate a d-dimensional vector w̄m,h
+to
+k
+obtain Vm,h+1 . Similar to the above analysis, in each round, O(d log(K(H + 1))) bits are needed to
+send the vector loc bkm,h .
+
+Therefore, the total bits of communication still only has a logarithmic dependency on the number of
+episodes K. This completes the proof.
+
+D
+
+Proof of the Regret Bound for CoopTS-LMC
+
+The general framework for CoopTS-LMC and CoopTS-PHE is closely similar. To make the article
+more concise, we first prove CoopTS-LMC completely, which is a bit more complicated. Then we
+can simplify the following similar proof for CoopTS-PHE in Appendix G.
+20
+
+D.1
+
+Supporting Lemmas
+
+Before deriving the regret bound for CoopTS-LMC, we first provide the necessary technical lemmas
+for our regret analysis. Note that the loop (Line 3-9) in Algorithm 3 is to do multi-sampling for N
+times. To simplify the notations, we eliminate the index n before Lemma D.7 because the previous
+lemmas have nothing to do with multi-sampling.
+Definition D.1 (Model prediction error). For any (m, k, h) ∈ M × [K] × [H], we define the model
+error associated with the reward rh ,
+k
+k
+lm,h
+(s, a) = rh (s, a) + Ph Vm,h+1
+(s, a) − Qkm,h (s, a).
+Definition D.2 (Filtration). For any (m, k, h) ∈ M × [K] × [H], we define the filtration Fm,k,h as
+Fm,k,h = σ
+
+
+
+sτn,i , aτn,i
+
+[
+
+
+(n,τ,i)∈M×[k−1]×[H]
+
+skn,i , akn,i
+
+[
+
+
+(n,i)∈[m−1]×[H]
+
+skm,i , akm,i
+
+
+
+
+i∈[h]
+
+.
+
+k,Jk
+Proposition D.3. In Algorithm 3, the parameter wm,h
+satisfies the Gaussian distribution
+
+k,Jk
+k,Jk
+N µm,h , Σm,h , where mean vector and the covariance matrix are defined as
+Jk
+J1 1,0
+k
+µk,J
+m,h = Ak ...A1 wm,h +
+
+k
+X
+
+ i
+Ji+1
+b m,h ,
+AJkk ...Ai+1
+I − AJi i w
+
+i=1
+k
+X
+ i
+1
+Ji+1
+Ji+1
+k
+i
+Σk,J
+=
+AJkk ...Ai+1
+I − A2J
+(Λm,h )−1 (I + Ai )−1 Ai+1
+...AJkk ,
+i
+m,h
+β
+m,i
+i=1
+
+where Ai = I − 2ηm,i Λim,h for i ∈ [k].
+k
+b m,h
+Lemma D.4. For any (m, k, h) ∈ M × [K] × [H], the unperturbed estimated parameter w
+satisfies
+p
+k
+b m,h
+w
+≤ 2H M kd/λ.
+
+Lemma D.5. Let λ = 1 in Algorithm 3. For any fixed 0 < δ < 1, with probability at least 1 − δ 2 ,
+for any (m, k, h) ∈ M × [K] × [H] and for any (s, a) ∈ S × A, we have
+s
+!
+2d
+log(1/δ)
+4
+k,J
+k
+b m,h
+ϕ(s, a)⊤ wm,hk − ϕ(s, a)⊤ w
+≤ 5
+∥ϕ(s, a)∥(Λkm,h )−1 .
++
+3βK
+3
+Lemma D.6. Let λ = 1 in Algorithm 3. For any fixed 0 < δ < 1, with probability at least 1 − δ, for
+any (m, k, h) ∈ M × [K] × [H], we have
+s
+√
+16
+2K 3/2 def
+k,Jk
+wm,h
+≤
+Hd M K +
+d
+= Bδ ,
+3
+3βK δ
+Lemma D.7. Let λ = 1 in Algorithm 3. For any fixed 0 < δ < 1, with probability at least 1 − δ, for
+all (m, k, h) ∈ M × [K] × [H], we have
+X
+
+ϕ sl , al
+
+
+
+−1
+(Λk
+m,h )
+
+(sl ,al ,s′ l )∈Um,h (k)
+
+where Cδ =
+
+h
+
+1
+2 log(K + 1) + log
+
+√
+≤ 3H dCδ ,
+
+ l l 
+k
+k
+Vm,h+1
+− Ph Vm,h+1
+s ,a
+
+ √
+
+2 2KBδ/2N M HK
+H
+
+
+
++ log 3δ
+
+i1/2
+
+and Bδ is defined in Lemma D.6.
+
+Lemma D.8. Let λ = 1 in Algorithm 3. Under Definition 4.1, for any fixed 0 < δ < 1, with
+probability at least 1 − δ, for all (m, k, h) ∈ M × [K] × [H] and for any (s, a) ∈ S × A, we have
+√
+k
+k
+b m,h
+ϕ(s, a)⊤ w
+− rh (s, a) − Ph Vm,h+1
+(s, a) ≤ 5H dCδ ∥ϕ(s, a)∥(Λkm,h )−1 .
+Lemma D.9 (Error bound). Let λ = 1 in Algorithm 3. Under Definition 4.1, for any fixed 0 < δ < 1,
+with probability at least 1 − δ − δ 2 , for any (m, k, h) ∈ M × [K] × [H] and for any (s, a) ∈ S × A,
+we have
+s
+!
+√
+
+√
+2d log N /δ
+4
+k
+−lm,h (s, a) ≤ 5H dCδ + 5
++
+∥ϕ(s, a)∥ k  ,
+Λm,h −1
+3βK
+3
+where Cδ is defined in Lemma D.7.
+21
+
+Lemma D.10 (Optimism). Let λ = 1 in Algorithm 3 and c′0 = 1 − 2√12eπ . Under Definition 4.1,
+N
+
+for any fixed 0 < δ < 1, with probability at least 1 − |C(ε)|c′0 − 2δ where |C(ε)| ≤ (3/ε)d , for all
+(m, h, k) ∈ M × [H] × [K] and for all (s, a) ∈ S × A, we have
+k
+lm,h
+(s, a) ≤ αδ ε,
+√
+√
+
+where αδ = M K 2H d + Bδ/N M HK .
+
+Remark D.11. Here we point out that in our proofs for both CoopTS-LMC and CoopTS-PHE, we
+use a new ε-covering technique to prove that the optimism lemma holds for all (s, a) ∈ S × A
+instead of just the state-action pairs encountered by the algorithm, which is essential in applying this
+k
+lemma to bound the term Eπ∗ [lm,h
+(sm,h , am,h )|sm,1 = skm,1 ] in (D.2) in the regret analysis. This
+was ignored by previous works [13, 33] that use the same regret decomposition technique in the
+single-agent setting.
+The following lemma gives the upper bound of self-normalized term summation in the multi-agent
+setting, which is first introduced by Lemma 9 in [24]. To make our analysis complete, we give out
+the proof in the Appendix E.9 where we make some necessary modifications compared with Lemma
+9 in [24].
+Lemma D.12. Let Algorithm 2 run for any K > 0, M ≥ 1, and γ as the communication control
+
+⊤
+P
+PK
+k
+k
+k
+k
+factor. Define ΛK
++ λI, then we have
+h =
+m∈M
+k=1 ϕ sm,h , am,h ϕ sm,h , am,h
+s
+
+
+
+
+
+
+K
+X X
+det(ΛK
+det(ΛK
+√
+k
+k
+h )
+h )
+ϕ(sm,h , am,h ) (Λk )−1 ≤ log
++ 1 M γ + 2 M K log
+.
+m,h
+det(λI)
+det(λI)
+m∈M k=1
+
+The following lemma shows that we can decompose the regret of Algorithm 2 into three different
+components. The proof of this lemma closely resembles Lemma 4.2 in [13] for the single-agent
+setting. When we fix the agent m ∈ M, it is totally same as Lemma 4.2 in [13].
+Lemma D.13. [13, Lemma 4.2] Define the operators and the following terms:
+∗
+(Jm,h f )(s) = f (s, ·), πm,h
+(·|s) ,
+
+k
+(Jm,k,h f )(s) = f (s, ·), πm,h
+(·|s) ,
+
+
+
+πm,k
+πm,k  k
+k
+k
+k
+Dm,k,h,1 = Jm,k,h Qm,h − Qm,h
+sm,h − Qm,h − Qm,h sm,h , akm,h ,
+(D.1)
+
+
+
+
+π
+π
+m,k
+m,k
+k
+k
+Dm,k,h,2 = Pm,h Vm,h+1
+− Vm,h+1
+skm,h , akm,h − Vm,h+1
+− Vm,h+1
+skm,h+1 .
+
+Then we can decompose the regret into the following form:
+Regret(K) =
+
+K
+X X
+
+k
+
+
+πm
+∗
+skm,1
+Vm,1
+skm,1 − Vm,1
+
+m∈M k=1
+
+=
+
+K X
+H
+X X
+
+
+
+∗
+k
+Eπ∗ Qkm,h (sm,h , ·), πm,h
+(·, |sm,h ) − πm,h
+(·|sm,h ) |sm,1 = skm,1
+
+m∈M k=1 h=1
+
+|
+
+{z
+
+}
+
+(i)
+
++
+
+K X
+H
+X X
+
+(Dm,k,h,1 + Dm,k,h,2 )
+
+m∈M k=1 h=1
+
+|
++
+
+K X
+H
+X X
+
+{z
+
+}
+
+(ii)
+
+
+k
+
+k
+Eπ∗ lm,h
+(sm,h , am,h )|sm,1 = skm,1 − lm,h
+skm,h , akm,h .
+
+m∈M k=1 h=1
+
+|
+D.2
+
+{z
+
+(iii)
+
+Regret Analysis
+
+In this part, we give out the proof of Theorem 4.4, the regret bound for CoopTS-LMC.
+22
+
+}
+
+Proof of Theorem 4.4. Based on the result from Lemma D.13, we do the regret decomposition first
+K
+X X
+
+Regret(K) =
+
+k
+
+
+πm
+∗
+skm,1 − Vm,1
+skm,1
+Vm,1
+
+m∈M k=1
+K X
+H
+X X
+
+=
+
+
+
+∗
+k
+Eπ∗ Qkm,h (sm,h , ·), πm,h
+(·, |sm,h ) − πm,h
+(·|sm,h ) |sm,1 = skm,1
+
+m∈M k=1 h=1
+
+{z
+
+|
+
+}
+
+(i)
+
++
+
+K X
+H
+X X
+
+(Dm,k,h,1 + Dm,k,h,2 )
+
+m∈M k=1 h=1
+
+{z
+
+|
++
+
+}
+
+(ii)
+
+K X
+H
+X X
+
+k
+
+
+k
+Eπ∗ lm,h
+(sm,h , am,h )|sm,1 = skm,1 − lm,h
+skm,h , akm,h .
+
+m∈M k=1 h=1
+
+|
+
+{z
+
+}
+
+(iii)
+
+(D.2)
+Next, we will bound the above three terms, respectively.
+k
+, we have
+Bounding Term (i) in (D.2): for the policy πm,h
+K X
+H
+X X
+
+
+
+∗
+k
+Eπ∗ Qkm,h (sm,h , ·), πm,h
+(·, |sm,h ) − πm,h
+(·|sm,h ) |sm,1 = skm,1 ≤ 0.
+
+(D.3)
+
+m∈M k=1 h=1
+k
+This is because by definition πm,h
+is the greedy policy for Qkm,h .
+
+Bounding Term (ii) in (D.2): note that 0 ≤ Qkm,h ≤ H − h + 1 ≤ H, based on (D.1), for any
+(m, k, h) ∈ M × [K] × [H], we have |Dm,k,h,1 | ≤ 2H and |Dm,k,h,2 | ≤ 2H. Note that Dm,k,h,1 is
+a martingale difference sequence E[Dm,k,h,1 |Fm,k,h ] = 0. By applying Azuma-Hoeffding inequality,
+with probability at least 1 − δ/3, we have
+K X
+H
+X X
+
+p
+Dm,k,h,1 ≤ 2 2M H 3 K log(6/δ).
+
+m∈M k=1 h=1
+
+Note that Dm,k,h,2 is also a martingale difference sequence. By applying Azuma-Hoeffding inequality,
+with probability at least 1 − δ/3, we have
+K X
+H
+X X
+
+p
+Dm,k,h,2 ≤ 2 2M H 3 K log(6/δ).
+
+m∈M k=1 h=1
+
+By taking union bound, with probability at least 1 − 2δ/3, we have
+K X
+H
+X X
+
+Dm,k,h,1 +
+
+m∈M k=1 h=1
+
+K X
+H
+X X
+
+Dm,k,h,2 ≤ 4
+
+p
+2M H 3 K log(6/δ).
+
+(D.4)
+
+m∈M k=1 h=1
+
+Bounding Term (iii) in (D.2): based on Lemmas D.9 and D.10, by taking union bound, with
+N
+2
+probability at least 1 − |C(ε)|c′0 − 2δ ′ − M HK(δ ′ + δ ′ ), we have
+K X
+H
+X X
+
+k
+
+
+k
+Eπ∗ lm,h
+(sm,h , am,h )|sm,1 = skm,1 − lm,h
+skm,h , akm,h
+
+m∈M k=1 h=1
+
+≤
+
+K X
+H
+X X
+
+k
+αδ′ ε − lm,h
+skm,h , akm,h
+
+
+
+m∈M k=1 h=1
+
+≤ HM Kαδ′ ε +
+
+K X
+H
+X X
+
+s
+
+√
+5H dCδ′ + 5
+
+m∈M k=1 h=1
+
+23
+
+!
+√
+2d log( N /δ ′ ) 4
++
+ϕ(skm,h , akm,h ) (Λk )−1
+m,h
+3βK
+3
+
+! H
+√
+K
+2d log( N /δ ′ ) 4 X X X
+ϕ(skm,h , akm,h ) (Λk )−1
++
+= HM Kαδ′ ε + 5H dCδ′ + 5
+m,h
+3βK
+3
+h=1 m∈M k=1
+s
+!
+√
+√
+2d log( N /δ ′ ) 4
+≤ HM Kαδ′ ε + 5H dCδ′ + 5
++
+3βK
+3
+s
+
+
+
+
+
+
+H
+X
+det(ΛK
+det(ΛK
+√
+h )
+h )
+×
+log
++ 1 M γ + 2 M K log
+det(λI)
+det(λI)
+h=1
+s
+!
+√
+√
+2d log( N /δ ′ ) 4
+≤ HM Kαδ′ ε + 5H dCδ′ + 5
++
+3βK
+3
+
+
+p
+√
+× H d(log(1 + M K/d) + 1)M γ + 2 M Kd log(1 + M K/d) .
+s
+
+√
+
+The first inequality follows from Lemma D.10, the second inequality follows from Lemma D.9, the
+third inequality follows from Lemma D.12, the last inequality holds due to Lemma J.2 and the fact
+that ∥ϕ(·)∥2 ≤ 1.
+p
+p
+√
+e 1/dHM 3 K 4 N ) and choose √1 = 20H dCδ′ +
+Here we choose ε = dH d/M K/αδ′ = O(
+βK
+16
+3 , we have
+K X
+H
+X X
+
+√
+
+
+
+k
+k
+e dH 2 dM √γ + dM K ,
+skm,h , akm,h ≤ O
+Eπ∗ lm,h
+(sm,h , am,h )|sm,1 = skm,1 − lm,h
+
+m∈M k=1 h=1
+
+(D.5)
+
+occurs with probability at least 1 − |C(ε)|c′0
+
+N
+
+2
+
+− 2δ ′ − M HK(δ ′ + δ ′ ).
+
+e
+We set δ ′ = δ/12(M HK + 1) and choose N = C̄ log(δ)/ log(c′0 ) where C̄ = O(d),
+then we have
+1 − |C(ε)|c′0
+
+N
+
+2
+
+− 2δ ′ − M HK(δ ′ + δ ′ ) ≥ 1 − δ/3.
+
+Combining Terms (i)(ii)(iii) together: Based on (D.3), (D.4) and (D.5).
+√ By taking
+ union bound, we
+e dH 2 dM √γ + dM K with probability at
+get that the final regret bound for CoopTS-LMC is O
+least 1 − δ.
+
+E
+
+Proof of Supporting Lemmas in Appendix D
+
+E.1
+
+Proof of Proposition D.3
+
+Recall from Algorithm 3, the LMC update rule is
+q
+k,j
+k,j−1
+k,j−1 
+−1 k,j
+wm,h
+= wm,h
+− ηm,k ∇Lkm,h wm,h
++ 2ηm,k βm,k
+ϵm,h ,
+
+k,j−1 
+k,j−1
+where we have ∇Lkm,h wm,h
+= 2 Λkm,h wm,h
+− bkm,h . Plug in the above formula, then we
+can calculate that
+ q
+k,Jk
+k,Jk −1
+k,Jk −1
+−1 k,Jk
+wm,h
+= wm,h
+− 2ηm,k Λkm,h wm,h
+− bkm,h + 2ηm,k βm,k
+ϵm,h
+q
+ k,Jk −1
+−1 k,Jk
+= I − 2ηm,k Λkm,h wm,h
++ 2ηm,k bkm,h + 2ηm,k βm,k
+ϵm,h
+= I − 2ηm,k Λkm,h
+
+J k
+
+I − 2ηm,k Λkm,h
+
+J k
+
+k,0
+wm,h
++
+
+JX
+k −1
+
+q
+
+
+−1 k,Jk −l
+(I − 2ηm,k Λkm,h )l 2ηm,k bkm,h + 2ηm,k βm,k
+ϵm,h
+
+l=0
+
+=
+
+k,0
+wm,h
++ 2ηm,k
+
+JX
+k −1
+l=0
+
+24
+
+l
+I − 2ηm,k Λkm,h bkm,h
+
++
+
+q
+
+−1
+2ηm,k βm,k
+
+JX
+k −1
+
+l
+k −l
+,
+I − 2ηm,k Λkm,h ϵk,J
+m,h
+
+l=0
+
+where the third equality follows from iteration. Denote that Ai = I − 2ηm,i Λim,h . Moreover, we
+
+choose the step size such that 0 < ηm,i < 1/ 2λmax Λim,h . Thus we have
+k−1,Jk−1
+
+k,Jk
+wm,h
+= AJkk wm,h
+
++ 2ηm,k
+
+JX
+k −1
+
+k
+b m,h
+Alk Λkm,h w
++
+
+q
+
+−1
+2ηm,k βm,k
+
+l=0
+
+k −l
+Alk ϵk,J
+m,h
+
+l=0
+
+k−1,Jk−1
+
+ k
+b m,h +
++ (I − Ak ) I + Ak + ... + AJkk −1 w
+
+k−1,Jk−1
+
+q
+
+= AJkk wm,h
+
+JX
+k −1
+
+q
+
+−1
+2ηm,k βm,k
+
+JX
+k −1
+
+k −l
+Alk ϵk,J
+m,h
+
+l=0
+
+= AJkk wm,h
+
+ k
+b m,h +
++ I − AJkk w
+
+−1
+2ηm,k βm,k
+
+JX
+k −1
+
+k −l
+Alk ϵk,J
+m,h
+
+l=0
+1,0
++
+= AJkk ...AJ1 1 wm,h
+
+k
+X
+
+ i
+Ji+1
+b m,h
+I − AJi i w
+AJkk ...Ai+1
+
+i=1
+
++
+
+k q
+X
+
+J
+
+−1
+i+1
+2ηm,i βm,i
+AJkk ...Ai+1
+
+JX
+i −1
+
+i=1
+
+i,Ji −l
+Ali ϵm,h
+,
+
+l=0
+k−1,J
+
+k,0
+k
+b m,h
+where the first equality holds because bkm,h = Λkm,h w
+and wm,h k−1 = wm,h
+, the third equality
+n−1
+n
+−1
+follows from the fact that I + A + ... + A
+= (I − A )(I − A) , and the fourth equality holds
+because of iteration.
+i −l
+Note that ϵi,J
+∼ N (0, I), based on the property of multivariate Gaussian distribution, we have
+m,h
+k,Jk
+k,Jk 
+k
+wm,h
+∼ N µk,J
+m,h , Σm,h . Then we can directly get the mean vector
+
+Jk
+J1 1,0
+k
+µk,J
+m,h = Ak ...A1 wm,h +
+
+k
+X
+
+ i
+Ji+1
+b m,h .
+AJkk ...Ai+1
+I − AJi i w
+
+i=1
+k
+Next we will calculate the covariance matrix Σk,J
+m,h .
+q
+Ji+1
+−1
+2ηm,i βm,i
+AJkk ...Ai+1
+, thus we have
+
+Mi
+
+JX
+i −1
+
+i −l
+Ali ϵi,J
+∼N
+m,h
+
+0,
+
+JX
+i −1
+
+Mi Ali
+
+⊤
+Mi Ali
+
+For simplicity, we define Mi =
+
+!
+∼ N 0, Mi
+
+l=0
+
+l=0
+
+JX
+i −1
+
+!
+A2l
+i
+
+M⊤
+i
+
+!
+.
+
+l=0
+
+k
+Thus we get the covariance matrix Σk,J
+m,h ,
+!
+JX
+k
+i −1
+X
+k,Jk
+2l
+Σm,h =
+Mi
+Ai M⊤
+i
+
+i=1
+
+=
+
+k
+X
+i=1
+
+=
+
+k
+X
+
+l=0
+Ji+1
+−1
+2ηm,i βm,i
+AJkk ...Ai+1
+
+JX
+i −1
+
+!
+J
+
+i+1
+A2l
+Ai+1
+...AJkk
+i
+
+l=0
+
+
+Ji+1
+Ji+1
+−1
+2ηm,i βm,i
+AJkk ...Ai+1
+I − Ai2Ji (I − A2i )−1 Ai+1
+...AJkk
+
+i=1
+
+=
+
+k
+X
+ i −1
+1
+Ji+1
+Ji+1
+i
+AJkk ...Ai+1
+I − A2J
+Λm,h
+(I + Ai )−1 Ai+1
+...AJkk ,
+i
+β
+m,i
+i=1
+
+where the third equality follows from the fact that I + A + ... + An−1 = (I − An )(I − A)−1 . Here
+we complete the proof.
+25
+
+E.2
+
+Proof of Lemma D.4
+
+k
+b m,h
+Proof. Note that w
+= Λkm,k
+k
+b m,h
+=
+w
+
+Λkm,h
+
+−1 k
+bm,h
+
+=
+
+Λkm,h
+
+−1
+
+−1 k
+bm,h , we can calculate that
+
+X
+
+
+
+
+l 
+k
+rh sl , al + Vm,h+1
+(s′ ) ϕ sl , al
+
+(sl ,al ,s′ l )∈Um,h (k)
+
+1 p
+≤√
+K(k)
+λ
+
+!1/2
+X
+
+
+
+ 2
+l 
+k
+rh sl , al + Vm,h+1
+(s′ ) ϕ sl , al (Λk
+
+−1
+m,h )
+
+(sl ,al ,s′ l )∈Um,h (k)
+
+X
+2H p
+2
+≤√
+K(k)
+ϕ(sl , al ) (Λk )−1
+m,h
+λ
+(sl ,al ,s′ l )∈Um,h (k)
+p
+≤ 2H K(k)d/λ
+p
+≤ 2H M kd/λ,
+
+!1/2
+
+k
+where the first inequality follows from Lemma J.3, the second inequality is due to 0 ≤ Vm,h
+≤
+H − h + 1, 0 ≤ rh ≤ 1 and ∥ϕ(s, a)∥ ≤ 1, the third inequality follows from Lemma J.4, and the
+last inequality holds because K(k) = (M − 1)ks + k − 1 ≤ M k.
+
+E.3
+
+Proof of Lemma D.5
+
+Proof. We separate the error into two terms and bound them, respectively,
+
+
+
+
+k,Jk
+k,Jk
+k,Jk
+⊤
+k
+k
+k
+b
+b m,h
++
+ϕ(s,
+a)
+µ
+.
+ϕ(s, a)⊤ wm,h
+−
+w
+− ϕ(s, a)⊤ w
+≤ ϕ(s, a)⊤ wm,h
+− µk,J
+m,h
+m,h
+m,h
+{z
+} |
+{z
+}
+|
+I1
+
+I2
+
+(E.1)
+Bounding Term I1 in (E.1): by Cauchy-Schwarz inequality, we have
+
+
+k,Jk
+k,Jk
+k
+k
+ϕ(s, a)⊤ wm,h
+≤ ϕ(s, a) k,Jk · wm,h
+− µk,J
+− µk,J
+m,h
+m,h
+Σm,h
+
+k,J
+
+(Σm,hk )−1
+
+.
+
+By choosing ηm,k ≤ 1/(4λmax (Λkm,h )) for all k and m, then we have
+1
+I ≼ Ak = I − 2ηm,k Λkm,h ≼ (1 − 2ηm,k λmin (Λkm,h ))I,
+2
+3
+I ≼ I + Ak = 2I − 2ηm,k Λkm,h ≼ 2I.
+2
+
+(E.2)
+
+k
+Recall the definition of Σk,J
+m,h in Proposition D.3. By choosing βm,i = βK for all i ∈ [k] and
+m ∈ M, then we have
+k
+ϕ(s, a)⊤ Σk,J
+m,h ϕ(s, a)
+
+k
+X
+
+−1
+1
+Ji+1
+Ji+1
+=
+ϕ(s, a)⊤ AJkk ...Ai+1
+I − Ai2Ji Λim,h
+(I + Ai )−1 Ai+1
+...AJkk ϕ(s, a)
+β
+i=1 m,i
+
+≤
+
+k
+
+−1
+−1 Ji  Ji+1
+2 X
+Ji+1
+Λim,h
+− AJi i Λim,h
+Ai Ai+1 ...AJkk ϕ(s, a)
+ϕ(s, a)⊤ AJkk ...Ai+1
+3βm,i i=1
+
+=
+
+k−1
+
+−1
+−1  Ji+1
+2 X
+Ji+1
+− Λi+1
+Ai+1 ...AJkk ϕ(s, a)
+ϕ(s, a)⊤ AJkk ...Ai+1
+Λim,h
+m,h
+3βK i=1
+
+−
+
+2
+ϕ(s, a)⊤ AJkk ...AJ1 1 (Λ1m,h )−1 AJ1 1 ...AJkk ϕ(s, a)
+3βK
+26
+
++
+
+2
+ϕ(s, a)⊤ (Λkm,h )−1 ϕ(s, a),
+3βK
+
+where the first inequality follows from (E.2). By the definition of Λim,h and Woodbury formula, we
+have
+!−1
+X
+
+
+
+
+
+−1
+−1
+−1
+⊤
+Λim,h
+− Λi+1
+= Λim,h
+− Λim,h +
+ϕ sl , al ϕ sl , al
+m,h
+(sl ,al ,s′l )∈Um,h (k)
+
+= (Λim,h )−1 φ(In + φ⊤ (Λim,h )−1 φ)−1 φ⊤ (Λim,h )−1 ,
+
+where φ is a matrix with the dimension of d × n, n is the number difference of ϕ sl , al between
+
+−1
+−1
+and Λi+1
+(i.e. we concatenate all ϕ sl , al into the matrix φ). Note that n ≤ M ,
+Λim,h
+m,h
+then we have
+
+−1
+−1  Ji+1
+Ji+1
+ϕ(s, a)⊤ AJkk ...Ai+1
+Λim,h
+− Λi+1
+Ai+1 ...AJkk ϕ(s, a)
+m,h
+
+−1
+−1 −1 ⊤ i −1  Ji+1
+Ji+1
+= ϕ(s, a)⊤ AJkk ...Ai+1
+Λim,h
+φ(In + φ⊤ Λim,h
+φ) φ Λm,h
+Ai+1 ...AJkk ϕ(s, a)
+−1
+−1 Ji+1
+Ji+1
+Λim,h
+≤ ϕ(s, a)⊤ AJkk ...Ai+1
+φφ⊤ Λim,h
+Ai+1 ...AJkk ϕ(s, a)
+−1 2
+i +1
+= ϕ(s, a)⊤ AJkk ...AJi+1
+Λim,h
+φ 2
+2
+
+2
+
+i +1
+≤ AJkk ...AJi+1
+(Λim,h )−1/2 ϕ(s, a) 2 · (Λim,h )−1/2 φ F
+
+≤
+
+k
+
+Y
+
+1 − 2ηm,j λmin Λjm,h
+
+2Jj
+
+tr φ⊤ Λim,h
+
+−1 
+φ ∥ϕ(s, a)∥2(Λi
+
+−1
+m,h )
+
+,
+
+j=i+1
+1
+
+where ∥·∥F is Frobenius norm and the last inequality is due to ∥Λ− 2 X∥2F = tr(X⊤ Λ−1 X) and
+(E.2). Thus we have
+2
+
+ϕ(s, a) Σk,Jk ≤
+m,h
+
+k
+k
+2Jj
+−1 
+2 X Y 
+1 − 2ηm,j λmin Λjm,h
+tr φ⊤ Λim,h
+φ ∥ϕ(s, a)∥2(Λi )−1
+m,h
+3βK i=1 j=i+1
+
++
+
+Using the inequality
+r
+ϕ(s, a) Σk,Jk ≤
+m,h
+
+√
+
+2
+∥ϕ(s, a)∥2(Λk )−1 .
+m,h
+3βK
+
+a2 + b2 ≤ a + b for a, b > 0, we get
+
+2
+3βK
+
+X
+k
+k
+
+Jj
+Y
+1
+1 − 2ηm,j λmin (Λjm,h )
+tr(φ⊤ (Λim,h )−1 φ) 2 ∥ϕ(s, a)∥(Λi
+
+m,h
+
+)−1
+
+i=1 j=i+1
+
+
++ ∥ϕ(s, a)∥(Λk
+
+m,h
+
+)−1
+
+def
+
+k
+= gbm,h
+(ϕ(s, a)).
+
+
+−1/2 
+
+k,Jk
+k
+k
+Note that Σk,J
+wm,h
+− µk,J
+∼ N (0, Id ). By the Gaussian concentration property, we
+m,h
+m,h
+have
+ 
+
+−1/2 
+
+p
+k,Jk
+k,Jk
+k,Jk
+P
+Σm,h
+wm,h − µm,h
+≥ 4d log(1/δ) ≤ δ 2 .
+Then we have
+
+
+p
+k,Jk
+k
+k
+P ϕ(s, a)⊤ wm,h
+− ϕ(s, a)⊤ µk,J
+gm,h
+(ϕ(s, a)) d log(1/δ)
+m,h ≥ 2b
+
+
+p
+k,Jk
+k
+≤ P ϕ(s, a)⊤ wm,h
+d
+log(1/δ)∥ϕ(s,
+a)∥
+− ϕ(s, a)⊤ µk,J
+≥
+2
+k,Jk
+m,h
+Σm,h
+
+
+p
+k,Jk
+k,Jk
+≤ P ϕ(s, a) k,Jk · wm,h − µm,h
+≥ 2 d log(1/δ)∥ϕ(s, a)∥Σk,Jk
+k,Jk −1
+m,h
+Σm,h
+(Σm,h )
+
+
+p
+
+
+k,Jk
+k −1/2
+k
+=P
+Σk,J
+wm,h
+− µk,J
+≥ 2 d log(1/δ)
+m,h
+m,h
+27
+
+≤ δ2 .
+
+(E.3)
+
+Bounding Term I2 in (E.1): Recall from Proposition D.3, we have
+Jk
+J1 1,0
+k
+µk,J
+m,h = Ak ...A1 wm,h +
+
+k
+X
+
+ i
+Ji+1
+b m,h
+AJkk ...Ai+1
+I − AJi i w
+
+i=1
+1,0
++
+= AJkk ...AJ1 1 wm,h
+
+k−1
+X
+
+J
+
+i+1
+i+1
+i
+1
+k
+b m,h
+b m,h
+b m,h
+b m,h
+(w
+AJkk ...Ai+1
+−w
+) − AJkk ...AJ1 1 w
++w
+
+i=1
+1,0
+1
+b m,h
+= AJkk ...AJ1 1 (wm,h
+−w
+)+
+
+k−1
+X
+
+J
+
+i+1
+i+1
+i
+k
+b m,h
+b m,h
+b m,h
+(w
+−w
+AJkk ...Ai+1
+)+w
+.
+
+i=1
+
+Then we can get
+k
+k
+b m,h
+ϕ(s, a)⊤ (µk,J
+)
+m,h − w
+k−1
+X J
+Ji+1
+1,0
+i+1
+i
+1
+b m,h
+b m,h
+b m,h
+(w
+−w
+Akk ...Ai+1
+).
+= ϕ(s, a)⊤ AJkk ...AJ1 1 (wm,h
+−w
+) + ϕ(s, a)⊤
+{z
+}
+|
+i=1
+|
+{z
+}
+I21
+I22
+
+1,0
+1
+b m,h
+= (Λ1m,h )−1 b1m,h = 0. Thus we have I21 = 0. To
+In Algorithm 3, we choose wm,h
+= 0 and w
+
+bound term I22 , we use the inequalities in (E.2) and Lemma D.4, we have
+k−1
+X
+
+I22 ≤
+
+J
+
+i+1
+i+1
+i
+b m,h
+b m,h
+ϕ(s, a)⊤ AJkk ...Ai+1
+(w
+−w
+)
+
+i=1
+
+≤
+
+k−1
+X
+
+k
+
+Y
+
+J j
+i+1
+i
+b m,h
+b m,h
+1 − 2ηm,j λmin (Λjm,h ) ∥ϕ(s, a)∥(∥w
+∥ + ∥w
+∥)
+
+i=1 j=i+1
+
+≤
+
+k−1
+X
+
+k
+
+Y
+
+J j
+p
+p
+
+1 − 2ηm,j λmin (Λjm,h ) ∥ϕ(s, a)∥ 2H M id/λ + 2H M (i + 1)d/λ
+
+i=1 j=i+1
+
+≤ 4H
+
+k
+k−1
+
+J j
+X Y
+p
+1 − 2ηm,j λmin (Λjm,h ) ∥ϕ(s, a)∥.
+M Kd/λ
+i=1 j=i+1
+
+Thus we get
+⊤
+
+ϕ(s, a)
+
+
+k
+k
+b m,h
+µk,J
+≤ 4H
+m,h − w
+
+p
+
+M Kd/λ
+
+k−1
+X
+
+k
+
+Y
+
+J j
+1 − 2ηm,j λmin (Λjm,h ) ∥ϕ(s, a)∥.
+
+i=1 j=i+1
+
+(E.4)
+Substituting (E.3) and (E.4) into (E.1), with probability at least 1 − δ 2 , we have
+k
+b m,h
+ϕ(s, a)⊤ wm,hk − ϕ(s, a)⊤ w
+k,J
+
+k−1
+k
+
+Jj
+X Y
+p
+≤ 4H M Kd/λ
+1 − 2ηm,j λmin (Λjm,h )
+∥ϕ(s, a)∥ + 2
+i=1 j=i+1
+
+s
++2
+
+k
+
+s
+
+2d log(1/δ)
+∥ϕ(s, a)∥(Λk )−1
+m,h
+3βK
+
+k
+
+Jj
+−1  1
+2d log(1/δ) X Y 
+1 − 2ηm,j λmin (Λjm,h )
+tr φ⊤ Λim,h
+φ 2 ∥ϕ(s, a)∥(Λi )−1
+m,h
+3βK
+i=1 j=i+1
+
+def
+
+= W.
+
+(E.5)
+
+Here we choose ηm,j = 1/(4λmax (Λjm,h )) and set κj = λmax
+
+
+1 − 2ηm,j λmin Λjm,h
+
+Jj
+
+28
+
+
+Λjm,h /λmin
+
+= (1 − 1/2κj )Jj .
+
+
+Λjm,h , then we have
+
+We want to have (1 − 1/2κj )Jj < ϵ, it suffices to choose Jj such that
+Jj ≥
+
+log(1/ϵ)
+.
+1
+log 1−1/2κ
+j
+
+Note that 1/2κj ≤ 1/2, we have log(1/(1 − 1/2κj )) ≥ 1/2κj because e−x > 1 − x for 0 < x < 1.
+Therefore, we only need to pick Jj ≥ 2κj log(1/ϵ).
+√
+−1 
+Also note that 1 ≥ ∥ϕ(s, a)∥ ≥ λ∥ϕ(s, a)∥(Λim,h )−1 and tr φ⊤ Λim,h
+φ ≤ M due to the
+fact that n ≤ M . By setting ϵ = 1/(4HM Kd) and λ = 1, we obtain
+W ≤
+
+k−1
+X
+
+s
+ϵ
+
+k−i
+
+4H
+
+p
+
+M Kd/λ∥ϕ(s, a)∥ + 2
+
+i=1
+
+≤
+
+k−1
+X
+
+ϵk−i 4H
+
+
+
+k−1
+X k−i √
+2d log(1/δ)
+ϵ
+∥ϕ(s, a)∥(Λk )−1 +
+M ∥ϕ(s, a)∥
+m,h
+3βK
+i=1
+
+p
+√
+M Kd/λ M K∥ϕ(s, a)∥(Λk
+
+m,h
+
+)−1
+
+i=1
+
+s
+
+
+
+k−1
+X k−i √
+2d log(1/δ)
+ϵ M K∥ϕ(s, a)∥(Λk )−1
+∥ϕ(s, a)∥(Λk )−1 +
+m,h
+m,h
+3βK
+i=1
+s
+
+
+k−1
+k−1
+X k−i−1
+X k−i−1
+2d log(1/δ)
+≤
+ϵ
+∥ϕ(s, a)∥(Λk )−1 + 2
+∥ϕ(s, a)∥(Λk )−1 +
+ϵ
+∥ϕ(s, a)∥(Λk )−1
+m,h
+m,h
+m,h
+3βK
+i=1
+i=1
+s
+
+
+2d log(1/δ)
+4
+≤ 5
+∥ϕ(s, a)∥(Λk )−1 ,
++
+m,h
+3βK
+3
++2
+
+p
+where the second inequality follows from ∥ϕ(s, a)∥(Λkm,h )−1 ≥ 1/ K(k) + 1∥ϕ(s, a)∥ ≥
+√
+Pk−1
+Pk−2
+1/ M K∥ϕ(s, a)∥, the fourth inequality follows from i=1 ϵk−i−1 = i=0 ϵi < 1/(1−ϵ) ≤ 4/3.
+Finally we have
+
+ s
+
+
+2d log(1/δ) 4
+⊤ k,Jk
+⊤ k
+b m,h ≤ 5
+P ϕ(s, a) wm,h − ϕ(s, a) w
+∥ϕ(s, a)∥(Λkm,h )−1
++
+3βK
+3
+
+
+k,Jk
+k
+b m,h
+− ϕ(s, a)⊤ w
+≥ P ϕ(s, a)⊤ wm,h
+≤W
+≥ 1 − δ2 .
+This completes the proof.
+E.4
+
+Proof of Lemma D.6
+
+k,Jk
+k,Jk 
+k,Jk
+k,Jk
+k,Jk
+k,Jk
+k
+Proof. Recall that wm,h
+∼ N µk,J
+m,h , Σm,h . Let ξm,h = wm,h − µm,h ∼ N (0, Σm,h ), thus
+we have
+k,Jk
+k,Jk
+k,Jk
+k
+k
+wm,h
+= µk,J
+≤ µk,J
+m,h + ξm,h
+m,h + ξm,h .
+k
+Bounding µk,J
+m,h in (E.6): Based on Proposition D.3, we have
+
+Jk
+J1 1,0
+k
+µk,J
+m,h = Ak . . . A1 wm,h +
+
+k
+X
+
+ i
+Ji+1
+b m,h
+AJkk . . . Ai+1
+I − AJi i w
+
+i=1
+
+≤
+
+k
+X
+
+J
+
+i+1
+AJkk . . . Ai+1
+I − AJi i
+
+
+F
+
+i
+b m,h
+· w
+
+i=1
+
+≤ 2H
+
+k
+X
+p
+
+Ji+1
+M Kd/λ
+AJkk . . . Ai+1
+I − AJi i F
+i=1
+
+k
+X
+p
+J
+≤ 2Hd M K/λ
+∥Ak ∥J2 k . . . ∥Ai+1 ∥2 i+1
+i=1
+
+29
+
+I − AJi i
+
+
+2
+
+(E.6)
+
+≤ 2Hd
+
+k
+k
+X
+Y
+p
+M K/λ
+
+Ji 
+
+1 − 2ηm,j λmin Λjm,h
+
+Jj
+
+∥I∥2 + Ai 2
+
+1 − 2ηm,j λmin Λjm,h
+
+Jj
+
+1 + 1 − 2ηm,i λmin Λim,h
+
+i=1 j=i+1
+
+≤ 2Hd
+
+k
+k
+X
+Y
+p
+M K/λ
+
+Jj 
+
+,
+
+i=1 j=i+1
+
+where the second inequality holds from Lemma D.4, the third inequality follows from the fact
+
+Ji+1
+that rank AJkk . . . Ai+1
+I − AJi i ≤ d and ∥X∥2 ≤ ∥X∥F ≤ rank(X)∥X∥2 where ∥X∥2 =
+σmax (X).
+
+
+Recall that in Lemma D.5, we set Jj ≥ 2κj log(1/ϵ) where κj = λmax Λjm,h /λmin Λjm,h ,
+ϵ = 1/(4HM Kd) and λ = 1, thus we get
+k
+µk,J
+m,h ≤ 2Hd
+
+k
+X
+p
+M K/λ
+(ϵk−i + ϵk−i+1 )
+i=1
+
+∞
+X
+p
+ϵi
+≤ 4Hd M K/λ
+i=0
+
+√
+16
+≤
+Hd M K.
+3
+
+k,Jk
+k,Jk
+k
+Bounding ξm,h
+in (E.6): Note that ξm,h
+∼ N 0, Σk,J
+m,h , using Gaussian concentration
+Lemma J.5, we have
+r
+
+
+1
+k,Jk
+k,Jk 
+P ξm,h ≤
+tr Σm,h
+≥ 1 − δ.
+δ
+Recall from Proposition D.3, we have
+k
+ X
+
+
+1
+Ji+1
+Ji+1
+k
+tr Σk,J
+=
+tr AJkk . . . Ai+1
+I − Ai2Ji (Λim,h )−1 (I + Ai )−1 Ai+1
+. . . AJkk
+m,h
+β
+i=1 m,i
+
+≤
+
+k
+X
+
+
+1
+Ji+1 
+i
+tr AJkk . . . tr Ai+1
+tr I − A2J
+tr
+i
+β
+i=1 m,i
+
+Ji+1 
+× tr Ai+1
+. . . tr AJkk ,
+
+Λim,h
+
+−1 
+
+tr
+
+I + Ai )−1
+
+
+
+where the inequality holds due to Lemma J.6. Recall from (E.2) that, when ηm,k ≤ 1/(4λmax (Λkm,h ))
+for all k and m, we have AJi i ≼ (1 − 2ηm,k λmin (Λkm,h ))Jj I, set λ = 1, then we obtain
+
+Jj 
+Jj
+tr(AJi i ) ≤ tr 1 − 2ηm,k λmin Λkm,h
+I ≤ d 1 − 2ηm,k λmin Λkm,h
+≤ dϵ ≤ 1.
+
+1
+i
+Similarly, we have I − A2J
+≼ 1 − 22J
+I, then we get
+i
+i
+
+
+1
+2Ji
+tr(I − Ai ) ≤ 1 − 2Ji d < d.
+2
+Also, based on (I + Ai )−1 ≼ 32 I, we have
+ 2
+tr (I + Ai )−1 ≤ d.
+3
+Note that λmax Λim,h
+
+−1 
+
+≤ 1, we have
+−1  X
+−1 
+tr Λim,h
+≤
+λ Λim,h
+≤ d.
+
+Combine the above results together and choose βm,i = βK for all i ∈ [K] and m ∈ M, we have
+tr
+
+
+k
+Σk,J
+m,h ≤
+
+K
+X
+1
+2
+2
+· · d3 =
+Kd3 .
+β
+3
+3β
+K
+i=1 m,i
+
+30
+
+Then we have
+r
+r
+
+
+
+
+
+1
+2
+1
+k,Jk
+k,J
+k
+k
+P ξm,h ≤
+·
+Kd3 ≥ P ξm,h ≤
+tr Σk,J
+≥ 1 − δ.
+m,h
+δ 3βK
+δ
+Combine above results together: with probability at least 1 − δ, we have
+s
+√
+16
+2K 3/2
+k,Jk
+≤
+wm,h
+Hd M K +
+d .
+3
+3βK δ
+This completes the proof.
+E.5
+
+Proof of Lemma D.7
+
+Proof. Based on Lemma D.6, for any fixed n ∈ [N ], with probability at least 1 − δ, for any
+(m, k, h) ∈ M × [K] × [H], we have
+s
+√
+16
+2K 3/2
+k,Jk ,n
+wm,h
+≤
+Hd M K +
+d .
+3
+3βK δ
+By taking union over n, m, k, h, we have for all (m, k, h) ∈ M × [K] × [H] and for all n ∈ [N ],
+with probability 1 − δ/2, we have
+s
+√
+16
+4N M HK 2 3/2
+k,Jk ,n
+wm,h
+≤
+Hd M K +
+d
+= Bδ/2N M HK .
+(E.7)
+3
+3βK δ
+Based on Lemma J.7 and Lemma J.9, we have that for any ε > 0 and δ > 0, with probability at least
+1 − δ/2,
+X
+
+ϕ sl , al
+
+
+
+ l l 
+k
+k
+Vm,h+1
+− Ph Vm,h+1
+s ,a
+−1
+(Λk
+m,h )
+
+(sl ,al ,s′ l )∈Um,h (k)
+
+1/2
+Bδ/2N M HK
+k+λ
+d
+3
+8k 2 ε2
+log
+≤ 4H
++ d log
++ log
++
+2
+λ
+ε
+δ
+λ
+√
+
+
+
+
+1/2
+
+Bδ/2N M HK
+k+λ
+2 2kε
+3
+d
++ d log
++ log
+≤ 2H
+log
++ √ .
+2
+λ
+ε
+δ
+λ
+
+
+2
+
+
+
+
+
+
+
+
+
+
+
+
+
+Here we set λ = 1, ε = 2√H2k , with probability at least 1 − δ/2, we have
+X
+
+ϕ sl , al
+
+
+
+ l l 
+k
+k
+Vm,h+1
+− Ph Vm,h+1
+s ,a
+−1
+(Λk
+m,h )
+
+(sl ,al ,s′ l )∈Um,h (k)
+
+
+
+
+1/2
+√ 1
+Bδ/2N M HK
+3
+≤ 2H d log(k + 1) + log
++H
++
+log
+H
+√
+2
+δ
+2 2k
+
+ √
+
+1/2
+√ 1
+2 2KBδ/2N M HK
+3
+≤ 3H d log(K + 1) + log
++ log
+.
+(E.8)
+2
+H
+δ
+h
+By applying union bound between (E.7) and (E.8), and define that Cδ = 21 log(K + 1) + log 3δ +
+ √
+i1/2
+2 2KBδ/2N M HK
+log
+, finally we obtain that for all (m, k, h) ∈ M × [K] × [H],
+H
+X
+
+ϕ sl , al
+
+
+
+√
+≤ 3H dCδ ,
+
+ l l 
+k
+k
+Vm,h+1
+− Ph Vm,h+1
+s ,a
+−1
+(Λk
+m,h )
+
+(sl ,al ,s′ l )∈Um,h (k)
+
+with probability at least 1 − δ.
+31
+
+E.6
+
+Proof of Lemma D.8
+
+Proof. We denote the inner product over S by ⟨·, ·⟩S . Based on Ph (·|s, a) = ϕ(s, a), µh (·) S in
+Definition 4.1, we have
+k
+k
+Ph Vm,h+1
+(s, a) = ϕ(s, a)⊤ µh , Vm,h+1
+S
+−1 k 
+⊤
+k
+k
+= ϕ(s, a) Λm,h
+Λm,h µh , Vm,h+1
+S
+
+!
+= ϕ(s, a)
+
+⊤
+
+−1
+Λkm,h
+
+X
+
+l
+
+l
+
+l
+
+l
+
+l
+
+ϕ s ,a ϕ s ,a
+
+l ⊤
+
+k
+µh , Vm,h+1
+S
+
++ λI
+
+(sl ,al ,s′l )∈Um,h (k)
+
+!
+= ϕ(s, a)
+
+⊤
+
+−1
+Λkm,h
+
+X
+
+ϕ s ,a
+
+
+k
+Ph Vm,h+1
+
+l
+
+s ,a
+
+l
+
++ λI
+
+k
+µh , Vm,h+1
+S
+
+(sl ,al ,s′l )∈Um,h (k)
+
+(E.9)
+
+Here the last equality uses Ph (·|s, a) = ϕ(s, a), µh (·) S again. Then we can separate the following
+error into three parts,
+k
+k
+b m,h
+ϕ(s, a)⊤ w
+− rh (s, a) − Ph Vm,h+1
+(s, a)
+X
+
+
+
+
+−1
+l 
+⊤
+k
+k
+= ϕ(s, a) Λm,h
+rh sl , al + Vm,h+1
+(s′ ) ϕ sl , al − rh (s, a)
+(sl ,al ,s′l )∈Um,h (k)
+
+− ϕ(s, a)
+
+⊤
+
+!
+
+−1
+Λkm,h
+
+X
+
+l
+
+l
+
+s ,a
+
+
+
+
+
+k
+k
+Vm,h+1
+− Ph Vm,h+1
+
+
+
+ϕ s ,a
+
+k
+Ph Vm,h+1
+
+
+
+
+
+l
+
+l
+
+k
++ λI µh , Vm,h+1
+S
+
+(sl ,al ,s′ l )∈Um,h (k)
+⊤
+
+= ϕ(s, a)
+
+−1
+Λkm,h
+
+X
+
+l
+
+l
+
+ϕ s ,a
+
+l
+
+l
+
+s ,a
+
+!
+
+
+(sl ,al ,s′l )∈Um,h (k)
+
+|
+
+{z
+
+}
+
+(i)
+
++ ϕ(s, a)
+
+⊤
+
+!
+
+−1
+Λkm,h
+
+X
+
+l
+
+l
+
+l
+
+
+
+l
+
+rh s , a ϕ s , a
+
+
+
+− rh (s, a)
+
+(sl ,al ,s′ l )∈Um,h (k)
+
+{z
+
+|
+
+}
+
+(ii)
+
+−1
+k
+− λϕ(s, a)⊤ Λkm,h
+µh , Vm,h+1
+.
+S
+|
+{z
+}
+
+(E.10)
+
+(iii)
+
+Here the first equality holds due to (E.9). We now provide an upper bound for each of the terms in
+(E.10).
+Bounding Term (i) in (E.10): using Cauchy-Schwarz inequality and Lemma D.7, with probability at
+least 1 − δ, for all (m, k, h) ∈ M × [K] × [H] and for any (s, a) ∈ S × A, we have
+!
+X
+−1
+ k
+ l l 
+⊤
+k
+l l
+k
+ϕ(s, a) Λm,h
+ϕ s ,a
+Vm,h+1 − Ph Vm,h+1 s , a
+(sl ,al ,s′ l )∈Um,h (k)
+
+X
+
+≤
+
+ϕ sl , al
+
+
+
+ l l 
+k
+k
+Vm,h+1
+− Ph Vm,h+1
+s ,a
+
+∥ϕ(s, a)∥(Λkm,h )−1
+−1
+(Λk
+m,h )
+
+(sl ,al ,s′ l )∈Um,h (k)
+
+√
+≤ 3H dCδ ∥ϕ(s, a)∥(Λkm,h )−1 .
+
+(E.11)
+
+Bounding Term (ii) in (E.10): we first note that
+!
+⊤
+
+ϕ(s, a)
+
+−1
+Λkm,h
+
+X
+
+l
+
+l
+
+l
+
+rh s , a ϕ s , a
+
+l
+
+− rh (s, a)
+
+l
+
+l
+
+l
+
+(sl ,al ,s′ l )∈Um,h (k)
+
+!
+= ϕ(s, a)
+
+⊤
+
+−1
+Λkm,h
+
+X
+(sl ,al ,s′ l )∈U
+
+l
+
+rh s , a ϕ s , a
+m,h (k)
+
+32
+
+− ϕ(s, a)⊤ θh
+
+.
+
+!
+= ϕ(s, a)⊤ Λkm,h
+
+−1
+
+X
+
+
+
+rh sl , al ϕ sl , al − Λkm,h θh
+
+(sl ,al ,s′ l )∈Um,h (k)
+
+!
+⊤
+
+= ϕ(s, a)
+
+−1
+Λkm,h
+
+X
+
+l
+
+l
+
+l
+
+rh s , a ϕ s , a
+
+l
+
+−
+
+(sl ,al ,s′ l )∈Um,h (k)
+
+X
+
+l
+
+l
+
+l
+
+l
+
+l
+
+ϕ s ,a ϕ s ,a
+
+l ⊤
+
+θh − λIθh
+
+(sl ,al ,s′ l )∈Um,h (k)
+
+!
+= ϕ(s, a)
+
+⊤
+
+−1
+Λkm,h
+
+X
+
+l
+
+l
+
+rh s , a ϕ s , a
+
+(sl ,al ,s′ l )∈Um,h (k)
+
+= −λϕ(s, a)⊤ Λkm,h
+
+−1
+
+l
+
+l
+
+−
+
+X
+
+l
+
+ϕ s , a rh s , a
+
+l
+
+− λθh
+
+(sl ,al ,s′ l )∈Um,h (k)
+
+θh ,
+
+(E.12)
+
+where the first and fourth equality holds due to the definition rh (s, a) = ϕ(s, a), θh from Definition 4.1, the third equality uses the definition of Λkm,h . Next we can obtain that
+−1
+−λϕ(s, a)⊤ Λkm,h
+θh ≤ λ∥ϕ(s, a)∥(Λkm,h )−1 ∥θh ∥(Λkm,h )−1
+√
+≤ λ∥ϕ(s, a)∥(Λkm,h )−1 ∥θh ∥
+√
+≤ λd∥ϕ(s, a)∥(Λkm,h )−1 ,
+(E.13)
+√
+−1 
+where we use the fact that λmax Λkm,h
+≤ 1/λ and ∥θh ∥ ≤ d from Definition 4.1. By
+Combining (E.12) and (E.13), we obtain
+!
+X
+√
+−1
+
+
+⊤
+k
+l l
+l l
+ϕ(s, a) Λm,h
+rh s , a ϕ s , a
+− rh (s, a) ≤ λd∥ϕ(s, a)∥(Λkm,h )−1 .
+(sl ,al ,s′ l )∈Um,h (k)
+
+(E.14)
+Bounding Term (iii) in (E.10): we have
+−1
+k
+k
+λϕ(s, a)⊤ Λkm,h
+µh , Vm,h+1
+≤ λ∥ϕ(s, a)∥(Λkm,h )−1 µh , Vm,h+1
+−1
+S
+S (Λk
+m,h )
+√
+k
+≤ λ∥ϕ(s, a)∥(Λkm,h )−1 µh , Vm,h+1
+S
+√
+≤ H λ∥ϕ(s, a)∥(Λkm,h )−1 ∥µh ∥
+√
+≤ H λd∥ϕ(s, a)∥(Λkm,h )−1 ,
+(E.15)
+−1 
+where the second inequality holds due to the fact that λmax Λkm,h
+≤ 1/λ, the third inequality
+√
+k
+uses the fact that Vm,h+1 ≤ H and the last inequality follows from ∥µh ∥ ≤ d in Definition 4.1.
+Combine Terms (i)(ii)(iii) together: combine (E.11), (E.14) and (E.15), then set λ = 1, with
+probability at least 1 − δ, we get
+
+√ 
+√
+k
+k
+b m,h
+ϕ(s, a)⊤ w
+− rh (s, a) − Ph Vm,h+1
+(s, a) ≤ 3HCδ + λd + H λd ∥ϕ(s, a)∥(Λkm,h )−1
+√
+≤ 5H dCδ ∥ϕ(s, a)∥(Λkm,h )−1 ,
+This completes the proof.
+E.7
+
+Proof of Lemma D.9
+
+Proof. Recall from Definition D.1,
+k
+k
+−lm,h
+(s, a) = Qkm,h (s, a) − rh (s, a) − Ph Vm,h+1
+(s, a)
+n
+o+
+k,Jk ,n
+k
+− rh (s, a) − Ph Vm,h+1
+(s, a)
+= min max ϕ(s, a)⊤ wm,h
+,H − h + 1
+n∈[N ]
+
+k,Jk ,n
+k
+≤ max ϕ(s, a)⊤ wm,h
+− rh (s, a) − Ph Vm,h+1
+(s, a)
+n∈[N ]
+
+k,Jk ,n
+k
+k
+k
+b m,h
+b m,h
+= max ϕ(s, a)⊤ wm,h
+− ϕ(s, a)⊤ w
++ ϕ(s, a)⊤ w
+− rh (s, a) − Ph Vm,h+1
+(s, a)
+n∈[N ]
+
+33
+
+k,Jk ,n
+k
+k
+k
+b m,h
+b m,h
+− rh (s, a) − Ph Vm,h+1
+(s, a) .
+− ϕ(s, a)⊤ w
++ ϕ(s, a)⊤ w
+≤ max ϕ(s, a)⊤ wm,h
+n∈[N ]
+|
+{z
+}
+|
+{z
+}
+I2
+I1
+
+Bounding Term I1 : based on Lemma D.5, for any fixed n ∈ [N ], for any (m, h, k) ∈ M×[H]×[K]
+and for any (s, a) ∈ S × A, with probability at least 1 − δ 2 , we have
+s
+!
+2d log(1/δ) 4
+⊤ k,Jk ,n
+⊤ k
+b m,h ≤ 5
++
+∥ϕ(s, a)∥(Λkm,h )−1 .
+ϕ(s, a) wm,h − ϕ(s, a) w
+3βK
+3
+By taking union bound over n, we have for all n ∈ [N ], with probability 1 − δ 2 , we have
+s
+!
+√
+
+2d log N /δ
+4
+⊤ k,Jk ,n
+⊤ k
+b m,h ≤ 5
+ϕ(s, a) wm,h − ϕ(s, a) w
++
+∥ϕ(s, a)∥(Λkm,h )−1 .
+3βK
+3
+This indicates, for any (m, h, k) ∈ M × [H] × [K] and (s, a) ∈ S × A, with probability at least
+1 − δ 2 , we have
+s
+!
+√
+
+2d log N /δ
+4
+⊤ k,Jk ,n
+⊤ k
+b m,h ≤ 5
+Term I1 = max ϕ(s, a) wm,h − ϕ(s, a) w
++
+∥ϕ(s, a)∥(Λkm,h )−1 .
+3βK
+3
+n∈[N ]
+(E.16)
+Bounding Term I2 : based on Lemma D.8, with probability at least 1 − δ, for any (m, h, k) ∈
+M × [H] × [K] and (s, a) ∈ S × A, we have
+√
+k
+k
+b m,h
+ϕ(s, a)⊤ w
+− rhk (s, a) − Ph Vm,h+1
+(s, a) ≤ 5H dCδ ∥ϕ(s, a)∥(Λkm,h )−1 .
+Combine the two result above, by taking union bound, with probability at least 1 − δ − δ 2 , for any
+(m, h, k) ∈ M × [H] × [K] and (s, a) ∈ S × A, we have
+s
+!
+√
+
+√
+2d
+log
+N
+/δ
+4
+k
++
+∥ϕ(s, a)∥(Λkm,h )−1 .
+−lm,h
+(s, a) ≤ 5H dCδ + 5
+3βK
+3
+This completes the proof.
+E.8
+
+Proof of Lemma D.10
+
+Proof. Recall from Definition D.1,
+k
+k
+lm,h
+(s, a) = rh (s, a) + Ph Vm,h+1
+(s, a) − Qkm,h (s, a).
+
+Note that
+Qkm,h (s, a) = min
+
+n
+
+k,Jk ,n
+max ϕ(s, a)⊤ wm,h
+,H − h + 1
+
+o+
+
+n∈[N ]
+
+k,Jk ,n
+≤ max ϕ(x, a)⊤ wm,h
+.
+n∈[N ]
+
+p
+Note that ∥ϕ(s, a)∥(Λkm,h )−1 ≤ 1/λ∥ϕ(s, a)∥ ≤ 1 for all ϕ(s, a). Define C(ε) to be a ε-cover of
+
+ϕ | ∥ϕ∥(Λkm,h )−1 ≤ 1 . Based on Lemma J.8, we have |C(ε)| ≤ (3/ε)d .
+First, for any fixed ϕ(s,
+ a) ∈ C(ε), based on the results in Proposition D.3, we have that
+k,Jk ,n
+k
+⊤ k,Jk
+ϕ(s, a)⊤ wm,h
+∼ N ϕ(s, a)⊤ µk,J
+m,h , ϕ(s, a) Σm,h ϕ(s, a) for any fixed n ∈ [N ]. Now we
+define
+k
+k
+rh (s, a) + Ph Vm,h+1
+(s, a) − ϕ(s, a)⊤ µk,J
+m,h
+q
+Zk =
+.
+k
+ϕ(s, a)⊤ Σk,J
+m,h ϕ(s, a)
+
+When |Zk | < 1, by Gaussian concentration Lemma J.10, we have
+
+
+k,Jk ,n
+k
+P ϕ(s, a)⊤ wm,h
+≥ rh (s, a) + Ph Vm,h+1
+(s, a)
+34
+
+k,Jk ,n
+k
+k
+k
+rh (s, a) + Ph Vm,h+1
+(s, a) − ϕ(s, a)⊤ µk,J
+ϕ(s, a)⊤ wm,h
+− ϕ(s, a)⊤ µk,J
+m,h
+m,h
+q
+q
+=P
+≥
+k
+k
+ϕ(s, a)⊤ Σk,J
+ϕ(s, a)⊤ Σk,J
+m,h ϕ(s, a)
+m,h ϕ(s, a)
+!
+k,Jk ,n
+k
+ϕ(s, a)⊤ wm,h
+− ϕ(s, a)⊤ µk,J
+m,h
+q
+=P
+≥ Zk
+k
+ϕ(s, a)⊤ Σk,J
+m,h ϕ(s, a)
+
+!
+
+1
+≥ √ exp(−Zk2 /2)
+2 2π
+1
+≥ √
+.
+2 2eπ
+Consider the numerator of Zk :
+k
+k
+rh (s, a) + Ph Vm,h+1
+(s, a) − ϕ(s, a)⊤ µk,J
+m,h
+k
+k
+k
+k
+b m,h
+b m,h
+− ϕ(s, a)⊤ µk,J
++ ϕ(s, a)⊤ w
+(s, a) − ϕ(s, a)⊤ w
+≤ rh (s, a) + Ph Vm,h+1
+m,h .
+
+Based on Lemma D.8, with probablity at least 1 − δ, we have
+√
+k
+k
+b m,h
+|rh (s, a) + Ph Vm,h+1
+(s, a) − ϕ(s, a)⊤ w
+| ≤ 5H dCδ ∥ϕ(s, a)∥(Λkm,h )−1 ,
+From (E.4), we have
+k−1
+k
+
+J j
+X Y
+p
+
+j
+k
+k
+b
+ϕ(s, a)⊤ µk,J
+−
+w
+≤
+4H
+M
+Kd/λ
+∥ϕ(s, a)∥.
+1
+−
+2η
+λ
+(Λ
+)
+m,j
+min
+m,h
+m,h
+m,h
+i=1 j=i+1
+
+Recall the proof of Lemma D.5, we set ηm,j = 1/(4λmax (Λjm,h )), Jj ≥ 2κj log(1/ϵ), then we have
+for all j ∈ [K], (1 − 2ηm,j λmin (Λjm,h ))Jj ≤ ϵ, set ϵ = 1/4HM Kd and λ = 1, we have
+k−1
+X
+√
+k
+k
+b m,h
+ϕ(s, a)⊤ w
+− ϕ(s, a)⊤ µk,J
+≤
+4H
+M
+Kd
+ϵk−i ∥ϕ(s, a)∥
+m,h
+i=1
+
+≤
+
+k−1
+X
+
+ϵk−i−1
+
+i=1
+
+≤
+
+√
+√
+1
+4H M Kd M K∥ϕ(s, a)∥(Λkm,h )−1
+4M HKd
+
+4
+∥ϕ(s, a)∥(Λkm,h )−1 .
+3
+
+So, with probablity at least 1 − δ, we have
+k
+k
+rh (s, a) + Ph Vm,h+1
+(s, a) − ϕ(s, a)⊤ µk,J
+m,h ≤
+
+
+
+√
+4
+∥ϕ(s, a)∥(Λkm,h )−1 .
+5H dCδ +
+3
+
+(E.17)
+
+k
+Consider the denominator of Zk : recall from the definition of Σk,J
+m,h from Proposition D.3, then we
+have
+
+ϕ(s, a)⊤ Σm,hk ϕ(s, a)
+k,J
+
+=
+
+≥
+
+k
+X
+
+
+−1
+1
+Ji+1
+Ji+1
+J
+J
+ϕ(s, a)⊤ Akk . . . Ai+1
+I − A2Ji Λim,h
+(I + Ai )−1 Ai+1
+. . . Akk ϕ(s, a)
+β
+m,i
+i=1
+
+k
+X
+
+
+−1 Ji+1
+1
+Ji+1
+J
+J
+ϕ(s, a)⊤ Akk . . . Ai+1
+I − A2Ji Λim,h
+Ai+1 . . . Akk ϕ(s, a),
+2β
+m,i
+i=1
+
+where we used the fact that 21 I ≼ (I + Ak )−1 . Then we have
+ϕ(s, a)⊤ Σm,hk ϕ(s, a)
+k,J
+
+≥
+
+k
+X
+
+1
+Ji+1
+J
+ϕ(s, a)⊤ Akk . . . Ai+1
+2β
+m,i
+i=1
+
+Λim,h
+
+−1
+
+35
+
+− AJi i Λim,h
+
+−1
+
+ Ji+1
+J
+. . . Akk ϕ(s, a)
+AJi i Ai+1
+
+=
+
+k−1
+1 X
+Ji+1
+J
+ϕ(s, a)⊤ Akk . . . Ai+1
+2βK i=1
+
+Λim,h
+
+−1
+
+− Λi+1
+m,h
+
+−1  Ji+1
+J
+Ai+1 . . . Akk ϕ(s, a)
+
+−1 J1
+1
+J
+J
+A1 . . . Akk ϕ(s, a)
+ϕ(s, a)⊤ Akk . . . AJ1 1 Λ1m,h
+2βK
+−1
+1
++
+ϕ(s, a)⊤ Λkm,h
+ϕ(s, a).
+2βK
+−
+
+By the definition of Λim,h and Woodbury formula, we have
+−1
+Λim,h
+−
+
+−1
+Λi+1
+=
+m,h
+
+−1
+Λim,h
+−
+
+X
+
+Λim,h +
+
+l
+
+l
+
+
+
+l
+
+
+l ⊤
+
+!−1
+
+ϕ s ,a ϕ s ,a
+
+(sl ,al ,s′l )∈Um,h (k)
+
+−1 ⊤ i
+= (Λim,h )−1 φ In + φ⊤ (Λim,h )−1 φ
+φ (Λm,h )−1 ,
+
+where φ is a matrix with the dimension of d × n, n is the number difference of ϕ sl , al between
+
+
+
+−1
+−1
+and Λi+1
+(i.e. we concatenate all ϕ sl , al in to the matrix φ). Note that n ≤ M ,
+Λim,h
+m,h
+we have
+
+−1
+−1  Ji+1
+Ji+1
+ϕ(s, a)⊤ AJkk ...Ai+1
+Λim,h
+− Λi+1
+Ai+1 ...AJkk ϕ(s, a)
+m,h
+
+−1
+−1 −1 ⊤ i −1  Ji+1
+Ji+1
+= ϕ(s, a)⊤ AJkk ...Ai+1
+Λim,h
+φ(In + φ⊤ Λim,h
+φ) φ Λm,h
+Ai+1 ...AJkk ϕ(s, a)
+−1
+−1 Ji+1
+Ji+1
+≤ ϕ(s, a)⊤ AJkk ...Ai+1
+Λim,h
+φφ⊤ Λim,h
+Ai+1 ...AJkk ϕ(s, a)
+
+−1
+2
+i +1
+= ϕ(s, a)⊤ AJkk ...AJi+1
+Λim,h
+φ 2
+2
+
+2
+
+i +1
+≤ AJkk ...AJi+1
+(Λim,h )−1/2 ϕ(s, a) 2 · (Λim,h )−1/2 φ F
+
+≤
+
+k
+
+Y
+
+1 − 2ηm,j λmin Λjm,h
+
+2Jj
+
+tr φ⊤ Λim,h
+
+−1 
+φ ∥ϕ(s, a)∥2(Λi
+
+−1
+m,h )
+
+,
+
+j=i+1
+1
+
+where ∥·∥F is Frobenius norm and the last inequality is due to ∥Λ− 2 X∥2F = tr(X⊤ Λ−1 X) and
+(E.2). Therefore, we have
+k
+ϕ(s, a)⊤ Σk,J
+m,h ϕ(s, a)
+
+≥
+
+k
+2Ji
+1
+1 Y
+1 − 2ηm,i λmin Λim,h
+∥ϕ(s, a)∥2(Λ1 )−1
+∥ϕ(s, a)∥2(Λk )−1 −
+m,h
+m,h
+2βK
+2βK i=1
+
+k−1
+k
+2Jj
+−1 
+1 X Y
+1 − 2ηm,j λmin Λjm,h
+tr φ⊤ Λim,h
+φ ∥ϕ(s, a)∥2(Λi )−1 .
+m,h
+2βK i=1 j=i+1
+
+Similar to the proof of Lemma D.5, note that tr φ⊤ (Λim,h )−1 φ ≤ M , when we choose Jj ≥
+2κj log(3kM ), we have
+√
+
+
+k−1
+1
+∥ϕ(s, a)∥ X
+M
+∥ϕ(s, a)∥(Λkm,h )−1 −
+∥ϕ(s, a)∥Σk,Jk ≥ √
+−
+∥ϕ(s,
+a)∥
+m,h
+(3KM )k
+(3kM )k−i
+2 βK
+i=1
+
+
+1
+1
+1
+≥ √
+∥ϕ(s, a)∥(Λkm,h )−1 − √
+∥ϕ(s, a)∥ − √
+∥ϕ(s, a)∥
+2 βK
+3 kM
+6 kM
+1
+≥ √ ∥ϕ(s, a)∥(Λkm,h )−1 ,
+(E.18)
+4 βK
+√
+−1 
+where we used the fact that λmin Λkm,h
+≥ 1/kM and ∥ϕ(s, a)∥(Λkm,h )−1 ≥ 1/ kM ∥ϕ(s, a)∥.
+Therefore, according to (E.17) and (E.18), with probablity at least 1 − δ, it holds that
+
+−
+
+|Zk | =
+
+k
+k
+rh (s, a) + Ph Vm,h+1
+(s, a) − ϕ(s, a)⊤ µk,J
+m,h
+q
+k
+ϕ(s, a)⊤ Σk,J
+m,h ϕ(s, a)
+
+36
+
+≤
+
+√
+5H dCδ + 43
+√1
+4 βK
+
+which implies |Zk | < 1 when √β1
+
+K
+
+,
+
+√
+= 20H dCδ + 16
+3 .
+
+Till now we have proved that for any fixed ϕ(s, a) ∈ C(ε) and for all (m, h, k) ∈ M × [H] × [K],
+for any fixed n ∈ [N ], with probablity at least 1 − δ, we have
+
+
+1
+k,Jk ,n
+k
+P ϕ(s, a)⊤ wm,h
+− rh (s, a) − Ph Vm,h+1
+(s, a) ≥ 0 ≥ √
+.
+2 2eπ
+By taking union bound over n ∈ [N ], with probablity at least 1 − δ, we have
+
+
+
+
+1 N
+N
+k,Jk ,n
+k
+P max ϕ(s, a)⊤ wm,h
+− rh (s, a) − Ph Vm,h+1
+(s, a) ≥ 0 ≥ 1 − 1 − √
+= 1 − c′0 ,
+n∈[N ]
+2 2eπ
+where c′0 = 1− 2√12eπ . Therefore, for any fixed ϕ(s, a) ∈ C(ε) and for all (m, h, k) ∈ M×[H]×[K],
+N
+N
+with probability at least (1 − δ) 1 − c′0
+> 1 − δ − c′0 , we have
+
+k,Jk ,n
+k
+max ϕ(s, a)⊤ wm,h
+− rh (s, a) − Ph Vm,h+1
+(s, a) ≥ 0.
+(E.19)
+n∈[N ]
+
+Next for any ϕ = ϕ(s, a), we can find ϕ′ ∈ C(ε) such that ∥ϕ − ϕ′ ∥(Λkm,h )−1 ≤ ε. We define
+∆ϕ = ϕ − ϕ′ . Recall from Definition 4.1, we have
+def
+
+k
+k
+k
+rh (s, a) + Ph Vm,h+1
+(s, a) = ϕ(s, a)⊤ θh + ϕ(s, a)⊤ µh , Vm,h+1
+= ϕ(s, a)⊤ wm,h
+,
+S
+√
+k
+k
+k
+where wm,h
+= θh + µh , Vm,h+1
+. Note that max{∥µh (S)∥, ∥θh ∥} ≤ d and Vm,h+1
+≤
+S
+H − h ≤ H, thus we have
+√
+√
+√
+k
+k
+wm,h
+≤ ∥θh ∥ + µh , Vm,h+1
+≤ d + H d ≤ 2H d.
+S
+k,Jk ,n
+k
+k
+Then we define the regression error ∆wm,h
+= wm,h
+− wm,h
+. Thus we have
+
+
+k,Jk ,n
+k
+k
+max ϕ(s, a)⊤ wm,h
+− rh (s, a) − Ph Vm,h+1
+(s, a) = max − ϕ(s, a)⊤ ∆wm,h
+.
+n∈[N ]
+
+n∈[N ]
+
+Then by Cauchy-Schwarz inequality, we have
+⊤
+
+k
+k
+k
+ϕ⊤ ∆wm,h
+= ϕ′ ∆wm,h
++ ∆ϕ⊤ ∆wm,h
+⊤
+
+k
+k
+≥ ϕ′ ∆wm,h
+− ∥∆ϕ∥ · ∆wm,h
+√
+⊤
+k
+k
+.
+≥ ϕ′ ∆wm,h
+− M Kε ∆wm,h
+
+By triangle inequality, with probability at least 1 − δ, we have
+√
+k,Jk ,n
+k
+k
+∆wm,h
+≤ wm,h
++ wm,h
+≤ 2H d + Bδ/N M HK
+√
+√
+
+Denote αδ = M K 2H d + Bδ/N M HK . Then, for all (m, h, k) ∈ M × [H] × [K], with
+probability at least 1 − δ, we have
+
+ ⊤
+k
+k
+max ϕ⊤ ∆wm,h
+≥ max ϕ′ ∆wm,h
+− αδ ε.
+n∈[N ]
+
+n∈[N ]
+
+Recall from (E.19), by taking union bound, with probability at least 1 − |C(ε)|c′0
+(m, h, k) ∈ M × [H] × [K] and for all (s, a) ∈ S × A, we have
+
+k
+max ϕ⊤ ∆wm,h
+≥ −αδ ε.
+
+N
+
+− 2δ, for all
+
+n∈[N ]
+
+Finally, with probability at least 1 − |C(ε)|c′0
+(s, a) ∈ S × A, we have
+
+N
+
+− 2δ, for all (m, h, k) ∈ M × [H] × [K] and for all
+
+k
+lm,h
+(s, a) ≤ αδ ε.
+
+This completes the proof.
+37
+
+E.9
+
+Proof of Lemma D.12
+
+k
+Proof. For simplicity, we denote (skm,h , akm,h ) as zm,h
+. Then we consider the following mappings
+(νM , νK ) : [M K] → [M ] × [K],
+ 
+τ
+,
+νM (τ ) = τ (modM ),
+νK =
+M
+
+where we set νM (τ ) = M if M |τ . Next, for any τ ≥ 0, we define
+Λ̄τh = λI +
+
+τM
+
+ 
+⊤
+X
+νK (u)
+νK (u)
+ϕ zνM
+,
+(u),h ϕ zνM (u),h
+
+for τ > 0,
+
+u=1
+
+Λ̄0h = λI,
+
+for τ = 0.
+
+We denote σ = {σ1 , . . . , σn } as the synchronization episodes, where σi ∈ [K], we also denote
+σ0 = 0. Then we separate the episodes k = 1, . . . , K into two groups based on the following
+condition,
+1≤
+
+det(Λ̄σhi )
+≤ 3.
+σ
+det(Λ̄hi−1 )
+
+(E.20)
+
+σ
+
+Note that the left inequality always holds due to Λ̄hi−1 ≼ Λ̄σhi and the trivial fact that A ≼ B ⇒
+det(A) ≤ det(B). Then we define that I1 = {k ∈ N+ , k ∈ [σi−1 , σi ), ∀i ∈ [n]|(E.20) is true}
+and I2 = {k ∈ N+ , k ∈ [σi−1 , σi ), ∀i ∈ [n]|(E.20) is false}, then [K] = I1 ∪ I2 ∪ {K}. For any
+σ
+k ∈ [σi−1 , σi ) and k ∈ I1 , note that Λ̄hi−1 ≼ Λkm,h ≼ Λ̄kh ≼ Λ̄σhi , thus for any m ∈ M, we have
+s
+
+
+det(Λ̄kh )
+k
+k
+ϕ zm,h (Λk )−1 ≤ ϕ zm,h (Λ̄k )−1
+m,h
+h
+det(Λkm,h )
+s
+
+det(Λ̄σhi )
+k
+≤ ϕ zm,h
+k
+σ
+−1
+(Λ̄h )
+det(Λ̄hi−1 )
+
+k
+,
+(E.21)
+≤ 2 ϕ zm,h
+(Λ̄k )−1
+h
+
+where the first inequality follows from Lemma J.12, the second inequality follows from the trivial
+fact that A ≼ B ⇒ det(A) ≤ det(B), and the final inequality holds because k ∈ I1 . Then we will
+bound the summation for k ∈ I1 and k ∈ I2 , respectively.
+s
+X
+X
+X
+X
+k
+k )∥2
+∥ϕ(zm,h
+)∥(Λkm,h )−1 ≤ M K
+∥ϕ(zm,h
+(Λk )−1
+k∈I1 ∪{K} m∈M
+
+m,h
+
+m∈M k∈I1 ∪{K}
+
+s
+X
+≤ 2 MK
+
+X
+
+k )∥2
+∥ϕ(zm,h
+(Λ̄k )−1
+h
+
+m∈M k∈I1 ∪{K}
+
+v
+u
+K
+X X
+u
+k )∥2
+∥ϕ(zm,h
+≤ 2tM K
+(Λ̄k )−1
+h
+
+m∈M k=1
+
+s
+≤2
+
+
+M K log
+
+
+det(ΛK
+h )
+,
+det(λI)
+
+where the first inequality follows from Cauchy-Schwarz inequality, the second inequality holds due to (E.21), the final equality follows from Lemma J.1 and ΛK
+=
+h
+
+⊤
+P
+PK
+k
+k
+k
+k
++ λI.
+m∈M
+k=1 ϕ sm,h , am,h ϕ sm,h , am,h
+For any interval [σi−1 , σi ), define ∆i = σi − σi−1 − 1, we calculate that
+v
+u
+σX
+σX
+i −1
+i −1
+u
+k
+k ) 2
+ϕ(zm,h ) (Λk )−1 ≤ t∆i
+ϕ(zm,h
+(Λk
+k=σi−1
+
+m,h
+
+k=σi−1
+
+38
+
+m,h )
+
+−1
+
+v
+u
+u
+≤ t∆i log
+≤
+
+√
+
+σi −1
+det(Λm,h
+)
+
+!
+
+σ
+
+i−1
+det(Λm,h
+)
+
+γ,
+
+where the last inequality follows from the synchronization condition (3.3).
+m
+l
+
+det(ΛK
+h )
+, note that σn ≤ K, then we can find that
+Define Rh = log det(λI)
+
+Rh ≥ log
+
+det(Λ̄σhn )
+det(Λ̄σh0 )
+
+
+=
+
+n
+X
+
+
+log
+
+i=1
+
+
+det(Λ̄σhi )
+.
+σ
+det(Λ̄hi−1 )
+
+We can claim that I2 has at most Rh synchronization episodes, otherwise
+
+
+
+
+n
+X
+X
+det(Λ̄σhi )
+det(Λ̄σhi )
+Rh ≥
+≥
+log
+≥ Rh log 3,
+log
+σ
+σ
+det(Λ̄hi−1 )
+det(Λ̄hi−1 )
+i=1
+i∈{i|σi−1 ∈I2 }
+
+which causes the contradiction. Thus I2 has at most Rh intervals, then we get
+
+
+
+
+X X
+det(ΛK
+√
+√
+k
+h )
+ϕ(zm,h
+) (Λk )−1 ≤ Rh M γ ≤ log
++ 1 M γ.
+m,h
+det(λI)
+k∈I2 m∈M
+
+Finally, we can bound the total summation,
+K
+X X
+m∈M k=1
+
+k
+ϕ(zm,h
+) (Λk
+
+−1
+m,h )
+
+≤
+
+X X
+
+k
+ϕ(zm,h
+) (Λk
+
+−1
+m,h )
+
+m∈M k∈I2
+
+
+≤
+
+
+log
+
++
+
+X
+
+X
+
+k
+∥ϕ(zm,h
+)∥(Λkm,h )−1
+
+m∈M k∈I1 ∪{K}
+
+s
+
+
+
+
+det(ΛK
+)
+det(ΛK
+√
+h
+h )
++ 1 M γ + 2 M K log
+.
+det(λI)
+det(λI)
+
+This completes the proof.
+
+F
+
+Proof of the Regret Bound for CoopTS-LMC in Misspecified Setting
+
+In this section, we prove the regret bound for CoopTS-LMC in the misspecified setting. The regret
+analysis, the essential supporting lemmas and their corresponding proofs are almost same as what we
+have presented in Appendix D and Appendix E. Here we mainly point out the differences of proof
+between these two settings.
+F.1
+
+Supporting Lemmas
+
+Definition F.1 (Model prediction error). For any (m, k, h) ∈ M × [K] × [H], we define the model
+error associated with the reward rm,h ,
+k
+k
+lm,h
+(s, a) = rm,h (s, a) + Pm,h Vm,h+1
+(s, a) − Qkm,h (s, a).
+
+Lemma F.2. Let λ = 1 in Algorithm 3. Under Definition 4.8, for any fixed 0 < δ < 1, with
+probability at least 1 − δ, for all (m, k, h) ∈ M × [K] × [H] and for any (s, a) ∈ S × A, we have
+k
+k
+b m,h
+ϕ(s, a)⊤ w
+− rm,h (s, a) − Pm,h Vm,h+1
+(s, a)
+√
+√
+
+≤ 5H dCδ + 3Hζ M Kd ∥ϕ(s, a)∥(Λkm,h )−1 + 3Hζ,
+
+where Cδ is defined in Lemma D.7.
+Proof of Lemma F.2. Recall from Definition 4.8, we have
+k
+k
+Pm,h Vm,h+1
+(s, a) − ϕ(s, a)⊤ µh , Vm,h+1
+≤ Pm,h (· | s, a) − ϕ(s, a), µh (·)
+S
+
+1
+
+≤ 2H Pm,h (· | s, a) − ϕ(s, a), µh (·)
+39
+
+k
+∥Vm,h+1
+∥∞
+TV
+
+≤ 2Hζ,
+where the first inequality follows from Cauchy-Schwarz inequality,
+P the second inequality follows
+k
+from the fact that ∥Vm,h+1
+∥∞ ≤ H and P2 , ∥P1 − P2 ∥TV = 12 x∈ω |P1 (x) − P2 (x)| = 12 ∥P1 −
+P2 ∥1 for two distributions P1 and P2 , note that here we regard distribution as infinite dimensional
+k
+vector, the third inequality follows from Definition 4.8. Define ∆m,1 = Pm,h Vm,h+1
+(s, a) −
+⊤
+k
+ϕ(s, a) µh , Vm,h+1 S , thus |∆m,1 | ≤ 2Hζ. Then we have
+k
+Pm,h Vm,h+1
+(s, a)
+
+(F.1)
+
+⊤
+
+k
+µh , Vm,h+1
++ ∆m,1
+S
+
+⊤
+
+−1
+Λkm,h
+
+= ϕ(s, a)
+= ϕ(s, a)
+
+X
+
+l
+
+l
+
+
+l ⊤
+
+l
+
+
+
+ϕ s ,a ϕ s ,a
+
+!
+k
+µh , Vm,h+1
++ ∆m,1
+S
+
++ λI
+
+(sl ,al ,s′ l )∈Um,h (k)
+
+= ϕ(s, a)⊤ Λkm,h
+
+−1
+
+
+⊤
+k
+ϕ sl , al ϕ sl , al
+µh , Vm,h+1
+S
+
+X
+
+!
+
+(sl ,al ,s′ l )∈Um,h (k)
+
++ λϕ(s, a)⊤ Λkm,h
+⊤
+
+= ϕ(s, a)
+
+−1
+
+k
+µh , Vm,h+1
++ ∆m,1
+S
+
+!
+
+−1
+Λkm,h
+
+X
+
+l
+
+ϕ s ,a
+
+(sl ,al ,s′ l )∈U
+
+− ϕ(s, a)
+
+⊤
+
+l
+
+k
+Pm,h Vm,h+1
+
+
+
+
+
+l
+
+l
+
+s ,a
+
+
+
+m,h (k)
+
+!
+
+−1
+Λkm,h
+
+X
+
+l
+
+l
+
+∆m,1 ϕ s , a
+
+
+
+(sl ,al ,s′ l )∈Um,h (k)
+
++ λϕ(s, a)⊤ Λkm,h
+
+−1
+
+k
+µh , Vm,h+1
++ ∆m,1 .
+S
+
+(F.2)
+
+Based on (F.1), we can separate the following error into four parts,
+k
+k
+b m,h
+ϕ(s, a)⊤ w
+− rm,h (s, a) − Pm,h Vm,h+1
+(s, a)
+X
+
+
+
+
+−1
+l 
+k
+= ϕ(s, a)⊤ Λkm,h
+rm,h sl , al + Vm,h+1
+(s′ ) ϕ sl , al − rm,h (s, a)
+(sl ,al ,s′l )∈Um,h (k)
+⊤
+
+− ϕ(s, a)
+
+!
+
+−1
+Λkm,h
+
+X
+
+l
+
+l
+
+k
+Pm,h Vm,h+1
+
+
+
+l
+
+l
+
+s ,a
+
+
+
+k
+k
+Vm,h+1
+− Pm,h Vm,h+1
+
+
+
+ϕ s ,a
+
+
+
+(sl ,al ,s′ l )∈Um,h (k)
+
++ ∆m,1 ϕ(s, a)⊤ Λkm,h
+
+!
+
+−1
+
+X
+
+
+ϕ sl , al
+
+(sl ,al ,s′ l )∈Um,h (k)
+
+− λϕ(s, a)⊤ Λkm,h
+⊤
+
+= ϕ(s, a)
+
+−1
+
+−1
+Λkm,h
+
+k
+µh , Vm,h+1
+− ∆m,1
+S
+
+X
+
+l
+
+l
+
+ϕ s ,a
+
+
+
+l
+
+l
+
+s ,a
+
+!
+
+
+(sl ,al ,s′l )∈Um,h (k)
+
+{z
+
+|
+
+}
+
+(i)
+
++ ϕ(s, a)⊤ Λkm,h
+
+!
+
+−1
+
+X
+
+
+
+rm,h sl , al ϕ sl , al
+
+− rm,h (s, a)
+
+(sl ,al ,s′ l )∈Um,h (k)
+
+|
+
+{z
+
+}
+
+(ii)
+
+−1
+k
+− λϕ(s, a)⊤ Λkm,h
+µh , Vm,h+1
+S
+|
+{z
+}
+(iii)
+
+⊤
+
++ ∆m,1 ϕ(s, a)
+
+!
+
+−1
+Λkm,h
+
+X
+
+l
+
+l
+
+ϕ s ,a
+
+
+
+− ∆m,1 .
+
+(sl ,al ,s′ l )∈Um,h (k)
+
+|
+
+{z
+
+}
+
+(iv)
+
+40
+
+(F.3)
+
+We now provide an upper bound for each of the terms in (F.3).
+Bounding Term (i) in (F.3): same as (E.11) in Appendix E.6, with probability at least 1 − δ, we have
+√
+(F.4)
+|Term (i)| ≤ 3H dCδ ∥ϕ(s, a)∥(Λkm,h )−1 .
+Bounding Term (ii) + Term (iv) in (F.3): define ∆m,2 = rm,h (s, a) − ϕ(s, a)⊤ θh , then we have
+|∆m,2 | ≤ ζ due to Definition 4.8. Next we have
+ϕ(s, a)⊤ Λkm,h
+
+−1
+
+!
+
+
+rm,h sl , al ϕ sl , al
+− rm,h (s, a)
+
+X
+(sl ,al ,s′ l )∈Um,h (k)
+
+!
+⊤
+
+= ϕ(s, a)
+
+−1
+Λkm,h
+
+X
+
+l
+
+l
+
+l
+
+l
+
+l
+
+l
+
+l
+
+l
+
+rm,h s , a ϕ s , a
+
+− ϕ(s, a)⊤ θh − ∆m,2
+
+(sl ,al ,s′ l )∈Um,h (k)
+
+!
+⊤
+
+= ϕ(s, a)
+
+−1
+Λkm,h
+
+X
+
+rm,h s , a ϕ s , a
+
+− Λkm,h θh
+
+− ∆m,2
+
+(sl ,al ,s′ l )∈Um,h (k)
+
+= ϕ(s, a)⊤ Λkm,h
+
+−1
+
+X
+
+
+
+ϕ sl , al rm,h sl , al
+
+(sl ,al ,s′ l )∈Um,h (k)
+
+!
+
+⊤
+ϕ sl , al ϕ sl , al θh − λIθh
+
+X
+
+−
+
+− ∆m,2
+
+(sl ,al ,s′ l )∈Um,h (k)
+
+!
+⊤
+
+= ϕ(s, a)
+
+−1
+Λkm,h
+
+X
+
+l
+
+l
+
+ϕ s , a ∆m,2 − λIθh
+
+− ∆m,2
+
+(sl ,al ,s′ l )∈Um,h (k)
+
+!
+= −λϕ(s, a)
+
+⊤
+
+−1
+Λkm,h
+θh + ∆m,2 ϕ(s, a)⊤
+
+−1
+Λkm,h
+
+X
+
+l
+
+ϕ s ,a
+
+l
+
+− ∆m,2 , (F.5)
+
+(sl ,al ,s′ l )∈Um,h (k)
+
+|
+
+{z
+
+}
+
+(v)
+
+where the third equality uses the definition of Λkm,h . By Combining (F.5) and (E.13) in Appendix E.6,
+we obtain
+√
+|Term (ii) + Term (iv)| ≤ λd∥ϕ(s, a)∥(Λkm,h )−1 + |Term (iv) + Term (v)|.
+(F.6)
+Then we calculate that
+|Term (iv) + Term (v)|
+⊤
+
+= (∆m,1 + ∆m,2 )ϕ(s, a)
+
+!
+
+−1
+Λkm,h
+
+X
+
+l
+
+l
+
+ϕ s ,a
+
+
+
+− (∆m,1 + ∆m,2 )
+
+(sl ,al ,s′ l )∈Um,h (k)
+
+≤ |∆m,1 + ∆m,2 | · ϕ(s, a)⊤ Λkm,h
+
+!
+
+−1
+
+X
+
+
+ϕ sl , al
+
++ |∆m,1 + ∆m,2 |
+
+(sl ,al ,s′ l )∈Um,h (k)
+
+≤ 3Hζ∥ϕ(s, a)∥(Λkm,h )−1
+
+X
+
+ϕ(sl , al ) (Λk
+
+−1
+m,h )
+
+(sl ,al ,s′ l )∈Um,h (k)
+
++ 3Hζ
+! 21
+
+≤ 3Hζ∥ϕ(s, a)∥(Λkm,h )−1 K(k)
+
+X
+(sl ,al ,s′ l )∈Um,h (k)
+
+√
+≤ 3Hζ M Kd∥ϕ(s, a)∥(Λkm,h )−1 + 3Hζ,
+
+l
+
+l
+
+ϕ(s , a )
+
+2
+−1
+(Λk
+m,h )
+
++ 3Hζ
+(F.7)
+
+where the second inequality follows from Cauchy-Schwarz inequality and the fact that |∆m,1 +
+∆m,2 | ≤ |∆m,1 | + |∆m,2 | ≤ 2Hζ + ζ ≤ 3Hζ, the third inequality holds because of CauchySchwarz inequality, and the last inequality holds because K(k) ≤ M K and Lemma J.4. Substitute
+(F.7) into (F.6), we have
+√
+√ 
+|Term (ii) + Term (iv)| ≤ 3Hζ M Kd + λd ∥ϕ(s, a)∥(Λkm,h )−1 + 3Hζ.
+(F.8)
+41
+
+Bounding Term (iii) in (F.3): same as (E.15) in Appendix E.6, we have
+√
+|Term (iii)| ≤ H λd∥ϕ(s, a)∥(Λkm,h )−1 .
+
+(F.9)
+
+Combine all the terms in (F.3) together: by using triangle inequality in (F.3), we combine (F.4),
+(F.8) and (F.9), then set λ = 1, with probability at least 1 − δ, we get
+k
+k
+b m,h
+ϕ(s, a)⊤ w
+− rm,h (s, a) − Pm,h Vm,h+1
+(s, a)
+
+
+√
+√
+√
+√
+≤ 3H dCδ + d + H d + 3Hζ M Kd ∥ϕ(s, a)∥(Λkm,h )−1 + 3Hζ
+√
+√
+
+≤ 5H dCδ + 3Hζ M Kd ∥ϕ(s, a)∥(Λkm,h )−1 + 3Hζ.
+
+This completes the proof.
+Lemma F.3 (Error bound). Let λ = 1 in Algorithm 3. Under Definition 4.8, for any fixed 0 < δ < 1,
+with probability at least 1 − δ − δ 2 , for any (m, k, h) ∈ M × [K] × [H] and for any (s, a) ∈ S × A,
+we have
+s
+!
+√
+
+√
+√
+2d log N /δ
+4
+k
+−lm,h (s, a) ≤ 5H dCδ + 3Hζ M Kd + 5
+∥ϕ(s, a)∥(Λkm,h )−1 + 3Hζ,
++
+3βK
+3
+where Cδ is defined in Lemma D.7.
+Proof of Lemma F.3. We do the same process as that in Appendix E.7, and we have
+k,Jk ,n
+k
+k
+b m,h
+−lm,h
+(s, a) ≤ max ϕ(s, a)⊤ wm,h
+− ϕ(s, a)⊤ w
+n∈[N ]
+{z
+}
+|
+(i)
+
++ ϕ(s, a)
+|
+
+⊤
+
+k
+k
+b m,h
+w
+− rm,h (s, a) − Pm,h Vm,h+1
+(s, a)
+
+{z
+
+(ii)
+
+.
+
+}
+
+Bounding Term (i): based on (E.16), for any (m, h, k) ∈ M × [H] × [K] and (s, a) ∈ S × A, with
+probability at least 1 − δ 2 , we have
+s
+!
+√
+
+2d
+log
+N
+/δ
+4
+k,J
+,n
+k
+b m,h
+max ϕ(s, a)⊤ wm,hk − ϕ(s, a)⊤ w
+≤ 5
+∥ϕ(s, a)∥(Λkm,h )−1 .
++
+3βK
+3
+n∈[N ]
+Bounding Term (ii): based on Lemma F.2, for all (m, h, k) ∈ M × [H] × [K] and (s, a) ∈ S × A,
+we have
+√
+√
+
+k
+k
+b m,h
+ϕ(s, a)⊤ w
+− rhk (s, a) − Ph Vm,h+1
+(s, a) ≤ 5H dCδ + 3Hζ M Kd ∥ϕ(s, a)∥(Λk
+
+m,h
+
+)−1 + 3Hζ.
+
+Combine the two result above, by taking union bound, with probability at least 1 − δ − δ 2 , we have
+s
+!
+√
+
+√
+√
+2d log N /δ
+4
+k
+−lm,h (s, a) ≤ 5H dCδ + 3Hζ M Kd + 5
++
+∥ϕ(s, a)∥(Λkm,h )−1 + 3Hζ.
+3βK
+3
+This completes the proof.
+Lemma F.4 (Optimism). Let λ = 1 in Algorithm 3 and c′0 = 1 − 2√12eπ . Under Definition 4.8, for
+N
+
+any fixed 0 < δ < 1, with probability at least 1 − |C(ε)|c′0 − 2δ where |C(ε)| ≤ (3/ε)d , for all
+(m, h, k) ∈ M × [H] × [K] and for all (s, a) ∈ S × A, we have
+k
+lm,h
+(s, a) ≤ αδ ε + 3Hζ,
+√
+√
+
+where αδ = M K 2H d + Bδ/N M HK .
+
+42
+
+Proof of Lemma F.4. This proof is similar to the proof in Appendix E.8, we just prove the part that
+for fixed ϕ ∈ C(ε). Recall from Definition F.1,
+k
+k
+lm,h
+(s, a) = rm,h (s, a) + Pm,h Vm,h+1
+(s, a) − Qkm,h (s, a).
+
+Note that
+Qkm,h (s, a) = min
+
+n
+
+k,Jk ,n
+max ϕ(s, a)⊤ wm,h
+,H − h + 1
+
+n∈[N ]
+
+o+
+
+k,Jk ,n
+≤ max ϕ(x, a)⊤ wm,h
+.
+n∈[N ]
+
+Here we define
+Zk =
+
+k
+k
+rm,h (s, a) + Pm,h Vm,h+1
+(s, a) − ϕ(s, a)⊤ µk,J
+m,h − (∆m,1 + ∆m,2 )
+q
+,
+k
+ϕ(s, a)⊤ Σk,J
+m,h ϕ(s, a)
+
+k
+k
+where ∆m,1 = Pm,h Vm,h+1
+(s, a) − ϕ(s, a)⊤ µh , Vm,h+1
+, ∆m,2 = rm,h (s, a) −
+S
+k,Jk ,n
+⊤
+ϕ(s, a) θh . Based on the results in Proposition D.3, we have that ϕ(s, a)⊤ wm,h
+∼
+
+
+⊤ k,Jk
+⊤ k,Jk
+N ϕ(s, a) µm,h , ϕ(s, a) Σm,h ϕ(s, a) , for any fixed n ∈ [N ]. When |Zk | < 1, by Gaussian
+concentration Lemma J.10, we have
+
+
+
+k,J ,n
+k
+P rm,h (s, a) + Pm,h Vm,h+1
+(s, a) − ϕ(s, a)⊤ wm,hk ≤ (∆m,1 + ∆m,2 )
+
+
+k,J ,n
+k
+= P ϕ(s, a)⊤ wm,hk ≥ rm,h (s, a) + Pm,h Vm,h+1
+(s, a) − (∆m,1 + ∆m,2 )
+k,J ,n
+
+k,J
+
+k,J
+
+k
+ϕ(s, a)⊤ wm,hk − ϕ(s, a)⊤ µm,hk
+(s, a) − (∆m,1 + ∆m,2 ) − ϕ(s, a)⊤ µm,hk
+rm,h (s, a) + Pm,h Vm,h+1
+q
+q
+=P
+≥
+k,J
+k,J
+ϕ(s, a)⊤ Σm,hk ϕ(s, a)
+ϕ(s, a)⊤ Σm,hk ϕ(s, a)
+!
+k,J ,n
+k,J
+ϕ(s, a)⊤ wm,hk − ϕ(s, a)⊤ µm,hk
+q
+≥ Zk
+=P
+k,J
+ϕ(s, a)⊤ Σm,hk ϕ(s, a)
+
+1
+≥ √ exp(−Zk2 /2)
+2 2π
+1
+≥ √
+.
+2 2eπ
+
+Consider the numerator of Zk :
+k
+k
+rm,h (s, a) + Pm,h Vm,h+1
+(s, a) − ϕ(s, a)⊤ µk,J
+m,h − (∆m,1 + ∆m,2 )
+k
+k
+b m,h
+≤ rm,h (s, a) + Pm,h Vm,h+1
+(s, a) − ϕ(s, a)⊤ w
+− (∆m,1 + ∆m,2 )
+{z
+}
+|
+I1
+
+⊤
+
++ ϕ(s, a)
+|
+
+k
+k
+b m,h
+w
+− ϕ(s, a)⊤ µk,J
+m,h
+
+{z
+
+.
+
+(F.10)
+
+}
+
+I2
+
+Bounding Term I1 in (F.10): recall the proof of Lemma F.2, we do the almost same error decomposition as (F.3) with the only difference of adding term (∆m,1 + ∆m,2 )
+k
+k
+b m,h
+ϕ(s, a)⊤ w
+− rm,h (s, a) − Pm,h Vm,h+1
+(s, a) + (∆m,1 + ∆m,2 )
+
+= ϕ(s, a)⊤ Λkm,h
+
+−1
+
+!
+
+
+
+k
+k
+ϕ sl , al Vm,h+1
+− Pm,h Vm,h+1
+sl , al
+
+X
+(sl ,al ,s′ l )∈Um,h (k)
+
+|
+
+{z
+
+}
+
+(i)
+
++ ϕ(s, a)⊤ Λkm,h
+
+−1
+
+!
+X
+
+
+
+rm,h sl , al ϕ sl , al
+
+− rm,h (s, a)
+
+(sl ,al ,s′ l )∈Um,h (k)
+
+|
+
+{z
+
+(ii)
+
+−1
+k
+− λϕ(s, a)⊤ Λkm,h
+µh , Vm,h+1
+S
+|
+{z
+}
+(iii)
+
+43
+
+}
+
+!
+
+⊤
+
++ ∆m,1 ϕ(s, a)
+
+!
+
+−1
+Λkm,h
+
+X
+
+l
+
+l
+
+ϕ s ,a
+
+
+
++ ∆m,2 .
+
+(F.11)
+
+(sl ,al ,s′l )∈Um,h (k)
+
+|
+
+{z
+
+}
+
+(iv)
+
+We now provide an upper bound for each of the terms in (F.11).
+Bounding Term (i) in (F.11): almost same as (E.11) in Appendix E.6 with the only difference
+between Ph and Pm,h , with probability at least 1 − δ, we have
+√
+(F.12)
+|Term (i)| ≤ 3H dCδ ∥ϕ(s, a)∥(Λkm,h )−1 .
+Bounding Term (ii) + Term (iv) in (F.11): we do the same calculation as that in the proof of
+Lemma F.2, based on (F.5), we have
+!
+⊤
+
+Term (ii) = ϕ(s, a)
+
+−1
+Λkm,h
+
+X
+
+l
+
+l
+
+l
+
+rm,h s , a ϕ s , a
+
+l
+
+− rm,h (s, a)
+
+(sl ,al ,s′ l )∈Um,h (k)
+
+!
+= −λϕ(s, a)
+
+⊤
+
+−1
+Λkm,h
+θh + ∆m,2 ϕ(s, a)⊤
+
+−1
+Λkm,h
+
+X
+
+l
+
+ϕ s ,a
+
+l
+
+− ∆m,2 .
+
+(sl ,al ,s′l )∈Um,h (k)
+
+|
+
+{z
+
+}
+
+(v)
+
+(F.13)
+
+By Combining (F.13) and (E.13) in Appendix E.6, we obtain
+√
+|Term (ii) + Term (iv)| ≤ λd∥ϕ(s, a)∥(Λkm,h )−1 + |Term (iv) + Term (v)|.
+
+(F.14)
+
+Then we calculate that
+|Term (iv) + Term (v)| = |∆m,1 + ∆m,2 | · ϕ(s, a)
+
+⊤
+
+!
+
+−1
+Λkm,h
+
+X
+
+l
+
+l
+
+ϕ s ,a
+
+
+
+(sl ,al ,s′ l )∈Um,h (k)
+
+X
+
+≤ 3Hζ∥ϕ(s, a)∥(Λkm,h )−1
+
+ϕ(sl , al ) (Λk
+
+−1
+m,h )
+
+(sl ,al ,s′ l )∈Um,h (k)
+
+! 21
+X
+
+≤ 3Hζ∥ϕ(s, a)∥(Λkm,h )−1 K(k)
+
+l
+
+l
+
+ϕ(s , a )
+
+(sl ,al ,s′ l )∈Um,h (k)
+
+√
+≤ 3Hζ M Kd∥ϕ(s, a)∥(Λkm,h )−1 ,
+
+2
+−1
+(Λk
+m,h )
+
+(F.15)
+
+where the first inequality follows from Cauchy-Schwarz inequality and the fact that |∆m,1 + ∆m,2 | ≤
+3Hζ, the second inequality holds because of Cauchy-Schwarz inequality, and the last inequality
+holds because K(k) ≤ M K and Lemma J.4. Substitute (F.15) into (F.14), we have
+√ 
+√
+|Term (ii) + Term (iv)| ≤ 3Hζ M Kd + λd ∥ϕ(s, a)∥(Λkm,h )−1 .
+(F.16)
+Bounding Term (iii) in (F.11): same as (E.15) in Appendix E.6, we have
+√
+|Term (iii)| ≤ H λd∥ϕ(s, a)∥(Λkm,h )−1 .
+
+(F.17)
+
+Combine all the terms in (F.11) together: by using triangle inequality in (F.11), we combine (F.12),
+(F.16) and (F.17), then set λ = 1, with probability at least 1 − δ, we get
+k
+k
+b m,h
+ϕ(s, a)⊤ w
+− rm,h (s, a) − Pm,h Vm,h+1
+(s, a) + (∆m,1 + ∆m,2 )
+√
+√
+
+≤ 5H dCδ + 3Hζ M Kd ∥ϕ(s, a)∥(Λkm,h )−1 .
+
+Bounding Term I2 in (F.10): same as the proof in Appendix E.8, we have
+k
+k
+b m,h
+ϕ(s, a)⊤ w
+− ϕ(s, a)⊤ µk,J
+m,h ≤
+
+44
+
+4
+∥ϕ(s, a)∥(Λkm,h )−1 .
+3
+
+So, with probability at least 1 − δ, we have
+k
+rm,h (s, a) + Pm,h Vm,h+1
+(s, a) − ϕ(s, a)⊤ µm,hk ≤
+k,J
+
+
+
+
+√
+√
+4
+5H dCδ + 3Hζ M Kd +
+∥ϕ(s, a)∥(Λk )−1 .
+m,h
+3
+(F.18)
+
+Consider the denominator of Zk : same as the proof in Appendix E.8, with (E.18), we have
+1
+(F.19)
+∥ϕ(s, a)∥Σk,Jk ≥ √ ∥ϕ(s, a)∥(Λkm,h )−1 ,
+m,h
+4 βK
+√
+−1 
+where we used the fact that λmin Λkm,h
+≥ 1/k and ∥ϕ(s, a)∥(Λkm,h )−1 ≥ 1/ k∥ϕ(s, a)∥2 .
+Therefore, according to (F.18) and (F.19), with probability at least 1 − δ, it holds that
+|Zk | =
+
+≤
+=
+
+k
+k
+rm,h (s, a) + Pm,h Vm,h+1
+(s, a) − ϕ(s, a)⊤ µk,J
+m,h
+q
+k
+ϕ(s, a)⊤ Σk,J
+m,h ϕ(s, a)
+ √
+
+√
+5H dCδ + 3Hζ M Kd + 34 ∥ϕ(s, a)∥(Λkm,h )−1
+
+√1 ∥ϕ(s, a)∥ k
+(Λm,h )−1
+4 βK
+
+√
+√
+5H dCδ + 3Hζ M Kd + 34
+√1
+4 βK
+
+which implies |Zk | < 1 when √β1
+
+K
+
+,
+
+√
+√
+= 20H dCδ + 12Hζ M Kd + 16
+3 .
+
+Now we have already proved that, for any fixed n ∈ [N ], with probability at least 1 − δ, we have
+
+
+1
+k,Jk ,n
+k
+P rm,h (s, a) + Pm,h Vm,h+1
+(s, a) − ϕ(s, a)⊤ wm,h
+≤ (∆m,1 + ∆m,2 ) ≥ √
+.
+2 2eπ
+By taking union bound over n ∈ [N ], with probablity at least 1 − δ, we have
+
+
+
+k,Jk ,n
+k
+P max ϕ(s, a)⊤ wm,h
+− rm,h (s, a) − Pm,h Vm,h+1
+(s, a) ≥ −(∆m,1 + ∆m,2 )
+n∈[N ]
+
+
+1 N
+≥1− 1− √
+2 2eπ
+N
+
+= 1 − c′0 ,
+where c′0 = 1 − 2√12eπ . Finally, with probability at least (1 − δ) 1 − c′0
+we have
+
+N
+
+, for all (s, a) ∈ S × A,
+
+k
+lm,h
+(s, a) ≤ 3Hζ.
+
+Till now we have completed the proof of fixed ϕ ∈ C(ε). Follow the proof in Appendix E.8, we can
+get the final result.
+F.2
+
+Regret Analysis
+
+In this part, we give out the proof of Theorem 4.12, the regret bound for CoopTS-LMC in the
+misspecified setting.
+Proof of Theorem 4.12. This proof is almost same as the proof in Appendix D.2. We do the same
+regret decomposition (D.2) and obtain the same bound for Term(i) (D.3) and Term(ii) (D.4). Next
+we bound Term (iii) with new lemmas in the misspecified setting.
+Bounding Term (iii) in (D.2): based on Lemma F.3 and Lemma F.4, by taking union bound, with
+N
+2
+probability at least 1 − |C(ε)|c′0 − 2δ ′ − M HK(δ ′ + δ ′ ), we have
+K X
+H
+X X
+
+k
+
+
+k
+Eπ∗ lm,h
+(sm,h , am,h )|sm,1 = skm,1 − lm,h
+skm,h , akm,h
+
+m∈M k=1 h=1
+
+45
+
+K X
+H 
+X X
+
+≤
+
+
+
+k
+− lm,h
+skm,h , akm,h + αδ′ ε + 3Hζ
+
+m∈M k=1 h=1
+K X
+H
+X X
+
+≤
+
+√
+
+s
+
+√
+
+5H dCδ′ + 3Hζ M Kd + 5
+
+m∈M k=1 h=1
+
+!
+√
+
+2d log N /δ ′
+4
+ϕ(skm,h , akm,h ) (Λk )−1
++
+m,h
+3βK
+3
+
+!
++ αδ′ ε + 6Hζ
+2
+
+= HM Kαδ′ ε + 6H M Kζ +
+×
+
+H X X
+K
+X
+
+√
+
+√
+
+s
+
+5H dCδ′ + 3Hζ M Kd + 5
+
+!
+√
+
+2d log N /δ ′
+4
++
+3βK
+3
+
+ϕ(skm,h , akm,h ) (Λk
+
+−1
+m,h )
+
+h=1 m∈M k=1
+
+!
+√
+
+2d log N /δ ′
+4
+≤ HM Kαδ′ ε + 6H M Kζ + 5H dCδ′ + 3Hζ M Kd + 5
++
+3βK
+3
+s
+
+
+
+
+
+H 
+X
+det(ΛK
+det(ΛK
+√
+h )
+h )
+×
+log
++ 1 M γ + 2 M K log
+det(λI)
+det(λI)
+h=1
+s
+!
+√
+
+′
+√
+√
+2d
+log
+N
+/δ
+4
+≤ HM Kαδ′ ε + 6H 2 M Kζ + 5H dCδ′ + 3Hζ M Kd + 5
++
+3βK
+3
+
+
+p
+√
+× H d(log(1 + M K/d) + 1)M γ + 2 M Kd log(1 + M K/d)
+
+p
+√
+√ p
+√ 
+√  
+3
+e d 32 H 2 M
+=O
+dM γ + K + d 2 H 2 M K
+dM γ + K ζ .
+(F.20)
+2
+
+√
+
+√
+
+s
+
+The first inequality follows from Lemma F.4, the second inequality follows from Lemma F.3, the
+third inequality follows from Lemma D.12, the last inequality√holds due to Lemma
+J.2 and the fact
+√
+that ∥ϕ(·)∥2 ≤ 1, the last equality follows from √β1 = 20H dCδ′ + 12Hζ M Kd + 16
+3 , which
+K
+we define in Lemma F.4.
+The probability calculation is same as that in Appendix D.2. By combining Terms (i)(ii)(iii) together,
+we get that the final regret bound for CoopTS-LMC in misspecified setting is
+
+p
+√ 
+√  
+√ p
+√
+3
+e d 23 H 2 M
+dM γ + K + d 2 H 2 M K
+dM γ + K ζ ,
+O
+with probability at least 1 − δ. Here we finish the proof.
+
+G
+
+Proof of the Regret Bound for CoopTS-PHE
+
+Before getting the regret bound for CoopTS-PHE, we first present some essential technical lemmas
+required for our analysis.
+G.1
+
+Supporting Lemmas
+
+k,n
+e m,h
+Proposition G.1. The difference between the perturbed estimated parameter w
+and unperturbed
+k
+b m,h satisfies the Gaussian distribution,
+estimated parameter w
+
+−1 
+k,n
+k,n
+k
+e m,h
+b m,h
+ζm,h
+=w
+−w
+∼ N 0, σ 2 Λkm,h
+,
+P
+
+
+
+
+−1
+k
+k
+′l
+b m,h
+where w
+= Λkm,h
+ϕ sl , al is the unperturbed
+(sl ,al ,s′ l )∈Um,h (k) rh + Vm,h+1 s
+estimated parameter.
+
+Next we will define some good events that hold with high probability to help prove the critical lemmas
+in this section.
+46
+
+Lemma G.2 (Good events). For any fixed 0 < δ < 1, with some constant c > 0, we define the
+following random events
+n
+√ o
+def
+k,n
+k
+Gm,h
+(ζ, δ) = max ζm,h
+≤ c1 σ d ,
+Λk
+n∈[N ]
+
+def
+
+G(M, K, H, δ) =
+
+\
+
+m,h
+
+\ \
+
+k
+Gm,h
+(ζ, δ),
+
+m∈M k≤K h≤H
+
+p
+where c1 = c log(dN M KH/δ). Then the event G(M, K, H, δ) occurs with probability at least
+1 − δ.
+Lemma G.3. Let λ = 1 in Algorithm 2. For any fixed 0 < δ < 1, conditioned on the event
+G(M, K, H, δ), with probability 1 − δ, for all (m, k, h) ∈ M × [K] × [H], we have
+X
+
+ϕ sl , al
+
+
+
+−1
+(Λk
+m,h )
+
+(sl ,al ,s′ l )∈Um,h (k)
+
+where we define Dδ =
+
+h
+
+√
+≤ 3H dDδ ,
+
+ l l 
+k
+k
+Vm,h+1
+− Ph Vm,h+1
+s ,a
+
+1
+2 log(K + 1) + log
+
+ √
+
+6 2K(2H
+
+i1/2
+√
+√ 
+M Kd+c1 σ d)
+1
++
+log
+.
+H
+δ
+
+Lemma G.4. Let λ = 1 in Algorithm 2. Under Definition 4.1, for any fixed 0 < δ < 1, conditioned
+on the event G(M, K, H, δ), with probability 1 − δ, for all (m, k, h) ∈ M × [K] × [H] and for any
+(s, a) ∈ S × A, we have
+√
+k
+k
+b m,h
+ϕ(s, a)⊤ w
+− rh (s, a) − Ph Vm,h+1
+(s, a) ≤ 5H dDδ ∥ϕ(s, a)∥(Λkm,h )−1 .
+(G.1)
+Lemma G.5 (Optimism). Let λ = 1 in Algorithm 2 and set c0 = Φ(1). Under Definition 4.1,
+conditioned on the event G(M, K, H, δ), with probability at least 1 − |C(ε)|cN
+0 − δ where |C(ε)| ≤
+(3/ε)d , for all (m, k, h) ∈ M × [K] × [H] and for all (s, a) ∈ S × A, we have
+k
+lm,h
+(s, a) ≤ Aδ ε,
+
+√
+√
+e
+where Aδ = c1 σ d + 5H dDδ = O(Hd).
+Lemma G.6 (Error bound). Let λ = 1 in Algorithm 2. Under Definition 4.1, for any fixed 0 < δ < 1,
+conditioned on the event G(M, K, H, δ), with probability 1 − δ, for all (m, k, h) ∈ M × [K] × [H]
+and for any (s, a) ∈ S × A, we have
+k
+−lm,h
+(s, a) ≤ c2 Hd∥ϕ(s, a)∥(Λkm,h )−1 ,
+
+e
+where c2 = O(1).
+G.2
+
+Regret Analysis
+
+In this part, we give out the proof of Theorem 4.2, the regret bound for CoopTS-PHE.
+Proof of Theorem 4.2. Based on the result from Lemma D.13, we do the regret decomposition first
+Regret(K) =
+
+K
+X X
+
+k
+
+
+πm
+∗
+Vm,1
+skm,1 − Vm,1
+skm,1
+
+m∈M k=1
+
+=
+
+K X
+H
+X X
+
+
+
+∗
+k
+Eπ∗ Qkm,h (sm,h , ·), πm,h
+(·, |sm,h ) − πm,h
+(·|sm,h ) |sm,1 = skm,1
+
+m∈M k=1 h=1
+
+{z
+
+|
+
+(i)
+
++
+
+K X
+H
+X X
+
+(Dm,k,h,1 + Dm,k,h,2 )
+
+m∈M k=1 h=1
+
+|
+
+{z
+
+}
+
+(ii)
+
+47
+
+}
+
+K X
+H
+X X
+
++
+
+k
+
+
+k
+Eπ∗ lm,h
+(sm,h , am,h )|sm,1 = skm,1 − lm,h
+skm,h , akm,h .
+
+m∈M k=1 h=1
+
+|
+
+{z
+
+}
+
+(iii)
+
+(G.2)
+Next, we will bound the above three terms, respectively.
+k
+Bounding Term (i) in (G.2): for the policy πm,h
+, we have
+K X
+H
+X X
+
+
+
+∗
+k
+Eπ∗ Qkm,h (sm,h , ·), πm,h
+(·, |sm,h ) − πm,h
+(·|sm,h ) |sm,1 = skm,1 ≤ 0.
+
+(G.3)
+
+m∈M k=1 h=1
+k
+This is because by definition πm,h
+is the greedy policy for Qkm,h .
+
+Bounding Term (ii) in (G.2): note that 0 ≤ Qkm,h ≤ H − h + 1 ≤ H, based on (D.1), for any
+(m, k, h) ∈ M × [K] × [H], we have |Dm,k,h,1 | ≤ 2H and |Dm,k,h,2 | ≤ 2H. Note that Dm,k,h,1 is
+a martingale difference sequence E[Dm,k,h,1 |Fm,k,h ] = 0. By applying Azuma-Hoeffding inequality,
+with probability at least 1 − δ/3, we have
+K X
+H
+X X
+
+p
+Dm,k,h,1 ≤ 2 2M H 3 K log(6/δ).
+
+m∈M k=1 h=1
+
+Note that Dm,k,h,2 is also a martingale difference sequence. By applying Azuma-Hoeffding inequality,
+with probability at least 1 − δ/3, we have
+K X
+H
+X X
+
+p
+Dm,k,h,2 ≤ 2 2M H 3 K log(6/δ).
+
+m∈M k=1 h=1
+
+By taking union bound, with probability at least 1 − 2δ/3, we have
+K X
+H
+X X
+
+Dm,k,h,1 +
+
+m∈M k=1 h=1
+
+K X
+H
+X X
+
+Dm,k,h,2 ≤ 4
+
+p
+2M H 3 K log(6/δ).
+
+(G.4)
+
+m∈M k=1 h=1
+
+Bounding Term (iii) in (G.2): conditioned on the event G(M, K, H, δ ′ ), based on Lemma G.6 and
+′
+′
+Lemma G.5, by taking union bound, with probability at least 1 − |C(ε)|cN
+0 − δ − M HKδ , we have
+H
+K X
+X X
+
+k
+
+
+k
+Eπ∗ lm,h
+(sm,h , am,h )|sm,1 = skm,1 − lm,h
+skm,h , akm,h
+
+m∈M k=1 h=1
+
+≤
+
+K X
+H
+X X
+
+k
+Aδ′ ε − lm,h
+skm,h , akm,h
+
+
+
+m∈M k=1 h=1
+
+≤ HM KAδ′ ε +
+
+K X
+H
+X X
+
+c2 dH ϕ(skm,h , akm,h ) (Λk
+
+m,h )
+
+m∈M k=1 h=1
+
+≤ HM KAδ′ ε + c2 dH
+
+H 
+X
+h=1
+
+
+log
+
+det(ΛK
+h )
+det(λI)
+
+
+
+
+
+√
+
+−1
+
++1 M γ+2
+
+s
+
+
+M K log
+
+det(ΛK
+h )
+det(λI)
+
+
+
+
+
+p
+√
+≤ HM KAδ′ ε + c2 dH · H d(log(1 + M K/d) + 1)M γ + 2 M Kd log(1 + M K/d) .
+The first inequality follows from Lemma G.5, the second inequality holds due to Lemma G.6, the
+third inequality follows from Lemma D.12, the last inequality holds due to Lemma J.2 and the fact
+that ∥ϕ(·)∥2 ≤ 1.
+p
+p
+e d/M K). Conditioned on the event G(M, K, H, δ ′ ),
+Here we choose ε = dH d/M K/Aδ′ = O(
+we have
+K X
+H
+X X
+
+√
+k
+
+
+
+k
+e dH 2 dM √γ + dM K ,
+Eπ∗ lm,h
+(sm,h , am,h )|sm,1 = skm,1 − lm,h
+skm,h , akm,h ≤ O
+
+m∈M k=1 h=1
+
+(G.5)
+
+48
+
+′
+′
+′
+with probability at least 1−|C(ε)|cN
+0 −δ −M HKδ . Based on Lemma G.2, the event G(M, K, H, δ )
+′
+occurs with probability at least 1 − δ . Therefore, (G.5) occurs with probability at least
+
+
+′
+′
+1 − δ ′ 1 − |C(ε)|cN
+0 − δ − M HKδ .
+
+e log(δ)/ log(c0 ) where C
+e = O(d),
+e
+We set δ ′ = δ/6(M HK + 2) and choose N = C
+then we have
+
+
+′
+′
+1 − δ ′ 1 − |C(ε)|cN
+≥ 1 − δ/3.
+0 − δ − M HKδ
+Combining Terms (i)(ii)(iii) together: Based on (G.3), (G.4) and (G.5).
+√ By taking
+ union bound, we
+e dH 2 dM √γ + dM K with probability at
+get that the final regret bound for CoopTS-PHE is O
+least 1 − δ.
+
+H
+
+Proof of Supporting Lemmas in Appendix G
+
+H.1
+
+Proof of Proposition G.1
+
+Proof. Based on (3.5), we can calculate that
+k,n
+e m,h
+w
+=
+
+!
+
+−1
+Λkm,h
+
+X
+
+
+
+l
+
+l
+
+rh s , a
+
+
+
+
+k
++ ϵk,l,n
++ Vm,h+1
+h
+
+′l
+
+s
+
+
+
+l
+
+l
+
+ϕ s ,a
+
+
+
+− λξhk,n
+
+(sl ,al ,s′ l )∈Um,h (k)
+k
+b m,h
+=w
++ Λkm,h
+
+!
+
+−1
+
+X
+
+
+ϵk,l,n
+ϕ sl , al − λξhk,n
+h
+
+,
+
+(H.1)
+
+(sl ,al ,s′ l )∈Um,h (k)
+k
+b m,h
+where w
+= Λkm,h
+
+−1  P
+
+(sl ,al ,s′ l )∈Um,h (k)
+
+
+
+l 
+k
+rh + Vm,h+1
+s′ ϕ sl , al is the unperturbed
+
+estimated parameter. Since ϵk,l,n
+∼ N (0, σ 2 ), for l ∈ [K(k)], based on the property of Gaussian
+h
+distribution, we have
+
+
+
+ 
+l l
+2
+l l
+l l ⊤
+ϵk,l,n
+ϕ
+s
+,
+a
+∼
+N
+0,
+σ
+ϕ
+s
+,
+a
+ϕ
+s
+,
+a
+,
+h
+Since ξhk,n ∼ N (0, σ 2 I), we can calculate the covariance matrix of the second term in (H.1),
+!
+X
+−1
+
+−1
+k,l,n
+k,n
+k
+l l
+Λm,h
+Cov
+ϵh ϕ s , a − λξh
+Λkm,h
+(sl ,al ,s′l )∈Um,h (k)
+
+−1 2
+= Λkm,h
+σ
+
+
+⊤
+ϕ sl , al ϕ sl , al + λI
+
+X
+
+!
+
+(sl ,al ,s′ l )∈Um,h (k)
+
+= σ 2 Λkm,h
+
+−1
+
+Λkm,h Λkm,h
+
+= σ 2 Λkm,h
+
+−1
+
+.
+
+−1
+
+It is obvious that the mean of the second term in (H.1) is 0. Thus, we have
+
+−1 
+k,n
+k,n
+k
+e m,h
+b m,h
+ζm,h
+=w
+−w
+∼ N 0, σ 2 Λkm,h
+.
+This completes the proof.
+H.2
+
+Proof of Lemma G.2
+
+Proof. Recall that in Proposition G.1, we have
+
+−1 
+ k,n
+ζm,h ∼ N 0, σ 2 Λkm,h
+.
+By Lemma J.10, for fixed n ∈ [N ], with probability at least 1 − δ, we have
+p
+k,n
+ζm,h
+≤ c dσ 2 log(d/δ).
+Λk
+m,h
+
+49
+
+Λkm,h
+
+−1
+
+By applying union bound over N samples, we have
+
+
+p
+k,n
+2 log(d/δ) ≥ 1 − N δ.
+≤
+c
+P max ζm,h
+dσ
+k
+Λ
+n∈[N ]
+
+m,h
+
+p
+Now we define c1 = c log(dN M KH/δ), and we define the event
+n
+√ o
+def
+k,n
+k
+≤
+c
+σ
+Gm,h
+(ζ, δ) = max ζm,h
+d .
+1
+Λk
+n∈[N ]
+
+m,h
+
+k
+Thus for any fixed m, h and k, the event Gm,h
+(ζ, δ) occurs with a probability of at least 1 − δ/M KH.
+By taking union bound over all (m, h, k) ∈ M × [H] × [K], we have
+!
+\ \ \
+
+k
+P G(M, K, H, δ) = P
+Gm,h (ζ, δ) ≥ 1 − δ.
+m∈M k≤K h≤H
+
+This completes the proof.
+H.3
+
+Proof of Lemma G.3
+
+Proof. Based on the result in Lemma D.4, for any (m, h, k) ∈ M × [H] × [K], we have
+p
+k
+b m,h
+w
+≤ 2H M kd/λ.
+
+By recalling the construction of Λkm,h , it is trivial to find that λmin Λkm,h ≥ λ. Conditioned on the
+event G(M, K, H, δ), we have
+√
+√
+k,n
+k,n
+λ ζm,h
+≤ ζm,h
+≤ c1 σ d.
+Λk
+m,h
+
+Then by triangle inequality, for all n ∈ [N ], we obtain the upper bound
+p
+p
+k,n
+k,n
+k
+b m,h
+e m,h
+≤ 2H M kd/λ + c1 σ d/λ.
++ ζm,h
+= w
+w
+Based on the result from Lemma J.7 and Lemma J.9, we have that, for any ε > 0, and for all
+(m, k, h) ∈ M × [K] × [H], with probability at least 1 − δ, we have
+X
+
+ϕ sl , al
+
+
+
+ l l 
+k
+k
+Vm,h+1
+− Ph Vm,h+1
+s ,a
+−1
+(Λk
+m,h )
+
+(sl ,al ,s′ l )∈Um,h (k)
+
+#
+!1/2
+p
+p
+!
+
+
+3 2H M kd/λ + c1 σ d/λ
+k+λ
+1
+8k 2 ε2
+2 d
+≤ 4H
+log
++ log
++
++ d log
+2
+λ
+ε
+δ
+λ
+"
+!
+#
+p
+p
+
+√
+1/2
+
+
+3 2H M kd/λ + c1 σ d/λ
+d
+k+λ
+1
+2 2kε
+≤ 2H
+log
++ d log
++ log
++ √ .
+2
+λ
+ε
+δ
+λ
+"
+
+Here we set λ = 1, ε = 2√H2k , with probability at least 1 − δ, we have
+X
+
+ϕ sl , al
+
+
+
+ l l 
+k
+k
+Vm,h+1
+− Ph Vm,h+1
+s ,a
+−1
+(Λk
+m,h )
+
+(sl ,al ,s′ l )∈Um,h (k)
+
+#1/2
+√
+√ !
+√
+6 2K 2H M Kd + c1 σ d
+1
+1
++ log
++H
+≤ 2H d log(K + 1) + log
+2
+H
+δ
+√
+≤ 3H dDδ ,
+h
+ √
+i1/2
+√
+√ 
+Kd+c1 σ d)
+1
+where we define Dδ = 12 log(K + 1) + log 6 2K(2H M
++
+log
+. Here we finish
+H
+δ
+the proof.
+√
+
+"
+
+50
+
+H.4
+
+Proof of Lemma G.4
+
+Proof. This proof is almost same as the proof of Lemma D.8 in Appendix E.6. The only difference is
+the Term (i) in (E.10). Here based on Lemma G.6, conditioned on the event G(M, K, H, δ), with
+probability 1 − δ, we have
+√
+Term (i) ≤ 3H dDδ ∥ϕ(s, a)∥(Λkm,h )−1 .
+Finally, conditioned on the event G(M, K, H, δ), with probability 1 − δ, for all (m, k, h) ∈ M ×
+[K] × [H] and for any (s, a) ∈ S × A, we have
+√
+√
+√ 
+k
+k
+b m,h
+ϕ(s, a)⊤ w
+− rh (s, a) − Ph Vm,h+1
+(s, a) ≤ 3H dDδ + H d + d ∥ϕ(s, a)∥(Λkm,h )−1
+√
+≤ 5H dDδ ∥ϕ(s, a)∥(Λkm,k )−1 .
+Here we finish the proof.
+H.5
+
+Proof of Lemma G.5
+
+Proof. Recall from Definition 4.1, we have
+def
+
+k
+k
+k
+rh (s, a) + Ph Vm,h+1
+(s, a) = ϕ(s, a)⊤ θh + ϕ(s, a)⊤ µh , Vm,h+1
+= ϕ(s, a)⊤ wm,h
+,
+S
+√
+k
+k
+k
+where wm,h
+= θh + µh , Vm,h+1
+. Note that max{∥µh (S)∥, ∥θh ∥} ≤ d and Vm,h+1
+≤
+S
+H − h ≤ H, thus we have
+k
+k
+wm,h
+≤ ∥θh ∥ + µh , Vm,h+1
+S
+√
+√
+≤ d+H d
+√
+≤ 2H d.
+k
+k
+k
+b m,h
+Then we define the regression error ∆wm,h
+= wm,h
+−w
+. For any (m, h, k) ∈ M × [H] × [K]
+and any (s, a) ∈ S × A, we have
+k
+k
+lm,h
+(s, a) = rh (s, a) + Ph Vm,h+1
+(s, a) − Qkm,h (s, a)
+n
+
+o+
+k,n
+k
+k
+b m,h
+= rh (s, a) + Ph Vm,h+1
+(s, a) − min H − h + 1, max ϕ(s, a)⊤ w
++ ζm,h
+n∈[N ]
+n
+
+o
+k,n
+k
+k
+k
+b m,h
+≤ max ϕ(s, a)⊤ wm,h
+− (H − h + 1), ϕ(s, a)⊤ wm,h
+− max ϕ(s, a)⊤ w
++ ζm,h
+n∈[N ]
+n
+o
+k,n
+k
+≤ max 0, ϕ(s, a)⊤ ∆wm,h
+− max ϕ(s, a)⊤ ζm,h
+,
+(H.2)
+n∈[N ]
+
+k
+where the last inequality holds because |rh | ≤ 1 and Vm,h+1
+≤ H − h, this indicates rh (s, a) +
+p
+k
+⊤ k
+Ph Vm,h+1 (s, a) = ϕ(s, a) wm,h ≤ H − h + 1. Note that ∥ϕ(s, a)∥(Λkm,h )−1 ≤ 1/λ∥ϕ(s, a)∥ ≤
+
+1 for all ϕ(s, a). Define C(ε) to be a ε-cover of ϕ | ∥ϕ∥(Λkm,h )−1 ≤ 1 . Based on Lemma J.8, we
+
+have |C(ε)| ≤ (3/ε)d .
+First, for any fixed ϕ(s, a) ∈ C(ε), we have
+
+ ⊤ k,n
+ϕ ζm,h ∼ N 0, σ 2 ∥ϕ∥2(Λk
+
+−1
+m,h )
+
+
+
+.
+
+Use the property of Gaussian distribution, we obtain
+
+
+k,n
+P ϕ⊤ ζm,h
+− σ∥ϕ∥(Λkm,h )−1 ≥ 0 = Φ(−1).
+By taking union bound over n ∈ [N ], we obtain
+
+
+
+k,n
+− σ∥ϕ∥(Λkm,h )−1 ≥ 0 ≥ 1 − (1 − Φ(−1))N = 1 − Φ(1)N = 1 − cN
+P max ϕ⊤ ζm,h
+0 .
+n∈[N ]
+
+51
+
+By applying union bound over C(ε), with probability 1 − |C(ε)|cN
+0 , for all ϕ ∈ C(ε), we have
+ ⊤ k,n
+(H.3)
+max ϕ ζm,h − σ∥ϕ∥(Λkm,h )−1 ≥ 0.
+n∈[N ]
+
+Then, for any ϕ = ϕ(s, a), we can find ϕ′ ∈ C(ε) such that ∥ϕ − ϕ′ ∥(Λkm,h )−1 ≤ ε. Define
+∆ϕ = ϕ − ϕ′ , we have
+⊤
+
+⊤
+
+k,n
+k,n
+k,n
+k
+k
+k
+ϕ⊤ ζm,h
+− ϕ⊤ ∆wm,h
+= ϕ′ ζm,h
+− ϕ′ ∆wm,h
++ ∆ϕ⊤ ζm,h
+− ∆ϕ⊤ ∆wm,h
+⊤
+
+k,n
+k
+≥ ϕ′ ζm,h
+− ∥ϕ′ ∥(Λkm,h )−1 ∆wm,h
+Λk
+
+m,h
+
+k,n
+− ∥∆ϕ∥(Λkm,h )−1 ζm,h
+Λk
+
+m,h
+
+k
+− ∥∆ϕ∥(Λkm,h )−1 ∆wm,h
+Λk
+
+m,h
+
+⊤ k,n
+≥ ϕ′ ζm,h
+− ∥ϕ′ ∥(Λkm,h )−1
+k,n
+ζm,h
+Λk
+
+−ε
+
+m,h
+
+k
+∆wm,h
+Λk
+m,h
+
+k
++ ∆wm,h
+Λk
+
+
+
+.
+
+(H.4)
+
+m,h
+
+Conditioned on the event G(M, K, H, δ), we have
+√
+≤ c1 σ d.
+
+k,n
+ζm,h
+Λk
+
+m,h
+
+d
+
+For any vector x ∈ R , we have
+
+k
+k
+k
+b m,h
+x⊤ ∆wm,h
+= x⊤ wm,h
+−w
+
+
+−1
+k
+= x⊤ Λkm,h
+Λkm,h wm,h
+−
+
+X
+
+
+
+k
+rh + Vm,h+1
+s′
+
+l 
+
+ϕ sl , al
+
+
+
+
+
+(sl ,al ,s′ l )∈Um,h (k)
+
+= x⊤ Λkm,h
+
+−1
+
+ K(k)
+X
+
+
+⊤ k
+k
+ϕ sl , al ϕ sl , al wm,h
++ λwm,h
+
+l=1
+
+−
+
+ K(k)
+X
+
+
+
+l 
+k
+rh + Vm,h+1
+s′ ϕ sl , al
+
+
+
+l=1
+
+= x⊤ Λkm,h
+
+−1
+
+
+ K(k)
+
+X
+
+l 
+k
+k
+k
+Ph Vm,h+1
+− Vm,h+1
+s′ ϕ sl , al
+wm,h
++
+,
+l=1
+
+k
+where the third equality holds due to the definition of Λkm,h . We set x = Λkm,h ∆wm,h
+. By using
+Cauchy-Schwarz inequality, we have
+2
+k
+k ⊤
+∆wm,h
+= ∆wm,h
+Λk
+m,h
+
+≤
+
+
+ K(k)
+
+X
+
+
+k
+k
+k
+′l
+l l
+wm,h +
+Ph Vm,h+1 − Vm,h+1 s ϕ s , a
+l=1
+
+k
+∆wm,h
+·
+Λk
+m,h
+
+k
+wm,h
++
+
+ K(k)
+X
+
+
+
+l 
+k
+k
+Ph Vm,h+1
+− Vm,h+1
+s′ ϕ sl , al
+
+l=1
+
+
+.
+−1
+(Λk
+m,h )
+
+This indicates that with probability at least 1 − δ, for all (m, h, k) ∈ M × [H] × [K], we have
+K(k)
+k
+∆wm,h
+Λk
+
+m,h
+
+k
+≤ wm,h
+(Λk
+
+m,h
+
++
+)−1
+√
+
+X
+
+l 
+k
+k
+Ph Vm,h+1
+− Vm,h+1
+s′ ϕ sl , al
+−1
+(Λk
+m,h )
+
+l=1
+
+k
+≤ wm,h
++ 3H dDδ
+√
+≤ 5H dDδ ,
+
+where the second inequality holds because of Lemma G.3. Then for all (m, h, k) ∈ M × [H] × [K],
+with probability at least 1 − δ, (H.4) becomes
+
+k,n
+k
+max ϕ⊤ ζm,h
+− ϕ⊤ ∆wm,h
+n∈[N ]
+
+52
+
+ ⊤ k,n
+k
+≥ max ϕ′ ζm,h
+− ∥ϕ′ ∥(Λkm,h )−1 ∆wm,h
+Λk
+n∈[N ]
+
+√
+√
+
+− ε c1 σ d + 5H dDδ .
+
+m,h
+
+√
+
+√
+k
+e
+Now we choose σ = O(H
+d) and guarantee that σ > 5H dDδ ≥ ∆wm,h
+, this is
+Λk
+m,h
+√
+√
+e
+achievable through calculation. Define Aδ = c1 σ d + 5H dDδ = O(Hd). Then, for all
+(m, h, k) ∈ M × [H] × [K], with probability at least 1 − δ, we have
+
+ ⊤ k,n
+k,n
+k
+max ϕ⊤ ζm,h
+− ϕ⊤ ∆wm,h
+≥ max ϕ′ ζm,h
+− σ∥ϕ′ ∥(Λkm,h )−1 − Aδ ε.
+n∈[N ]
+
+n∈[N ]
+
+Recall from (H.3), by taking union bound, with probability at least 1 − |C(ε)|cN
+0 − δ, for all
+(m, h, k) ∈ M × [H] × [K] and for all (s, a) ∈ S × A, we have
+
+k,n
+k
+max ϕ⊤ ζm,h
+− ϕ⊤ ∆wm,h
+≥ −Aδ ε.
+n∈[N ]
+
+Finally, recall from (H.2), we have, with probability at least 1 − |C(ε)|cN
+0 − δ, for all (m, h, k) ∈
+M × [H] × [K] and for all (s, a) ∈ S × A, we have
+k
+lm,h
+(s, a) ≤ Aδ ε.
+
+This completes the proof.
+H.6
+
+Proof of Lemma G.6
+
+Proof. Recall the definition of model prediction error in Definition D.1, we get
+k
+k
+−lm,h
+(s, a) = Qkm,h (s, a) − rh (s, a) − Ph Vm,h+1
+(s, a)
+n
+
+
+o+
+k,n
+k
+k
+b m,h
+= min max ϕ(s, a)⊤ w
++ ζm,h
+,H − h + 1
+− rh (s, a) − Ph Vm,h+1
+(s, a)
+n∈[N ]
+
+
+k,n
+k
+k
+b m,h
+≤ max ϕ(s, a)⊤ w
++ ζm,h
+− rh (s, a) − Ph Vm,h+1
+(s, a)
+n∈[N ]
+
+
+k,n
+k
+k
+b m,h
+= max ϕ(s, a)⊤ ζm,h
+− rh (s, a) + Ph Vm,h+1
+(s, a) − ϕ(s, a)⊤ w
+n∈[N ]
+
+k,n
+k
+k
+b m,h
+≤ rh (s, a) + Ph Vm,h+1
+(s, a) − ϕ(s, a)⊤ w
+.
++ max ϕ(s, a)⊤ ζm,h
+n∈[N ]
+
+Based on Lemma G.4, conditioned on the event G(M, K, H, δ), with probability 1 − δ, for all
+(m, k, h) ∈ M × [K] × [H] and for any (s, a) ∈ S × A, we have
+√
+k
+k
+b m,h
+ϕ(s, a)⊤ w
+− rh (s, a) − Ph Vm,h+1
+(s, a) ≤ 5H dDδ ∥ϕ(s, a)∥(Λkm,h )−1
+(H.5)
+Conditioned on the event G(M, K, H, δ), for all (m, h, k) ∈ M × [H] × [K] and for any (s, a) ∈
+S × A, we have
+√
+k,n
+max ϕ(s, a)⊤ ζm,h
+≤ c1 σ d∥ϕ(s, a)∥(Λkm,h )−1 .
+(H.6)
+n∈[N ]
+
+Combine (H.5) and (H.6), then use σ defined in Lemma G.5. Conditioned on the event G(M, K, H, δ),
+with probability 1 − δ, for all (m, h, k) ∈ M × [H] × [K] and for any (s, a) ∈ S × A, we get
+√
+√ 
+k
+−lm,h
+(s, a) ≤ 5H dDδ + c1 σ d ∥ϕ(s, a)∥(Λkm,h )−1
+≤ c2 Hd∥ϕ(s, a)∥(Λkm,h )−1 ,
+e
+where c2 = O(1).
+Here we completes the proof.
+
+I
+
+Proof of the Regret Bound for CoopTS-PHE in Misspecified Setting
+
+In this section, we prove the regret bound for CoopTS-PHE in the misspecified setting. The regret
+analysis, the essential supporting lemmas and their corresponding proofs are very similar to what we
+have presented in Appendix G and Appendix H. Here we mainly point out the differences of proof
+between these two settings.
+53
+
+I.1
+
+Supporting Lemmas
+
+Lemma I.1. Let λ = 1 in Algorithm 2. Under Definition 4.8, for any fixed 0 < δ < 1, conditioned
+on the event G(M, K, H, δ), with probability 1 − δ, for all (m, k, h) ∈ M × [K] × [H] and for any
+(s, a) ∈ S × A, we have
+√
+√
+
+k
+k
+b m,h
+ϕ(s, a)⊤ w
+− rh (s, a) − Ph Vm,h+1
+(s, a) ≤ 5H dDδ + 3Hζ M Kd ∥ϕ(s, a)∥(Λk
+
+m,h
+
+)−1 + 3Hζ,
+
+(I.1)
+
+where Dδ is defined in Lemma G.3.
+Proof of Lemma I.1. This proof is almost same as the proof of Lemma F.2, with the only difference
+in bounding Term(i) in (F.3). Here (F.4) becomes
+√
+|Term(i)| ≤ 3H dDδ ∥ϕ(s, a)∥(Λkm,h )−1 .
+Finally we can get the desired result.
+Lemma I.2 (Optimism). Let λ = 1 in Algorithm 2 and set c0 = Φ(1). Under Definition 4.8,
+conditioned on the event G(M, K, H, δ), with probability at least 1 − |C(ε)|cN
+0 − δ where |C(ε)| ≤
+(3/ε)d , for all (m, k, h) ∈ M × [K] × [H] and for all (s, a) ∈ S × A, we have
+k
+lm,h
+≤ Aδ ε + 3Hζ,
+
+√
+√
+e
+where Aδ = c1 σ d + 5H dDδ = O(Hd).
+Proof of Lemma I.2. This proof is similar to the proof in Appendix H.5. In the previous part, we
+have defined
+k
+k
+∆m,1 = Pm,h Vm,h+1
+(s, a) − ϕ(s, a)⊤ µh , Vm,h+1
+,
+S
+
+∆m,2 = rm,h (s, a) − ϕ(s, a)⊤ θh ,
+where |∆m,1 | ≤ 2Hζ and |∆m,2 | ≤ ζ. Thus we have
+k
+k
+rm,h (s, a) + Pm,h Vm,h+1
+(s, a) = ϕ(s, a)⊤ wm,h
++ ∆m,1 + ∆m,2 ,
+k
+k
+k
+k
+k
+b m,h
+where wm,h
+= ⟨µh , Vm,h+1
++ θh . Then we define ∆wm,h
+= wm,h
+−w
+. For any (m, h, k) ∈
+S
+M × [H] × [K] and any (s, a) ∈ S × A, we have
+k
+k
+lm,h
+(s, a) = rm,h (s, a) + Pm,h Vm,h+1
+(s, a) − Qkm,h (s, a)
+n
+
+o+
+k,n
+k
+k
+b m,h
+= rm,h (s, a) + Pm,h Vm,h+1
+(s, a) − min H − h + 1, max ϕ(s, a)⊤ w
++ ζm,h
+n∈[N ]
+n
+
+o
+k,n
+k
+k
+k
+b m,h
+≤ max ϕ(s, a)⊤ wm,h
+− (H − h + 1), ϕ(s, a)⊤ wm,h
+− max ϕ(s, a)⊤ w
++ ζm,h
+n∈[N ]
+
++ ∆m,1 + ∆m,2
+n
+o
+k,n
+k
+≤ max 0, ϕ(s, a)⊤ ∆wm,h
+− max ϕ(s, a)⊤ ζm,h
++ 3Hζ.
+n∈[N ]
+
+(I.2)
+
+In Appendix H.5, we have proved that with probability at least 1 − |C(ε)|cN
+0 − δ, for all (m, h, k) ∈
+M × [H] × [K] and for all (s, a) ∈ S × A, we have
+
+k,n
+k
+max ϕ⊤ ζm,h
+− ϕ⊤ ∆wm,h
+≥ −Aδ ε.
+n∈[N ]
+
+Substitute it into (I.2), we can get the final result.
+Lemma I.3 (Error bound). Let λ = 1 in Algorithm 2. Under Definition 4.8, for any fixed 0 < δ < 1,
+conditioned on the event G(M, K, H, δ), with probability 1 − δ, for all (m, k, h) ∈ M × [K] × [H]
+and for any (s, a) ∈ S × A, we have
+√
+
+k
+−lm,h
+(s, a) ≤ c2 Hd + 3Hζ M Kd ∥ϕ(s, a)∥(Λkh )−1 + 3Hζ,
+e
+where c2 = O(1)
+is same as that in Lemma G.6.
+54
+
+Proof of Lemma I.3. Similar to the proof in Appendix H.6, using (H.6) in Appendix H.6 and (I.1),
+we have
+k,n
+k
+k
+k
+b m,h
+−lm,h
+(s, a) ≤ rh (s, a) + Ph Vm,h+1
+(s, a) − ϕ(s, a)⊤ w
++ max ϕ(s, a)⊤ ζm,h
+n∈[N ]
+√
+√
+√ 
+≤ 5H dDδ + 3Hζ M Kd + c1 σ d ∥ϕ(s, a)∥(Λkh )−1 + 3Hζ
+√
+
+≤ c2 Hd + 3Hζ M Kd ∥ϕ(s, a)∥(Λkh )−1 + 3Hζ,
+
+e
+where c2 = O(1)
+is same as that in Lemma G.6. Here we completes the proof.
+I.2
+
+Regret Analysis
+
+In this part, we give out the proof of Theorem 4.10, the regret bound for CoopTS-PHE in the
+misspecified setting.
+
+Proof of Theorem 4.10. This proof is almost same as the proof in Appendix G.2. We do the same
+regret decomposition (G.2) and obtain the same bound for Term (i) (G.3) and Term (ii) (G.4). Next
+we bound Term (iii) with new lemmas in misspecified setting.
+Bounding Term (iii) in (G.2): conditioned on the event G(M, K, H, δ ′ ), based on Lemma I.3 and
+N
+Lemma I.2, by taking union bound, with probability at least 1 − |C(ε)|c′0 − δ ′ − M HKδ ′ , we have
+K X
+H
+X X
+
+k
+
+
+k
+Eπ∗ lm,h
+(sm,h , am,h )|sm,1 = skm,1 − lm,h
+skm,h , akm,h
+
+m∈M k=1 h=1
+
+≤
+
+K X
+H 
+X X
+
+
+
+k
+− lm,h
+skm,h , akm,h + Aδ′ ε + 3Hζ
+
+m∈M k=1 h=1
+
+≤
+
+K X
+H 
+X X
+
+
+√
+
+c2 dH + 3Hζ M Kd ∥ϕ(s, a)∥(Λkh )−1 + 3Hζ + Aδ′ ε + 3Hζ
+
+m∈M k=1 h=1
+H X X
+K
+X
+ϕ(skm,h , akm,h ) (Λk
+= HM KA ε + 6H M Kζ + c2 dH + 3Hζ M Kd
+δ′
+
+2
+
+√
+
+h=1 m∈M k=1
+
+−1
+m,h )
+
+√
+
+≤ HM KAδ′ ε + 6H 2 M Kζ + c2 dH + 3Hζ M Kd
+s
+
+
+
+
+
+H 
+X
+det(ΛK
+det(ΛK
+)
+√
+h
+h )
+×
+log
++ 1 M γ + 2 M K log
+det(λI)
+det(λI)
+h=1
+√
+
+≤ HM KAδ′ ε + 6H 2 M Kζ + c2 dH + 3Hζ M Kd
+
+
+p
+√
+× H d(log(1 + M K/d) + 1)M γ + 2 M Kd log(1 + M K/d)
+
+p
+√
+√ 
+√ p
+√  
+e d 32 H 2 M
+dM γ + K + dH 2 M K
+dM γ + K ζ .
+=O
+The first inequality follows from Lemma I.2, the second inequality holds due to Lemma I.3, the third
+inequality follows from Lemma D.12, the last
+p inequality holds due
+p to Lemma J.2 and the fact that
+e d/M K).
+∥ϕ(·)∥2 ≤ 1, and again we choose ε = dH d/M K/Aδ′ = O(
+The probability calculation is same as that in Appendix G.2. By combining Terms (i)(ii)(iii) together,
+we get that the final regret bound for CoopTS-PHE in misspecified setting is
+
+p
+√
+√ 
+√ p
+√  
+e d 23 H 2 M
+Regret(K) = O
+dM γ + K + dH 2 M K
+dM γ + K ζ ,
+with probability at least 1 − δ. Here we finish the proof.
+55
+
+J
+
+Auxiliary Lemmas
+
+d
+Lemma J.1. [1, Lemma 11] Let {Xt }∞
+t=1 be a sequence in R , V is d × d positive definite matrix
+Pt
+⊤
+and define V̄t = V + s=1 Xs Xs . Then, we have that
+
+ X
+n
+det(V̄n )
+log
+≤
+∥Xt ∥2V̄−1 .
+t−1
+det(V)
+t=1
+
+Further, if ∥Xt ∥2 ≤ L for all t, then
+n
+n
+o
+X
+
+min 1, ∥Xt ∥2V̄−1 ≤ 2 log det(V̄n ) − log det V
+t=1
+
+t−1
+
+ 
+
+trace(V) + nL2 /d − log det V ,
+
+≤ 2 d log
+
+and finally, if λmin (V) ≥ max 1, L2 then
+n
+X
+
+∥Xt ∥2V̄−1 ≤ 2 log
+t−1
+
+t=1
+
+det(V̄n )
+.
+det(V)
+
+Lemma J.2. [1, Lemma 10] Suppose X1 , X2 , . . . , Xt ∈ Rd and for any 1 ≤ s ≤ t, ∥Xs ∥2 ≤ L.
+Pt
+Let V̄t = λI + s=1 Xs X⊤
+s for some λ > 0. Then,
+
+d
+det V̄t ≤ λ + tL2 /d .
+Lemma J.3. [32, Lemma D.5] Let A ∈ Rd×d be a positive definite matrix where its largest
+eigenvalue λmax (A) ≤ λ. Let x1 , ..., xk be k vectors in Rd . Then it holds that
+X
+1/2
+k
+k
+X
+√
+A
+xi ≤ λk
+∥xi ∥2A
+.
+i=1
+
+i=1
+
+Lemma J.4. [36, Lemma D.1] Let Λt = λI +
+holds that
+t
+X
+
+Pt
+
+d
+⊤
+i=1 ϕi ϕi , where ϕi ∈ R and λ > 0. Then it
+
+−1
+ϕ⊤
+ϕi ≤ d.
+i (Λt )
+
+i=1
+
+Lemma J.5. [33, Lemma D.1] Given a multivariate normal distribution X ∼ N (0, Σ), we have,
+r
+
+
+1
+tr(Σ) ≥ 1 − δ.
+P ∥X∥ ≤
+δ
+Lemma J.6. [30] If A and B are positive semi-definite square matrices of the same size, then
+
+
+0 ≤ [tr(AB)]2 ≤ tr A2 tr B2 ≤ [tr(A)]2 [tr(B)]2 .
+Lemma J.7. [36, Lemma D.4] Let {si }∞
+i=1 be a stochastic process on state space S with corre∞
+sponding filtration {Fi }∞
+.
+Let
+{ϕ
+}
+be
+an Rd -valued stochastic process where ϕi ∈ Fi−1 , and
+i i=1
+i=1 P
+k
+∥ϕi ∥ ≤ 1. Let Λk = λI + i=1 ϕi ϕ⊤
+i . Then for any δ > 0, with probability at least 1 − δ, for all
+k ≥ 0, and any V ∈ V with sups∈S |V (s)| ≤ H, we have
+
+
+
+
+k
+2
+X
+d
+k+λ
+Nε
+8k 2 ε2
+ϕi {V (si ) − E[V (si ) | Fi−1 ]}
+≤ 4H 2
+log
++ log
++
+,
+2
+λ
+δ
+λ
+Λ−1
+i=1
+k
+
+where Nε is the ε-covering number of V with respect to the distance dist(V, V ′ ) = sups∈S |V (s)−
+V ′ (s)|.
+Lemma J.8. [75, Covering number of Euclidean ball] For any ε > 0, Nε , the ε-covering number of
+the Euclidean ball of radius B > 0 in Rd satisfies
+
+d 
+d
+2B
+3B
+Nε ≤ 1 +
+≤
+.
+ε
+ε
+56
+
+Lemma J.9. Let V denote a class of functions mapping from S to R with the following parametric
+form
+n
+n
+o+ o
+V (·) = max min max ϕ(·, a)⊤ wn , H − h + 1
+,
+a∈A
+
+n∈[N ]
+
+where the parameter wn satisifies ∥wn ∥ ≤ B for all n ∈ [N ] and for all (x, a) ∈ S × A, we
+have ∥ϕ(x, a)∥ ≤ 1. Let NV,ε be the ε-covering number of V with respect to the distance dist
+(V, V ′ ) = sups∈S V (s) − V ′ (s) . Then
+d
+
+3B
+.
+NV,ε ≤
+ε
+Proof. Consider any two functions V1 , V2 ∈ V with parameters {w1n }n∈[N ] and {w2n }n∈[N ] , respectively. Then we have
+dist(V1 , V2 ) ≤ sup max ϕ(s, a)⊤ w1n − max ϕ(s, a)⊤ w2n
+n∈[N ]
+s,a n∈[N ]
+
+
+⊤ n
+≤ sup max ϕ(s, a) w1 − ϕ(s, a)⊤ w2n
+s,a
+
+n∈[N ]
+
+≤ sup max ϕ⊤ w1n − ϕ⊤ w2n
+∥ϕ∥≤1 n∈[N ]
+
+= max sup ϕ⊤ (w1n − w2n )
+n∈[N ] ∥ϕ∥≤1
+
+≤ max sup ∥ϕ∥ w1n − w2n
+n∈[N ] ∥ϕ∥≤1
+
+≤ max w1n − w2n .
+n∈[N ]
+
+Let Nw,ε denote the ε-covering number of {w ∈ Rd | ∥w∥ ≤ B}. Then, Lemma J.8 implies
+d 
+d
+
+3B
+2B
+≤
+.
+Nw,ε ≤ 1 +
+ε
+ε
+For any V1 ∈ V, we consider its corresponding parameters {w1n }n∈[N ] . For any n ∈ [N ], we can
+find w2n such that ∥w1n − w2n ∥ ≤ ε, then we can get V2 ∈ V with parameters {w2n }n∈[N ] . Then we
+have dist(V1 , V2 ) ≤ maxn∈[N ] ∥w1n − w2n ∥ ≤ ε. Thus, we have,
+d 
+d
+
+3B
+2B
+NV,ε ≤ Nw,ε ≤ 1 +
+≤
+.
+ε
+ε
+This completes the proof.
+Lemma J.10. [3] Suppose Z is a Gaussian random variable Z ∼ N (µ, σ 2 ), where σ > 0. For
+0 ≤ z ≤ 1, we have
+1 −z2
+1 −z2
+P(Z > µ + zσ) ≥ √ e 2 , P(Z < µ − zσ) ≥ √ e 2 .
+8π
+8π
+And for z ≥ 1, we have
+2
+
+2
+
+e−z /2
+e−z /2
+√ ≤ P(|Z − µ| > zσ) ≤ √ .
+2z π
+z π
+Lemma J.11.
+[32,
+Lemma
+D.2]
+Consider
+a
+d-dimensional
+multivariate normal distribution
+
+N 0, AΛ−1 where A is a scalar. Let η1 , η2 , . . . , ηN be N independent samples from the distribution. Then for any δ > 0
+
+
+p
+P max ∥ηj ∥Λ ≤ c dA log(d/δ) ≥ 1 − M δ,
+j∈[M ]
+
+where c is some absolute constant.
+Lemma J.12. [1, Lemma 12] Let A, B and C be positive semi-definite matrices such that A =
+B + C. Then we have that
+det(A)
+x⊤ Ax
+sup ⊤
+≤
+.
+det(B)
+x̸=0 x Bx
+57
+
+Figure 3: The N-Chain environment [62].
+
+K
+
+Additional Experimental Details
+
+We conduct comprehensive experiments investigating the exploration strategies for DQN under a
+multi-agent setting. For all the Q networks in our experiments, we use ReLU as our activation
+function. Given that all experiments are conducted under multi-agent settings unless explicitly
+specified as a single-agent or centralized scenario, we denote our methods: CoopTS-PHE as "PHE"
+and CoopTS-LMC as "LMC" in experimental contexts and figures. In addition to our methods,
+the baselines we selected are either commonly used (DQN [57], DDQN [28]) or with competitive
+empirical performance (Bootstrapped DQN [62], NoisyNet DQN [26]). Both Bootstrapped DQN
+and NoisyNet DQN are randomized exploration methods. Bootstrapped DQN uses finite ensembles
+to generate the randomized value functions and views them as approximate posterior samples of
+Q-value functions. NoisyNet DQN injects noise into the parameters of neural networks to aid efficient
+exploration. For those figures which aim to compare among different m agents within a single plot,
+we use Total Episodes to indicate the total number of training samples for a direct comparison. Note
+that the shaded areas on all figures represent the standard deviation.
+Table 2: The swept hyper-parameters in N-Chain for PHE
+Hyper-parameter
+
+Values
+
+Learning Rate ηk
+No Target Networks
+Reward Noise
+Regularization Noise
+
+{10−1 , 3 × 10−2 , 10−2 , 3 × 10−3 , 10−3 , 3 × 10−4 , 10−4 }
+{1, 2, 4, 8}
+{0, 10−4 10−3 , 10−2 , 10−1 , 1.0}
+{0, 10−4 10−3 , 10−2 , 10−1 , 1.0}
+
+Table 3: The swept hyper-parameters in N-Chain for LMC
+Hyper-parameter
+
+Values
+
+Learning Rate ηk
+Bias Factor α
+Inverse Temperature βm,k
+No Update Jk
+
+{10−1 , 3 × 10−2 , 10−2 , 3 × 10−3 , 10−3 , 3 × 10−4 , 10−4 }
+{1.0, 0.1, 0.01}
+{100 , 102 , 104 , 106 , 108 }
+{1, 4, 16, 32}
+
+K.1 N -chain
+We commence by presenting the comprehensive results for N = 25 in Figure 4, illustrating that
+our randomized exploration methods exhibit greater suitability in realistic scenarios characterized
+by an increasing number of agents. This superiority is particularly evident under two potential
+circumstances: (1) where there are more limitations on computation or data access from each source
+in the real world, and (2) when parallel learning from multiple sources can significantly enhance
+runtime efficiency.
+Subsequently, we provide a more comprehensive study to investigate the exploration capabilities
+facilitated by parallel training. Preliminary experiments are conducted with a reduced state space,
+specifically considering N = 10. The study aims to investigate exploration capabilities across varying
+agent counts, specifically within the set m ∈ {1, 2, 3, 4}.
+We list the details of all swept hyper-parameters in N -chain for PHE and LMC in Table 2 and Table 3,
+respectively. Specifically, PHE is trained with reward noise ϵk,l,n
+= 10−2 and regularizer noise
+h
+58
+
+Table 4: Hyper-parameters used in the N-chain
+Hyper-parameter
+
+PHE
+
+LMC
+
+DQN
+
+Bootstrapped Noisy
+DQN
+DQN
+
+DDQN
+
+Discount Factor λ
+Learning Rate ηk
+Hidden Activation
+Output Activation
+No Update Jk
+No Target Networks
+Batch Size
+NN size
+
+0.99
+3 × 10−2
+Relu
+Linear
+1
+2
+32
+32 × 32
+
+0.99
+10−4
+Relu
+Linear
+4
+1
+32
+32 × 32
+
+0.99
+3 × 10−2
+Relu
+Linear
+1
+1
+32
+32 × 32
+
+0.99
+3 × 10−2
+Relu
+Linear
+1
+4
+32
+32 × 32
+
+0.99
+3 × 10−2
+Relu
+Linear
+1
+1
+32
+32 × 32
+
+8
+
+8
+
+8
+
+6
+
+PHE
+LMC
+DQN
+Bootstrapped DQN
+NoisyNet DQN
+DDQN
+
+4
+2
+0 0
+
+500
+
+1000
+
+6
+4
+2
+
+1500
+
+0 0
+
+2000
+
+Training Episodes per Agent
+(a) m=2
+
+Episode Return
+
+10
+
+Episode Return
+
+10
+
+Episode Return
+
+10
+
+PHE
+LMC
+DQN
+Bootstrapped DQN
+NoisyNet DQN
+DDQN
+500
+
+6
+4
+2
+
+1000
+
+1500
+
+0 0
+
+2000
+
+Training Episodes per Agent
+(b) m=3
+
+0.99
+3 × 10−2
+Relu
+Linear
+1
+1
+32
+32 × 32
+
+PHE
+LMC
+DQN
+Bootstrapped DQN
+NoisyNet DQN
+DDQN
+500
+
+1000
+
+1500
+
+2000
+
+Training Episodes per Agent
+(c) m=4
+
+Figure 4: Comparison among different exploration strategies in N -chain with N = 25. All results
+are averaged over 10 runs.
+ξhk,n = 10−3 in (3.5) and LMC is trained with βm,k = 102 and in (3.7) and optimized by Adam
+SGLD [33] with α1 = 0.9, α2 = 0.999 and bias factor α = 0.1. The final hyper-parameters used in
+N -chain are presented in Table 4.
+Performance Consistency with Varying m In the investigation detailed in Figure 5, we explore
+parallel learning without inter-agent communication. Note that the x-axis implies the total training
+episodes from m agents. Consequently, while multiple agents engage in simultaneous policy learning,
+each agent independently formulates its policies without the exchange of transition information. The
+discernible trend in this scenario is that an increase in the number of agents sharing the total episodes
+results in a slower rate of policy learning. Notably, despite this temporal discrepancy, all learning
+trajectories eventually approximate convergence towards the optimal dashed line.
+
+8
+
+8
+
+6
+4
+
+m = 1, N = 10
+m = 2, N = 10
+m = 3, N = 10
+m = 4, N = 10
+
+2
+0
+
+500
+
+1000
+
+1500
+
+2000
+
+Total Episodes
+
+2500
+
+Episode Return
+
+10
+
+Episode Return
+
+10
+
+6
+4
+
+0
+
+3000
+
+(a) PHE
+
+m = 1, N = 10
+m = 2, N = 10
+m = 3, N = 10
+m = 4, N = 10
+
+2
+
+0
+
+500
+
+1000
+
+1500
+
+2000
+
+Total Episodes
+
+2500
+
+3000
+
+(b) LMC
+
+Figure 5: Rewards with averaged over 10 independent runs for different numbers of agents among
+algorithms without communication. Note that when m = 1, one agent indicates a centralized setting.
+59
+
+8
+
+8
+
+8
+
+centralized, n = 10
+no communication(2 agents), n = 10
+linear(2 agents), n = 10
+constant(2 agents), n = 10
+exponential(2 agents), n = 10
+
+2
+0 0
+
+250
+
+500
+
+750
+
+1000
+
+1250
+
+Total Episodes
+(a) m=2
+
+Episode Return
+
+8
+6
+4
+
+centralized, n = 10
+no communication(2 agents), n = 10
+linear(2 agents), n = 10
+constant(2 agents), n = 10
+exponential(2 agents), n = 10
+
+2
+0 0
+
+250
+
+500
+
+750
+
+1000
+
+1250
+
+Total Episodes
+(d) m=2
+
+0 0
+
+1500
+
+10
+
+1500
+
+4
+
+centralized, n = 10
+no communication(3 agents), n = 10
+linear(3 agents), n = 10
+constant(3 agents), n = 10
+exponential(3 agents), n = 10
+
+2
+500
+
+1000
+
+1500
+
+Total Episodes
+(b) m=3
+
+6
+4
+
+0 0
+
+2000
+
+10
+
+8
+
+8
+
+6
+4
+
+centralized, n = 10
+no communication(3 agents), n = 10
+linear(3 agents), n = 10
+constant(3 agents), n = 10
+exponential(3 agents), n = 10
+
+2
+0 0
+
+1750
+
+500
+
+1000
+
+1500
+
+Total Episodes
+(e) m=3
+
+centralized, n = 10
+no communication(4 agents), n = 10
+linear(4 agents), n = 10
+constant(4 agents), n = 10
+exponential(4 agents), n = 10
+
+2
+
+10
+
+Episode Return
+
+4
+
+6
+
+Episode Return
+
+6
+
+Episode Return
+
+10
+
+Episode Return
+
+10
+
+Episode Return
+
+10
+
+500
+
+1500
+
+2000
+
+2500
+
+3000
+
+6
+4
+
+centralized, n = 10
+no communication(4 agents), n = 10
+linear(4 agents), n = 10
+constant(4 agents), n = 10
+exponential(4 agents), n = 10
+
+2
+0 0
+
+2000
+
+1000
+
+Total Episodes
+(c) m=4
+
+500
+
+1000
+
+1500
+
+2000
+
+2500
+
+Total Episodes
+(f) m=4
+
+3000
+
+Figure 6: Different number of agents m with different synchronization strategies as well as the
+single-agent and no communication settings in N = 10. Top: PHE, Bottom: LMC
+
+8
+
+8
+
+8
+
+6
+
+LMC
+PHE
+NeuralTS
+NeuralUCB
+LinTS
+LinUCB
+
+4
+2
+0 0
+
+200
+
+400
+
+600
+
+800
+
+Total Episodes
+(a) m=2
+
+1000
+
+6
+
+LMC
+PHE
+NeuralTS
+NeuralUCB
+LinTS
+LinUCB
+
+4
+2
+0 0
+
+500
+
+1000
+
+1500
+
+Total Episodes
+(b) m=3
+
+2000
+
+Episode Return
+
+10
+
+Episode Return
+
+10
+
+Episode Return
+
+10
+
+6
+
+LMC
+PHE
+NeuralTS
+NeuralUCB
+LinTS
+LinUCB
+
+4
+2
+0 0
+
+500
+
+1000
+
+1500
+
+2000
+
+2500
+
+Total Episodes
+(c) m=4
+
+3000
+
+Figure 7: Performance with different number of agents m compared with bandit-inspired exploration
+in N = 10.
+Different Synchronization Conditions To further demonstrate the efficiency of parallel learning
+with communication, we compare different synchronization conditions in Section 3.1. Specifically,
+we denote synchronization (1) in every constant step as constant, (2) following exponential function as exponential, and (3) based on (3.3) as linear. To have a fair comparison among different
+synchronization conditions, we firstly record the empirical number of synchronization via linear
+condition in average, and then we consider constant value for constant condition and select proper
+base b for exponential condition with a similar number of synchronization. Figure 6 illustrates that
+any synchronization condition can improve learning efficiency but still with centralized learning as
+an upper bound. Note that the x-axis implies the total training episodes from m agents.
+Performance Compared with Bandit-inspired Methods Since one of our proposed random
+exploration strategies, PHE is a variant of approximated TS, it is fair for us to investigate the
+performance of other exploration methods from bandit algorithms with the integration of DQN. We
+mainly compare both TS and UCB under neural network (i.e., NeuralTS [90] and NeuralUCB [94])
+and linear (i.e., LinTS [5] and LinUCB [49]) settings. We show that a performance gap exists between
+linear approaches and other neural-based methods even in a small-scale exploration problem with
+N = 10 in Figure 7. Note that the x-axis implies the total training episodes from m agents.
+60
+
+PHE
+LMC
+DQN
+Bootstrapped DQN
+NoisyNet DQN
+DDQN
+NeuralTS
+NeuralUCB
+
+Computation Time (sec)
+
+30
+25
+20
+15
+10
+5
+
+32_2
+
+32_3
+
+64_2
+
+64_3
+
+Neural Network
+
+Figure 8: Computation time with different exploration strategies. Note that the x-axis indicates the
+neural network size, i.e., 32_2 implies two layers with 32 neurons in each layer.
+
+8
+
+8
+
+Episode Return
+
+10
+
+Episode Return
+
+10
+
+6
+4
+2
+0 0
+
+inv temp 1e0
+inv temp 1e2
+inv temp 1e4
+inv temp 1e6
+inv temp 1e8
+1000
+
+2000
+
+inv temp 1e0
+inv temp 1e2
+inv temp 1e4
+inv temp 1e6
+inv temp 1e8
+
+6
+4
+2
+
+3000
+
+4000
+
+5000
+
+Training Episodes per Agent
+
+0 0
+
+6000
+
+(a) m=1 (centralized), N=25
+
+500
+
+1000
+
+1500
+
+2000
+
+2500
+
+Training Episodes per Agent
+
+3000
+
+(b) m=2 (no communication), N=25
+
+Figure 9: Hyper-parameter tuning of inverse temperature (inv temp) βm,k for LMC with N = 25: (a)
+centralized setting m = 1 (b) 2 agents without communication m = 2.
+
+Computational Time We have demonstrated that both NeuralTS and NeuralUCB exhibit convergence to performance levels comparable to our proposed randomized exploration strategies (i.e., PHE
+and LMC) when considering the case of N = 10 with m = 4 under the synchronization condition
+(linear), as outlined in (3.3). However, we argue that the scalability of both methods is limited
+due to their associated computational costs. To substantiate this assertion, we conduct experiments
+across all methods including DQN baselines with N = 10 and m = 4 over 104 steps with varying
+neural network sizes, such as [32, 32, 32], which signifies three layers with 32 neurons in each layer.
+Importantly, the length of the chain N has no bearing on the running time.
+In Figure 8, we show the computational time of all methods under different neural network sizes.
+The solid lines represent the average computational time over 10 random seeds and the shaded area
+represents the standard deviation. We observe that NeuralTS and NeuralUCB have heavy running
+time consistently with varying network sizes. Although the computation time of LMC is still higher
+than other remaining approaches, we observe that it maintains a similar computation time with
+different neural network sizes, which can still be scaled up to more complex problems with larger
+neural networks.
+61
+
+8
+
+8
+
+6
+4
+2
+0 0
+
+m = 1, N = 25, full buffer
+m = 1, N = 25, half buffer
+m = 1, N = 25, less buffer
+m = 2 (no communication), N = 25, full buffer
+m = 2 (no communication), N = 25, half buffer
+m = 2 (no communication), N = 25, less buffer
+1000
+
+2000
+
+3000
+
+4000
+
+Total Episodes
+
+5000
+
+Episode Return
+
+10
+
+Episode Return
+
+10
+
+6
+4
+2
+0 0
+
+6000
+
+m = 1, N = 25, full buffer
+m = 1, N = 25, half buffer
+m = 1, N = 25, less buffer
+m = 2 (no communication), N = 25, full buffer
+m = 2 (no communication), N = 25, half buffer
+m = 2 (no communication), N = 25, less buffer
+1000
+
+(a) PHE
+
+2000
+
+3000
+
+4000
+
+Total Episodes
+
+5000
+
+6000
+
+(b) LMC
+
+Figure 10: Different buffer size with N = 25 between single agent (centralized) and 2 agents (no
+communication). Note that the full buffer indicates the size of the total episodes. Each agent in no
+communication setting only occupies half of the total episodes. Therefore, two curves (full buffer,
+half buffer) in no communication are consistent.
+
+8
+
+8
+
+6
+4
+
+m = 1 (centralized), N = 25
+m = 2 (no communication), N = 25
+m = 2 (linear), N = 25
+m = 2 (constant), N = 25
+m = 2 (exponential), N = 25
+
+2
+0 0
+
+1000
+
+2000
+
+3000
+
+4000
+
+Total Episodes
+
+5000
+
+Episode Return
+
+10
+
+Episode Return
+
+10
+
+6
+4
+
+m = 1 (centralized), N = 25
+m = 2 (no communication), N = 25
+m = 2 (linear), N = 25
+m = 2 (constant), N = 25
+m = 2 (exponential), N = 25
+
+2
+0 0
+
+6000
+
+(a) PHE
+
+1000
+
+2000
+
+3000
+
+4000
+
+Total Episodes
+
+5000
+
+6000
+
+(b) LMC
+
+Figure 11: Different synchronization strategies as well as the single-agent and no communication
+settings in N = 25.
+
+Hyper-parameter Tuning of Inverse Temperature βm,k Subsequently, we scale the problem to
+N = 25. Given the extended horizon, the demand for exploration intensifies, leading us to conduct
+hyper-parameter tuning for the inverse temperature parameter βm,k in LMC, as illustrated in Figure 9.
+It is crucial to note that the efficacy of learning is significantly influenced by the exploration capacity
+in both centralized learning and parallel learning without communication. Our observations reveal
+a discernible gap between centralized and parallel learning, a departure from the pattern observed
+in Figure 5. We posit that the disparity may stem from issues associated with the replay buffer
+size in off-policy RL algorithms. Specifically, when the replay buffer exhausts its capacity for new
+transitions, the incoming transition replaces the oldest one.
+Hyper-parameter Tuning of Buffer Size Therefore, we present a performance comparison between a solitary agent (m = 1) and a scenario involving two agents (m = 2) in Figure 10 with
+different buffer sizes. Full buffer and half buffer indicate the replay buffer’s capacity to store the
+complete set and half of the transitions during training, respectively. We observe that the learning
+process is more efficient with less buffer size in a centralized setting because having an excessively
+large replay buffer may potentially impede the efficiency of the learning process. Furthermore, the
+gap between centralized setting and paralleling learning still exists among different buffer sizes.
+Therefore, we focus on the setting of less buffer size with different synchronization conditions
+62
+
+Episode Return
+
+10
+8
+6
+
+m = 1 (centralized), prioritized
+m = 2 (no communication), prioritized
+m = 2 (linear), prioritized
+m = 1 (centralized)
+m = 2 (no communication)
+m = 2 (linear)
+
+4
+2
+0 0
+
+1000
+
+2000
+
+3000
+
+4000
+
+Total Episodes
+
+5000
+
+6000
+
+Figure 12: Gap reduction improvement with prioritized experience replay for parallel learning without
+communication. Note that the same settings with standard and prioritized experience replay are in the
+same-ish color.
+
+(a) SuperMarioBros-1-1- (b) SuperMarioBros-1-2- (c) SuperMarioBros-1-3- (d) SuperMarioBros-1-4v0
+v0
+v0
+v0
+
+Figure 13: Illustrations of 4 different environments in Super Mario Bros task.
+in Figure 11. We conclude that linear condition results in competitive performance in both PHE
+and LMC in the N -chain problem and we report all exploration strategies with linear condition in
+Section 5.1. Note that the x-axis in Figure 10 and Figure 11 represent the total training episodes from
+m agents.
+Ablation Study of Sampling Mechanism To reduce the reward gap, we adopt a better sampling
+mechanism in the replay buffer with prioritized experience replay (PER). In Figure 12, parallel
+learning without inter-agent communication can increase reward with PER, where the x-axis represents the total training episodes from m agents. However, centralized learning with PER improves
+faster convergence with similar performance and the trends for linear condition curves are similar.
+Therefore, the gap between centralized and parallel learning without communication is reduced
+with PER. Note that the main experimental results in Figure 1 are based on standard experience
+replay because standard sampling in linear condition has similar performance against PER with faster
+training time.
+K.2
+
+Super Mario Bros
+
+While cooperative parallel learning enhances training efficiency through data sharing, challenges
+emerge when handling data from devices capturing images or audio due to privacy concerns in
+real-world applications. In response, our approach extends randomized exploration strategies to a
+federated reinforcement learning framework as shown in Algorithm 4, from Algorithm 1, which
+incorporates parameter synchronization among Q neural networks (Line 14-19 in Algorithm 4) rather
+than relying on the conventional practice of sharing agents’ transitions. Note that the synchronization
+63
+
+Table 5: Hyper-parameters used in the Super Mario Bros
+Hyper-parameter
+
+PHE
+
+LMC
+
+DQN
+
+Bootstrapped Noisy
+DQN
+DQN
+
+DDQN
+
+Discount Factor λ
+Learning Rate ηk
+Hidden Activation
+Output Activation
+No Update Jk
+No Target Networks
+Batch Size
+
+0.9
+10−2
+Relu
+Linear
+1
+2
+32
+
+0.9
+3 × 10−4
+Relu
+Linear
+4
+1
+32
+
+0.9
+10−2
+Relu
+Linear
+1
+1
+32
+
+0.9
+10−2
+Relu
+Linear
+1
+4
+32
+
+0.9
+10−2
+Relu
+Linear
+1
+1
+32
+
+0.9
+10−2
+Relu
+Linear
+1
+1
+32
+
+follows the format as in Algorithm 1 to update Q functions with horizon h ∈ H. However, in practice,
+we can directly update the weight of the neural network to reduce the communication cost.
+The training process unfolds within a federated reinforcement learning framework, wherein local
+updates and global aggregations are iteratively executed [37]. Specifically, each agent iterates through
+multiple local updates of its value function, followed by server-mediated averaging of these functions
+across all agents, constituting a form of parameter sharing. Note that the transitions are not accessible
+among agents, leading us to directly synchronize all agents with parameter sharing every constant
+local iteration instead of synchronization condition in (3.3). We use the same architecture for all the
+experiments in the Super Mario Bros task with the preprocessed images as the input states and 7
+discrete actions in action space.
+Particularly, we construct 3 convolutional neural network layers with width [32, 64, 32], followed by 2
+fully connected layers with the output of action space in the Q network. The detailed hyper-parameters
+for Super Mario Bros task are presented in Table 5.
+Algorithm 4 Unified Algorithm Framework for Randomized Exploration in Federated Learning
+1: for episode k = 1, ..., K do
+2:
+for agent m ∈ M do
+3:
+Receive initial state skm,1 .
+k
+4:
+Vm,H+1
+(·) ← 0.
+5:
+{Qkm,h (·, ·)}H
+◁ Algorithm 2 or Algorithm 3
+h=1 ←Randomized Exploration
+6:
+for step h = 1, ..., H do
+7:
+akm,h ← argmaxa∈A Qkm,h (skm,h , a).
+8:
+Receive skm,h+1 and rh .
+9:
+if Condition then
+10:
+SYNCHRONIZE ← True.
+11:
+end if
+12:
+end for
+13:
+end for
+14:
+if SYNCHRONIZE then
+15:
+for step h = H, ..., 1 do
+PM
+1
+k
+16:
+Q̄km ← M
+m=1 Qm,h
+k
+k
+17:
+Qm,h ← Q̄m,h , ∀m
+18:
+end for
+19:
+end if
+20: end for
+K.3
+
+Thermal Control of Building Energy Systems
+
+BuildingEnv encompasses the regulation of heat flow in a multi-zone building to sustain a desired
+temperature setpoint. We focus on one pre-defined building called "office small" in different cities
+with varying weather types, i.e., Tampa (Hot Humid), Tucson (Hot Dry), Rochester (Cold Humid),
+and Great Falls (Cold Dry). Each episode is designed to span a single day, comprising 5-minute time
+intervals (H = 288, τ = 5/60 hours).
+64
+
+Table 6: Hyper-parameters used in the building energy systems
+Hyper-parameter
+
+PHE
+
+LMC
+
+DQN
+
+Bootstrapped Noisy
+DQN
+DQN
+
+DDQN
+
+Discount Factor λ
+Learning Rate ηk
+Hidden Activation
+Output Activation
+No Update Jk
+No Target Networks
+Batch Size
+NN size
+
+0.99
+3 × 10−3
+Relu
+Linear
+1
+2
+32
+64 × 64
+
+0.99
+3 × 10−3
+Relu
+Linear
+8
+1
+32
+64 × 64
+
+0.99
+3 × 10−3
+Relu
+Linear
+1
+1
+32
+64 × 64
+
+0.99
+3 × 10−3
+Relu
+Linear
+1
+4
+32
+64 × 64
+
+0.99
+3 × 10−3
+Relu
+Linear
+1
+1
+32
+64 × 64
+
+0.99
+3 × 10−3
+Relu
+Linear
+1
+1
+32
+64 × 64
+
+LMC
+
+DQN BootstrappedNoisyNet
+
+15
+20
+25
+
+20
+
+Daily Return
+
+Daily Return
+
+10
+
+30
+40
+
+30
+35
+40
+45
+50
+
+50
+Random
+
+PHE
+
+LMC
+
+DQN BootstrappedNoisyNet
+
+Algorithm
+
+DDQN
+
+Random
+
+(a) Tampa (hot humid)
+
+PHE
+
+Algorithm
+
+DDQN
+
+(b) Tucson (hot dry)
+
+50
+
+0
+50
+
+70
+
+Daily Return
+
+Daily Return
+
+60
+
+80
+90
+100
+
+100
+150
+200
+
+110
+Random
+
+PHE
+
+LMC
+
+DQN BootstrappedNoisyNet
+
+Algorithm
+
+DDQN
+
+(c) Rochester (cold humid)
+
+Random
+
+PHE
+
+LMC
+
+DQN BootstrappedNoisyNet
+
+Algorithm
+
+DDQN
+
+(d) Great Falls (cold dry)
+
+Figure 14: Evaluation performance at different cities in building energy systems
+Observation Space The state at time step t, denoted as s(t) ∈ RM +4 , encompasses the temperatures Ti (t) of each zone, where i ∈ M , along with four additional properties: QGHI (t), Q̄p (t),
+TG (t), and TE (t). Specifically, QGHI (t) represents the heat gain from solar irradiance, Q̄p (t) denotes the heat acquired from occupant activities, while TG (t) and TE (t) signify the ground and
+outdoor environment temperatures, respectively.
+Action Space The continuous version of the action a(t) ∈ [−1, 1]M controls the heating of M
+zones. However, since our randomized exploration strategies use DQN [57] as the backbone, we
+adopt the multi-discrete action space defined in [85], which is a vector of action spaces. Then we
+convert the multi-discrete action space to a single discrete action space with action mapping.
+Reward Function The primary objective is to minimize energy consumption while ensuring the
+maintenance of temperature within a specified comfort range. Therefore, the reward is penalized with
+both temperature deviations and HVAC energy consumption as follows:
+r(t) = −(1 − β)∥a(t)∥2 − β∥T target (t) − T (t)∥2 ,
+target
+where T target (t) = [T1target (t), T2target (t), ..., TM
+(t)] are the target temperatures and T ( t) =
+[T1 (t), T2 (t), ..., TM (t)] are the actual zonal temperatures. The parameter β is the trade-off between the energy consumption and temperature deviation penalties.
+
+65
+
+We execute experiments following the united framework in Algorithm 1, synchronizing every constant
+number of steps across diverse weather conditions in varying cities. The hyper-parameters we used are
+in Table 6. Subsequently, we evaluate the performance of all methods in distinct cities, as illustrated
+in Figure 14. Notably, our proposed random exploration strategies demonstrate a consistently higher
+mean return across all cities. However, it is worth highlighting that DQN in Figure 14(c) and
+Noisy-Net in Figure 14(d) exhibit lower returns compared to random actions. This outcome can be
+attributed to the discrete action space configuration [85]. In addition, we observe that maintaining
+thermal control of buildings is more challenging in cold weather conditions compared to hot weather
+conditions.
+
+66
+
+

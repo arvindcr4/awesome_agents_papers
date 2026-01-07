@@ -1,5 +1,5 @@
 # MasRouter Multi-Agent Routing
-- Paper: [MasRouter_Multi-Agent_Routing.pdf](../../../papers/multi-agent/MasRouter_Multi-Agent_Routing.pdf)
+- Paper: [MasRouter_Multi-Agent_Routing.pdf](../../../reinforcement_learning_papers/03_multi_agent_rl/MasRouter_Multi-Agent_Routing.pdf)
 
 ## Gemini diagrams
 

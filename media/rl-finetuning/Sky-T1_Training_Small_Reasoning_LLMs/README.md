@@ -1,5 +1,5 @@
 # Sky-T1 Training Small Reasoning LLMs
-- Paper: [Sky-T1_Training_Small_Reasoning_LLMs.pdf](../../../papers/rl-finetuning/Sky-T1_Training_Small_Reasoning_LLMs.pdf)
+- Paper: [Sky-T1_Training_Small_Reasoning_LLMs.pdf](../../../reinforcement_learning_papers/02_rlhf_alignment/Sky-T1_Training_Small_Reasoning_LLMs.pdf)
 
 ## Gemini diagrams
 

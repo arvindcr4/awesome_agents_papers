@@ -1,5 +1,5 @@
 # Survey Evaluation LLM-based Agents
-- Paper: [Survey_Evaluation_LLM-based_Agents.pdf](../../../papers/benchmarks/Survey_Evaluation_LLM-based_Agents.pdf)
+- Paper: [Survey_Evaluation_LLM-based_Agents.pdf](../../../reinforcement_learning_papers/09_agentic_rl/Survey_Evaluation_LLM-based_Agents.pdf)
 
 ## Gemini diagrams
 

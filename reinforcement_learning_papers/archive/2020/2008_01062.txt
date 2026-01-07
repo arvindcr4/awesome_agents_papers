@@ -1,0 +1,3992 @@
+Published as a conference paper at ICLR 2021
+
+QPLEX: D UPLEX D UELING M ULTI -AGENT
+Q-L EARNING
+
+arXiv:2008.01062v3 [cs.LG] 4 Oct 2021
+
+Jianhao Wang∗ 1 , Zhizhou Ren∗ 1 , Terry Liu1 , Yang Yu2 , Chongjie Zhang1
+1
+Institute for Interdisciplinary Information Sciences, Tsinghua University, China
+2
+Polixir Technologies, China
+{wjh19, rzz16, liudr18}@mails.tsinghua.edu.cn
+yuy@nju.edu.cn
+chongjie@tsinghua.edu.cn
+
+A BSTRACT
+We explore value-based multi-agent reinforcement learning (MARL) in the popular
+paradigm of centralized training with decentralized execution (CTDE). CTDE has
+an important concept, Individual-Global-Max (IGM) principle, which requires
+the consistency between joint and local action selections to support efficient local
+decision-making. However, in order to achieve scalability, existing MARL methods
+either limit representation expressiveness of their value function classes or relax
+the IGM consistency, which may suffer from instability risk or may not perform
+well in complex domains. This paper presents a novel MARL approach, called
+duPLEX dueling multi-agent Q-learning (QPLEX), which takes a duplex dueling
+network architecture to factorize the joint value function. This duplex dueling
+structure encodes the IGM principle into the neural network architecture and thus
+enables efficient value function learning. Theoretical analysis shows that QPLEX
+achieves a complete IGM function class. Empirical experiments on StarCraft II
+micromanagement tasks demonstrate that QPLEX significantly outperforms stateof-the-art baselines in both online and offline data collection settings, and also
+reveal that QPLEX achieves high sample efficiency and can benefit from offline
+datasets without additional online exploration1 .
+
+1
+
+I NTRODUCTION
+
+Cooperative multi-agent reinforcement learning (MARL) has broad prospects for addressing many
+complex real-world problems, such as sensor networks (Zhang & Lesser, 2011), coordination
+of robot swarms (Hüttenrauch et al., 2017), and autonomous cars (Cao et al., 2012). However,
+cooperative MARL encounters two major challenges of scalability and partial observability in
+practical applications. The joint state-action space grows exponentially as the number of agents
+increases. The partial observability and communication constraints of the environment require each
+agent to make its individual decisions based on local action-observation histories. To address these
+challenges, a popular MARL paradigm, called centralized training with decentralized execution
+(CTDE) (Oliehoek et al., 2008; Kraemer & Banerjee, 2016), has recently attracted great attention,
+where agents’ policies are trained with access to global information in a centralized way and executed
+only based on local histories in a decentralized way.
+Many CTDE learning approaches have been proposed recently, among which value-based MARL
+algorithms (Sunehag et al., 2018; Rashid et al., 2018; Son et al., 2019; Wang et al., 2019b) have
+shown state-of-the-art performance on challenging tasks, e.g., unit micromanagement in StarCraft II
+(Samvelyan et al., 2019). To enable effective CTDE for multi-agent Q-learning, it is critical that
+the joint greedy action should be equivalent to the collection of individual greedy actions of agents,
+which is called the IGM (Individual-Global-Max) principle (Son et al., 2019). This IGM principle
+provides two advantages: 1) ensuring the policy consistency during centralized training (learning
+the joint Q-function) and decentralized execution (using individual Q-functions) and 2) enabling
+∗
+1
+
+Equal contribution.
+Videos available at https://sites.google.com/view/qplex-marl/.
+
+1
+
+Published as a conference paper at ICLR 2021
+
+scalable centralized training of computing one-step TD target of the joint Q-function (deriving joint
+greedy action selection from individual Q-functions). To realize this principle, VDN (Sunehag et al.,
+2018) and QMIX (Rashid et al., 2018) propose two sufficient conditions of IGM to factorize the joint
+action-value function. However, these two decomposition methods suffer from structural constraints
+and limit the joint action-value function class they can represent. As shown by Wang et al. (2020a),
+the incompleteness of the joint value function class may lead to poor performance or potential risk of
+training instability in the offline setting (Levine et al., 2020). Several methods have been proposed
+to address this structural limitation. QTRAN (Son et al., 2019) constructs two soft regularizations
+to align the greedy action selections between the joint and individual value functions. WQMIX
+(Rashid et al., 2020) considers a weighted projection that places more importance on better joint
+actions. However, due to computational considerations, both their implementations are approximate
+and based on heuristics, which cannot guarantee the IGM consistency exactly. Therefore, achieving
+the complete expressiveness of the IGM function class with effective scalability remains an open
+problem for cooperative MARL.
+To address this challenge, this paper presents a novel MARL approach, called duPLEX dueling multiagent Q-learning (QPLEX), that takes a duplex dueling network architecture to factorize the joint
+action-value function into individual action-value functions. QPLEX introduces the dueling structure
+Q = V + A (Wang et al., 2016) for representing both joint and individual (duplex) action-value
+functions and then reformalizes the IGM principle as an advantage-based IGM. This reformulation
+transforms the IGM consistency into the constraints on the value range of the advantage functions
+and thus facilitates the action-value function learning with linear decomposition structure. Different
+from QTRAN and WQMIX (Son et al., 2019; Rashid et al., 2020) losing the guarantee of exact
+IGM consistency due to approximation, QPLEX takes advantage of a duplex dueling architecture
+to encode it into the neural network structure and provide a guaranteed IGM consistency. To our
+best knowledge, QPLEX is the first multi-agent Q-learning algorithm that effectively achieves high
+scalability with a full realization of the IGM principle.
+We evaluate the performance of QPLEX in both didactic problems proposed by prior work (Son et al.,
+2019; Wang et al., 2020a) and a range of unit micromanagement benchmark tasks in StarCraft II
+(Samvelyan et al., 2019). In these didactic problems, QPLEX demonstrates its full representation
+expressiveness, thereby learning the optimal policy and avoiding the potential risk of training
+instability. Empirical results on more challenging StarCraft II tasks show that QPLEX significantly
+outperforms other multi-agent Q-learning baselines in online and offline data collections. It is
+particularly interesting that QPLEX shows the ability to support offline training, which is not
+possessed by other baselines. This ability not only provides QPLEX with high stability and sample
+efficiency but also with opportunities to efficiently utilize multi-source offline data without additional
+online exploration (Fujimoto et al., 2019; Fu et al., 2020; Levine et al., 2020; Yu et al., 2020).
+
+2
+
+P RELIMINARIES
+
+2.1
+
+D ECENTRALIZED PARTIALLY O BSERVABLE MDP (D EC -POMDP)
+
+We model a fully cooperative multi-agent task as a Dec-POMDP (Oliehoek et al., 2016) defined
+by a tuple M = hN , S, A, P, Ω, O, r, γi, where N ≡ {1, 2, . . . , n} is a finite set of agents and
+s ∈ S is a finite set of global states. At each time step, every agent i ∈ N chooses an action
+ai ∈ A ≡ {A(1) , . . . , A(|A|) } on a global state s, which forms a joint action a ≡ [ai ]ni=1 ∈ A ≡ An .
+It results in a joint reward r(s, a) and a transition to the next global state s0 ∼ P (·|s, a). γ ∈ [0, 1) is
+a discount factor. We consider a partially observable setting, where each agent i receives an individual
+partial observation oi ∈ Ω according to the observation probability function O(oi |s, ai ). Each agent
+i has an action-observation history τi ∈ T ≡ (Ω × A)∗ and constructs its individual policy πi (a|τi )
+to jointly maximize team performance. We use τ ∈ T ≡ T n to denote joint action-observation
+history. The formal objective function
+P∞ is to find a joint policy π = hπ1 , . . . , πn i that maximizes a
+joint value function V π (s) = E [ t=0 γ t rt |s0 = s, π]. Another quantity of interest in policy search
+is the joint action-value function Qπ (s, a) = r(s, a) + γEs0 [V π (s0 )].
+2.2
+
+D EEP M ULTI -AGENT Q-L EARNING IN D EC -POMDP
+
+Q-learning algorithms is a popular algorithm to find the optimal joint action-value function
+Q∗ (s, a) = r(s, a)+γEs0 [maxa0 Q∗ (s0 , a0 )]. Deep Q-learning represents the action-value function
+2
+
+Published as a conference paper at ICLR 2021
+
+with a deep neural network parameterized by θ. Mutli-agent Q-learning algorithms (Sunehag et al.,
+2018; Rashid et al., 2018; Son et al., 2019; Yang et al., 2020) use a replay memory D to store the
+transition tuple (τ , a, r, τ 0 ), where r is the reward for taking action a at joint action-observation history τ with a transition to τ 0 . Due to partial observability, Q (τ , a; θ) is used in place of Q (s, a; θ).
+Thus, parameters θ are learnt by minimizing
+TD error:i
+h the following expected
+
+2
+0
+−
+L(θ) = E(τ ,a,r,τ 0 )∈D r + γV τ ; θ − Q (τ , a; θ)
+,
+(1)
+
+
+where V τ 0 ; θ − = maxa0 Q τ 0 , a0 ; θ − is the one-step expected future return of the TD target
+and θ − are the parameters of the target network, which will be periodically updated with θ.
+2.3
+
+C ENTRALIZED T RAINING WITH D ECENTRALIZED E XECUTION (CTDE)
+
+CTDE is a popular paradigm of cooperative multi-agent deep reinforcement learning (Sunehag et al.,
+2018; Rashid et al., 2018; Wang et al., 2019a; 2020b;c;d). Agents are trained in a centralized way
+and granted access to other agents’ information or the global states during the centralized training
+process. However, due to partial observability and communication constraints, each agent makes its
+own decision based on its local action-observation history during the decentralized execution phase.
+IGM (Individual-Global-Max; Son et al., 2019) is a popular principle to realize effective value-based
+CTDE, which asserts the consistency between joint and local greedy action selections in the joint
+n
+action-value Qtot (τ , a) and individual action-values
+[Qi (τi , ai )]i=1 :
+
+
+∀τ ∈ T , arg max Qtot (τ , a) = arg max Q1 (τ1 , a1 ), . . . , arg max Qn (τn , an ) .
+(2)
+a∈A
+
+a1 ∈A
+
+an ∈A
+
+Two factorization structures, additivity and monotonicity, has been proposed by VDN (Sunehag
+et al., 2018) and QMIX (Rashid et al., 2018), respectively, as shown below:
+n
+X
+∂QQMIX
+tot (τ , a)
+QVDN
+(τ
+,
+a)
+=
+Q
+(τ
+,
+a
+)
+and
+∀i
+∈
+N
+,
+> 0.
+i i i
+tot
+∂Qi (τi , ai )
+i=1
+Qatten (Yang et al., 2020) is a variant of VDN, which supplements global information through
+a multi-head attention structure. It is known that, these structures implement sufficient but not
+necessary conditions for the IGM constraint, which limit the representation expressiveness of joint
+action-value functions (Mahajan et al., 2019). There exist tasks whose factorizable joint action-value
+functions can not be represented by these decomposition methods, as shown in Section 4. In contrast,
+QTRAN (Son et al., 2019) transforms IGM into a linear constraint and uses it as soft regularization
+constraints. WQMIX (Rashid et al., 2020) introduces a weighting mechanism into the projection of
+monotonic value factorization, in order to place more importance on better joint actions. However,
+these relaxations may violate the exact IGM consistency and may not perform well in complex
+problems.
+
+3
+
+QPLEX: D UPLEX D UELING M ULTI -AGENT Q-L EARNING
+
+In this section, we will first introduce advantage-based IGM, equivalent to the regular IGM principle,
+and, with this new definition, convert the IGM consistency of greedy action selection to simple
+constraints on advantage functions. We then present a novel deep MARL model, called duPLEX
+dueling multi-agent Q-learning algorithm (QPLEX), that directly realizes these constraints by a
+scalable neural network architecture.
+3.1
+
+A DVANTAGE -BASED IGM
+
+To ensure the consistency of greedy action selection on the joint and local action-value functions, the
+IGM principle constrains the relative order of Q-values over actions. From the perspective of dueling
+decomposition structure Q = V + A proposed by Dueling DQN (Wang et al., 2016), this consistency
+should only constrain the action-dependent advantage term A and be free of the state-value function
+V . This observation naturally motivates us to reformalize the IGM principle as advantage-based IGM,
+which transforms the consistency constraint onto advantage functions.
+Definition 1 (Advantage-based IGM). For a joint action-value function Qtot : T × A 7→ R and
+individual action-value functions [Qi : T × A 7→ R]ni=1 , where ∀τ ∈ T , ∀a ∈ A, ∀i ∈ N ,
+(Joint Dueling) Qtot (τ , a) = Vtot (τ ) + Atot (τ , a) and Vtot (τ ) = max
+Qtot (τ , a0 ), (3)
+0
+a
+
+(Individual Dueling) Qi (τi , ai ) = Vi (τi ) + Ai (τi , ai ) and Vi (τi ) = max
+Qi (τi , a0i ),
+0
+ai
+
+3
+
+(4)
+
+Published as a conference paper at ICLR 2021
+
+𝑄*+* (𝝉, 𝒂)
+𝑄*+* (𝝉, 𝒂)
+
+Transformation 1
+
+Dot Product
+𝝀>𝟎
+
+𝑠*
+
+𝒂
+(
+"&'
+
+Transformation 𝑛
+
+𝑉' (𝜏' ), 𝐴' (𝜏' , 𝑎' ) ⋯ 𝑉( (𝜏( ), 𝐴( (𝜏( , 𝑎( )
+
+MLP
+
+𝐴" 𝝉, 𝑎"
+
+𝒘 > 𝟎, 𝒃
+
+𝑉' (𝝉), 𝐴' (𝝉, 𝑎' ) ⋯ 𝑉( (𝝉), 𝐴( (𝝉, 𝑎( ) 𝑠*
+
+𝑉*+* (𝝉) 𝐴*+* (𝝉, 𝒂)
+
+𝑉" 𝝉
+
+Weighted Sum
+
+Dueling Mixing
+
++
+
+𝑉" 𝝉 , 𝐴" (𝝉, 𝑎" )
+
+Duplex Dueling
+
++
+
+(
+"&'
+
+TD Loss
+
+𝑄' (𝜏' , 𝑎' )
+
+⋯
+
+Agent 1
+𝑠*
+
+(𝑜'* , 𝑎'*5' )
+
+⋯
+
+(𝑎)
+
+𝑄( (𝜏( , 𝑎( )
+
+MLP
+
+𝑉" (𝜏" ), 𝐴" (𝜏" , 𝑎" )
+
+𝑠*
+
+𝑠*
+
+𝑄" (𝜏" , 𝑎" )
+MLP
+
+ℎ"*5'
+
+GRU
+
+Agent 𝑛
+
+MLP
+
+(𝑜(* , 𝑎(*5' )
+
+(𝑜"* , 𝑎"*5' )
+
+(𝑏)
+
+ℎ"*
+
+(𝑐)
+
+Figure 1: (a) The dueling mixing network structure. (b) The overall QPLEX architecture. (c) Agent
+network structure (bottom) and Transformation network structure (top).
+such that the following holds
+
+
+arg max Atot (τ , a) = arg max A1 (τ1 , a1 ), . . . , arg max An (τn , an ) ,
+a∈A
+
+a1 ∈A
+
+(5)
+
+an ∈A
+
+then, we can say that [Qi ]ni=1 satisfies advantage-based IGM for Qtot .
+As specified in Definition 1, advantage-based IGM takes a duplex dueling architecture, Joint Dueling
+and Individual Dueling, which induces the joint and local (duplex) advantage functions by A = Q−V .
+Compared with regular IGM, advantage-based IGM transfers the consistency constraint on actionvalue functions stated in Eq. (2) to that on advantage functions. This change is an equivalent
+transformation because the state-value terms V do not affect the action selection, as shown by
+Proposition 1.
+Proposition 1. The advantage-based IGM and IGM function classes are equivalent.
+One key benefit of using advantage-based IGM is that its consistency constraint can be directly
+realized by limiting the value range of advantage functions, as indicated by the following fact.
+Fact 1. The constraint of advantage-based IGM stated in Eq. (5) is equivalent to that when ∀τ ∈ T ,
+∀a∗ ∈ A∗ (τ ), ∀a ∈ A \ A∗ (τ ), ∀i ∈ N ,
+Atot (τ , a∗ ) = Ai (τi , a∗i ) = 0 and Atot (τ , a) < 0, Ai (τi , ai ) ≤ 0,
+(6)
+∗
+where A (τ ) = {a|a ∈ A, Qtot (τ , a) = Vtot (τ )}.
+To achieve a full expressiveness power of advantage-based IGM or IGM, Fact 1 enables us to develop
+an efficient MARL algorithm that allows the joint state-value function learning with any scalable
+decomposition structure and just imposes simple constraints limiting value ranges of advantage
+functions. The next subsection will describe such a MARL algorithm.
+3.2
+
+T HE QPLEX A RCHITECTURE
+
+In this subsection, we present a novel multi-agent Q-learning algorithm with a duplex dueling
+architecture, called QPLEX, which exploits Fact 1 and realizes the advantage-based IGM constraint.
+The overall architecture of QPLEX is illustrated in Figure 1, which consists of two main components
+as follows: (i) an Individual Action-Value Function for each agent, and (ii) a Duplex Dueling
+component that composes individual action-value functions into a joint action-value function under
+the advantage-based IGM constraint. During the centralized training, the whole network is learned
+in an end-to-end fashion to minimize the TD loss as specified in Eq. (1). During the decentralized
+execution, the duplex dueling component will be removed, and each agent will select actions using
+its individual Q-function based on local action-observation history.
+Individual Action-Value Function is represented by a recurrent Q-network for each agent i, which
+takes previous hidden state ht−1
+, current local observations oti , and previous action at−1
+as inputs
+i
+i
+and outputs local Qi (τi , ai ).
+4
+
+Published as a conference paper at ICLR 2021
+
+Duplex Dueling component connects local and joint action-value functions via two modules: (i)
+a Transformation network module that incorporates the information of global state or joint history
+into individual action-value functions during the centralized training process, and (ii) a Dueling
+Mixing network module that composes separate action-value functions from Transformation into
+a joint action-value function. Duplex Dueling first derives the individual dueling structure for
+each agent i by computing its value function Vi (τi ) = maxai Qi (τi , ai ) and its advantage function
+Ai (τi , ai ) = Qi (τi , ai ) − Vi (τi ), and then computes the joint dueling structure by using individual
+dueling structures.
+Transformation network module uses the centralized information to transform local dueling structure
+n
+n
+[Vi (τi ), Ai (τi , ai )]i=1 to [Vi (τ ), Ai (τ , ai )]i=1 conditioned on the joint action-observation history, as
+shown below, for any agent i, i.e., Qi (τ , ai ) = wi (τ )Qi (τi , ai ) + bi (τ ), thus,
+Vi (τ ) = wi (τ )Vi (τi ) + bi (τ ),
+
+and
+
+Ai (τ , ai ) = Qi (τ , ai ) − Vi (τ ) = wi (τ )Ai (τi , ai ),
+
+(7)
+
+where wi (τ ) > 0 is a positive weight. This positive linear transformation maintains the consistency
+of the greedy action selection and alleviates partial observability in Dec-POMDP (Son et al., 2019;
+Yang et al., 2020). As used by QMIX (Rashid et al., 2018), QTRAN (Son et al., 2019), and Qatten
+(Yang et al., 2020), the centralized information can be the global state s, if available, or the joint
+action-observation history τ .
+Dueling Mixing network module takes the outputs of the transformation network as input, e.g.,
+[Vi , Ai ]ni=1 , and produces the values of joint Qtot , as shown in Figure 1a. This dueling mixing
+network uses individual dueling structure transformed by Transformation to compute the joint
+value Vtot (τ ) and the joint advantage Atot (τ , a), respectively, and finally outputs Qtot (τ , a) =
+Vtot (τ ) + Atot (τ , a) by using the joint dueling structure.
+Based on Fact 1, the advantage-based IGM principle imposes no constraints on value functions.
+Therefore, to enable efficient learning, we use a simple sum structure to compose the joint value:
+Vtot (τ ) =
+
+n
+X
+
+Vi (τ )
+
+(8)
+
+i=1
+
+To enforce the IGM consistency of the joint advantage and individual advantages, as specified by
+Eq. (6), QPLEX computes the joint advantage function as follows:
+Atot (τ , a) =
+
+n
+X
+
+λi (τ , a)Ai (τ , ai ), where λi (τ , a) > 0.
+
+(9)
+
+i=1
+
+The joint advantage function Atot is the dot product of advantage functions [Ai ]ti=1 and positive
+importance weights [λi ]ni=1 with joint history and action. The positivity induced by λi will continue to
+maintain the consistency flow of the greedy action selection and the joint information of λi provides
+the full expressiveness power for value factorization. To enable efficient learning of importance
+weights λi with joint history and action, QPLEX uses a scalable multi-head attention module (Vaswani
+et al., 2017):
+K
+X
+λi (τ , a) =
+λi,k (τ , a)φi,k (τ )υk (τ ),
+(10)
+k=1
+
+where K is the number of attention heads, λi,k (τ , a) and φi,k (τ ) are attention weights activated by
+a sigmoid regularizer, and υk (τ ) > 0 is a positive key of each head. This sigmoid activation of λi
+brings sparsity to the credit assignment of the joint advantage function to individuals, which enables
+efficient multi-agent learning (Wang et al., 2019b).
+With Eq. (8) and (9), the joint action-value function Qtot can be reformulated as follows:
+Qtot (τ , a) = Vtot (τ ) + Atot (τ , a) =
+
+n
+X
+
+Qi (τ , ai ) +
+
+i=1
+
+n
+X
+
+(λi (τ , a) − 1) Ai (τ , ai ).
+
+(11)
+
+i=1
+
+It can be seen that Qtot consists of two terms. The first term is the sum of action-value functions
+[Qi ]ni=1 , which is the joint action-value function QQatten
+of Qatten (Yang et al., 2020) (which is
+tot
+the Qtot of VDN (Sunehag et al., 2018) with global information). The second term corrects for
+the discrepancy between the centralized joint action-value function and QQatten
+tot , which is the main
+contribution of QPLEX to realize the full expressiveness power of value factorization.
+5
+
+a2
+A(1)
+A(2)
+A(3)
+
+A(1)
+8
+-12
+-12
+
+A(2)
+-12
+(0) 6
+0
+
+A(3)
+-12
+0
+(0) 6
+
+(a) Payoff of a harder matrix game
+
+8
+6
+4
+
+QPLEX
+QTRAN
+QMIX
+VDN
+
+2
+0
+0
+
+100
+
+200
+
+Qatten
+OW-QMIX
+CW-QMIX
+Optimal
+
+300
+
+Iterations
+
+400
+
+500
+
+(b) Deep MARL algorithms
+
+Median Test Return
+
+a1
+
+Median Test Return
+
+Published as a conference paper at ICLR 2021
+
+8
+6
+QPLEX-3L10H
+QPLEX-3L4H
+QPLEX-2L10H
+QPLEX-2L4H
+Optimal
+
+4
+2
+0
+0
+
+150
+
+300
+
+450
+
+Iterations
+
+600
+
+750
+
+(c) Learning curves of ablation study
+
+Figure 2: (a) Payoff matrix for a harder one-step game. Boldface means the optimal joint action
+selection from the payoff matrix. The strikethroughs indicate the original matrix game proposed by
+QTRAN. (b) The learning curves of QPLEX and other baselines. (c) The learning curve of QPLEX,
+whose suffix aLbH denotes the neural network size with a layers and b heads (multi-head attention)
+for learning importance weights λi (see Eq. (9) and (10)), respectively.
+Proposition 2. Given the universal function approximation of neural networks, the action-value
+function class that QPLEX can realize is equivalent to what is induced by the IGM principle.
+In practice, QPLEX can utilize common neural network structures (e.g., multi-head attention modules)
+to achieve superior performance by approximating the universal approximation theorem (Csáji et al.,
+2001). We will discuss the effects of QPLEX’s duplex dueling network with different configurations
+in Section 4.1. As introduced by Son et al. (2019) and Wang et al. (2020a), the completeness of
+value factorization is very critical for multi-agent Q-learning and we will illustrate the stability and
+state-of-the-art performance of QPLEX in online and offline data collections in the next section.
+
+4
+
+E XPERIMENTS
+
+In this section, we first study didactic examples proposed by prior work (Son et al., 2019; Wang et al.,
+2020a) to investigate the effects of QPLEX’s complete IGM expressiveness on learning optimality and
+stability. To demonstrate scalability on complex MARL domains, we also evaluate the performance of
+QPLEX on a range of StarCraft II benchmark tasks (Samvelyan et al., 2019). The completeness of the
+IGM function class can express richer joint action-value function classes induced by large and diverse
+datasets or training buffers. This expressiveness can provide QPLEX with higher sample efficiency to
+achieve state-of-the-art performance in online and offline data collections. We compare QPLEX with
+state-of-the-art baselines: QTRAN (Son et al., 2019), QMIX (Rashid et al., 2018), VDN (Sunehag
+et al., 2018), Qatten (Yang et al., 2020), and WQMIX (OW-QMIX and CW-QMIX; Rashid et al.,
+2020). In particular, the second term of Eq. (11) is the main difference between QPLEX and Qatten.
+Thus, Qatten provides a natural ablation baseline of QPLEX to demonstrate the effectiveness of
+this discrepancy term. The implementation details of these algorithms and experimental settings are
+deferred to Appendix B. We also conduct two ablation studies to study the influence of the attention
+structure of dueling architecture and the number of parameters on QPLEX, which are deferred to be
+discussed in Appendix E. Towards fair evaluation, all experimental results are illustrated with the
+median performance and 25-75% percentiles over 6 random seeds.
+4.1
+
+M ATRIX G AMES
+
+QTRAN (Son et al., 2019) proposes a hard matrix game, as shown in Table 4a of Appendix C. In this
+subsection, we consider a harder matrix game in Table 2a, which also describes a simple cooperative
+multi-agent task with considerable miscoordination penalties, and its local optimum is more difficult
+to jump out. The optimal joint strategy of these two games is to perform action A(1) simultaneously.
+To ensure sufficient data collection in the joint action space, we adopt uniform data distribution.
+With this fixed dataset, we can study the optimality of multi-agent Q-learning from an optimization
+perspective, ignoring the challenge of exploration and sample complexity.
+As shown in Figure 2b, QPLEX, QTRAN, and WQMIX, which possess a richer expressiveness
+power of value factorization can achieve optimal performance, while other algorithms with limited
+expressiveness (e.g., QMIX, VDN, and Qatten) fall into a local optimum induced by miscoordination
+penalties. In the original matrix proposed by QTRAN, QPLEX and QTRAN can also successfully
+converge to optimal joint action-value functions. These results are deferred to Appendix C. QTRAN
+6
+
+Published as a conference paper at ICLR 2021
+
+500
+a1 6=a2 , r=0
+
+ a =a =A(2)
+s1 o 1 2
+r=0
+
+s2
+
+
+
+300
+200
+
+W
+
+(1)
+
+a1 =a2 =A
+
+QPLEX
+QTRAN
+QMIX
+VDN
+Qatten
+OW-QMIX
+CW-QMIX
+Optimal
+
+400
+
+Qtot
+
+r=0
+
+100
+00
+
+, r=1
+
+(a) Two-state MMDP
+
+20
+
+40
+
+60
+
+Iteration t
+
+80
+
+100
+
+(b) Learning curves of MARL algorithms
+
+Figure 3: (a) A special two-state MMDP used to demonstrate the training stability of the multi-agent
+Q-learning algorithms. r is a shorthand for r(s, a). (b) The learning curves of kQtot k∞ in a specific
+two-state MMDP.
+achieves superior performance in the matrix games but suffers from its relaxation of IGM consistency
+in complex domains (such as StarCraft II) shown in Section 4.3.
+In the theoretical analysis of QPLEX, Proposition 2 exploits the universal function approximation of
+neural networks. QPLEX allows the scalable implementations with various neural network capacities
+(different layers and heads of attention module) for learning importance weights λi (see Eq. (9)
+and (10)). As shown in Figure 2c, by increasing the neural network size for learning λi (e.g.,
+QPLEX-3L10H), QPLEX possesses more expressiveness of value factorization and converges faster.
+However, learning efficiency becomes challenging for complex neural networks. To effectively
+perform StarCraft II tasks ranging from 2 to 27 agents, we use a small multi-head attention module
+(i.e., QPLEX-1L4H) in complex domains (see Section 4.3). Please refer to Appendix B for more
+detailed configurations.
+4.2
+
+T WO - STATE MMDP
+
+In this subsection, we focus on a Multi-agent Markov Decision Process (MMDP) (Boutilier, 1996)
+which is a fully cooperative multi-agent setting with full observability. Consider a two-state MMDP
+proposed by Wang et al. (2020a) with two agents, two actions, and a single reward (see Figure 3a).
+Two agents start at state s2 and explore extrinsic rewards for 100 environment steps. The optimal
+policy of this MMDP is simply executing the action A(1) at state s2 , which is the only coordination
+pattern to obtain the positive reward. To approximate the uniform data distribution, we adopt a
+uniform exploration strategy (i.e., -greedy exploration with  = 1). We consider the training stability
+of multi-agent Q-learning algorithms with uniform data distribution in this special MMDP task. As
+shown in Figure 3b, the joint state-value function Qtot learned by baseline algorithms using limited
+function classes, including QMIX, VDN, and Qatten, will diverge. This instability phenomenon of
+VDN has been theoretically investigated by Wang et al. (2020a). By utilizing richer function classes,
+QPLEX, QTRAN, and WQMIX can address this numerical instability issue and converge to the
+optimal joint state-value function.
+4.3
+
+D ECENTRALIZED S TAR C RAFT II M ICROMANAGEMENT B ENCHMARK
+
+A more challenging set of empirical experiments are based on StarCraft Multi-Agent Challenge
+(SMAC) benchmark (Samvelyan et al., 2019). We first investigate empirical performance in a
+popular experimental setting with -greedy exploration and a limited first-in-first-out (FIFO) buffer
+(Samvelyan et al., 2019), named online data collection setting. To demonstrate the offline training
+potential of QPLEX, we also adopt the offline data collection setting proposed by Levine et al. (2020),
+which can be granted access to a given dataset without additional online exploration.
+4.3.1
+
+T RAINING WITH O NLINE DATA C OLLECTION
+
+We evaluate QPLEX in 17 benchmark tasks of StarCraft II, which contains 14 popular tasks proposed
+by SMAC (Samvelyan et al., 2019) and three new super hard cooperative tasks. To demonstrate the
+overall performance of each algorithm, Figure 4 plots the averaged median test win rate across all 17
+scenarios and the number of scenarios in which the algorithm outperforms, respectively. Figure 4a
+shows that, compared with other baselines, QPLEX constantly and significantly outperforms baselines
+7
+
+75
+
+# Maps Best (out of 17)
+
+Averaged Median Test Win Rate %
+
+Published as a conference paper at ICLR 2021
+
+60
+45
+30
+15
+0
+0.0M
+
+0.4M
+
+0.8M
+
+1.2M
+
+Timesteps
+
+1.6M
+
+2.0M
+
+8
+
+QPLEX
+QTRAN
+QMIX
+VDN
+Qatten
+OW-QMIX
+CW-QMIX
+
+6
+4
+2
+0
+0.0M
+
+0.4M
+
+(a) Averaged test win rate
+
+0.8M
+
+1.2M
+
+Timesteps
+
+1.6M
+
+2.0M
+
+(b) # Maps best out of 17 scenarios
+
+Figure 4: (a) The median test win %, averaged across all 17 scenarios. (b) The number of scenarios
+in which the algorithms’ median test win % is the highest by at least 1/32 (smoothed).
+over the whole training process and exceeds at least 10% median test win rate averaged across all 17
+scenarios. Moreover, Figure 4b illustrates that, among all 17 tasks, QPLEX is the best performer on
+up to eight tasks, underperforms on just two tasks, and ties for the best performer on the rest tasks.
+After 0.8M timesteps, the number of tasks that QPLEX achieves the best performance gradually
+decreases to five, because, in several easy tasks, other baselines also reach almost 100% test win rate
+as shown in Figure 5. The overall evaluation diagram of the original SMAC benchmark (14 tasks)
+corresponding to Figure 4 is deferred to Figure 8 in Appendix D.
+Figure 5 shows the learning curves on nine tasks in the online data collection setting and the results
+of other eight maps are deferred to Figure 7 in Appendix D. From Figure 5, we can observe that
+QPLEX significantly outperforms other baselines with higher sample efficiency. On the super hard
+map 5s10z, the performance gap between QPLEX and other baselines exceeds 30% in test win rate,
+and the visualized strategies of QPLEX and QMIX in this map are deferred to Appendix F. Most
+multi-agent Q-learning baselines including QMIX, VDN, and Qatten achieve reasonable performance
+(see Figure 5). However, as Figure 4 suggests, QTRAN performs the worst in these comparative
+experiments, even though it performs well in the didactic games. From a theoretical perspective, the
+online data collection process utilizes an -greedy exploration process, which requires individual
+greedy action selections to build an effective training buffer. QTRAN may suffer from its relaxation
+of IGM consistency (soft constraints of IGM) in the online data collection phase, while the duplex
+dueling architecture of QPLEX (hard constraint of IGM) provides effective individual greedy action
+selections, making it suitable for data collection with -greedy exploration.
+Moreover, although WQMIX (OW-QMIX and CW-QMIX) outperforms QMIX in some tasks (illustrated in Figure 5, e.g., 2c_vs_64zg and bane_vs_bane), WQMIX show very similar overall
+performance as QMIX across 17 StarCraft II benchmark tasks. In contrast, QPLEX achieves significant improvement in convergence performance in a lot of hard and super hard maps and demonstrates
+high sample efficiency across most scenarios (see Figure 5).
+4.3.2
+
+T RAINING WITH O FFLINE DATA C OLLECTION
+
+Recently, offline reinforcement learning has been regarded as a key step for real-world RL applications
+(Dulac-Arnold et al., 2019; Levine et al., 2020). Agarwal et al. (2020) presents an optimistic
+perspective of offline Q-learning that DQN and its variants can achieve superior performance in
+Atari 2600 games (Bellemare et al., 2013) with sufficiently large and diverse datasets. In MARL,
+StarCraft II benchmark has the same discrete action space as Atari. We conduct a lot of experiments
+on the StarCraft II benchmark tasks to study offline multi-agent Q-learning in this subsection. We
+adopt a large and diverse dataset to make the expressiveness power of value factorization become the
+dominant factor to investigate. We train a behavior policy of QMIX and collect all its experienced
+transitions throughout the training process (see the details in Appendix C). As shown in Figure 13 in
+Appendix G, QPLEX significantly outperforms other multi-agent Q-learning baselines and possesses
+the state-of-the-art value factorization structure for offline multi-agent Q-learning. QMIX and Qatten
+cannot always maintain stable learning performance, and VDN suffers from offline data collection and
+leads to weak empirical results. QTRAN may perform well in certain cases when its soft constraints,
+two `2 -penalty terms, are well minimized. With offline data collection, individual greedy action
+selections do not need to build a training buffer, but they still need to compute the one-step TD target
+8
+
+Published as a conference paper at ICLR 2021
+
+1.5M
+
+2.0M
+
+2.0M
+
+2.0M
+
+2c_vs_64zg
+
+0.5M
+
+1.0M
+
+1.5M
+
+Timesteps
+
+5s10z
+
+0.5M
+
+1.0M
+
+1.5M
+
+Timesteps
+
+100
+80
+60
+40
+20
+0
+0.0M
+100
+80
+60
+40
+20
+0
+0.0M
+
+1c3s5z
+
+0.5M
+
+1.0M
+
+1.5M
+
+Timesteps
+
+2.0M
+
+2.0M
+
+2.0M
+
+3s_vs_5z
+
+0.5M
+
+1.0M
+
+1.5M
+
+Timesteps
+
+7sz
+
+0.5M
+
+1.0M
+
+1.5M
+
+Timesteps
+
+OW-QMIX
+
+Median Test Win Rate %
+
+1.0M
+
+Timesteps
+
+Qatten
+
+Median Test Win Rate %
+
+0.5M
+
+100
+80
+60
+40
+20
+0
+0.0M
+
+VDN
+
+Median Test Win Rate %
+
+100
+80
+60
+40
+20
+0
+0.0M
+
+3s5z
+
+Median Test Win Rate %
+
+Median Test Win Rate %
+
+100
+80
+60
+40
+20
+0
+0.0M
+
+QMIX
+
+Median Test Win Rate %
+
+Median Test Win Rate %
+
+100
+80
+60
+40
+20
+0
+0.0M
+
+QTRAN
+
+Median Test Win Rate %
+
+Median Test Win Rate %
+
+QPLEX
+
+100
+80
+60
+40
+20
+0
+0.0M
+100
+80
+60
+40
+20
+0
+0.0M
+100
+80
+60
+40
+20
+0
+0.0M
+
+CW-QMIX
+
+10m_vs_11m
+
+0.5M
+
+1.0M
+
+1.5M
+
+Timesteps
+
+2.0M
+
+bane_vs_bane
+
+0.5M
+
+1.0M
+
+1.5M
+
+Timesteps
+
+2.0M
+
+1c3s8z_vs_1c3s9z
+
+0.5M
+
+1.0M
+
+1.5M
+
+Timesteps
+
+2.0M
+
+Figure 5: Learning curves of StarCraft II with online data collection.
+for centralized training. Therefore, compared with QTRAN, QPLEX still has theoretical advantages
+regarding the IGM principle in the offline data collection setting.
+
+5
+
+C ONCLUSION
+
+In this paper, we introduced QPLEX, a novel multi-agent Q-learning framework that allows centralized end-to-end training and learns to factorize a joint action-value function to enable decentralized
+execution. QPLEX takes advantage of a duplex dueling architecture that efficiently encodes the
+IGM consistency constraint on joint and individual greedy action selections. Our theoretical analysis
+shows that QPLEX achieves a complete IGM function class. Empirical results demonstrate that it
+significantly outperforms state-of-the-art baselines in both online and offline data collection settings.
+In particular, QPLEX possesses strong ability of supporting offline training. This ability provides
+QPLEX with high sample efficiency and opportunities of utilizing offline multi-source datasets. It
+will be an interesting and valuable direction to study offline multi-agent reinforcement learning in
+continuous action spaces (such as MuJoCo (Todorov et al., 2012)) with QPLEX’s value factorization.
+
+ACKNOWLEDGEMENTS
+We would like to thank the anonymous reviewers for their insightful comments and helpful suggestions. This work is supported in part by Science and Technology Innovation 2030 – “New Generation
+Artificial Intelligence” Major Project (No. 2018AAA0100904), and a grant from the Institute of Guo
+Qiang, Tsinghua University.
+
+R EFERENCES
+Rishabh Agarwal, Dale Schuurmans, and Mohammad Norouzi. An optimistic perspective on offline
+reinforcement learning. In International Conference on Machine Learning, 2020.
+9
+
+Published as a conference paper at ICLR 2021
+
+Marc G Bellemare, Yavar Naddaf, Joel Veness, and Michael Bowling. The arcade learning environment: An evaluation platform for general agents. Journal of Artificial Intelligence Research, 47:
+253–279, 2013.
+Craig Boutilier. Planning, learning and coordination in multiagent decision processes. In Proceedings
+of the 6th Conference on Theoretical Aspects of Rationality and Knowledge, pp. 195–210. Morgan
+Kaufmann Publishers Inc., 1996.
+Yongcan Cao, Wenwu Yu, Wei Ren, and Guanrong Chen. An overview of recent progress in the
+study of distributed multi-agent coordination. IEEE Transactions on Industrial Informatics, 9(1):
+427–438, 2012.
+Balázs Csanád Csáji et al. Approximation with artificial neural networks. Faculty of Sciences, Etvs
+Lornd University, Hungary, 24(48):7, 2001.
+Gabriel Dulac-Arnold, Daniel Mankowitz, and Todd Hester. Challenges of real-world reinforcement
+learning. arXiv preprint arXiv:1904.12901, 2019.
+Justin Fu, Aviral Kumar, Ofir Nachum, George Tucker, and Sergey Levine. D4rl: Datasets for deep
+data-driven reinforcement learning. arXiv preprint arXiv:2004.07219, 2020.
+Scott Fujimoto, David Meger, and Doina Precup. Off-policy deep reinforcement learning without
+exploration. In International Conference on Machine Learning, pp. 2052–2062, 2019.
+Maximilian Hüttenrauch, Adrian Šošić, and Gerhard Neumann. Guided deep reinforcement learning
+for swarm systems. arXiv preprint arXiv:1709.06011, 2017.
+Landon Kraemer and Bikramjit Banerjee. Multi-agent reinforcement learning as a rehearsal for
+decentralized planning. Neurocomputing, 190:82–94, 2016.
+Sergey Levine, Aviral Kumar, George Tucker, and Justin Fu. Offline reinforcement learning: Tutorial,
+review, and perspectives on open problems. arXiv preprint arXiv:2005.01643, 2020.
+Anuj Mahajan, Tabish Rashid, Mikayel Samvelyan, and Shimon Whiteson. Maven: Multi-agent
+variational exploration. In Advances in Neural Information Processing Systems, pp. 7611–7622,
+2019.
+Frans A Oliehoek, Matthijs TJ Spaan, and Nikos Vlassis. Optimal and approximate q-value functions
+for decentralized pomdps. Journal of Artificial Intelligence Research, 32:289–353, 2008.
+Frans A Oliehoek, Christopher Amato, et al. A concise introduction to decentralized POMDPs,
+volume 1. Springer, 2016.
+Tabish Rashid, Mikayel Samvelyan, Christian Schroeder Witt, Gregory Farquhar, Jakob Foerster,
+and Shimon Whiteson. Qmix: Monotonic value function factorisation for deep multi-agent
+reinforcement learning. In International Conference on Machine Learning, pp. 4292–4301, 2018.
+Tabish Rashid, Gregory Farquhar, Bei Peng, and Shimon Whiteson. Weighted qmix: Expanding
+monotonic value function factorisation for deep multi-agent reinforcement learning. Advances in
+Neural Information Processing Systems, 33, 2020.
+Mikayel Samvelyan, Tabish Rashid, Christian Schroeder de Witt, Gregory Farquhar, Nantas Nardelli,
+Tim GJ Rudner, Chia-Man Hung, Philip HS Torr, Jakob Foerster, and Shimon Whiteson. The
+starcraft multi-agent challenge. In Proceedings of the 18th International Conference on Autonomous
+Agents and MultiAgent Systems, pp. 2186–2188. International Foundation for Autonomous Agents
+and Multiagent Systems, 2019.
+Kyunghwan Son, Daewoo Kim, Wan Ju Kang, David Earl Hostallero, and Yung Yi. Qtran: Learning to
+factorize with transformation for cooperative multi-agent reinforcement learning. In International
+Conference on Machine Learning, pp. 5887–5896, 2019.
+Peter Sunehag, Guy Lever, Audrunas Gruslys, Wojciech Marian Czarnecki, Vinicius Zambaldi, Max
+Jaderberg, Marc Lanctot, Nicolas Sonnerat, Joel Z Leibo, Karl Tuyls, et al. Value-decomposition
+networks for cooperative multi-agent learning based on team reward. In Proceedings of the 17th
+International Conference on Autonomous Agents and MultiAgent Systems, pp. 2085–2087, 2018.
+10
+
+Published as a conference paper at ICLR 2021
+
+Emanuel Todorov, Tom Erez, and Yuval Tassa. Mujoco: A physics engine for model-based control.
+In 2012 IEEE/RSJ International Conference on Intelligent Robots and Systems, pp. 5026–5033.
+IEEE, 2012.
+Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez, Łukasz
+Kaiser, and Illia Polosukhin. Attention is all you need. In Advances in Neural Information
+Processing Systems, pp. 5998–6008, 2017.
+Jianhao Wang, Zhizhou Ren, Beining Han, and Chongjie Zhang. Towards understanding linear value
+decomposition in cooperative multi-agent q-learning. arXiv preprint arXiv:2006.00587, 2020a.
+Tonghan Wang, Jianhao Wang, Yi Wu, and Chongjie Zhang. Influence-based multi-agent exploration.
+arXiv preprint arXiv:1910.05512, 2019a.
+Tonghan Wang, Jianhao Wang, Chongyi Zheng, and Chongjie Zhang. Learning nearly decomposable
+value functions via communication minimization. arXiv preprint arXiv:1910.05366, 2019b.
+Tonghan Wang, Heng Dong, Victor Lesser, and Chongjie Zhang. Multi-agent reinforcement learning
+with emergent roles. arXiv preprint arXiv:2003.08039, 2020b.
+Tonghan Wang, Tarun Gupta, Anuj Mahajan, Bei Peng, Shimon Whiteson, and Chongjie Zhang.
+Rode: Learning roles to decompose multi-agent tasks. arXiv preprint arXiv:2010.01523, 2020c.
+Yihan Wang, Beining Han, Tonghan Wang, Heng Dong, and Chongjie Zhang. Off-policy multi-agent
+decomposed policy gradients. arXiv preprint arXiv:2007.12322, 2020d.
+Ziyu Wang, Tom Schaul, Matteo Hessel, Hado Hasselt, Marc Lanctot, and Nando Freitas. Dueling
+network architectures for deep reinforcement learning. In International Conference on Machine
+Learning, pp. 1995–2003, 2016.
+Yaodong Yang, Jianye Hao, Ben Liao, Kun Shao, Guangyong Chen, Wulong Liu, and Hongyao Tang.
+Qatten: A general framework for cooperative multiagent reinforcement learning. arXiv preprint
+arXiv:2002.03939, 2020.
+Tianhe Yu, Garrett Thomas, Lantao Yu, Stefano Ermon, James Zou, Sergey Levine, Chelsea Finn, and
+Tengyu Ma. Mopo: Model-based offline policy optimization. arXiv preprint arXiv:2005.13239,
+2020.
+Chongjie Zhang and Victor Lesser. Coordinated multi-agent reinforcement learning in networked
+distributed pomdps. In Twenty-Fifth AAAI Conference on Artificial Intelligence, 2011.
+
+11
+
+Published as a conference paper at ICLR 2021
+
+A
+
+O MITTED P ROOFS IN S ECTION 3
+
+Definition 1 (Advantage-based IGM). For a joint action-value function Qtot : T × A 7→ R and
+individual action-value functions [Qi : T × A 7→ R]ni=1 , where ∀τ ∈ T , ∀a ∈ A, ∀i ∈ N ,
+(Joint Dueling) Qtot (τ , a) = Vtot (τ ) + Atot (τ , a) and Vtot (τ ) = max
+Qtot (τ , a0 ), (3)
+0
+a
+
+(Individual Dueling) Qi (τi , ai ) = Vi (τi ) + Ai (τi , ai ) and Vi (τi ) = max
+Qi (τi , a0i ),
+0
+
+(4)
+
+such that the following holds
+
+
+arg max Atot (τ , a) = arg max A1 (τ1 , a1 ), . . . , arg max An (τn , an ) ,
+
+(5)
+
+ai
+
+a1 ∈A
+
+a∈A
+
+an ∈A
+
+then, we can say that [Qi ]ni=1 satisfies advantage-based IGM for Qtot .
+Let the action-value function class derived from IGM is denoted by
+n
+h
+in 
+o
+e=
+e tot ∈ R|T ||A|n , Q
+e i ∈ R|T ||A|
+Q
+Q
+Eq. (2) is satisfied ,
+i=1
+h in
+e tot and Q
+ei
+where Q
+denote the joint and individual action-value functions induced by IGM,
+i=1
+respectively. Similarly, let
+n
+h
+in 
+o
+b=
+b tot ∈ R|T ||A|n , Q
+b i ∈ R|T ||A|
+Q
+Q
+Eq. (3), (4), (5) are satisfied
+i=1
+
+e
+e
+denote the action-value function class derived from advantage-based
+IGM.
+h in
+h inVtot and Atot denote the
+ei
+joint state-value and advantage functions, respectively. Vei
+and A
+denote the individual
+i=1
+
+i=1
+
+state-value and advantage functions induced by advantage-IGM, respectively. According to the
+duplex dueling architecture Q = V + A stated in advantage-based IGM (see Definition 1), we derive
+the joint and individual action-value functions as following: ∀τ ∈ T , ∀a ∈ A, ∀i ∈ N ,
+b tot (τ , a) = Vbtot (τ ) + A
+btot (τ , a) and Q
+b i (τi , ai ) = Vbi (τi ) + A
+bi (τi , ai ).
+Q
+Proposition 1. The advantage-based IGM and IGM function classes are equivalent.
+e≡Q
+b in the following two directions.
+Proof. We will prove Q
+
+h in 
+h in
+h in
+b tot = Q
+e tot and Q
+e⊆Q
+b For any Q
+e tot , Q
+ei
+e we construct Q
+bi
+ei
+. The
+∈ Q,
+= Q
+Q
+i=1
+i=1
+i=1
+joint and individual state-value/advantage functions induced by advantage-IGM
+b tot (τ , a0 ) and A
+btot (τ , a) = Q
+b tot (τ , a) − Vbtot (τ ),
+Vbtot (τ ) = max Q
+a0
+
+b i (τi , a0 ) and A
+bi (τi , ai ) = Q
+b i (τi , a0 ) − Vbi (τi ),
+Vbi (τi ) = max
+Q
+i
+i
+0
+
+∀i ∈ N ,
+
+ai
+
+are derived by Eq. (3) and Eq. (4), respectively. Because state-value functions do not affect the greedy
+action selection, ∀τ ∈ T , ∀a ∈ A,
+
+
+e
+e
+e
+arg max Qtot (τ , a) = arg max Q1 (τ1 , a1 ), . . . , arg max Qn (τn , an )
+a1 ∈A
+an ∈A
+a∈A
+
+
+b tot (τ , a) = arg max Q
+b 1 (τ1 , a1 ), . . . , arg max Q
+b n (τn , an )
+⇒ arg max Q
+a1 ∈A
+an ∈A
+a∈A
+
+
+b tot (τ , a) − Vbtot (τ ) =
+⇒ arg max Q
+a∈A
+
+
+
+
+
+b
+b
+b
+b
+arg max Q1 (τ1 , a1 ) − V1 (τ1 ) , . . . , arg max Qn (τn , an ) − Vn (τn )
+a1 ∈A
+an ∈A
+
+
+b
+b
+b
+⇒ arg max Atot (τ , a) = arg max A1 (τ1 , a1 ), . . . , arg max An (τn , an ) .
+a1 ∈A
+
+a∈A
+
+an ∈A
+
+
+h in 
+b tot , Q
+bi
+b which means that Q
+e ⊆ Q.
+b
+∈ Q,
+Thus, Q
+i=1
+
+12
+
+Published as a conference paper at ICLR 2021
+
+
+h in 
+b tot , Q
+bi
+b we construct
+b⊆Q
+e We will prove this direction in the same way. For any Q
+∈ Q,
+Q
+i=1
+h in
+h in
+e tot = Q
+b tot and Q
+ei
+bi
+Q
+= Q
+. Because state-value functions do not affect the greedy action
+i=1
+i=1
+selection, ∀τ ∈ T , ∀a ∈ A,
+
+
+btot (τ , a) = arg max A
+b1 (τ1 , a1 ), . . . , arg max A
+bn (τn , an )
+arg max A
+a1 ∈A
+an ∈A
+a∈A
+
+
+btot (τ , a) + Vbtot (τ ) =
+⇒ arg max A
+a∈A
+
+
+
+
+
+b
+b
+b
+b
+arg max A1 (τ1 , a1 ) + V1 (τ1 ) , . . . , arg max An (τn , an ) + Vn (τn )
+a1 ∈A
+an ∈A
+
+
+b
+b
+b
+⇒ arg max Qtot (τ , a) = arg max Q1 (τ1 , a1 ), . . . , arg max Qn (τn , an )
+a1 ∈A
+an ∈A
+a∈A
+
+
+e
+e
+e
+⇒ arg max Qtot (τ , a) = arg max Q1 (τ1 , a1 ), . . . , arg max Qn (τn , an ) .
+a1 ∈A
+
+a∈A
+
+an ∈A
+
+
+h in 
+e tot , Q
+ei
+e which means that Q
+b ⊆ Q.
+e The action-value function classes derived
+Thus, Q
+∈ Q,
+i=1
+from advantage-based IGM and IGM are equivalent.
+Fact 1. The constraint of advantage-based IGM stated in Eq. (5) is equivalent to that when ∀τ ∈ T ,
+∀a∗ ∈ A∗ (τ ), ∀a ∈ A \ A∗ (τ ), ∀i ∈ N ,
+Atot (τ , a∗ ) = Ai (τi , a∗i ) = 0 and Atot (τ , a) < 0, Ai (τi , ai ) ≤ 0,
+(6)
+∗
+where A (τ ) = {a|a ∈ A, Qtot (τ , a) = Vtot (τ )}.
+btot (τ , a) ≤ 0 and A
+bi (τi , ai ) ≤ 0 from Eq. (3)
+Proof. We derive that ∀τ ∈ T , ∀a ∈ A, ∀i ∈ N , A
+and Eq. (4) of Definition 1, respectively. According to the definition of arg max operator, Eq. (3),
+b ∗ (τ ) denote arg maxa∈A A
+btot (τ , a) as follows:
+and Eq. (4), ∀τ ∈ T , let A
+b ∗ (τ ) = arg max A
+btot (τ , a) = arg max Q
+b tot (τ , a)
+A
+a∈A
+a∈A
+n
+o
+b tot (τ , a) = Vbtot (τ )
+= a|a ∈ A, Q
+n
+o
+b tot (τ , a) − Vbtot (τ ) = 0
+= a|a ∈ A, Q
+n
+o
+btot (τ , a) = 0 .
+= a|a ∈ A, A
+
+(12)
+
+bi (τi , ai ) as follows:
+Similarly, ∀τ ∈ T , ∀i ∈ N , let Ab∗i (τi ) denote arg maxai ∈A A
+bi (τi , ai ) = arg max Q
+b i (τi , ai )
+Ab∗i (τi ) = arg max A
+ai ∈A
+ai ∈A
+n
+o
+b i (τi , ai ) = Vbi (τi )
+= ai |ai ∈ A, Q
+n
+o
+bi (τi , ai ) = 0 .
+= ai |ai ∈ A, A
+∗
+
+(13)
+
+∗
+
+b (τ ), ∀a ∈ A \ A
+b (τ ),
+Thus, ∀τ ∈ T , ∀a∗ ∈ A
+btot (τ , a∗ ) = 0 and A
+btot (τ , a) < 0;
+A
+
+(14)
+
+∀τ ∈ T , ∀i ∈ N , ∀a∗i ∈ Ab∗ (τi ), ∀ai ∈ A \ Ab∗ (τi ),
+bi (τi , a∗i ) = 0 and A
+bi (τi , ai ) < 0.
+A
+Recall the constraint stated in Eq. (5), ∀τ ∈ T ,
+
+
+btot (τ , a) = arg max A
+b1 (τ1 , a1 ), . . . , arg max A
+bn (τn , an ) .
+arg max A
+a∈A
+
+a1 ∈A
+
+an ∈A
+
+13
+
+(15)
+
+Published as a conference paper at ICLR 2021
+
+We can rewrite the constraint of advantage-based IGM stated in Eq. (5) as ∀τ ∈ T ,
+n
+o
+b ∗ (τ ) = ha1 , . . . , an i ai ∈ Ab∗ (τi ), ∀i ∈ N .
+A
+i
+
+(16)
+∗
+
+b (τ ),
+Therefore, combining Eq. (14), Eq. (15), and Eq. (16), we can derive ∀τ ∈ T , ∀a∗ ∈ A
+∗
+b
+∀a ∈ A \ A (τ ), ∀i ∈ N ,
+btot (τ , a∗ ) = A
+bi (τi , a∗i ) = 0 and A
+btot (τ , a) < 0, A
+bi (τi , ai ) ≤ 0.
+A
+
+(17)
+
+In another way,
+Eq. (14), Eq. (15), and Eq. (17), we can derive Eq. (16) by the definition
+h icombining
+n
+∗
+∗
+b
+b
+of A and A
+(see Eq. (12) and Eq. (13)). In more detail, the closed set property of Cartesian
+n
+
+i=1
+
+product of [a∗i ]i=1 has been encoded into the Eq. (16) and Eq. (17) simultaneously.
+Proposition 2. Given the universal function approximation of neural networks, the action-value
+function class that QPLEX can realize is equivalent to what is induced by the IGM principle.
+Proof. We assume that the neural network of QPLEX can be large enough to achieve the universal
+function approximation by corresponding theorem (Csáji et al., 2001). Let the action-value function
+class that QPLEX can realize is denoted by
+h
+o
+n
+in 
+n
+Q=
+Qtot ∈ R|T ||A| , Qi ∈ R|T ||A|
+Eq. (7), (8), (9), (10), (11) are satisfied .
+i=1
+
+h 0 in h 0 in h 0 in  n  n
+ n
+In addition, Qtot , V tot , Atot , Qi
+, Vi
+, Ai
+, Qi i=1 , V i i=1 , and Ai i=1 denote
+i=1
+i=1
+i=1
+the corresponding (joint, transformed, and individual) (action-value, state-value, and advantage)
+functions, respectively. In the implementation of QPLEX, we ensure the positivity of important
+n
+n
+weights of Transformation and joint advantage function, [wi ]i=1 and [λi ]i=1 , which maintains the
+greedy action selection flow and rules out these non-interesting points (zeros) on optimization. We
+b ≡ Q in the following two directions.
+will prove Q
+
+h in 
+h in
+ 
+b tot , Q
+bi
+b we construct Qtot = Q
+b ⊆ Q For any Q
+bi
+b tot and Qi n = Q
+∈ Q,
+Q
+i=1
+i=1
+ n i=1  n
+and derive V tot , Atot , V i i=1 , and Ai i=1 by Eq.(3) and Eq. (4), respectively. Note that in the
+construction of QPLEX,
+Vi (τ ) = wi (τ )Vi (τi ) + bi (τ ) and
+
+Ai (τ , ai ) = wi (τ )Ai (τi , ai )
+
+and
+Qtot (τ , a) = Vtot (τ ) + Atot (τ , a) =
+
+n
+X
+i=1
+
+Vi (τ ) +
+
+n
+X
+
+λi (τ , a)Ai (τ , ai ).
+
+i=1
+
+In addition, we construct transformed functions connecting joint and individual functions as follows:
+∀τ ∈ T , ∀a ∈ A, ∀i ∈ N ,
+0
+
+Qi (τ , a) =
+
+Qtot (τ , a)
+0
+0
+0
+0
+0
+, V i (τ ) = arg max Qi (τ , a), and Ai (τ , a) = Qi (τ , a) − V i (τ ),
+n
+a∈A
+
+which means that according to Fact 1,
+ 0
+
+ Ai (τi , a) > 0,
+0
+wi (τ ) = 1, bi (τ ) = V i (τ ) − V i (τi ), and λi (τi , a) = Ai (τi , ai )
+
+
+1,
+
+ n 
+b ⊆ Q.
+Thus, Qtot , Qi i=1 ∈ Q, which means that Q
+14
+
+when Ai (τi , ai ) < 0,
+when Ai (τi , ai ) = 0.
+
+Published as a conference paper at ICLR 2021
+
+
+  
+b For any Qtot , Qi n
+∈ Q, with the similar discussion of Fact 1, ∀τ ∈ T , ∀i ∈ N , let
+Q⊆Q
+i=1
+∗
+
+Ai (τi ) denote arg maxai ∈A Ai (τi , ai ), where
+
+∗
+Ai (τi ) = ai |ai ∈ A, Ai (τi , ai ) = 0 .
+n
+
+n
+
+Combining the positivity of [wi ]i=1 and [λi ]i=1 with Eq. (7), (8), (9), and (11), we can derive
+∗
+∗
+∀τ ∈ T , ∀i ∈ N , ∀a∗i ∈ A (τi ), ∀ai ∈ A \ A (τi ),
+Ai (τi , a∗i ) = 0 and Ai (τi , ai ) < 0
+⇒
+⇒
+
+0
+
+0
+
+Ai (τ , a∗i ) = wi (τ )Ai (τi , a∗i ) = 0 and Ai (τ , ai ) = wi (τ )Ai (τi , ai ) < 0
+0
+
+0
+
+Atot (τ , a∗ ) = λi (τ , a∗ )Ai (τi , a∗i ) = 0 and Atot (τ , a) = λi (τ , a)Ai (τi , a∗i ) < 0,
+
+where a∗ = ha∗1 , . . . , a∗n i and a = ha1 , . . . , an i. Notably, these a∗ forms
+n
+o
+∗
+∗
+A (τ ) = ha1 , . . . , an i ai ∈ Ai (τi ), ∀i ∈ N ,
+
+(18)
+
+h in
+ n
+b tot = Qtot and Q
+bi
+which is similar to Eq. (16) in the proof of Fact 1. We construct Q
+= Qi i=1 .
+i=1
+According to Eq. (18), the constraints ofadvantage-based
+h in  IGM stated in Fact 1 (Eq. (3), Eq. (4), and
+b and Q ⊆ Q.
+b tot , Q
+bi
+b
+Eq. (6)) are satisfied, which means that Q
+∈Q
+i=1
+
+Thus, when assuming neural networks provide universal function approximation, the joint action-value
+function class that QPLEX can realize is equivalent to what is induced by the IGM principle.
+
+B
+
+E XPERIMENT S ETTINGS AND I MPLEMENTATION D ETAILS
+
+B.1
+
+S TAR C RAFT II
+
+We consider the combat scenario of StarCraft II unit micromanagement tasks, where the enemy units
+are controlled by the built-in AI, and each ally unit is controlled by the reinforcement learning agent.
+The units of the two groups can be asymmetric, but the units of each group should belong to the same
+race. At each timestep, every agent takes action from the discrete action space, which includes the
+following actions: no-op, move [direction], attack [enemy id], and stop. Under the control of these
+actions, agents move and attack in continuous maps. At each time step, MARL agents will get a
+global reward equal to the total damage done to enemy units. Killing each enemy unit and winning
+the combat will bring additional bonuses of 10 and 200, respectively. We briefly introduce the SMAC
+challenges of our paper in Table 1.
+B.2
+
+I MPLEMENTATION D ETAILS
+
+We adopt the PyMARL (Samvelyan et al., 2019) implementation of state-of-the-art baselines: QTRAN
+(Son et al., 2019), QMIX (Rashid et al., 2018), VDN (Sunehag et al., 2018), Qatten (Yang et al.,
+2020), and WQMIX (OW-QMIX and CW-QMIX; Rashid et al., 2020). The hyper-parameters of these
+algorithms are the same as that in SMAC (Samvelyan et al., 2019) and referred in their source codes.
+QPLEX is also based on PyMARL, whose special hyper-parameters are illustrated in Table 2 and
+other common hyper-parameters are adopted by the default implementation of PyMARL (Samvelyan
+et al., 2019). Especially in the online data collection, we take the advanced implementation of
+Transformation of Qatten in QPLEX. To ensure the positivity of important weights of Transformation
+n
+n
+and joint advantage function, we add a sufficiently small amount 0 = 10−10 on [wi ]i=1 and [λi ]i=1 .
+In addition, we stop gradients of local advantage function Ai to increase the optimization stability of
+the max operator of dueling structure. This instability consideration due to max operator has been
+justified by Dueling DQN (Wang et al., 2016). We approximate the joint action-value function as
+Qtot (τ , a) ≈
+
+n
+X
+i=1
+
+Qi (τ , ai ) +
+
+n
+X
+
+ei (τ , ai ),
+(λi (τ , a) − 1) A
+
+i=1
+
+ei denotes a variant of the local advantage function Ai by stoping gradients.
+where A
+15
+
+Published as a conference paper at ICLR 2021
+
+Map Name
+2s3z
+3s5z
+1c3s5z
+5m_vs_6m
+10m_vs_11m
+27m_vs_30m
+3s5z_vs_3s6z
+MMM2
+2s_vs_1sc
+3s_vs_5z
+6h_vs_8z
+bane_vs_bane
+2c_vs_64zg
+corridor
+5s10z
+7sz
+1c3s8z_vs_1c3s9z
+
+Ally Units
+2 Stalkers & 3 Zealots
+3 Stalkers & 5 Zealots
+1 Colossus, 3 Stalkers & 5 Zealots
+5 Marines
+10 Marines
+27 Marines
+3 Stalkers & 5 Zealots
+1 Medivac, 2 Marauders & 7 Marines
+2 Stalkers
+3 Stalkers
+6 Hydralisks
+20 Zerglings & 4 Banelings
+2 Colossi
+6 Zealots
+5 Stalkers & 10 Zealots
+7 Stalkers & 7 Zealots
+1 Colossus, 3 Stalkers & 8 Zealots
+
+Enemy Units
+2 Stalkers & 3 Zealots
+3 Stalkers & 5 Zealots
+1 Colossus, 3 Stalkers & 5 Zealots
+6 Marines
+11 Marines
+30 Marines
+3 Stalkers & 6 Zealots
+1 Medivac, 2 Marauders & 8 Marines
+1 Spine Crawler
+5 Zealots
+8 Zealots
+20 Zerglings & 4 Banelings
+64 Zerglings
+24 Zerglings
+5 Stalkers & 10 Zealots
+7 Stalkers & 7 Zealots
+1 Colossus, 3 Stalkers & 9 Zealots
+
+Table 1: The StarCraft multi-Agent challenge (SMAC; Samvelyan et al., 2019) benchmark.
+QPLEX’s architecuture configurations
+The number of layers in w, b, λ, φ, υ
+The number of heads in the attention module
+Unit number in middle layers of w, b, λ, φ, υ
+Activation in the middle layers of w, υ
+Activation in the last layer of w, υ
+Activation in the middle layers of b
+Activation in the last layer of b
+Activation in the middle layers of λ, φ
+Activation in the last layer of λ, φ
+
+Didactic Examples
+2 or 3
+4 or 10
+64
+Relu
+Absolute
+Relu
+None
+Relu
+Sigmoid
+
+StarCraft II
+1
+4
+∅
+∅
+Absolute
+∅
+None
+∅
+Sigmoid
+
+Table 2: The network configurations of QPLEX’s architecture.
+
+Our training time on an NVIDIA RTX 2080TI GPU of each task is about 6 hours to 20 hours,
+depending on the agent number and the episode length limit of each map. The percentage of episodes
+in which MARL agents defeat all enemy units within the time limit is called test win rate. We pause
+training every 10k timesteps and evaluate 32 episodes with decentralized greedy action selection to
+measure test win rate of each algorithm. After training every 200 episodes, the target network will
+be updated once. We call this update period an Iteration for didactic tasks. In the two-state MMDP,
+P99
+Optimal line of Figure 3b is approximately i=0 γ i = 63.4 in one episode of 100 timesteps.
+Training with Online Data Collection We have collected a total of 2 million timestep data for
+each task and test the model every 10 thousand steps. We use -greedy exploration and a limited
+first-in-first-out (FIFO) replay buffer of size 5000 episodes, where  is linearly annealed from 1.0 to
+0.05 over 50k timesteps and keep it constant for the rest training process. To utilize the training buffer
+more efficiently, we perform gradient updates twice with a batch of 32 episodes after collecting every
+episode for each algorithm.
+Training with Offline Data Collection To construct a diverse dataset, we train a behavior policy
+of QMIX (Rashid et al., 2018) or VDN (Sunehag et al., 2018) and collect its 20k or 50k experienced
+episodes throughout the training process. The dataset configurations are shown in Table 3. We
+evaluate QPLEX and four baselines over six random seeds, which includes three different datasets
+and tests two seeds on each dataset. We train 300 epochs to demonstrate our learning performance,
+where each epoch trains 160k transitions with a batch of 32 episodes. Moreover, the training process
+of behavior policy is the same as that discussed in PyMARL (Samvelyan et al., 2019).
+16
+
+Published as a conference paper at ICLR 2021
+
+Map Name
+2s3z
+3s5z
+1c3s5z
+2s_vs_1sc
+3s_vs_5z
+2c_vs_64zg
+
+Replay Buffer Size
+20k episodes
+20k episodes
+20k episodes
+20k episodes
+20k episodes
+50k episodes
+
+Behaviour Test Win Rate
+95.8%
+92.0%
+90.2%
+98.1%
+94.4%
+80.9%
+
+Behaviour Policy
+QMIX
+QMIX
+QMIX
+QMIX
+VDN
+QMIX
+
+Table 3: The dataset configurations of the offline data collection setting.
+
+C
+
+O MITTED F IGURES AND TABLES IN S ECTION 4.1 AND 4.2
+
+a1
+a2
+A(1)
+A(2)
+A(3)
+
+A(1)
+
+A(2)
+
+A(3)
+
+8
+-12
+-12
+
+-12
+0
+0
+
+-12
+0
+0
+
+a1
+a2
+A(1)
+A(2)
+A(3)
+
+A(1)
+
+A(2)
+
+A(3)
+
+-8.0
+-8.0
+-8.0
+
+-8.0
+-0.0
+-0.0
+
+-8.0
+-0.0
+-0.0
+
+A(2)
+
+A(3)
+
+8.0
+-12.2
+-12.1
+
+-12.1
+-0.0
+-0.0
+
+-12.1
+-0.0
+-0.0
+
+(b) Qtot of QPLEX
+
+(a) Payoff of matrix game
+a1
+a2
+A(1)
+A(2)
+A(3)
+
+A(1)
+
+a1
+a2
+A(1)
+A(2)
+A(3)
+
+(d) Qtot of QMIX
+
+a1
+a2
+A(1)
+A(2)
+A(3)
+
+A(1)
+
+A(2)
+
+A(3)
+
+8.0
+-12.0
+-12.0
+
+-12.0
+-0.0
+0.0
+
+-12.0
+0.0
+0.0
+
+(c) Qtot of QTRAN
+
+A(1)
+
+A(2)
+
+A(3)
+
+-6.2
+-4.9
+-4.9
+
+-4.9
+-3.6
+-3.6
+
+-4.9
+-3.6
+-3.6
+
+(e) Qtot of VDN
+
+a1
+a2
+A(1)
+A(2)
+A(3)
+
+A(1)
+
+A(2)
+
+A(3)
+
+-6.2
+-4.9
+-4.9
+
+-4.9
+-3.5
+-3.5
+
+-4.9
+-3.5
+-3.5
+
+(f) Qtot of Qatten
+
+Median Test Return
+
+Table 4: (a) Payoff matrix of the one-step game. Boldface means the optimal joint action selection
+from payoff matrix. (b-f) The joint action-value functions Qtot of QPLEX, QTRAN, QMIX, VDN,
+and Qatten. Boldface means greedy joint action selection from joint action-value functions.
+
+8
+6
+4
+2
+0
+2
+
+QPLEX
+QTRAN
+QMIX
+VDN
+Qatten
+Optimal
+
+0
+
+100
+
+200
+
+300
+
+Iterations
+
+400
+
+500
+
+Figure 6: The learning curves of QPLEX and other baselines on the origin matrix game.
+
+17
+
+Published as a conference paper at ICLR 2021
+
+E XPERIMENTS ON S TAR C RAFT II WITH O NLINE DATA C OLLECTION
+QMIX
+
+1.0M
+
+1.5M
+
+Timesteps
+
+2.0M
+
+Median Test Win Rate %
+
+0.5M
+
+2.0M
+
+Median Test Win Rate %
+
+Median Test Win Rate %
+
+2s_vs_1sc
+
+100
+80
+60
+40
+20
+0
+0.0M
+
+2.0M
+
+Median Test Win Rate %
+
+3s5z_vs_3s6z
+
+100
+80
+60
+40
+20
+0
+0.0M
+
+0.5M
+
+1.0M
+
+1.5M
+
+Timesteps
+
+Median Test Win Rate %
+
+MMM2
+
+100
+80
+60
+40
+20
+0
+0.0M
+
+0.5M
+
+1.0M
+
+1.5M
+
+Timesteps
+
+100
+80
+60
+40
+20
+0
+0.0M
+100
+80
+60
+40
+20
+0
+0.0M
+100
+80
+60
+40
+20
+0
+0.0M
+
+VDN
+
+Qatten
+
+2s3z
+
+0.5M
+
+1.0M
+
+2.0M
+
+1.5M
+
+2.0M
+
+1.5M
+
+2.0M
+
+1.5M
+
+Timesteps
+
+6h_vs_8z
+
+0.5M
+
+1.0M
+
+OW-QMIX
+
+Median Test Win Rate %
+
+QTRAN
+
+Median Test Win Rate %
+
+QPLEX
+
+Median Test Win Rate %
+
+D
+
+Timesteps
+
+100
+80
+60
+40
+20
+0
+0.0M
+100
+80
+60
+40
+20
+0
+0.0M
+
+CW-QMIX
+
+5m_vs_6m
+
+0.5M
+
+1.0M
+
+1.5M
+
+Timesteps
+
+2.0M
+
+27m_vs_30m
+
+0.5M
+
+1.0M
+
+1.5M
+
+Timesteps
+
+2.0M
+
+corridor
+
+0.5M
+
+1.0M
+
+Timesteps
+
+75
+
+# Maps Best (out of 14)
+
+Averaged Median Test Win Rate %
+
+Figure 7: The learning curves of StarCraft II with online data collection on remaining scenarios.
+
+60
+45
+30
+15
+0
+0.0M
+
+0.4M
+
+0.8M
+
+1.2M
+
+Timesteps
+
+1.6M
+
+2.0M
+
+8
+
+QPLEX
+QTRAN
+QMIX
+VDN
+Qatten
+OW-QMIX
+CW-QMIX
+
+6
+4
+2
+0
+0.0M
+
+(a) Averaged test win rate
+
+0.4M
+
+0.8M
+
+1.2M
+
+Timesteps
+
+1.6M
+
+2.0M
+
+(b) # Maps best out of 14 scenarios
+
+Figure 8: (a) The median test win %, averaged across all 14 scenarios proposed by SMAC (Samvelyan
+et al., 2019). (b) The number of scenarios in which the algorithms’ median test win % is the highest
+by at least 1/32 (smoothed).
+
+18
+
+Published as a conference paper at ICLR 2021
+
+E
+
+A BLATION S TUDIES WITH O NLINE DATA C OLLECTION
+
+In this section, we conduct two ablation studies to investigate why QPLEX works, which includes: (i)
+QPLEX without the multi-head attention structure of dueling architecture, and (ii) QMIX with the
+same number of parameters as QPLEX. For these studies, Figure 9 plots the averaged median test
+win rate % over the tasks of the StarCraft II benchmark mentioned in Section 4.3.1. Detailed learning
+curves on each task are shown in Figure 10 and 11, respectively.
+
+Averaged Median Test Win Rate %
+
+Averaged Median Test Win Rate %
+
+Multi-head attention structure of importance weights λi (see Eq. (9) and (10)) allows QPLEX to adapt
+its scalable implementation to different scenarios, e.g., didactic games or StarCraft II benchmark
+tasks. Section 4.1 demonstrates the importance of this attention structure, which can provide QPLEX
+more expressiveness of value factorization to perform better on the didactic matrix games. In this
+ablation study, we aim to test whether this multi-head attention is necessary for this StarCraft II
+domain. Specifically, we use a one-layer forward model instead of this multi-head attention structure
+in QPLEX, which is called QPLEX-wo-duel-atten. Figure 9a shows that QPLEX-wo-duel-atten
+achieves similar performance as QPLEX, which indicates that the the superiority of QPLEX over
+other MARL methods is largely due to the duplex dueling architecture (see Figure 1), instead of the
+multi-head attention trick.
+100
+80
+60
+40
+
+QPLEX
+QPLEX-wo-duel-atten
+QMIX
+Qatten
+
+20
+0
+0.0M
+
+0.4M
+
+0.8M
+
+1.2M
+
+Timesteps
+
+1.6M
+
+2.0M
+
+(a) Without dueling attention
+
+100
+80
+
+QPLEX
+QMIX
+Large QMIX
+
+60
+40
+20
+0
+0.0M
+
+0.4M
+
+0.8M
+
+1.2M
+
+Timesteps
+
+1.6M
+
+2.0M
+
+(b) QMIX with similar # neurons
+
+Figure 9: Ablation studies on QPLEX with the median test win %, averaged benchmark scenarios.
+QPLEX uses more parameters in the value factorization architecture of neural networks due to its
+multi-head attention structure. We introduce Large QMIX with a similar number of parameters with
+QPLEX, to investigate whether the superiority of QPLEX over QMIX is due to the increase in the
+number of parameters. Figure 9b shows that QMIX with a larger network cannot fundamentally
+improve its performance, and QPLEX still significantly outperforms Large QMIX by a large margin.
+This result also confirms that the main effect of QPLEX comes from its novel value factorization
+structure (duplex dueling architecture) rather than the number of parameters.
+
+19
+
+Published as a conference paper at ICLR 2021
+
+1.0M
+
+1.5M
+
+Timesteps
+
+2.0M
+
+1c3s5z
+
+50
+25
+0
+0.0M
+
+100
+
+0.5M
+
+1.0M
+
+1.5M
+
+Timesteps
+
+5m_vs_6m
+
+50
+25
+0
+0.0M
+
+0.5M
+
+1.0M
+
+1.5M
+
+Timesteps
+
+5s10z
+
+100
+50
+25
+0
+0.0M
+
+0.5M
+
+1.0M
+
+0.5M
+
+1.5M
+
+Timesteps
+
+1.0M
+
+1.5M
+
+Timesteps
+
+2.0M
+
+10m_vs_11m
+
+50
+25
+0
+0.0M
+
+0.5M
+
+1.0M
+
+1.5M
+
+Timesteps
+
+3s_vs_5z
+
+50
+25
+0.5M
+
+1.0M
+
+1.5M
+
+Timesteps
+
+7sz
+
+50
+25
+0.5M
+
+1.0M
+
+25
+0
+0.0M
+
+1.5M
+
+Timesteps
+
+0.5M
+
+1.0M
+
+1.5M
+
+Timesteps
+
+2.0M
+
+2c_vs_64zg
+
+75
+50
+25
+0
+0.0M
+
+0.5M
+
+1.0M
+
+1.5M
+
+2.0M
+
+1.5M
+
+2.0M
+
+Timesteps
+
+MMM2
+
+75
+50
+25
+0
+0.0M
+
+100
+
+75
+
+0
+0.0M
+
+50
+
+100
+
+75
+
+0
+0.0M
+
+75
+
+100
+
+75
+
+100
+
+75
+
+2.0M
+
+25
+
+100
+
+75
+
+2.0M
+
+50
+0
+0.0M
+
+3s5z
+
+100
+
+75
+
+100
+
+75
+
+2.0M
+
+Median Test Win Rate %
+
+0.5M
+
+Median Test Win Rate %
+
+0
+0.0M
+
+Median Test Win Rate %
+
+2.0M
+
+25
+
+Qatten
+
+Median Test Win Rate %
+
+Median Test Win Rate %
+Median Test Win Rate %
+
+Median Test Win Rate %
+
+2.0M
+
+50
+
+QMIX
+
+2s3z
+
+100
+
+75
+
+100
+
+Median Test Win Rate %
+
+2.0M
+
+Median Test Win Rate %
+
+2s_vs_1sc
+
+100
+
+Median Test Win Rate %
+
+QPLEX-wo-duel-atten
+
+Median Test Win Rate %
+
+Median Test Win Rate %
+
+QPLEX
+
+0.5M
+
+1.0M
+
+Timesteps
+
+1c3s8z_vs_1c3s9z
+
+75
+50
+25
+0
+0.0M
+
+0.5M
+
+1.0M
+
+1.5M
+
+Timesteps
+
+2.0M
+
+Figure 10: The learning curves of median test win rate % for QPLEX, QPLEX’s ablation QPLEXwo-duel-atten, QMIX, and Qatten with online data collection.
+
+20
+
+Published as a conference paper at ICLR 2021
+
+1.5M
+
+Timesteps
+
+2.0M
+
+1c3s5z
+
+50
+25
+0
+0.0M
+
+100
+
+0.5M
+
+1.0M
+
+1.5M
+
+Timesteps
+
+5m_vs_6m
+
+50
+25
+0
+0.0M
+
+0.5M
+
+1.0M
+
+1.5M
+
+Timesteps
+
+5s10z
+
+100
+50
+25
+0
+0.0M
+
+0.5M
+
+1.0M
+
+0.5M
+
+1.5M
+
+Timesteps
+
+1.0M
+
+1.5M
+
+Timesteps
+
+2.0M
+
+10m_vs_11m
+
+50
+25
+0
+0.0M
+
+0.5M
+
+1.0M
+
+1.5M
+
+Timesteps
+
+3s_vs_5z
+
+50
+25
+0.5M
+
+1.0M
+
+1.5M
+
+Timesteps
+
+7sz
+
+50
+25
+0.5M
+
+1.0M
+
+25
+0
+0.0M
+
+1.5M
+
+Timesteps
+
+0.5M
+
+1.0M
+
+1.5M
+
+Timesteps
+
+2.0M
+
+2c_vs_64zg
+
+75
+50
+25
+0
+0.0M
+
+0.5M
+
+1.0M
+
+1.5M
+
+2.0M
+
+1.5M
+
+2.0M
+
+Timesteps
+
+MMM2
+
+75
+50
+25
+0
+0.0M
+
+100
+
+75
+
+0
+0.0M
+
+50
+
+100
+
+75
+
+0
+0.0M
+
+75
+
+100
+
+75
+
+100
+
+75
+
+2.0M
+
+25
+
+100
+
+75
+
+2.0M
+
+50
+0
+0.0M
+
+3s5z
+
+100
+
+75
+
+100
+
+75
+
+2.0M
+
+Median Test Win Rate %
+
+1.0M
+
+Median Test Win Rate %
+
+0.5M
+
+2s3z
+
+Median Test Win Rate %
+
+2.0M
+
+25
+
+Large QMIX
+
+Median Test Win Rate %
+
+Median Test Win Rate %
+Median Test Win Rate %
+
+Median Test Win Rate %
+Median Test Win Rate %
+
+2.0M
+
+50
+0
+0.0M
+
+QMIX
+
+100
+
+75
+
+100
+
+Median Test Win Rate %
+
+2.0M
+
+Median Test Win Rate %
+
+2s_vs_1sc
+
+100
+
+Median Test Win Rate %
+
+Median Test Win Rate %
+
+QPLEX
+
+0.5M
+
+1.0M
+
+Timesteps
+
+1c3s8z_vs_1c3s9z
+
+75
+50
+25
+0
+0.0M
+
+0.5M
+
+1.0M
+
+1.5M
+
+Timesteps
+
+2.0M
+
+Figure 11: Learning curves of median test win rate % for QPLEX, QMIX, and Large QMIX with
+online data collection.
+
+21
+
+Published as a conference paper at ICLR 2021
+
+F
+
+A V ISUALIZATION OF THE S TRATEGIES L EARNED IN 5 S 10 Z
+
+(a) Strategy of QPLEX on 5s10z
+
+(b) Strategy of QMIX on 5s10z
+
+Figure 12: Visualized strategies of QPLEX and QMIX on 5s10z map of StarCraft II benchmark. Red
+marks represent learning agents, and blue marks represent build-in AI agents.
+As shown in Figure 12, both MARL agents and opponents contain 5 ranged soldiers (denoted by a
+circle) and 10 melee soldiers (denoted by line) on 5s10z map. The ranged soldiers have stronger
+combat capabilities and need to be protected strategically. QPLEX uses 10 melee soldiers to build
+lines of defense against the enemy, while QMIX fails to coordinate melee soldiers such that ranged
+soldiers have to fight against the enemy directly.
+
+E XPERIMENTS ON S TAR C RAFT II WITH O FFLINE DATA C OLLECTION
+
+0
+
+100
+
+200
+
+Epoches
+
+300
+
+300
+
+2s3z
+
+0
+
+100
+
+200
+
+Epoches
+
+100
+80
+60
+40
+20
+0
+
+100
+80
+60
+40
+20
+0
+
+QMIX
+
+VDN
+
+1c3s5z
+
+0
+
+100
+
+200
+
+Epoches
+
+300
+
+300
+
+3s5z
+
+0
+
+100
+
+200
+
+Epoches
+
+Qatten
+
+Median Test Win Rate %
+
+100
+80
+60
+40
+20
+0
+
+3s_vs_5z
+
+Median Test Win Rate %
+
+Median Test Win Rate %
+
+100
+80
+60
+40
+20
+0
+
+QTRAN
+
+Median Test Win Rate %
+
+Median Test Win Rate %
+
+QPLEX
+
+Median Test Win Rate %
+
+G
+
+100
+80
+60
+40
+20
+0
+
+100
+80
+60
+40
+20
+0
+
+2s_vs_1sc
+
+0
+
+100
+
+200
+
+Epoches
+
+300
+
+2c_vs_64zg
+
+0
+
+100
+
+200
+
+Epoches
+
+300
+
+Figure 13: Deferred learning curves of StarCraft II with offline data collection on tested scenarios.
+
+22
+
+Published as a conference paper at ICLR 2021
+
+H
+
+A BLATION S TUDIES ABOUT QPLEX WITH D IFFERENT N ETWORK
+C APACITIES IN S TAR C RAFT II
+
+We trade off the expressiveness and learning efficiency of the multi-head attention network module
+for estimating importance weights λi (see Eq. (9) and (10) in Section 3.2). It is generally sufficient for
+QPLEX to use a simple multi-head attention with a small number of heads and layers (as evaluated in
+StarCraft II tasks) to achieve the state-of-the-art performance shown in Figure 4. However, in some
+didactic corner-cases with an adequate and uniform dataset, a harder matrix game illustrated in Figure
+2a requires very high precision in estimating the action-value function in order to differentiate the
+optimal solution from the sub-optimal solutions. For this matrix game, a multi-head attention structure
+with more layers and heads has a more representational capacity and results in better performance, as
+demonstrated by the ablation study illustrated in Figure 2c in Section 4.1.
+Averaged Median Test Win Rate %
+
+In contrast, StarCraft II micromanagement benchmark
+100
+tasks contain much more complicated agents with large
+QPLEX-1L4H
+QPLEX-1L10H
+state-action spaces and range from 2 to 27 agents. To
+80
+QPLEX-2L4H
+support the superior training scalability of QPLEX, we
+60
+used a multi-head attention with just one layer and four
+heads. To evaluate the effect of the choice of layer and
+40
+the number of heads, we conducted an ablation study in
+20
+Starcraft II benchmark tasks. For simplicity, we follow
+0
+the notation of Figure 2, i.e., use QPLEX-aLbH to de0.0M 0.4M 0.8M 1.2M 1.6M 2.0M
+note QPLEX with a layers and b heads of importance
+Timesteps
+weights λi . As shown in Figure 14, using more heads,
+QPLEX-1L10H, does not change the performance, but Figure 14: Ablation study about QPLEX
+using more layers, QPLEX-2L4H, may slightly degen- with different network capacities in Starerate the learning efficiency of QPLEX in this complex Craft II.
+domain. Detailed learning curves on these tasks are
+shown in Figure 15. This is because using more layers significantly increase the number of parameters and requires more samples for learning, which may offset the benefits of higher expressiveness it
+brings. This ablation study shows that a simple attention neural network with just one layer and four
+heads has enough expressiveness to handle these complex StarCraft II tasks.
+
+23
+
+Published as a conference paper at ICLR 2021
+
+1.5M
+
+2.0M
+
+1c3s5z
+
+50
+25
+0
+0.0M
+
+100
+
+0.5M
+
+1.0M
+
+1.5M
+
+Timesteps
+
+5m_vs_6m
+
+50
+25
+0
+0.0M
+
+0.5M
+
+1.0M
+
+1.5M
+
+Timesteps
+
+5s10z
+
+100
+50
+25
+0
+0.0M
+
+0.5M
+
+1.0M
+
+0.5M
+
+1.5M
+
+Timesteps
+
+1.0M
+
+1.5M
+
+Timesteps
+
+2.0M
+
+10m_vs_11m
+
+50
+25
+0
+0.0M
+
+0.5M
+
+1.0M
+
+1.5M
+
+Timesteps
+
+3s_vs_5z
+
+50
+25
+0.5M
+
+1.0M
+
+1.5M
+
+Timesteps
+
+7sz
+
+50
+25
+0.5M
+
+1.0M
+
+25
+0
+0.0M
+
+1.5M
+
+Timesteps
+
+0.5M
+
+1.0M
+
+1.5M
+
+Timesteps
+
+2.0M
+
+2c_vs_64zg
+
+75
+50
+25
+0
+0.0M
+
+0.5M
+
+1.0M
+
+1.5M
+
+2.0M
+
+1.5M
+
+2.0M
+
+Timesteps
+
+MMM2
+
+75
+50
+25
+0
+0.0M
+
+100
+
+75
+
+0
+0.0M
+
+50
+
+100
+
+75
+
+0
+0.0M
+
+75
+
+100
+
+75
+
+100
+
+75
+
+2.0M
+
+25
+
+100
+
+75
+
+2.0M
+
+50
+0
+0.0M
+
+3s5z
+
+100
+
+75
+
+100
+
+75
+
+2.0M
+
+Median Test Win Rate %
+
+1.0M
+
+Timesteps
+
+Median Test Win Rate %
+
+0.5M
+
+2s3z
+
+Median Test Win Rate %
+
+2.0M
+
+25
+
+QPLEX-2L4H
+
+Median Test Win Rate %
+
+Median Test Win Rate %
+Median Test Win Rate %
+
+Median Test Win Rate %
+Median Test Win Rate %
+
+2.0M
+
+50
+0
+0.0M
+
+QPLEX-1L10H
+
+100
+
+75
+
+100
+
+Median Test Win Rate %
+
+2.0M
+
+Median Test Win Rate %
+
+2s_vs_1sc
+
+100
+
+Median Test Win Rate %
+
+Median Test Win Rate %
+
+QPLEX-1L4H
+
+0.5M
+
+1.0M
+
+Timesteps
+
+1c3s8z_vs_1c3s9z
+
+75
+50
+25
+0
+0.0M
+
+0.5M
+
+1.0M
+
+1.5M
+
+Timesteps
+
+2.0M
+
+Figure 15: Deferred figures of median test win rate % for QPLEX-1L4H, QPLEX-1L10H, and
+QPLEX-2L4H with online data collection.
+
+24
+
+Published as a conference paper at ICLR 2021
+
+I
+
+A BLATION S TUDIES ABOUT QTRAN
+
+To test whether QPLEX outperforms QTRAN because
+of these factors, we conducted an ablation study by removing the Transformation module and replacing the
+multi-head attention module with a simple one-layer
+forward model in the QPLEX’s dueling architecture,
+which is denoted as QPLEX-wo-trans-atten. In addition, we also introduce a variant of QTRAN, which
+also uses the Transformation module for individual Qfunctions, denoted as QTRAN-w-trans. Our experiments
+are evaluated on the tasks of the StarCraft II benchmark
+mentioned in Section 4.3.1.
+
+Averaged Median Test Win Rate %
+
+Both QPLEX and QTRAN aim to provide a richer factorized acton-value function class. The main
+difference between QPLEX and QTRAN is that QPLEX uses a duplex dueling architecture to realize
+the IGM principle (a hard constraint). In contrast, QTRAN uses two penalties as soft constraints to
+approximate the IGM principle. Moreover, from the perspective of implementation, QTRAN does
+not have a Transformation module (see Section 3.2) on the individual Q-functions and cannot utilize
+a multi-head attention module on the joint Q-function directly (because QTRAN does not take the
+duplex dueling architecture as QPLEX).
+100
+80
+
+QPLEX
+QPLEX-wo-trans-atten
+QTRAN
+QTRAN-w-trans
+
+60
+40
+20
+0
+0.0M
+
+0.4M
+
+0.8M
+
+1.2M
+
+Timesteps
+
+1.6M
+
+2.0M
+
+Figure 16: Ablation study about QTRAN
+Figure 16 illustrates the averaged median test win rate % with online data collection.
+over all tested scenarios. Detailed learning curves on
+these tasks are shown in Figure 17. These empirical results show that QPLEX-wo-trans-atten
+significantly outperforms QTRAN and QTRAN-w-trans, which implies that the outperformance
+of QPLEX over QTRAN is largely due to its duplex dueling architecture. It can also be seen that
+QTRAN-w-trans cannot significantly improve the performance of QTRAN, which implies that
+QTRAN cannot benefit a lot from an extra Transformation module empirically.
+As discussed in Section E, Figure 9a can be regarded as an ablation study of QPLEX-wo-atten,
+which just removes the multi-head attention module from dueling architecture. That ablation study
+shows that a simple neural network implementation of QPLEX’s dueling structure has enough
+expressiveness to handle these StarCraft II tasks in the online data collection setting, even if this
+structure can provide QPLEX with excellent performance in didactic matrix games using an adequate
+and uniform dataset (see Section 4.1). Thus, compared with QPLEX-wo-atten in Figure 9a, Figure 16
+shows that Transformation (abbreviated as -trans) is a useful module for QPLEX empirically, which
+indicates an another QPLEX’s advantage, i.e., QPLEX can equip a Transformation module to improve
+QPLEX’s empirical performance, whereas QTRAN may not by directly using it. Moreover, we
+would like to emphasize that, unlike the multi-head attention module, the Transformation module is
+actually a necessary module for QPLEX to realize IGM, as shown in Figure 1 and by the proof of
+Proposition 2. Therefore, it is actually fair to evaluate QPLEX with the Transformation module.
+
+25
+
+Published as a conference paper at ICLR 2021
+
+1.0M
+
+1.5M
+
+Timesteps
+
+2.0M
+
+1c3s5z
+
+50
+25
+0
+0.0M
+
+100
+
+0.5M
+
+1.0M
+
+1.5M
+
+Timesteps
+
+5m_vs_6m
+
+50
+25
+0
+0.0M
+
+0.5M
+
+1.0M
+
+1.5M
+
+Timesteps
+
+5s10z
+
+100
+50
+25
+0
+0.0M
+
+0.5M
+
+1.0M
+
+0.5M
+
+1.5M
+
+Timesteps
+
+1.0M
+
+1.5M
+
+Timesteps
+
+2.0M
+
+10m_vs_11m
+
+50
+25
+0
+0.0M
+
+0.5M
+
+1.0M
+
+1.5M
+
+Timesteps
+
+3s_vs_5z
+
+50
+25
+0.5M
+
+1.0M
+
+1.5M
+
+Timesteps
+
+7sz
+
+50
+25
+0.5M
+
+1.0M
+
+25
+0
+0.0M
+
+1.5M
+
+Timesteps
+
+0.5M
+
+1.0M
+
+1.5M
+
+Timesteps
+
+2.0M
+
+2c_vs_64zg
+
+75
+50
+25
+0
+0.0M
+
+0.5M
+
+1.0M
+
+1.5M
+
+2.0M
+
+1.5M
+
+2.0M
+
+Timesteps
+
+MMM2
+
+75
+50
+25
+0
+0.0M
+
+100
+
+75
+
+0
+0.0M
+
+50
+
+100
+
+75
+
+0
+0.0M
+
+75
+
+100
+
+75
+
+100
+
+75
+
+2.0M
+
+25
+
+100
+
+75
+
+2.0M
+
+50
+0
+0.0M
+
+3s5z
+
+100
+
+75
+
+100
+
+75
+
+2.0M
+
+Median Test Win Rate %
+
+0.5M
+
+Median Test Win Rate %
+
+0
+0.0M
+
+Median Test Win Rate %
+
+2.0M
+
+25
+
+QTRAN-w-trans
+
+Median Test Win Rate %
+
+Median Test Win Rate %
+Median Test Win Rate %
+
+Median Test Win Rate %
+
+2.0M
+
+50
+
+QTRAN
+
+2s3z
+
+100
+
+75
+
+100
+
+Median Test Win Rate %
+
+2.0M
+
+Median Test Win Rate %
+
+2s_vs_1sc
+
+100
+
+Median Test Win Rate %
+
+QPLEX-wo-trans-atten
+
+Median Test Win Rate %
+
+Median Test Win Rate %
+
+QPLEX
+
+0.5M
+
+1.0M
+
+Timesteps
+
+1c3s8z_vs_1c3s9z
+
+75
+50
+25
+0
+0.0M
+
+0.5M
+
+1.0M
+
+1.5M
+
+Timesteps
+
+2.0M
+
+Figure 17: Figures of median test win rate % for QPLEX, QPLEX’s ablation QPLEX-wo-trans-atten,
+QTRAN, and QTRAN-w-trans with online data collection.
+
+26
+
+Published as a conference paper at ICLR 2021
+
+J
+
+A C OMPARISON TO WQMIX IN P REDATOR -P REY
+
+WQMIX (Rashid et al., 2020) is a recent advanced multi-agent Q-learning algorithm. We compare
+QPLEX with WQMIX in a toy game, predator-prey, which is introduced by WQMIX and aims to
+test coordination between agents in a partially-observable setting.
+
+Median Test Return
+
+40
+0
+40
+QPLEX
+QTRAN
+QMIX
+OW-QMIX
+CW-QMIX
+
+80
+120
+160
+0.0M
+
+0.2M
+
+0.4M
+
+0.6M
+
+Timesteps
+
+0.8M
+
+1.0M
+
+Figure 18: Learning curves of median test return for QPLEX, QTRAN, QMIX, and WQMIX
+(OW-QMIX and CW-QMIX) in the toy predator-prey task.
+Predator-prey is a multi-agent coordinated game used by WQMIX (Rashid et al., 2020) with miscoordination penalties. In order to collect the experience with the positive reward of agents’ coordinated
+actions, extensive exploration can benefit multi-agent Q-learning algorithms to solve this kind of tasks.
+WQMIX shapes the data distribution with an importance weight to boost efficient learning, which can
+also be regarded as a type of biased exploration. To support QPLEX with effective exploration, we
+use an -greedy strategy which is also discussed in the paper of WQMIX. This strategy’s  is linearly
+annealed from 1 to 0.05 over 1 million timesteps, increased from the 50k used in SMAC (Samvelyan
+et al., 2019). As shown in Figure 18, besides WQMIX and QTRAN, QPLEX can solve this task by
+using the introduced -greedy exploration strategy. Moreover, QMIX can also solve this task by using
+the same -greedy strategy as QPLEX, but QPLEX enjoys higher sample efficiency.
+
+27
+
+

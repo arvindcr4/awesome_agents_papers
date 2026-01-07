@@ -1,5 +1,5 @@
 # WorkArena Common Knowledge Work Tasks
-- Paper: [WorkArena_Common_Knowledge_Work_Tasks.pdf](../../../papers/benchmarks/WorkArena_Common_Knowledge_Work_Tasks.pdf)
+- Paper: [WorkArena_Common_Knowledge_Work_Tasks.pdf](../../../reinforcement_learning_papers/09_agentic_rl/WorkArena_Common_Knowledge_Work_Tasks.pdf)
 
 ## Gemini diagrams
 

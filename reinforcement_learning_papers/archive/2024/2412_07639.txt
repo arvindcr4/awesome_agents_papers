@@ -1,0 +1,2124 @@
+Offline Multi-Agent Reinforcement Learning via
+In-Sample Sequential Policy Optimization
+Zongkai Liu1, 3 , Qian Lin1 , Chao Yu1, 2 * , Xiawei Wu1 , Yile Liang4 , Donghui Li4 , Xuetao Ding4
+
+arXiv:2412.07639v2 [cs.AI] 18 Dec 2024
+
+1
+
+School of Computer Science and Engineering, Sun Yat-sen University, Guangzhou, China
+2
+Pengcheng Laboratory, Shenzhen, China
+3
+Shanghai Innovation Institute, Shanghai, China
+4
+Meituan, Beijing, China
+{liuzk, linq67}@mail2.sysu.edu.cn, yuchao3@mail.sysu.edu.cn
+Abstract
+
+Offline Multi-Agent Reinforcement Learning (MARL) is an
+emerging field that aims to learn optimal multi-agent policies
+from pre-collected datasets. Compared to single-agent case,
+multi-agent setting involves a large joint state-action space
+and coupled behaviors of multiple agents, which bring extra
+complexity to offline policy optimization. In this work, we revisit the existing offline MARL methods and show that in certain scenarios they can be problematic, leading to uncoordinated behaviors and out-of-distribution (OOD) joint actions.
+To address these issues, we propose a new offline MARL algorithm, named In-Sample Sequential Policy Optimization
+(InSPO). InSPO sequentially updates each agent’s policy in
+an in-sample manner, which not only avoids selecting OOD
+joint actions but also carefully considers teammates’ updated
+policies to enhance coordination. Additionally, by thoroughly
+exploring low-probability actions in the behavior policy, InSPO can well address the issue of premature convergence to
+sub-optimal solutions. Theoretically, we prove InSPO guarantees monotonic policy improvement and converges to quantal response equilibrium (QRE). Experimental results demonstrate the effectiveness of our method compared to current
+state-of-the-art offline MARL methods.
+Code — https://github.com/kkkaiaiai/InSPO/
+
+Introduction
+Offline Reinforcement Learning (RL) is a rapidly evolving field that aims to learn optimal policies from precollected datasets without interacting directly with the environment (Figueiredo Prudencio, Maximo, and Colombini 2024). The primary challenge in offline RL is the issue of distributional shift (Yang et al. 2021), which occurs
+when policy evaluation on out-of-distribution (OOD) samples leads to the accumulation of extrapolation errors. Existing research usually tackles this problem by employing conservatism principles, compelling the learning policy to remain close to the data manifold through various data-related
+regularization techniques (Yang et al. 2021; Pan et al. 2022;
+Matsunaga et al. 2023; Shao et al. 2023; Wang et al. 2023b).
+* Corresponding author.
+Copyright © 2025, Association for the Advancement of Artificial
+Intelligence (www.aaai.org). All rights reserved.
+
+In comparison to the single-agent counterpart, offline
+Multi-Agent Reinforcement Learning (MARL) has received
+relatively less attention. Under the multi-agent setting, it not
+only faces the challenges inherent to offline RL but also encounters common MARL issues, such as difficulties in coordination and large joint-action spaces (Zhang, Yang, and
+Başar 2021). These issues cannot be simply resolved by
+combining state-of-the-art offline RL solutions with modern multi-agent techniques (Yang et al. 2021). In fact, due
+to the increased number of agents and the offline nature of
+the problem, these issues become even more challenging.
+For example, under the offline setting, even if each agent selects an in-sample action, the resulting joint action may still
+be OOD. Additionally, in cooperative MARL, agents need
+to consider both their own actions and the actions of other
+agents in order to determine their contributions to the global
+return for high overall performance. Thus, under offline settings, discovering and learning cooperative joint policies
+from the dataset poses a unique challenge for offline MARL.
+To address the aforementioned issues, recent works have
+developed specific offline MARL algorithms. These approaches generally integrate the conservatism principle
+into the Centralized Training with Decentralized Execution (CTDE) framework, such as value decomposition structures (Yang et al. 2021; Pan et al. 2022; Matsunaga et al.
+2023; Shao et al. 2023; Wang et al. 2023b), which is developed under the Individual-Global-Max (IGM) assumption.
+Although these approaches have demonstrated successes in
+certain offline multi-agent tasks, they still exhibit several
+limitations. For example, due to the inherent limitations of
+the IGM principle, algorithms that utilize value decomposition structures may struggle to find optimal solutions because of constraints in their representation capabilities, and
+can even lead to the selection of OOD joint actions, as we
+show in the Proposed Method section.
+In this work, we propose a principled approach to tackle
+OOD joint actions issue. By introducing a behavior regularization into the policy learning objective and derive
+the closed-form solution of the optimal policy, we develop a sequential policy optimization method in an entirely
+in-sample learning manner without generating potentially
+OOD actions. Besides, the sequential update scheme used
+in this method enhances both the representation capabil-
+
+ity of the joint policy and the coordination among agents.
+Then, to prevent premature convergence to local optima,
+we encourage sufficient exploration of low-probability actions in the behavior policy through the use of policy entropy. The proposed novel algorithm, named the In-Sample
+Sequential Policy Optimization (InSPO), enjoys the properties of monotonic improvement and convergence to quantal
+response equilibrium (QRE) (McKelvey and Palfrey 1995),
+a solution concept in game theory. We evaluate InSPO in the
+XOR game, Multi-NE game, and Bridge to demonstrate its
+effectiveness in addressing OOD joint action and local optimum convergence issues. Additionally, we test it on various
+types of offline datasets in the StarCraft II micromanagement benchmark to showcase its competitiveness with current state-of-the-art offline MARL algorithms.
+
+Related Work
+MARL. The CTDE framework dominates current MARL
+research, facilitating agent cooperation. In CTDE, agents
+are centrally trained using global information but rely only
+on local observations to make decisions. Value decomposition is a notable method, representing the joint Q-function
+as a combination of individual agents’ Q-functions (Wang
+et al. 2021; Son et al. 2019; Rashid et al. 2018). These
+methods typically depend on the IGM principle, assuming
+the optimal joint action corresponds to each agent’s greedy
+actions. However, environments with multi-modal reward
+landscapes frequently violate the IGM assumption, limiting
+the effectiveness of value decomposition in learning optimal
+policies (Fu et al. 2022).
+Another influential class of methods is Multi-Agent Policy Gradient (MAPG), with notable algorithms such as
+MAPPO(Yu et al. 2022), CoPPO(Wu et al. 2021), and
+HAPPO (Kuba et al. 2022). However, on-policy learning approaches like these struggle in offline settings due to OOD
+action issues, leading to extrapolation errors.
+Offline MARL. OMAR (Pan et al. 2022) combines Independent Learning and zeroth-order optimization to adapt
+CQL (Kumar et al. 2020) for multi-agent scenarios. However, OMAR fundamentally follows a single-agent learning
+paradigm, which treats other agents as part of the environment, and does not handle cooperative behavior learning and
+OOD joint actions insufficiently.
+To enhance cooperation and efficiency in complex environments such as StarCraft II, some existing works employ value decomposition as a foundation for algorithm design. For instance, ICQ (Yang et al. 2021) introduces conservatism to prevent optimization on unseen state-action pairs,
+mitigating extrapolation errors. OMIGA (Wang et al. 2023b)
+and CFCQL (Shao et al. 2023) are the latest offline MARL
+methods, both integrating value decomposition structures.
+OMIGA applies implicit local value regularization to enable in-sample learning, while CFCQL calculates counterfactual regularization per agent, avoiding the excessive conservatism caused by direct value decomposition-CQL integration. Nonetheless, the IGM principle has been shown to
+fail in identifying optimal policies in multi-modal reward
+landscapes (Fu et al. 2022), due to the limited expressive-
+
+ness of the Q-value network, which poses a potential risk of
+encountering the OOD joint actions issue in offline settings.
+An alternative research direction in offline RL applies
+constraints on state-action distributions, called DIstribution
+Correction Estimation (DICE) methods (Figueiredo Prudencio, Maximo, and Colombini 2024). AlberDICE (Matsunaga
+et al. 2023) is a pioneering DICE-based method in offline
+MARL, which is proved to converge to NEs. However, when
+multiple NEs exist, its convergence results heavily depends
+on the dataset distribution. If the behavior policy is near a
+sub-optimal NE, AlberDICE will converge directly to that
+sub-optimal solution rather than the global optimum. This is
+primarily because AlberDICE lacks sufficient exploration of
+low-probability state-action pairs in dataset, leading to premature convergence to a deterministic policy. Additionally,
+AlberDICE employs an out-of-sample learning during policy extraction, i.e., it uses actions produced by the policy
+rather the actions in datasets, which could lead to OOD joint
+actions (Xu et al. 2023a; Kostrikov, Nair, and Levine 2022).
+Additionally, some works consider using model-based
+method (Barde et al. 2024) or using diffusion models (Li,
+Pan, and Huang 2023; Zhu et al. 2023) to solve the OOD action issue. More discussion about the related work is given
+in Appendix E.
+
+Background
+Cooperative Markov Game
+The cooperative MARL problem is usually modeled
+as a cooperative Markov game (Littman 1994) G =
+⟨N , S, A, P, r, γ, d⟩, where N = {1, · · · , N } is Q
+the set of
+agent indices, S is the finite state space, A = i∈N Ai
+is the joint action space, with Ai denoting the finite action
+space of agent i, r : S × A → R is the common reward
+function shared with all agents, P : S × A × S → [0, 1] is
+the transition probability function, γ ∈ [0, 1) is the discount
+factor, and d ∈ ∆(S) is the initial state distribution. At time
+step t ∈ {1, · · · , T }, each agent i ∈ N at state st ∈ S
+selects an action ait ∼ π i (·|st ) and moves to the next state
+st+1 ∼ P (·|st , at ). It then receives a reward rt = r(st , at )
+according to the joint action at = Q
+{a1t , · · · , aN
+t }. We dei
+note the joint policy as π(·|s) =
+π
+(·|s),
+and the
+i∈N
+joint policy except the i-th player as π −i . In a cooperative
+Markov game, all agents aim to learn a optimal joint policy π that jointly maximizes the expected discount returns
+PT
+Es∈S,a∼π [ t=0 γ t r(st , at )]. Under the offline setting, only
+|D|
+a pre-collected dataset D = {(s, a,Qr, s′ )k }k=1 collected by
+an unknown behavior policy µ = i∈N µi is given and the
+environment interactions are not allowed.
+
+IGM Principle and Value Decomposition
+Value-based methods aim to learn a joint Q-function Q :
+S × A → R to estimate the future expected return given
+the current state s and joint action a. However, directly
+computing the joint Q-function is challenging due to the
+huge state-action space in MARL. To address this issue,
+value decomposition decomposes the joint Q-function Q
+into individual Q-functions Qi for each agent: Q(s, a) =
+
+Agent 1
+
+A
+
+A
+
+B
+
+A
+
+1/3
+
+1/3
+
+B
+
+1/3
+
+0
+
+B
+
+A
+
+0
+
+1
+
+B
+
+1
+
+-2
+
+(a) reward matrix
+
+Agent 2
+
+Agent 2
+
+Agent 1
+
+(b) dataset distribution
+
+Figure 1: XOR game. (a) is the reward matrix of joint actions. (b) is the distribution of dataset.
+fmix (Q1 (s, a1 ), · · · , QN (s, aN ); s), where fmix represents
+the mixing function conditioned on the state (Fu et al. 2022).
+The mixing function fmix must satisfy the IGM principle that
+any optimal joint action a∗ should satisfy
+[
+a∗ = arg max Q(s, a) =
+{arg max Qi (s, ai )}. (1)
+a∈A
+
+i∈N
+
+ai ∈Ai
+
+Under the IGM assumption, value decomposition enables
+the identification of the optimal joint action through the
+greedy actions of each agent.
+
+Behavior-Regularized Markov Game in Offline
+MARL
+Behavior-Regularized Markov Game is a useful framework
+to avoid distribution shift by incorporating a data-related
+regularization term on rewards (Wang et al. 2023b; Xu et al.
+2023a). In this framework, the goal is to optimize policy by
+T
+
+i
+hX
+γ t r(st , at ) − αf (π(·|st ), µ(·|st )) ,
+max E
+π
+
+(2)
+
+t=1
+
+where f (·, ·) is a regularization function, and α ≥ 0 is a temperature constant. The unknown behavior policy µ here can
+usually be approximated by using Behavior Cloning (Wang
+et al. 2023b; Xu et al. 2023a). Policy evaluation operator in
+this framework is given by
+
+
+(3)
+Tπ Qπ (s, a) ≜ r(s, a) + γEs′ |s,a Vπ (s′ ) ,
+h
+i
+where Vπ (s) = Ea∼π Qπ (s, a) − αf (π(a|s), µ(a|s)) .
+Thus, the objective (2) can be represented as
+h
+i
+max Ea∼π Qπ (s, a) − αf (π(·|s), µ(·|s)) .
+π
+
+(4)
+
+The Proposed Method
+OOD Joint Action in Offline MARL
+In offline MARL, value decomposition methods are more
+prone to encountering OOD joint actions due to the constraints of the IGM principle in certain scenarios. We use
+the XOR game, shown in Figure 1, to illustrate this phenomenon. Figure 1(a) shows the reward matrix of the XOR
+game, while Figure 1(b) depicts the dataset considered in
+the offline setting. Since it is necessary to minimize temporal difference (TD) error ED [(fmix (Q1 (a1 ), Q2 (a2 )) −
+r(a1 , a2 ))2 ] while satisfying the IGM principle, the local
+Q-functions for both agents are forced to satisfy Qi (B) >
+
+Qi (A), i = 1, 2 (See Appendix D for a detailed derivation).
+As a result, both agents tend to choose action B, resulting in
+the OOD joint action (B, B).
+Another line in offline MARL research combines MAPG
+methods and data-related regularization (Pan et al. 2022).
+However, they can still encounter the OOD joint actions issue although not constrained by the IGM principle. Considering again the above offline task, both learned agents are
+likely to choose (A, A) due to the data-related regularization. For agent 1, given that its teammate selects action A,
+choosing action B would yield a higher payoff. The same
+is true for agent 2, resulting in the OOD joint action (B, B).
+This situation arises because these methods do not fully consider the change of teammates’ policies, leading to conflicting directions in policy updates.
+MAPG methods employing sequential update scheme can
+effectively address this issue, as they fully consider the direction of teammates’ policy updates, thereby avoiding conflicts (Matsunaga et al. 2023; Kuba et al. 2022). In the same
+scenario as above, but with sequential updates, where agent
+1 updates first followed by agent 2, agent 1 would still
+choose action B for a higher payoff. Then, when agent 2 updates, knowing that agent 1 chose B, it would find that sticking with action A is best. Consequently, sequential-update
+MAPG methods converge to the optimal policy.
+
+In-Sample Sequential Policy Optimization
+Inspired by the above discussions, we introduce an insample sequential policy optimization method under the
+behavior-regularized Markov game framework, i.e., Eq.(4).
+Here we consider the reverse KL divergence as the regularization, which means f (x, y) = log( xy ). The benefit of choosing reverse KL divergence is that the global
+regularization can be decomposed naturally as log( π
+µ) =
+P
+πi
+i∈N log( µi ), making the simplified computation of
+sequential-update possible. Denoting i1:n as an ordered subset {i1 , · · · , in } of N , and −i1:n as its complement, where
+ik is the k-th agent in the ordered subset and i1:0 = ∅, the
+sequential-update objectives are given by:
+h
+in
+(s, ain )
+= arg maxπin Eain ∼πin Qiπ1:n
+πnew
+old
+π in (ain |s) i
+− α log( in in ) , (5)
+µ (a |s)
+where
+h
+i
+in
+−in
+in
+i1:n−1
+Qiπ1:n
+(s,
+a
+)
+≜
+E
+,
+a
+)
+.
+−i1:n Qπ (s, a
+old
+old
+π
+,π
+new
+
+old
+
+However, the optimization objective (5) requires actions produced by the policy, which is in a out-of-sample learning
+manner, potentially leading to OOD actions. In order to
+achieve in-sample learning using only the dataset actions,
+we derive the closed-form solution of objectives (5) by the
+Karush-Kuhn-Tucker (KKT) conditions
+in
+πnew
+(ain |s) ∝ µin (ain |s) · exp
+
+ Qi1:n (s, ain ) 
+π old
+
+α
+
+,
+
+(6)
+
+Agent 1
+
+B
+
+C
+
+A
+
+5
+
+-20
+
+-20
+
+B
+
+-20
+
+10
+
+-20
+
+C
+
+-20
+
+-20
+
+20
+
+(a) reward matrix
+
+A
+Agent 2
+
+Agent 2
+
+Agent 1
+A
+
+B
+
+C
+
+A
+
+0.64 0.08 0.08
+
+B
+
+0.08 0.01 0.01
+
+C
+
+0.08 0.01 0.01
+
+(b) dataset distribution
+
+Figure 2: M-NE game. (a) is the reward matrix of joint actions. (b) is the distribution of dataset.
+and thus obtain the in-sample optimization objectives for
+parametric policy πθin by minimizing the KL divergence:
+in
+in
+θnew
+= arg minDKL (πnew
+(·|s), πθin (·|s))
+θ in
+
+h
+ Ai1:n (s, ain ) 
+π old
+= arg minE(s,ain )∼D − exp
+α
+i
+θ n
+i
+· log πθin (ain |s) ,
+(7)
+i1:n
+in
+i1:n
+in [Q
+(s, ain ) − Eπnew
+where Aiπ1:n
+(s, ain ) ≜ Qπ
+π old (s, a )].
+old
+old
+A potential problem of this method is that it may lead to
+premature convergence to local optima due to exploitation
+of vested interests. This concern is especially pronounced
+when the behavior policy is a local optimum, as we will
+show in the next subsection.
+
+Maximum-Entropy Behavior-Regularized Markov
+Game
+The existence of multiple local optima is a common phenomenon in many multi-agent tasks, where finding the
+global optimum is often extremely challenging. Therefore,
+near-optimal (or expert) behavior policies can easily fall
+into or stay near local optima. In such cases, because the
+data-related regularization enforces the learned policy to remain close to the behavior policy, optimizing the objective in
+Eq.(5) is more likely to cause the sequential policy optimization method to converge towards a deterministic policy that
+exploits this local optimum. Moreover, escaping this local
+optimum becomes challenging, as when one of the agents attempts to deviate unilaterally, the optimization objective (5)
+impedes this since it hurts the overall benefits.
+We examine this issue using the M-NE game depicted
+in Figure 2, with Figure 2(a) showing the reward matrix
+and Figure 2(b) illustrating the offline dataset. In this game,
+there are three NEs: (A, A), (B, B), and (C, C), with rewards of 5, 10, and 20, respectively, where (C, C) represents
+the global optimal NE and other NEs are local optima. On
+the considered dataset, data-related regularization enforces
+agents to select A with a high probability. As a result, agents
+confidently converge to the local optimum (A, A) based on
+the observed high probability of their teammates choosing
+A, failing to recognize the optimal joint action (C, C).
+One way to address this issue is to introduce perturbations to the rewards, preventing sequential policy optimization method from deterministically converging to a local optimum and thereby encouraging it to escape the local optimum and identify the global optimal solution. From a game-
+
+theoretic perspective, the optimal solution of the perturbed
+game aligns with the solution concept of quantal response
+equilibrium (QRE) (McKelvey and Palfrey 1995).
+Definition 1. For a Behavior-Regularized Markov Game G
+with a reward function r, denote the perturbed reward as r̃.
+Then, a joint policy π ∗ is a QRE if it holds
+i
+˜ ∗ ) ≥ J(π
+˜ −i
+J(π
+∀i ∈ N , π i ,
+(8)
+∗ , π ),
+P
+t
+˜
+where J(π) ≜ Eπ [ t γ (r̃(st , at )−αf (π(·|st ), µ(·|st )))].
+Therefore, our goal is to design an in-sample sequential
+policy optimization method with QRE convergence guarantees. One simple and effective way to introduce disturbances
+is to add policy entropy into the rewards, which is also a
+commonly used regularization in online RL to improve exploration (Liu et al. 2024; Haarnoja et al. 2018). Therefore,
+we introduce the following Maximum-Entropy BehaviorRegularized Markov Game (MEBR-MG) problem, which is
+a generalization of Behavior-Regularized Markov Game (2).
+T
+hX
+
+max E
+γ t r(st , at ) − αDKL (π(·|st ), µ(·|st ))
+π
+
+t=1
+
++ βH(π(·|st ))
+
+i
+,
+
+(9)
+
+where H(π(·|st )) is policy entropy, and β ≥ 0 is a temperature constant. In the following context, we first give some
+facts about MEBR-MG, and then give the in-sample sequential policy optimization method under MEBR-MG.
+In MEBR-MG, we have the following modified policy
+evaluation operator given by:
+
+
+Tπ Qπ (s, a) ≜ r(s, a) + γEs′ |s,a Vπ (s′ ) ,
+(10)
+where
+h
+Vπ (s) =Ea∼π Qπ (s, a)
+i
+X
+π i (ai |s)
+−
+α log i i
++ β log π i (ai |s) .
+µ (a |s)
+i∈N
+
+Lemma 2. Given a policy π, consider the modified policy
+evaluation operator Tπ in Eq.(10) and a initial Q-function
+Q0 : S × A → R, and define Qk+1 = Tπ Qk . Then the
+sequence Qk will converge to the Q-function Qπ of policy
+π as k → ∞.
+Proof can be found in Appendix A. This lemma indicates
+Q-function will converge to the Q-value under the joint policy π by repeatedly applying the policy evaluation operator.
+Moreover, the additional smoothness introduced by the
+regularization term allows the QRE of MEBR-MG to be expressed in the form of Boltzmann distributions, as demonstrated by the following Proposition 3.
+Proposition 3. In a MEBR-MG, a joint policy π ∗ is a QRE
+if it holds
+Vπ∗ (s) ≥ Vπi ,π−i
+(s), ∀i ∈ N , π i , s ∈ S.
+(11)
+∗
+Then the QRE policies for each agent i are given by
+π∗i (ai |s) ∝ µi (ai |s)
+ E −i −i [Q (s, ai , a−i )] − β log µi (ai |s) 
+π∗
+a ∼π ∗
+· exp
+α+β
+(12)
+
+Algorithm 1: InSPO
+Input: Offline dataset D, initial policy π 0 and Q-function
+Q0
+Output: π K
+1: Compute behavior policy µ by simple Behavior Cloning
+2: for k = 1, · · · , K do
+3:
+Compute Qk by Eq.(10)
+4:
+Draw a permutation i1:N of agents at random
+5:
+for n = 1, · · · , N do
+6:
+Update π ikn by Eq.(13)
+7:
+end for
+8: end for
+
+number of agents. To circumvent this exponential complexity, we instead maintain a local Q-function Qϕin for each
+agent in ∈ N to approximate Qiπ1:n
+(s, ain ). Besides, Qϕin
+old
+should be updated sequentially in conjunction with the policy in order to incorporate the information of updated teami1:n−1
+) into the local Q-function. Thus, we opmates (i.e., π new
+timize the following objective for each local Q-function ϕin :
+2 i
+h
+
+in
+in
+′ ,r)∼D ρ
+in (s, a
+)
+−
+y
+,
+E
+·
+Q
+min
+(s,a,s
+ϕ
+i
+ϕn
+
+(14)
+
+where
+i
+
+−i1:n
+1:n−1
+· π old
+)(a−in |s)
+(π new
+,
+µ−in (a−in |s)
+
+
+y =y(s, a, s′ , r) ≜ r + γEain ′ ∼πin Qϕin (s′ , ain ′ )
+
+ρin = ρin (s, a) ≜
+
+Proof can be found in Appendix A. Eq.(12) for QRE
+demonstrates that incorporating the reverse KL divergence
+term ensures that the learned policy shares the same support
+set as the behavior policy, thereby avoiding OOD actions;
+and the addition of an entropy term allows the policy to place
+greater emphasis on actions with lower probabilities in the
+behavior policy, preventing premature convergence to local
+optima.
+Similar to Eq.(7), the in-sample sequential policy optimization procedure under MEBR-MG is given by:
+h
+in
+θnew
+= arg min E(s,ain )∼D
+− exp
+
+θ in
+ Ai1:n (s, ain ) − β log µin (ain |s) 
+π old
+
+α+β
+
+i
+· log πθin (ain |s) .
+(13)
+
+Proposition 4. The sequential policy optimization procedure under MEBR-MG guarantees policy improvement, i.e.,
+∀s ∈ S, a ∈ A,
+Qπnew (s, a) ≥ Qπold (s, a), Vπnew (s) ≥ Vπold (s).
+Proof can be found in Appendix A. Proposition 4 demonstrates that the policy improvement step defined in Eq.(13)
+ensures a monotonic increase in performance at each iteration. By alternating between the policy evaluation step and
+the policy improvement step, we derive InSPO, as shown
+in Algorithm 1, and we furthermore prove that InSPO converges to QRE as follows.
+Theorem 5. Joint policy π updated by Algorithm 1 converges to QRE.
+Proof can be found in Appendix A.
+
+The Practical Implementation of InSPO
+In this section, we design a practical implementation of InSPO to handle the issue of large state-action space, making it
+more suitable for offline MARL. More details can be found
+in Appendix B.
+Policy Evaluation. According to Eq.(10), we need to
+train a global Q-function to estimate the expected future return based on the current state and joint action. However, in
+MARL, the joint action space grows exponentially with the
+
+old
+
+in
+in
+− αDKL (πold
+(·|s′ ), µin (·|s′ )) + βH(πold
+(·|s′ )).
+
+Here we omit the regularization terms for other agents to
+simplify the computation. Furthermore, to reduce the high
+variance of importance sampling ratio ρin , InSPO adopts
+importance resampling (Schlegel et al. 2019) in practice,
+which resamples experience with probability proportional to
+ρin to construct a resampled dataset Dρin , stabilizing the algorithm training effectively. Thus, Eq.(14) is replaced with
+min
+E(s,a,s′ ,r)∼Dρin
+i
+ϕn
+
+h
+2 i
+Qϕin (s, ain ) − y
+.
+
+(15)
+
+Policy Improvement. After obtaining the optimal local
+value functions, we can adopt the in-sample sequential policy optimization method in Eq.(13) to learn the local policy
+for each agent:
+h
+in
+= arg min E(s,ain )∼Dρin
+θnew
+θ in
+
+− exp
+
+ A in (s, ain ) − β log µin (ain |s) 
+ϕ
+
+α+β
+
+i
+log πθin (ain |s) ,
+
+where Aϕin (s, ain ) ≜ Qϕin (s, ain ) − Eπ in [Qϕin (s, ain )].
+θ
+
+old
+
+Experiments
+We conduct a series of experiments to evaluate InSPO on
+XOR game, M-NE game, Bridge (Fu et al. 2022) and StarCraft II Micromanagement (Xu et al. 2023b). In addition to
+Behavior Cloning (BC), our baselines also include the current state-of-the-art offline MARL algorithms: OMAR (Pan
+et al. 2022), CFCQL (Shao et al. 2023), OMIGA (Wang et al.
+2023b) and AlberDICE (Matsunaga et al. 2023). Each algorithm is run for five random seeds, and we report the mean
+performance with standard deviation. For the final results,
+we indicate the algorithm with the best mean performance
+in bold, and an asterisk (*) denotes that the metric is not significantly different from the top-performing metric in that
+case, based on a heteroscedastic two-sided t-test with a 5%
+significance level. See Appendix C for experimental details.
+
+Dataset
+(a)
+(b)
+(c)
+
+BC
+0.00 ± 0.01
+0.23 ± 0.01
+0.00 ± 0.01
+
+OMAR
+1.00 ± 0.00
+−2.00 ± 0.00
+0.00 ± 0.00
+
+AlberDICE
+1.00 ± 0.00
+1.00 ± 0.00
+1.00 ± 0.00
+
+CFCQL
+−0.64 ± 0.71
+−0.38 ± 0.11
+−0.73 ± 0.48
+
+OMIGA
+0.00 ± 0.01
+0.21 ± 0.03
+0.05 ± 0.00
+
+InSPO
+1.00 ± 0.00
+1.00 ± 0.00
+1.00 ± 0.00
+
+Table 1: Averaged test return on XOR game.
+Dataset
+BC
+OMAR
+AlberDICE
+CFCQL
+OMIGA
+InSPO
+balanced −9.79 ± 0.41 20.00 ± 0.00 20.00 ± 0.00 20.00 ± 0.00 20.00 ± 0.00 20.00 ± 0.00
+imbalanced −3.47 ± 0.17 5.00 ± 0.00
+5.00 ± 0.00
+5.00 ± 0.00
+5.00 ± 0.00 20.00 ± 0.00
+
+Table 2: Averaged test return on M-NE game.
+Dataset
+BC
+OMAR
+AlberDICE
+CFCQL
+OMIGA
+InSPO
+Optimal −1.26 −2.21 ± 0.90 −6.01 ± 0.00 −1.27 ± 0.03* −12.75 ± 1.60 −9.87 ± 0.68 −1.26 ± 0.00
+Mixed −4.56 −5.88 ± 0.49 −6.01 ± 0.00 −1.29 ± 0.00 −13.79 ± 1.78 −13.45 ± 0.42 −1.27 ± 0.01
+
+Table 3: Averaged test return on Bridge.
+Map
+
+Dataset
+medium
+medium-replay
+expert
+mixed
+medium
+medium-replay
+expert
+mixed
+medium
+medium-replay
+expert
+mixed
+medium
+medium-replay
+expert
+mixed
+average performance
+
+2s3z
+
+3s vs 5z
+
+5m vs 6m
+
+6h vs 8z
+
+BC
+0.16 ± 0.07
+0.33 ± 0.04
+0.97 ± 0.02
+0.44 ± 0.06
+0.08 ± 0.02
+0.01 ± 0.01
+0.98 ± 0.02
+0.21 ± 0.04
+0.28 ± 0.37*
+0.18 ± 0.06
+0.82 ± 0.04
+0.21 ± 0.12
+0.40 ± 0.03
+0.11 ± 0.04
+0.60 ± 0.04
+0.27 ± 0.06
+0.38
+
+OMAR
+0.15 ± 0.04
+0.24 ± 0.09
+0.95 ± 0.04
+0.60 ± 0.04
+0.00 ± 0.00
+0.00 ± 0.00
+0.64 ± 0.08
+0.00 ± 0.00
+0.19 ± 0.06
+0.03 ± 0.02
+0.33 ± 0.06
+0.10 ± 0.10
+0.04 ± 0.03
+0.00 ± 0.00
+0.01 ± 0.01
+0.00 ± 0.00
+0.21
+
+CFCQL
+0.40 ± 0.10
+0.55 ± 0.07*
+0.99 ± 0.01
+0.84 ± 0.09*
+0.28 ± 0.03
+0.12 ± 0.04
+0.99 ± 0.01
+0.60 ± 0.14
+0.29 ± 0.05
+0.22 ± 0.06*
+0.84 ± 0.03
+0.76 ± 0.07*
+0.41 ± 0.04*
+0.21 ± 0.05
+0.70 ± 0.06*
+0.49 ± 0.08
+0.54
+
+OMIGA
+0.23 ± 0.01
+0.42 ± 0.02
+0.98 ± 0.02
+0.62 ± 0.03
+0.02 ± 0.02
+0.02 ± 0.01
+0.98 ± 0.02
+0.20 ± 0.06
+0.25 ± 0.08
+0.16 ± 0.05
+0.74 ± 0.05
+0.38 ± 0.23
+0.34 ± 0.01
+0.11 ± 0.04
+0.54 ± 0.04
+0.36 ± 0.06
+0.39
+
+InSPO
+0.23 ± 0.06
+0.58 ± 0.09
+0.99 ± 0.01
+0.85 ± 0.04
+0.17 ± 0.05
+0.10 ± 0.05*
+0.99 ± 0.01
+0.78 ± 0.09
+0.28 ± 0.06*
+0.24 ± 0.07
+0.79 ± 0.12
+0.78 ± 0.06
+0.43 ± 0.06
+0.23 ± 0.02
+0.74 ± 0.11
+0.60 ± 0.12
+0.55
+
+Table 4: Averaged test winning rate on StarCraft II Micromanagement.
+
+Comparative Evaluation
+
+Agent 2
+
+Matrix Game. We evaluate whether InSPO can address
+the two issues highlighted in previous section using the
+XOR game and M-NE game shown in Figure 1(a) and Figure 2(a). First, we evaluate the ability of InSPO to handle
+Agent 1
+
+Agent 1
+
+Agent 1
+
+A
+
+B
+
+A
+
+B
+
+A
+
+B
+
+A
+
+B
+
+A
+
+0.0
+
+0.0
+
+0.0
+
+0.0
+
+0.36 0.20
+
+0.0
+
+1.0
+
+B
+
+0.0
+
+1.0
+
+0.0
+
+1.0
+
+0.29 0.15
+
+0.0
+
+0.0
+
+OMIGA
+
+InSPO
+
+OMAR
+
+OMIGA (relaxed)
+
+Agent 1
+
+Figure 3: Final joint policy on XOR game for dataset (b).
+Goal of
+agent 2
+agent1 agent2
+Goal of
+agent 1
+
+Figure 4: Bridge at the beginning.
+
+the OOD joint actions issue using the XOR game. Table 1
+compares the performance of all algorithms on four datasets,
+each comprising an equal mix of different joint actions:
+(a) {(A, B), (B, A)}, (b) {(A, A), (A, B), (B, A)}, and (c)
+{(A, A), (A, B), (B, A), (B, B)}. Figure 3 illustrates the
+converged joint policy of OMAR, OMIGA, and InSPO on
+dataset (c), representing decentralized training, value decomposition, and sequential-update methods, respectively.
+As observed, only InSPO and AlberDICE, two sequentialupdate MAPG methods, successfully converge to the optimal policy, while the other algorithms fail, even opting for
+OOD joint actions. Specifically, when a more relaxed behavior policy constraint is applied, the value decomposition
+method (i.e., OMIGA (relaxed) in Figure 3) converges to
+an OOD joint action (B, B), consistent with our analysis
+in previous section. These results suggest that decentralized
+training and value decomposition methods have limitations
+in environments that demand high levels of coordination.
+Next, we conduct InSPO on M-NE game to evaluate its
+ability to alleviate the local optimum convergence issue. Ta-
+
+Bridge. Bridge, illustrated in Figure 4, is a grid-world
+Markov game resembling a temporal version of the XOR
+game. Two agents must alternately cross a one-person bridge
+as fast as possible. Starting side by side on the bridge, they
+must move together to allow one agent to cross first. For
+this experiment, we use two datasets provided by Matsunaga
+et al. (2023): optimal and mixed. The optimal dataset contains 500 trajectories, generated by combining two optimal
+deterministic policies: either agent 1 steps back to let agent
+2 cross first, or vice versa. The mixed dataset includes the
+optimal dataset plus an additional 500 trajectories generated
+using a uniform random policy.
+The performance is shown in Table 3, where the results
+of BC, OMAR and AlberDICE are from the report in Matsunaga et al. (2023). The performance is similar to that
+of the XOR game: only InSPO and AlberDICE, both using sequential-update, achieve near-optimal performance on
+both datasets. In contrast, both value decomposition methods fail to converge and produced undesirable outcomes.
+StarCraft II. We further extend our study to the StarCraft
+II micromanagement benchmarks, a high-dimensional and
+complex environment widely used in both online and offline
+MARL. In this environment, we consider four representative
+maps: 2 easy maps (2s3z, 3s vs 5z), 1 hard map (5m vs 6m)
+and 1 super-hard map (6h vs 8z). We use four datasets provided by Shao et al. (2023): medium, expert, medium-replay
+and mixed. The medium-replay dataset is a replay buffer collected during training until the policy achieves medium performance, while the mixed dataset is the equal mixture of
+the medium and expert datasets. The results are shown in
+Table 4, with the performance of CFCQL, OMAR, and BC
+taken from Shao et al.’s report.
+In contrast to the previous benchmarks, StarCraft II does
+not exhibit a highly multi-modal reward landscape. Additionally, the agents share nearly identical local objectives, making this environment suitable for the IGM principle. Therefore, value decomposition methods have achieved
+state-of-the-art performance in this environment both in
+offline and online settings. Even so, as shown in Table 4, InSPO still demonstrates competitive performance and
+achieves state-of-the-art results in most tasks.
+
+Agent 1
+A
+
+B
+
+C
+
+A
+
+1.0
+
+0.0
+
+0.0
+
+B
+
+0.0
+
+0.0
+
+0.0
+
+C
+
+0.0
+
+0.0
+
+0.0
+
+(a) InSPO w/o entropy
+
+Agent 1
+A
+Agent 2
+
+Agent 2
+
+ble 2 shows the results on datasets: (a) a balanced dataset
+collected by a uniform policy µi (A) = µi (B) = µi (C) =
+1/3, and (b) a imbalanced dataset collected by a near local
+optimum µi (A) = 0.8, µi (B) = µi (C) = 0.1, for i = 1, 2.
+The results show that on the balanced dataset (a), most algorithms find the global optimal NE, while on the imbalanced dataset (b), only InSPO correctly identifies the global
+optimal NE. This indicates that in environments with multiple local optima, the convergence of most algorithms can be
+heavily influenced by the dataset distribution. Specifically,
+when the dataset is biased toward a local optimum, algorithms are prone to converging on this sub-optimal solution.
+In contrast, InSPO converges to the global optimal solution
+through comprehensive exploration of the dataset. The results demonstrate in offline scenarios, algorithms must make
+full use of all available dataset information to prevent being
+heavily influenced by behavior policies.
+
+B
+
+A
+
+0.44 0.23
+
+B
+
+0.21 0.12
+
+(b) InSPO w/o SPO
+
+Figure 5: Ablation on entropy and sequential update scheme.
+(a) is InSPO without entropy on M-NE game for the imbalanced dataset. (b) is simultaneous-update version of InSPO
+on XOR game for dataset (b).
+dataset α = 0.1
+α=5
+α = 10
+α = 50 auto-α
+expert 0.51 ± 0.17 0.54 ± 0.06 0.69 ± 0.05 0.62 ± 0.03 0.74
+mixed 0.17 ± 0.07 0.54 ± 0.06 0.53 ± 0.12 0.48 ± 0.07 0.60
+
+Table 5: Ablation results for α on 6h vs 8z.
+Ablation Study. Here we present the impact of different
+components on performance of InSPO. Figure 5(a) shows
+the converged policy of InSPO without entropy in the MNE game on the imbalanced dataset. Without the perturbations of entropy in the optimization objective, InSPO w/o
+entropy cannot escape the local optimum. Figure 5(b) shows
+the policy of InSPO using the simultaneous update scheme
+instead of sequential policy optimization (denoted as InSPO
+w/o SPO) on dataset (b) of the XOR game. Due to conflicting update directions, InSPO w/o SPO fails to learn the optimal policy and faces the OOD joint actions issue.
+Temperature α is used to control the degree of conservatism. A too large α will result in an overly conservative policy, while a too small one will easily causes distribution shift. Thus, to obtain a suitable α, we implement both fixed and auto-tuned α in practice (see Appendix B for details), where the auto-tuned α is adjusted
+by minα ED [αDKL (π, µ) − αD̄KL ], where D̄KL is the target value. Table 5 gives ablation results for α, which shows
+that the auto-tuned α can find an appropriate α to further
+improve performance.
+Furthermore, we explore the impact of update order on
+performance and the training efficiency of sequential updates. These results are provided in Appendix C.
+
+Conclusion
+In this paper, we study the offline MARL problem, a topic
+of significant practical importance and challenges that has
+not received adequate attention. We begin with two simple yet highly illustrative matrix games, highlighting some
+limitations of current offline MARL algorithms in addressing OOD joint actions and sub-optimal convergence issues.
+To overcome these challenges, we propose a novel algorithm called InSPO, which utilizes sequential-update insample learning to avoid OOD joint actions, and introduces
+policy entropy to ensure comprehensive exploration of the
+dataset, thus avoiding the influence of local optimum behavior policies. Furthermore, we theoretically demonstrate that
+InSPO possesses monotonic improvement and QRE convergence properties, and then empirically validate its superior
+
+performance on various MARL benchmarks. For future research, integrating sequential-update in-sample learning and
+enhanced dataset utilization with other offline MARL algorithms presents an intriguing direction.
+
+Acknowledgments
+We gratefully acknowledge the support from the National Natural Science Foundation of China (No. 62076259,
+62402252), the Fundamental and Applicational Research
+Funds of Guangdong Province (No. 2023A1515012946),
+the Fundamental Research Funds for the Central Universities Sun Yat-sen University, and the Pengcheng Laboratory
+Project (PCL2023A08, PCL2024Y02). This research is also
+supported by Meituan.
+
+References
+Barde, P.; Foerster, J.; Nowrouzezahrai, D.; and Zhang, A.
+2024. A Model-Based Solution to the Offline Multi-Agent
+Reinforcement Learning Coordination Problem. In International Conference on Autonomous Agents and Multiagent
+Systems. International Foundation for Autonomous Agents
+and Multiagent Systems / ACM.
+Ding, Z.; Su, K.; Hong, W.; Zhu, L.; Huang, T.; and Lu, Z.
+2022. Multi-Agent Sequential Decision-Making via Communication. arXiv:2209.12713.
+Figueiredo Prudencio, R.; Maximo, M. R. O. A.; and
+Colombini, E. L. 2024. A Survey on Offline Reinforcement
+Learning: Taxonomy, Review, and Open Problems. IEEE
+Transactions on Neural Networks and Learning Systems,
+35(8): 10237–10257.
+Fu, W.; Yu, C.; Xu, Z.; Yang, J.; and Wu, Y. 2022. Revisiting Some Common Practices in Cooperative Multi-Agent
+Reinforcement Learning. In International Conference on
+Machine Learning, volume 162 of Proceedings of Machine
+Learning Research, 6863–6877. PMLR.
+Haarnoja, T.; Zhou, A.; Abbeel, P.; and Levine, S. 2018.
+Soft actor-critic: Off-policy maximum entropy deep reinforcement learning with a stochastic actor. In International
+conference on machine learning, 1861–1870. PMLR.
+Haarnoja, T.; Zhou, A.; Hartikainen, K.; Tucker, G.; Ha,
+S.; Tan, J.; Kumar, V.; Zhu, H.; Gupta, A.; Abbeel, P.; and
+Levine, S. 2019. Soft Actor-Critic Algorithms and Applications. arXiv:1812.05905.
+Kostrikov, I.; Nair, A.; and Levine, S. 2022. Offline Reinforcement Learning with Implicit Q-Learning. In International Conference on Learning Representations. OpenReview.net.
+Kuba, J. G.; Chen, R.; Wen, M.; Wen, Y.; Sun, F.; Wang,
+J.; and Yang, Y. 2022. Trust Region Policy Optimisation in
+Multi-Agent Reinforcement Learning. In The Tenth International Conference on Learning Representations. OpenReview.net.
+Kumar, A.; Zhou, A.; Tucker, G.; and Levine, S. 2020. Conservative Q-Learning for Offline Reinforcement Learning.
+In Advances in Neural Information Processing Systems.
+
+Li, Z.; Pan, L.; and Huang, L. 2023. Beyond Conservatism: Diffusion Policies in Offline Multi-agent Reinforcement Learning. arXiv:2307.01472.
+Li, Z.; Zhao, W.; Wu, L.; and Pajarinen, J. 2024. Backpropagation Through Agents. In Annual AAAI Conference on
+Artificial Intelligence. AAAI Press.
+Littman, M. L. 1994. Markov Games as a Framework for
+Multi-Agent Reinforcement Learning. In Machine Learning, Proceedings of the Eleventh International Conference,
+157–163. Morgan Kaufmann.
+Liu, J.; Zhong, Y.; Hu, S.; Fu, H.; Fu, Q.; Chang, X.; and
+Yang, Y. 2024. Maximum Entropy Heterogeneous-Agent
+Reinforcement Learning. In International Conference on
+Learning Representations. OpenReview.net.
+Matsunaga, D. E.; Lee, J.; Yoon, J.; Leonardos, S.; Abbeel,
+P.; and Kim, K. 2023. AlberDICE: Addressing Out-OfDistribution Joint Actions in Offline Multi-Agent RL via Alternating Stationary Distribution Correction Estimation. In
+Advances in Neural Information Processing Systems.
+McKelvey, R. D.; and Palfrey, T. R. 1995. Quantal response
+equilibria for normal form games. Games and economic behavior, 10(1): 6–38.
+Pan, L.; Huang, L.; Ma, T.; and Xu, H. 2022. Plan Better Amid Conservatism: Offline Multi-Agent Reinforcement
+Learning with Actor Rectification. In International Conference on Machine Learning, volume 162 of Proceedings of
+Machine Learning Research, 17221–17237. PMLR.
+Rashid, T.; Samvelyan, M.; de Witt, C. S.; Farquhar, G.;
+Foerster, J. N.; and Whiteson, S. 2018. QMIX: Monotonic Value Function Factorisation for Deep Multi-Agent
+Reinforcement Learning. In International Conference on
+Machine Learning, volume 80 of Proceedings of Machine
+Learning Research, 4292–4301. PMLR.
+Schlegel, M.; Chung, W.; Graves, D.; Qian, J.; and White,
+M. 2019. Importance Resampling for Off-policy Prediction. In Advances in Neural Information Processing Systems, 1797–1807.
+Shao, J.; Qu, Y.; Chen, C.; Zhang, H.; and Ji, X. 2023. Counterfactual Conservative Q Learning for Offline Multi-agent
+Reinforcement Learning. In Advances in Neural Information Processing Systems.
+Son, K.; Kim, D.; Kang, W. J.; Hostallero, D.; and Yi, Y.
+2019. QTRAN: Learning to Factorize with Transformation
+for Cooperative Multi-Agent Reinforcement Learning. In
+International Conference on Machine Learning, volume 97
+of Proceedings of Machine Learning Research, 5887–5896.
+PMLR.
+Sutton, R. S. 2018. Reinforcement Learning: An Introduction.
+Wang, J.; Ren, Z.; Liu, T.; Yu, Y.; and Zhang, C. 2021.
+QPLEX: Duplex Dueling Multi-Agent Q-Learning. In International Conference on Learning Representations. OpenReview.net.
+Wang, J.; Ye, D.; and Lu, Z. 2023. More Centralized Training, Still Decentralized Execution: Multi-Agent Conditional
+Policy Factorization. In International Conference on Learning Representations. OpenReview.net.
+
+Wang, X.; Tian, Z.; Wan, Z.; Wen, Y.; Wang, J.; and Zhang,
+W. 2023a. Order Matters: Agent-by-agent Policy Optimization. In International Conference on Learning Representations. OpenReview.net.
+Wang, X.; Xu, H.; Zheng, Y.; and Zhan, X. 2023b. Offline
+Multi-Agent Reinforcement Learning with Implicit Globalto-Local Value Regularization. In Advances in Neural Information Processing Systems.
+Wu, Z.; Yu, C.; Ye, D.; Zhang, J.; Piao, H.; and Zhuo, H. H.
+2021. Coordinated Proximal Policy Optimization. In Advances in Neural Information Processing Systems, 26437–
+26448.
+Xu, H.; Jiang, L.; Li, J.; Yang, Z.; Wang, Z.; Chan, W. K. V.;
+and Zhan, X. 2023a. Offline RL with No OOD Actions: InSample Learning via Implicit Value Regularization. In International Conference on Learning Representations. OpenReview.net.
+Xu, H.; Jiang, L.; Li, J.; Yang, Z.; Wang, Z.; Chan, W. K. V.;
+and Zhan, X. 2023b. Offline RL with No OOD Actions: InSample Learning via Implicit Value Regularization. In International Conference on Learning Representations. OpenReview.net.
+Yang, Y.; Ma, X.; Li, C.; Zheng, Z.; Zhang, Q.; Huang,
+G.; Yang, J.; and Zhao, Q. 2021. Believe What You See:
+Implicit Constraint Approach for Offline Multi-Agent Reinforcement Learning. In Advances in Neural Information
+Processing Systems.
+Yu, C.; Velu, A.; Vinitsky, E.; Gao, J.; Wang, Y.; Bayen,
+A. M.; and Wu, Y. 2022. The Surprising Effectiveness of
+PPO in Cooperative Multi-Agent Games. In Advances in
+Neural Information Processing Systems.
+Zhang, K.; Yang, Z.; and Başar, T. 2021. Multi-Agent Reinforcement Learning: A Selective Overview of Theories and
+Algorithms. arXiv:1911.10635.
+Zhu, Z.; Liu, M.; Mao, L.; Kang, B.; Xu, M.; Yu, Y.; Ermon, S.; and Zhang, W. 2023. Madiff: Offline multi-agent
+learning with diffusion models. arXiv:2305.17330.
+
+A
+A.1
+
+Proofs
+
+Proof of Policy Evaluation
+
+Lemma 6. Given a policy π, consider the modified policy
+evaluation operator Tπ under MEBR-MGs and a initial Qfunction Q0 : S × A → R, and define Qk+1 = Tπ Qk .
+Then the sequence Qk will converge to the Q-function Qπ
+of policy π as k → ∞.
+Proof. With a pseudo-reward rπ (s, a) ≜ r(s, a) −
+γEs′ |s,a [αDKL (π(·|s′ ), µ(·|s′ )) − βH(π(·|s′ ))], the update
+rule of Q-function can be represented as:
+h
+i
+Q(s, a) ← rπ (s, a) + γEs′ |s,a,a′ ∼π Q(s′ , a′ ) .
+Then, we can apply the standard convergence results for policy evaluation (Sutton 2018).
+
+A.2
+
+Proof of QRE
+
+Proposition 7. In a MEBR-MG, a joint policy π ∗ is a QRE
+if it holds
+Vπ∗ (s) ≥ Vπi ,π−i
+(s), ∀i ∈ N , π i , s ∈ S.
+(16)
+∗
+Then the QRE policies for each agent i are given by
+π∗i (ai |s) ∝ µi (ai |s)
+ E −i −i [Q (s, ai , a−i )] − β log µi (ai |s) 
+π∗
+a ∼π ∗
+· exp
+α+β
+(17)
+Proof. We consider the following constrained policy optimization problem to agent i:
+h
+i
+maxπi Eai ∼πi ,a−i ∼π−i Qπ (s, a)
+−α
+
+N X
+X
+
+π j (aj |s) log
+
+j=1 aj
+
+−β
+
+N X
+X
+
+π j (aj |s)
+µj (aj |s)
+
+π j (aj |s) log π j (aj |s),
+
+j=1 aj
+
+s.t.
+
+X
+
+π i (ai |s) = 1,
+
+∀s ∈ S.
+
+ai
+
+Its associated Lagrangian function is
+h
+i
+L(π i , λ) =Eai ∼πi ,a−i ∼π−i Qπ (s, a)
+−α
+
+N X
+X
+
+π j (aj |s) log
+
+j=1 aj
+
+−β
+
+N X
+X
+
+π j (aj |s)
+µj (aj |s)
+
+π j (aj |s) log π j (aj |s)
+
+j=1 aj
+
++λ
+
+X
+
+
+π i (ai |s) − 1 .
+
+ai
+
+Therefore, we have:
+
+
+∂L(π i , λ)
+i
+−i
+−i ∼π −i Q (s, a , a
+)
+=
+E
+a
+π
+∂π i (ai |s)
+π i (ai |s)
+−α log i i
+− β log π i (ai |s) − α − β + λ.
+µ (a |s)
+According to the Karush-Kuhn-Tucker (KKT) conditions,
+we know the optimal policy (i.e., QRE policy) π∗i satisfies
+
+λ∗
+π∗i (ai |s) = exp(
+− 1) · µi (ai |s) · exp
+α+β
+Ea−i ∼π−i
+[Qπ∗ (s, ai , a−i )] − β log µi (ai |s) 
+∗
+,
+α+β
+P
+where λ∗ is used to ensure ai π∗i (ai |s) = 1, i.e.,
+Xh
+λ∗
+exp(1 −
+)=
+µi (ai |s)
+α+β
+i
+a
+
+[Qπ∗ (s, ai , a−i )] − β log µi (ai |s) i
+a
+· exp
+.
+α+β
+Thus, the proof is completed.
+ E −i
+
+∼π −i
+∗
+
+A.3
+
+Proof of Policy Improvement
+
+Proposition 8. The sequential policy optimization procedure under MEBR-MG guarantees policy improvement, i.e.,
+∀s ∈ S, a ∈ A,
+Qπnew (s, a) ≥ Qπold (s, a), Vπnew (s) ≥ Vπold (s).
+Proof. The policy improvement step of sequential policy
+optimization is given by
+h
+i1:n
+in
+(s, ain )
+πnew
+= arg maxπin Eain ∼πin Qπ
+old
+i
+π in (ain |s)
+− α log in in
+− β log π in (ain |s) ,
+(18)
+µ (a |s)
+
+n=1
+
+new
+
+new
+
+i
+in
+πnew
+(ain |s)
+in
+in
+|s)
+−
+β
+log
+π
+(a
+new
+µin (ain |s)
+N
+h
+X
+≥
+Eai1:n−1 ∼πi1:n−1 ,ain ∼π̄in Aiπnold (s, ai1:n−1 , ain )
+− α log
+
+n=1
+
+new
+
+i
+π̄ in (ain |s)
+in in
+|s)
+(a
+−
+β
+log
+π̄
+µin (ain |s)
+i
+h
+π̄(a|s)
+=Ea∼π̄ Aπold (s, a) − α log
+− β log π̄(a|s) .
+µ(a|s)
+− α log
+
+where
+i
+h
+−in
+in
+in
+i1:n−1
+,
+a
+)
+.
+Qiπ1:n
+(s,
+a
+)
+≜
+E
+−i1:n Qπ (s, a
+old
+old
+π
+,π
+new
+
+old
+
+We first show that the resulting joint policy π new satisfies:
+h
+π new =arg maxπ Ea∼π Qπold (s, a)
+i
+π(a|s)
+− α log
+− β log π(a|s)
+µ(a|s)
+=arg maxπ Lπold (π).
+Otherwise, suppose that there exists a policy π̄ ̸= π new such
+that Lπold (π̄) > Lπold (π new ). From the policy improvement
+step, we have
+h
+i
+h
+−in
+in
+in E i1:n−1
+,
+a
+)
+Eain ∼πnew
+−i1:n Qπ (s, a
+old
+π
+,π
+new
+
+old
+
+i
+π in (ain |s)
+in
+in
+−α log new
+(a
+|s)
+−
+β
+log
+π
+new
+µin (ain |s)
+≥
+h
+h
+i
+Eain ∼π̄in Eπi1:n−1 ,π−i1:n Qπold (s, a−in , ain )
+new
+
+−α log
+
+old
+
+i
+π̄ in (ain |s)
+in in
+−
+β
+log
+π̄
+(a
+|s)
+i
+i
+µ n (a n |s)
+by
+
+old
+
+h
+h
+i
+in
+i1:n−1
+in
+in E i1:n−1 A
+Eain ∼πnew
+(s,
+a
+,
+a
+)
+π
+old
+π
+new
+
+−α log
+
+i
+in
+πnew
+(ain |s)
+in
+in
+−
+β
+log
+π
+(a
+|s)
+new
+µin (ain |s)
+
+new
+
+(19)
+
+where
+h
+i
+Aiπnold (s, ai1:n−1 , ain ) ≜ Eπ−i1:n Qπold (s, a−in , ain )
+old
+h
+i
+−Eπ−i1:n−1 Qπold (s, a−in , ain ) .
+old
+
+
+
+Qπold (s, a) = r(s, a) + γEs′ |s,a V πold (s′ )
+h
+≤r(s, a) + γEs′ |s,a
+h
+ii
+π new (a|s′ )
+′
+Ea∼πnew Qπold (s′ , a) − α log
+−
+β
+log
+π
+(a|s
+)
+new
+µ(a|s′ )
+..
+.
+≤Qπnew (s, a), ∀s, a
+V πold (s)
+
+h
+h
+i
+Eain ∼π̄in Eπi1:n−1 Aiπnold (s, ai1:n−1 , ain )
+i
+π̄ in (ain |s)
+in in
+−
+β
+log
+π̄
+(a
+|s)
+,
+µin (ain |s)
+
+which contradicts the claim Lπold (π̄) > Lπold (π new ). Hence,
+we have π new = arg maxπ Lπold (π), which gives
+i
+h
+π new (a|s)
+− β log π new (a|s)
+Ea∼πnew Qπold (s, a) − α log
+µ(a|s)
+h
+i
+π old (a|s)
+≥ Ea∼πold Qπold (s, a) − α log
+− β log π old (a|s)
+µ(a|s)
+= V πold (s)
+
+And then,
+
+≥
+
+−α log
+
+The resulting inequality can be equivalently rewritten as
+i
+h
+π new (a|s)
+− β log π new (a|s)
+Ea∼πnew Qπold (s, a) − α log
+µ(a|s)
+i
+h
+π̄(a|s)
+≥ Ea∼π̄ Qπold (s, a) − α log
+− β log π̄(a|s) ,
+µ(a|s)
+
+Therefore, we have
+
+Subtracting both
+sides of the
+inequality
+i
+h
+−in
+in
+Eπi1:n−1 ,π−i1:n−1 Qπold (s, a , a ) gives
+new
+
+Combining this inequality (19) with Lemma 9, we have:
+h
+i
+π new (a|s)
+Ea∼πnew Aπold (s, a) − α log
+− β log π new (a|s)
+µ(a|s)
+N
+h
+X
+=
+Eai1:n−1 ∼πi1:n−1 ,ain ∼πin Aiπnold (s, ai1:n−1 , ain )
+
+i
+h
+π old (a|s)
+− β log π old (a|s)
+= Ea∼πold Qπold (s, a) − α log
+µ(a|s)
+h
+i
+π new (a|s)
+≤ Ea∼πnew Qπold (s, a) − α log
+− β log π new (a|s)
+µ(a|s)
+h
+i
+π new (a|s)
+≤ Ea∼πnew Qπnew (s, a) − α log
+− β log π new (a|s)
+µ(a|s)
+= V πnew (s), ∀s.
+Thus, the proof is completed.
+
+Lemma 9 (Multi-Agent Advantage Decomposition from
+Kuba et al.). For any state s and joint action, the joint advantage function can be decomposed as:
+Aπ (s, a) =
+
+N
+X
+
+Aiπn (s, ai1:n−1 , ain )
+
+n=1
+
+.
+
+and ϕ̄in is the soft-target network of ϕin .
+The behavior policy µin in J(θin ) is pre-trained by the
+Behavior Cloning
+i
+h
+in in
+in )∼D
+|s)
+.
+(21)
+(a
+−
+log
+µ
+E
+min
+(s,a
+i
+µn
+
+Proof. By the definition of multi-agent advantage function,
+we have:
+Aπ (s, a) =Qπ (s, a) − V π (s)
+N h
+h
+i
+X
+=
+Eπ−i1:n Qπ (s, a−in , ain )
+n=1
+
+h
+ii
+− Eπ−i1:n−1 Qπ (s, a−in , ain )
+=
+
+N
+X
+
+Instead of using the µin trained by Eq.(21) to calculate
+µ−in in the computation of importance resampling ratio ρin ,
+we pre-train an MLP-based autoregressive behavior policy,
+same with the one in Matsunaga et al., for numerically stability. The optimization objective of the autoregressive behavior policy is given by
+N
+h
+i
+X
+−i j
+i
+1:i−1
+min
+E
+−
+log
+µ
+(a
+|s,
+a
+,
+a
+)
+. (22)
+(s,a)∼D
+−i
+µ
+
+Aiπn (s, ai1:n−1 , ain )
+
+n=1
+
+.
+
+A.4
+
+where
+Aϕ̄in (s, ain ) ≜ Qϕ̄in (s, ain ) − Eπθin [Qϕ̄in (s, ain )],
+
+Proof of QRE convergence
+
+Theorem 10. In the tabular setting, the joint policy π updated by InSPO converges to QRE.
+Proof. First, we have that Qπk+1 (s, a) ≥ Qπk (s, a) by
+Proposition 8 and that the Q-function is upper-bounded
+since reward and regularizations are bounded. Hence, the sequence of policies converges to some limit point π̄.
+Then, considering this limit point joint policy π̄, it must
+be the case that ∀i, π i ,
+h
+h
+i
+Eai ∼π̄i Eπ̄−i Qπ̄ (s, a−i , ai )
+i
+π̄ i (ai |s)
+− β log π̄ i (ai |s)
+−α log i i
+µ (a |s)
+≥
+h
+h
+i
+Eai ∼πi Eπ̄−i Qπ̄ (s, a−i , ai )
+i
+π i (ai |s)
+−α log i i
+− β log π i (ai |s) ,
+µ (a |s)
+which is equivalent with Vπ̄ (s) ≥ Vπi ,π̄−i (s). Thus, π̄ is a
+quantal response equilibrium, which finishes the proof.
+
+j=1,j̸=i
+
+Then, in the computation of ρin , we use the geometric mean
+to prevent the collapse of ρin due to the growth of the number of agents:
+ π −in (a−in |s)  N1−1
+ρ in =
+.
+(23)
+µ−in (a−in |s)
+In order to estimate the future return based on state-action
+pair, we train the local Q-function network by minimizing
+the temporal difference (TD) error with a CQL regularization term to further penalize OOD action values:
+h
+2 i
+J(ϕin ) ≜ E(s,a,s′ ,r)∼Dρin Qϕin (s, ain ) − y
+h
+X
+exp(Qϕin (s, ain ))
++ αCQL Es∼Dρin log
+ain
+
+
+i
+− Eain ∼µin Qϕin (s, ain ) ,
+where
+
+
+y =y(s, a, s′ , r) ≜ r + γEain ′ ∼πin Qϕ̄in (s′ , ain ′ )
+old
+
+− αDKL (πθin (·|s′ ), µin (·|s′ )) + βH(πθin (·|s′ )).
+Here we use αCQL = 0.1 as the default value.
+Lastly, we give the loss function of auto-tuned α, which
+is inspired by the auto-tuned temperature extension of
+SAC (Haarnoja et al. 2019):
+hX
+i
+J(α) ≜ Es∼D
+αDKL (π i (·|s), µi (·|s)) − αD̄KL ,
+i∈N
+
+(25)
+where D̄KL is the target value with the default value 0.18.
+
+C
+B
+
+C.1
+
+Details of Practical Algorithm
+
+In the practical implementation of InSPO, we train the policy network θin by loss function
+h
+J(θin ) ≜ E(s,ain )∼Dρin
+− exp
+
+ A in (s, ain ) − β log µin (ain |s) 
+ϕ̄
+
+α+β
+
+i
+log πθin (ain |s) ,
+(20)
+
+(24)
+
+Experimental Details
+
+Baselines
+
+BC, OMAR and CFCQL: We use the open-source implementation 1 provided by Shao et al.. AlberDICE: We use
+the open-source implementation 2 provided by Matsunaga
+et al.. OMIGA: We use the open-source implementation 3
+provided by Wang et al..
+1
+
+https://github.com/thu-rllab/CFCQL
+https://github.com/dematsunaga/alberdice
+3
+https://github.com/ZhengYinan-AIR/OMIGA
+2
+
+Map
+5m vs 6m
+
+6h vs 8z
+
+Dataset
+medium
+medium-replay
+expert
+mixed
+medium
+medium-replay
+expert
+mixed
+
+random
+0.28 ± 0.06
+0.24 ± 0.07
+0.79 ± 0.12
+0.78 ± 0.06
+0.43 ± 0.06
+0.23 ± 0.02
+0.74 ± 0.11
+0.60 ± 0.12
+
+fixed
+0.29 ± 0.06
+0.25 ± 0.10
+0.84 ± 0.05
+0.78 ± 0.05
+0.39 ± 0.07
+0.23 ± 0.04
+0.72 ± 0.07
+0.62 ± 0.10
+
+semi-greedy
+0.28 ± 0.03
+0.27 ± 0.04
+0.81 ± 0.05
+0.78 ± 0.08
+0.42 ± 0.11
+0.17 ± 0.08
+0.71 ± 0.09
+0.65 ± 0.11
+
+Table 6: Impact of update order.
+
+C.2
+
+Dataset Details
+
+Bridge. We use the datasets 2 provided Matsunaga et al..
+The optimal dataset (500 trajectories) is collected by a handcrafted (multi-modal) optimal policy, and the mixed dataset
+(500 trajectories) is the equal mixture of the optimal dataset
+and 500 trajectories collected by a uniform random policy.
+StarCraft II. We use the datasets 1 provided Shao et al.,
+which are collected by QMIX (Rashid et al. 2018). The
+medium dataset (5000 trajectories) is collected by a partially
+trained model of QMIX, and the expert dataset (5000 trajectories) is collected by a fully trained model. The mixed
+dataset (5000 trajectories) is the equal mixture of medium
+and expert datasets. The medium-replay dataset (5000 trajectories) is the replay buffer during training until the policy
+reaches the medium performance.
+
+C.3
+
+Resources
+
+We run all the experiments on 4*NVIDIA GeForce RTX
+3090 GPUs and 4*NVIDIA A30. Each setting is repeated
+for 5 seeds. For one seed, it takes about 1.5 hours for StarCraft II, 1 hour for Bridge, and 15 minutes for matrix games.
+
+C.4
+
+C.5
+
+Impact of Update Order
+
+Update order might impact performance (Ding et al. 2022;
+Wang et al. 2023a). Ding et al. used a world model to determine the order by comparing the value of intentions. Wang
+et al. introduced a semi-greedy agent selection rule, which
+prioritizes updating agents with a higher expected advantage. However, they are heuristic and may not guarantee optimal results. To investigate this, we add an ablation study,
+comparing ‘random’, ‘fixed’, and semi-greedy update rule
+in terms of their impact on InSPO’s performance. Table 6
+shows that the effect of update order on performance is not
+significant, but determining the optimal update sequence is
+still an interesting direction for future work.
+
+C.6
+
+Training Efficiency
+
+The sequential updates can increase training times, which is
+a common issue with this method. Here we add a comparison of training times between InSPO and CFCQL in Table 7, which shows that sequential updates do increase the
+training time. However, some work (Wang et al. 2023a) aim
+to address this issue by grouping agents into blocks for simultaneous updates within blocks, with sequential updates
+between blocks.
+map
+2s3z
+3s vs 5z
+5m vs 6m
+6h vs 8z
+
+Reproducibility
+
+The local Q-function network is represented by 3-layer
+ReLU activated MLPs with 256 units for each hidden layer.
+The policy network is implemented in two ways: MLP and
+RNN. For the Matrix Game and Bridge, the policy network
+is represented by 3-layer ReLU activated MLPs with 256
+units for each hidden layer. For StarCraft II, the policy network consists of two linear layers of 64 units and one GRUCell layer, referring to the CFCQL implementation 1 . All the
+networks are optimized by Adam optimizer.
+For all datasets and algorithms, we run all the experiments with 1e7 training steps on 5 seeds: 0, 1,
+2, 3, 4. For evaluation we rolled out policies for 32
+episodes and computed the mean episode return (or winning rate). For OMAR, we tune a best CQL weight from
+{0, 0.1, 0.5, 1, 2, 3, 4, 5, 10}. For CFCQL, we tune a best
+CQL weight from {0, 0.1, 0.5, 1, 5, 10, 50}, softmax temperature from {0, 0.1, 0.5, 1, 100}. For OMIGA, we tune a best
+regularization temperature from {0.1, 0.5, 1, 3, 5, 7, 10}. For
+InSPO, we tune a best α from {0.1, 0.5, 1, 3, 5}, D̄KL from
+{0.08, 0.18, 0.3} and an exponentially decaying β from
+{0, 5, 10}.
+
+CFCQL
+1h
+1h
+0.5h
+0.75h
+
+InSPO
+1.75h
+1.2h
+1.25h
+2.25h
+
+Table 7: Comparison of training times between InSPO and
+CFCQL.
+
+D
+
+Value Decomposition in XOR
+
+In XOR game, the minimization of TD error
+ED [(Q(a1 , a2 ) − r(a1 , a2 ))2 ] motivates the global Qnetwork to satisfy
+Q(A, B) = Q(B, A) > Q(A, A).
+
+(26)
+
+According to IGM principle, if Qi (A) > Qi (B), then
+Q(A, A) > Q(A, B), and Q(A, A) > Q(B, B), contradicting Eq.(26). If Qi (A) = Qi (B), then Q(A, A) =
+Q(A, B) = Q(B, B), contradicting Eq.(26) again. Therefore, we have Qi (A) < Qi (B), which leads to the OOD
+joint action (B, B).
+
+E
+
+Similar Techniques to the Concept of
+“sequential”
+
+The idea of “sequential” has been explored in various directions within MARL. Specifically, Ding et al. introduced
+SeqComm, a communication framework where agents condition their actions based on the ordered actions of others,
+mitigating circular dependencies that arise in simultaneous
+communication. MACPF (Wang, Ye, and Lu 2023) decomposes joint policies into individual ones, incorporating a correction term to model dependencies on preceding agents’ actions in sequential execution. BPPO (Li et al. 2024) employs
+an auto-regressive joint policy with a fixed execution order.
+During training, agents act sequentially based on the prior
+agents’ actions, and update their policies based on the feedback from subsequent agents. This bidirectional mechanism
+enables each agent adapts to the changing behavior of the
+team efficiently.
+While these works use the concept of “sequential” to
+improve coordination, applying them directly in offline
+MARL poses challenges. Both policy and value functions
+in MACPF and BPPO explicitly condition on prior agents’
+actions, which can be challenging in offline settings where
+required data may be missing, potentially hindering accurate
+value function updates.
+
+

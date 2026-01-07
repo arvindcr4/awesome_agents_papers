@@ -1,5 +1,5 @@
 # ARTIST Agentic Reasoning Tool Integration
-- Paper: [ARTIST_Agentic_Reasoning_Tool_Integration.pdf](../../../papers/agent-frameworks/ARTIST_Agentic_Reasoning_Tool_Integration.pdf)
+- Paper: [ARTIST_Agentic_Reasoning_Tool_Integration.pdf](../../../reinforcement_learning_papers/09_agentic_rl/ARTIST_Agentic_Reasoning_Tool_Integration.pdf)
 
 ## Gemini diagrams
 

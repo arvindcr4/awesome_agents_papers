@@ -1,5 +1,5 @@
 # OpenAI O1 Replication Journey
-- Paper: [OpenAI_O1_Replication_Journey.pdf](../../../papers/rl-finetuning/OpenAI_O1_Replication_Journey.pdf)
+- Paper: [OpenAI_O1_Replication_Journey.pdf](../../../reinforcement_learning_papers/02_rlhf_alignment/OpenAI_O1_Replication_Journey.pdf)
 
 ## Gemini diagrams
 

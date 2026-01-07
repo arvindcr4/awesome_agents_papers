@@ -1,5 +1,5 @@
 # Chain-of-Thought Empowers Transformers to Solve Inherently Serial Problems
-- Paper: [Chain-of-Thought_Empowers_Transformers_to_Solve_Inherently_Serial_Problems.pdf](../../../papers/reasoning/Chain-of-Thought_Empowers_Transformers_to_Solve_Inherently_Serial_Problems.pdf)
+- Paper: [Chain-of-Thought_Empowers_Transformers_to_Solve_Inherently_Serial_Problems.pdf](../../../reinforcement_learning_papers/09_agentic_rl/Chain-of-Thought_Empowers_Transformers_to_Solve_Inherently_Serial_Problems.pdf)
 
 ## Gemini diagrams
 

@@ -1,0 +1,2036 @@
+arXiv:2509.01257v2 [cs.LG] 23 Oct 2025
+
+Multi-Agent Reinforcement Learning for Task
+Offloading in Wireless Edge Networks
+
+Andrea Fox
+LIA, Avignon University
+Avignon, France
+andrea.fox@univ-avignon.fr
+
+Francesco De Pellegrini
+LIA, Avignon University
+Avignon, France
+francesco.de-pellegrini@univ-avignon.fr
+
+Eitan Altman
+INRIA, Sophia Antipolis, France
+eitan.altman@inria.fr
+
+Abstract
+In edge computing systems, autonomous agents must make fast local decisions
+while competing for shared resources12 . Existing MARL methods often resume
+to centralized critics or frequent communication, which fail under limited observability and communication constraints. We propose a decentralized framework
+in which each agent solves a constrained Markov decision process (CMDP), coordinating implicitly through a shared constraint vector. For the specific case of
+offloading, e.g., constraints prevent overloading shared server resources. Coordination constraints are updated infrequently and act as a lightweight coordination
+mechanism. They enable agents to align with global resource usage objectives
+but require little direct communication. Using safe reinforcement learning, agents
+learn policies that meet both local and global goals. We establish theoretical guarantees under mild assumptions and validate our approach experimentally, showing
+improved performance over centralized and independent baselines, especially in
+large-scale settings.
+
+1
+
+Introduction
+
+In decentralized systems, local decisions taken by agents collectively influence the outcome of other
+agents’ actions or the availability of shared resources, with direct impact on individual performance.
+In mobile edge computing (MEC), for instance, this is the case of edge offloading techniques. They
+permit multiple devices to independently decide whether to offload computations to a shared edge
+server or to process them locally. But, while each agent operates based on local observations and
+limitations, such as battery level, workload, or latency requirements, the collective offloading decisions directly affect server responsiveness and network congestion. Actually, when too many agents
+offload simultaneously, the resulting overload can degrade performance across the system. In such
+settings, each agent’s objective depends not only on its own decisions but also on the aggregated
+behavior of others, introducing a coordination challenge. This challenge is further amplified in environments with communication delays or asynchronous agent behavior, where real-time coordination
+is difficult or infeasible. Designing scalable learning methods that support implicit coordination under these system technical constraints is essential for efficient and robust distributed operation.
+1
+The code used in our experiments can be found at https://github.com/Andrea-Fox/
+multiAgentTaskOffloading.
+2
+This work has been partially supported by the French National Research Agency (ANR) within the PARFAIT project (ANR-21-CE25-0013).
+
+1
+
+Many existing approaches to coordination in multi-agent reinforcement learning assume additive
+rewards or rely on shared incentives and communication protocols. However, in practical systems
+like edge computing and wireless access networks, agent interactions are tightly coupled through
+shared resources, and rewards are often non-additive due to congestion effects. To address these
+coordination challenges, we propose a decentralized learning framework based on independent constrained Markov decision processes (CMDPs). In this framework, coordination is achieved implicitly through shared constraints that are updated infrequently. These constraints regulate the
+maximum frequency at which each agent can offload tasks, effectively serving as a virtual coordination mechanism over shared resources. Each agent optimizes its own policy using techniques from
+constrained reinforcement learning, ensuring local autonomy while maintaining system-wide alignment through periodic, constraint-driven synchronization. This approach enables fast, scalable, and
+communication-efficient decision-making in distributed environments like edge computing, where
+centralized coordination is often impractical.
+Our contributions are resumed hereafter:
+• We introduce DCC, a general decentralized reinforcement learning framework for multiagent coordination under shared resource constraints; we apply it to the problem of task
+offloading in wireless edge computing systems. Each device (agent) solves a local CMDP,
+and coordination emerges implicitly through the shared constraint vector that regulates
+offloading behavior across the network.
+• We provide a tractable approximation of the global objective via decomposition, establish theoretical guarantees on its validity under mild assumptions and error bounds in the
+nonlinear case.
+• We validate the DCC framework through preliminary numerical experiments in toy environments. While limited in scope, our results highlight the scalability of the approach and
+the net improvement over centralized and independent baselines. They lay the groundwork
+for more extensive evaluations in future research.
+The paper is organized as follows: section 2 reviews related work, while section 3 introduces the
+Markov game and the system model under consideration. In section 4, we present the proposed algorithm for the agents’ constrained policy optimization. Numerical results are provided in section 5,
+followed by concluding remarks in the final section.
+
+2
+
+Related works
+
+Multi-agent reinforcement learning (MARL) has been extensively surveyed in [11, 33, 2]. Centralized Training Distributed Execution (CTDE) approaches are the most widely used in MARL. For
+example, MADDPG [18], MAPPO [32], and COMA [7] employ centralized critics to guide training,
+while policies are executed in a decentralized manner. Value-decomposition methods such as VDN
+[26] and QMIX [23] improve scalability further by factorizing value functions, though they operate
+under an individual-global-max assumption, which does not hold in settings where agents compete
+for scarce resources. Independent learners such as IQL [27] and IPPO [6] avoid centralization entirely, but struggle to coordinate in environments with interdependent rewards.
+Constrained reinforcement learning (CRL) extends standard RL by requiring policies to satisfy longterm constraints in addition to maximizing rewards. A variety of approaches have been proposed to
+solve constrained Markov decision processes (CMDPs) [9, 17]. Primal-dual methods, such as RCPO
+[29], optimize reward and constraints concurrently, while value-based methods [5] adapt Q-learning
+to the constrained setting. CPO [1] formulates the problem as a constrained trust-region update,
+offering guarantees but incurring high computational cost. IPO [16] introduces a first-order method
+using barrier functions, and PCPO [31] projects policies onto the feasible set after unconstrained
+optimization.
+While reinforcement learning has been widely applied to MEC offloading problems—typically optimizing task latency or energy consumption using single-agent algorithms such as DQN [15] and
+DDQN [28]—multi-agent settings remain comparatively underexplored. Some recent works integrate MARL into this domain: for example, [8] combines QMIX with DQN to jointly minimize
+average delay and energy cost, while [12] employs decentralized actor–critic agents for user-level
+2
+
+offloading decisions. However, these approaches either rely on centralized training, assume frequent inter-agent communication, or do not explicitly address coordination under shared resource
+constraints. In contrast, our method formulates offloading as a set of independent constrained MDPs,
+where coordination emerges implicitly via infrequent updates to shared constraints, enabling scalable, communication-efficient learning tailored to congestible wireless environments.
+
+3
+
+System model
+
+In wireless edge computing, a collection of mobile devices must decide at each time step whether to
+execute computational tasks locally, offload them to a shared edge server, or defer processing altogether. Each device operates independently based on its local state, which may include factors such
+as task backlog, latency sensitivity, energy harvesting rate, local processing cost, the time elapsed
+since the last data processing, and battery level. The wireless channel and the edge server represent
+shared, capacity-limited resources. When too many devices offload simultaneously, contention and
+server overload degrade performance for all users. To mitigate this, we impose a constraint on the
+long-term frequency with which each agent may offload, serving as a virtual coordination mechanism. This constraint does not reflect a physical device limitation, but rather a system-level policy
+that governs fair and efficient resource usage.
+Each device is modeled as an agent solving a local constrained MDP (CMDP) [3], optimizing its
+policy to balance local performance objectives with the global constraint on offloading frequency.
+Coordination emerges implicitly as agents adapt their policies based on local observations and periodic updates to the shared constraint, enabling decentralized yet system-aware behavior.
+3.1
+
+Markovian formulation
+
+We model the system described in section 3 as a decentralized multi-agent problem in which N
+agents must coordinate their actions to minimize a global objective function. The joint state of the
+system is denoted by s = (s1 , . . . , sN ) ∈ S, where si is the local observation of agent i. Each agent
+selects an action ai from its individual action space, and the joint action is a = (a1 , . . . , aN ) ∈ A.
+We assume independent transition dynamics, i.e., the transition probability of the system factorizes
+QN
+across agents as p(s′ | s, a) = i=1 pi (s′i | si , ai ), where s′ = (s′1 , . . . , s′N ) is the next state, and
+pi denotes the local transition kernel for agent i.
+Each agent’s reward consists of a local component and a global component that depends on the
+actions of the other agents. This formulation is sufficiently general to model a broad range of mobile
+edge computing applications.
+r(s, a) =
+
+N
+X
+i=1
+
+ri (si , a) =
+
+N
+X
+
+ui (si ) + I[ai = acrowd ] · d (N (a))
+
+(1)
+
+i=1
+
+where ui : Si → R describes the local utility function for agent i, acrowd ∈ Ai is a designated
+PN
+crowded action, corresponding to offloading the task to the edge computer, N (a) = j=1 I[aj =
+acrowd ] is the number of agents choosing the crowded action and d : [1, ∞) → R is a differentiable
+function with d(1) = 0, d′ (n) > 0, and d′′ (n) exists and does not change sign.
+The function d(n) models congestion at the edge: the more agents select the crowd action, the
+greater the penalty each receives for choosing it. This structure induces coordination challenges
+reminiscent of crowding games or singleton congestion games, where agents compete over a shared,
+congestible resource. This additive form preserves the separability of local rewards while explicitly
+modeling the coupling from congestion through d(N (a)), which captures the performance degradation when many agents offload simultaneously.
+We assume the following misalignment between individual and collective incentives:
+Assumption 1 (Individual Incentive for Crowd Action). Let a ∈ A be such that N (a) = 1 and ai =
+acrowd , i.e., only agent i selects the crowd action. Let a′ ∈ A be identical to a except a′i ̸= acrowd ,
+with a′j = aj for all j ̸= i. Then, for all states s:
+r(s, a) < r(s, a′ ).
+
+3
+
+(2)
+
+That is, the crowd action appears individually beneficial when selected in isolation. However, this
+creates a coordination dilemma: if every agent independently learns to select the crowd action,
+the shared penalty d(N (a)) increases, degrading the overall system performance. This structure
+highlights the need for coordination-aware learning methods beyond naive reward minimization.
+The objective function we want to minimize is
+"∞
+#
+X
+t
+J(π, β) = Ea∼π(s)
+γ r(st , at ) | s0 ∼ β
+
+(3)
+
+t=0
+
+While the dynamics are independent across agents, the reward function introduces a critical coupling
+through the crowd-dependent term d(N (a)), which depends on the number of agents selecting a
+specific action acrowd . This structure creates several challenges in analyzing or optimizing J(β):
+• Non-decomposability: The reward r(s, a) is not additive across agents, as the congestion
+penalty depends on the global joint action a. As a result, standard decomposition techniques used in multi-agent systems with independent rewards (e.g., independent learners)
+are not applicable.
+• Coupled incentives: Even if agents act independently, their optimal behavior is interdependent due to the shared penalty. The optimal joint policy may require implicit coordination to avoid overcrowding the sensitive action, a behavior that cannot be captured by
+decentralized greedy learners.
+• Noisy reward: Since the congestion term depends on how many agents select acrowd , individual agents receive noisy or misleading feedback about their own contribution to the
+reward. This complicates both policy gradient and value-based methods.
+• Non-stationarity in decentralized learning: In decentralized training, each agent’s policy
+evolves independently. Coupling in the reward makes the environment non-stationary from
+each agent’s perspective, even though the transition dynamics are stationary.
+These properties position the problem beyond standard cooperative multi-agent reinforcement learning (MARL) settings with additive rewards or shared goals. In the next section, we present a learning
+framework designed to address these challenges.
+
+4
+
+Using MARL for optimizing offloading
+
+We now introduce the DCC framework (Decentralized Coordination via CMDPs), a general structure for multi-agent reinforcement learning in shared-resource environments. DCC enables scalable
+coordination among agents by combining three key ingredients:
+1. Lightweight Communication: Agents operate independently, without exchanging realtime state or action information. Inter-agent communications do occur, but only infrequently and to share scalar constraint variables, which enables coordination.
+2. Constraint-Based Coupling: Each agent solves a constrained MDP in which the constraint controls the crowded action. The update of the constraint variable serves as a coordination signal across agents.
+3. 3: System-Level Alignment: Optimizing the constraint vector steers individual agent behavior toward global objectives, without requiring centralized control or synchronous communication.
+We remark that DCC is not a single algorithm but a general framework compatible with a broad
+class of reinforcement learning methods for local MDPs, including value-based and policy-gradient
+approaches. We begin by providing a high-level intuition of the proposed algorithm. A detailed
+description of each component is then developed in sections 4.1 to 4.5, including the underlying
+reward approximation, the CMDP formulation, and the multi-timescale optimization process.
+To approximate the global objective (3), we reformulate it as a sum of local value functions constrained by agent-specific action frequencies:
+⋆
+J(πglobal
+, β) ≈ inf
+θ
+
+4
+
+N
+X
+i=1
+
+Ji (πi⋆ (θi ), βi )
+
+(4)
+
+Each agent i solves its own CMDP, where the constraint θi encodes how often it can select the
+crowded action. This decomposition decouples learning while preserving system-level coordination
+through optimization of the shared constraint vector θ.
+To facilitate the development of a three-timescale learning algorithm, we define an approximate
+reward function: it replaces the actual number of agents which choose the congested action with the
+expected value. It corresponds to number of agents who select the crowded action according to their
+local constraint. This approximation removes the direct dependency on joint actions: each agent
+optimizes its policy independently and yet full constraint vector θ accounts for the aggregate system
+behavior.
+Our algorithm uses a three-timescale learning process to solve the approximation in (4):
+• Fast and Intermediate Timescales: For a fixed constraint vector θ, each agent independently optimizes its own policy by solving a local CMDP using a Lagrangian-based safe
+reinforcement learning approach. On the fastest timescale, the policy is updated using a
+shaped reward of the form ritot (s, a) = ri (si , a) + λi ci (si , ai ), where ci denotes the cost
+associated with selecting the crowded action. Since both θ and λi are held fixed during
+this phase, any standard reinforcement learning algorithm, such as PPO, DQN, or even
+Q-learning if the system is small enough, can be used to optimize the local policy. On the
+intermediate timescale, the Lagrange multiplier λi is updated via a primal-dual method to
+enforce long-term satisfaction of the constraint.
+• Slow Timescale: At the slowest time-scale, the constraint vector θ is optimized to improve global coordination. Instead of heuristically selecting θ, we treat it as a coordination
+variable and optimize it via stochastic approximation. Importantly, the structure of the objective allows each component of the gradient ∇θ J to be estimated using just three local
+policy evaluations per agent, regardless of the total number of agents. This property ensures
+that the algorithm remains scalable and efficient, even in large systems.
+While constraint updates are performed synchronously across agents, they occur at a much slower
+timescale and can be implemented with minimal coordination overhead. In practice, such updates
+are orders of magnitude less frequent than policy learning steps, preserving the algorithm’s scalability and decentralization. Notably, the computational complexity of DCC is similar to the one of
+the RL algorithm chosen, with the primary difference being the computation of the gradient—an
+operation that is computationally inexpensive.
+Together, these components yield a principled and practical algorithm for decentralized coordination under shared resource constraints, with theoretical support for its approximation quality and
+optimization dynamics.
+A simplified pseudocode for DCC is found in algorithm 1, while the full pseudocode in in section D. In the remainder of the section, we investigate more deeply the DCC framework through the
+following steps:
+• Introduction of a decomposable approximation of the immediate reward (section 4.1):
+we propose a decomposable approximation of the immediate reward that approximates
+the long-term reward with provably bounded approximation error—and exact equivalence
+when the congestion function is linear.
+• CMDP of the system (section 4.2): we introduce the single agent CMDP that will by used
+by the three timescale algorithm
+• Computing the optimal constrained policy (section 4.3): We describe the process of computing the optimal constrained policy for a single agent, given a fixed value of the constraint.
+• Differentiability of the objective (section 4.4): We establish that the long term reward of
+each agent is differentiable with respect to θ, which allows us to efficiently identify the
+minimum in (4)
+• Efficient computation of the gradient (section 4.5): We show how the structure of the gradient can be leveraged to significantly accelerate the computation of the infimum of the
+objective function.
+5
+
+Algorithm 1 DCC Framework (Simplified Overview)
+1: Initialize: constraint vector θ 0 , multipliers λ0i , policies πi0 for each agent i
+2: function O PTIMIZE L OCAL CMDP(i, θ, n)
+3:
+for m = 0, 1, . . . , M (n) do
+▷ Intermediate timescale: Lagrange multiplier update
+4:
+for t = 0, 1, . . . , T (m, n) do
+▷ Fast timescale: policy optimization
+5:
+Update policy πi via RL step on shaped reward ritot
+6:
+end for
+7:
+Update multiplier λi
+8:
+end for
+9:
+Jˆi (θ) ← evaluate final policy πi⋆
+10:
+return Jˆi (θ), final policy πi⋆ , multiplier λ⋆i
+11: end function
+12:
+13:
+14: for n = 0, 1, 2, . . . do
+▷ Slowest timescale: constraint optimization
+15:
+for each agent i = 1, . . . , N do
+16:
+Jˆi (θ), πi⋆ , λ⋆i ← O PTIMIZE L OCAL CMDP(i, θn , n)
+17:
+Estimate local gradient ∇θ Jˆi (θn )
+18:
+end for
+ˆ n)
+19:
+Update shared constraint vector: θn+1 ← θn + ηn ∇J(θ
+20: end for
+
+4.1
+
+Approximating the objective function via decomposition
+
+In a general setting general, the value function decomposition is a viable alternative when
+X
+r(s, a) =
+ri (si , ai )
+i
+
+meaning that each agent can act independently while still achieving the globally optimal outcome
+[19, 24]. However, in the setting studied in this work, this condition does not hold due to a coupling
+term that depends on how many agents select the crowded action. Specifically, the global reward
+takes the form
+X
+r(s, a = πglobal (s)) =
+fi (si ) + Ia=acrowd (ai ) · d (N (a))
+(5)
+i
+
+where N (a) denotes the number of agents that choose the crowded action under πglobal . (as defined
+in section 3).
+To address the challenge of decomposing this reward function, we propose a new (approximated)
+formulation of the reward :
+
+
+X
+X
+r̂(s, a; θ) =
+ui (si ) + Ia=acrowd (ai ) · d 1 +
+θj 
+(6)
+i
+
+=
+
+X
+
+j̸=i
+
+r̂i (si , ai ; θ−i ),
+
+i
+
+where θj denotes the average constraint valueP
+for agent j, i.e. the expected frequency with which
+agent j selects the crowded action, and θ−i = j̸=i θj .
+Intuitively, this approximation replaces the randomness in the number of offloading agents (d(N ))
+with its expectation (θ), which reduces variance in the reward signal while still capturing the average congestion effect. This makes the problem more tractable for decentralized learning, while
+preserving the essential trade-offs.
+This amounts to treating the policies of other agents (which are unknown to any given agent) as if
+they select the congested action as frequently as their individual constraints permit. Although this
+may not strictly hold in practice, it is justified by Assumption 1, which states that the congested
+action yields the highest reward when chosen in isolation—implying that agents are likely to fully
+utilize their constraints.
+6
+
+This approximation brings two key benefits for decentralized learning. First, by replacing the actual
+number of agents choosing the crowded action with its expected value under the constraint vector θ,
+it removes the non-stationarity typically introduced by inter-agent coupling. As a result, each agent’s
+reward depends only on its local state, action, and the fixed parameter θ, effectively decoupling the
+learning dynamics across agents during the fast timescale. Second, the use of an expected congestion
+term reduces the variance of the reward signal each agent observes, since it no longer depends
+on the stochastic actions of others. This lower-variance signal leads to more stable updates and
+can accelerate policy learning. Finally, in practical implementations such as edge computing, this
+formulation allows an agent to compute its reward without waiting for real-time feedback on how
+many others offloaded in the same timestep. While this does not reduce communication during
+deployment, it simplifies both training and simulation, and avoids introducing extra delays into the
+reward computation.
+Error Bound for the Reward Approximation The following result gives an indication of the
+error that one could have when considering the approximated definition of the reward in (6). In
+particular, we define J(π, β) the discounted reward associated to a policy π when considering the
+ˆ β) the one obtained when considering the approximated reward r̂ defined in (6).
+reward r and J(π,
+Lemma 1. Given a global policy π and a vector θ ∈ RN such that
+Ea∼π [Ni,t (a)] = θi ,
+where Ni (a) denotes the random variable representing the frequency with which agent i selects the
+crowded action at time t, it is verified that for a non linear penalty function d
+
+
+1 X
+θ−i
+ˆ
+| J(π, β) − J(π, β) |≤
+θi
+d(Nagents ) − d(1 + θ−i )
+1−γ i
+Nagents − 1
+Moreover, if d is linear, the two reward values coincide exactly, and the approximation becomes
+exact.
+Proof. See section A.1.
+This leads to the following result, which shows that, under certain conditions on the immediate
+reward function, the approximation in (4) holds exactly. As a result, the decomposition is valid, and
+the algorithm proposed in this work can reliably recover the optimal policy. Importantly, this also
+establishes clear conditions under which the method is guaranteed to be optimal.
+Proposition 1. Let assume we know θ∗ ∈ RN such that Ea∼π∗ [Ni,t (at )] = θi∗ ∀i, for the optimal
+global policy π ∗ and assume that d(·) is linear. Then the value function does not depend on the type
+of reward that we consider and an optimal global policy can be obtained as the combination of the
+appropriate optimal local policies.
+Proof. From lemma 1, we know that if the function d is linear, then the discounted reward of a
+policy is invariant under the choice between the original reward r and the approximated reward r̂.
+Assuming the optimal constraint values θ∗ are known, we can compute the locally optimal policy
+∗
+,
+for each agent using r̂. A policy composed by combining these local policies, denoted as πcomposed
+is then a solution to the global minimization problem with respect to r̂, and by the invariance, also
+with respect to r. This leads to the conclusion:
+X
+ˆ composed , β) =
+J(πcomposed , β) = J(π
+Jˆi (πi⋆ (θ∗ ), β)
+i
+
+4.2
+
+Constrained MDP for Each Agent
+
+As introduced in eq. (4), we approximate the global objective by decomposing it into a collection of
+independent Constrained Markov Decision Processes (CMDPs), one per agent. Constrained Markov
+Decision Process (CMDP) [3] extends the standard MDP by incorporating constraints on long-term
+cost signals. In this section, we describe the structure of the CMDP associated with each agent i.
+7
+
+State space The state space Si for agent i consists of its local observation si , such that the full
+joint state is (s1 , . . . , sN ) ∈ S.
+In the task offloading scenario considered, each agent’s state is given by si = (xi , ei ), where xi
+denotes the Age of Information, i.e., the number of timesteps since the last data processing was
+completed, and ei represents the current energy level of the agent’s battery.
+Action space The action space Ai (si ) includes a designated crowded action, acrowd , which represents use of a shared resource. All other actions are independent of shared usage.
+For example, in the task offloading scenario described in section 3, we have Ai (si ) =
+{“wait”, “local processing”, “offload”}, where “offload” corresponds to acrowd .
+Reward function The agent receives a reward according to the approximated formulation described in section 4.1, where the influence of other agents is captured through the fixed (in the slow
+and intermediate timescale) parameter θ−i :
+r̂i (s, a; θ−i ) = ui (si ) + Iai =acrowd · d (1 + θ−i ) .
+Cost function
+is used:
+
+The cost signal ci (si , ai ) is a naive function active only when the shared resource
+
+1, if ai = acrowd
+ci (si , ai ) =
+(7)
+0, otherwise
+
+Constraint The constraint is defined by the parameter θi , which limits the long-term frequency
+with which agent i can select the crowded action.
+While our formulation is based on the discounted reward criterion, the DCC-RL framework is not
+inherently restricted to this setting. In principle, the same decomposition and coordination structure
+can be applied in the average reward case, with appropriate adjustments to the underlying reinforcement learning algorithm. The choice between average and discounted formulations depends
+primarily on the application context and the algorithm used to solve each agent’s constrained MDP.
+In the discounted case, we define the discounted reward and discounted cost under policy πi and
+initial state distribution βi as follows:
+"∞
+#
+T
+X X
+t
+Ji (πi , βi ; θ−i ) = Eπ, s0 ∼β
+γ
+r̂i (St , At ; θ−i ) S0 = s0
+(8)
+t=0
+
+Ki (πi , βi ) = Eπ, s0 ∼β
+
+"∞
+X
+
+t=0
+
+#
+t
+
+γ ci (St , At ) S0 = s0
+
+(9)
+
+t=0
+
+The optimization problem faced by each agent, assuming fixed constraint parameters θ, is then:
+minimize: Ji (πi , βi ; θ−i )
+subject to: Ki (πi , βi ) ≤ θi
+4.3
+
+(CM DPi )
+
+Learning the Optimal Local Constrained Policy
+
+A central advantage of our framework is its flexibility: the local constrained policy optimization can
+be performed using any safe reinforcement learning (SRL) method suited to the environment. In particular, by adopting a Lagrangian-based approach, we decouple constraint enforcement from reward
+maximization. This separation enables the use of any standard reinforcement learning algorithm
+on the fastest timescale, with constraint satisfaction handled independently on a slower timescale.
+This modularity is crucial in decentralized settings with heterogeneous agents or dynamics, allowing
+DCC to adapt to a wide range of learning scenarios and observation structures.
+Lagrangian methods are a natural fit for our setting, as they allow constraint satisfaction to be enforced without the need for projection or repair, and are compatible with standard RL algorithms.
+While such methods can exhibit instability or slow convergence—particularly in settings where constraint violations incur severe penalties or pose safety risks—these issues are mitigated in our case.
+8
+
+Here, constraints reflect system-level efficiency or coordination objectives rather than hard safety
+requirements, so temporary violations during training do not lead to catastrophic outcomes. As a
+result, we can safely use Lagrangian updates without sacrificing performance or stability, making
+them a principled and practical choice for decentralized learning under shared constraints.
+In particular, we follow the structure of RCPO [29] for constrained optimization, employing either
+PPO [25], DQN [21] or Q-learning [30], depending on the scale of the system, as the algorithm to
+handle the fastest timescale
+In this framework, in the fastest timescale each RL agent optimizes a shaped reward of the form:
+r̂itotal (si , ai ; θ−i ) = r̂i (si , ai ; θ−i ) + λi ci (si , ai ),
+
+(10)
+
+where rˆi and ci have been defined in section 4.2.
+The scalar coefficient λi serves as a Lagrange multiplier, adaptively tuned during training to ensure
+constraint satisfaction. To formalize this, we define the agent-specific Lagrangian function:
+X
+
+∞
+t
+Li (πi , λi ; θ) = Eπi
+γ r̂i (st , at ; θ−i ) + λi (ci (st , at ) − θi )
+(11)
+t=0
+
+where θi is the fixed constraint threshold for agent i, and θ−i denotes the sum of the vector of constraint parameters associated with all other agents. In this formulation, θ−i is treated as fixed during
+the agent’s local optimization, capturing the expected influence of other agents on the congestion
+dynamics. The k-th update of the Lagrange multiplier is then computed as follows:
+
+
+λk+1
+= Γλi λki + ηi (k)∇λ Li (πi , λki ; θ)
+i
+"
+"∞
+#
+!#
+T
+X X
+= Γλi λki + ηi (k) Eπi
+γt
+ci − θ i
+t=0
+
+t=0
+
+and Γλi is a projection on the space of possible Lagrange multipliers, i.e. the set of positive real
+numbers and ηi (t) is a descending sequence converging to 0.
+Crucially the value of λi is optimized for each agent independently, allowing the coordination signal to emerge in a fully decentralized manner. Our method enables agents to learn how the cost
+function should influence their behavior individually, in order to satisfy long-term constraints while
+maintaining local performance.
+4.4
+
+Coordination via optimization of the constraints
+
+Having described the two faster timescales, we now focus on the slowest one, where the constraint
+vector θ is optimized to improve global coordination.
+In particular, we want to show that we can converge to the local optimal value of the constraint
+vector θ ∈ RN . The safe RL algorithms described in section 4.3 will then be able to find the optimal
+policy for that value.
+We consider the long term Lagrangian reward with regard to θ, assuming that we can solve the
+corresponding constrained problem and find the optimal values of π and λ. This corresponds to the
+quantity we want to minimize for each agent. With abuse of notation, we define the quantity
+ˆ i⋆ (θ))
+Jˆi (θ) = J(π
+= Li (πi⋆ (θ), λ⋆i (θ); θ)
+X
+
+∞
+T
+X
+t
+⋆
+= Ea∼πi⋆ (θ)
+γ
+r̂i (st , at ; θ−i ) + λi · (ci (st , at ) − θi )
+t=0
+
+(12)
+
+t=0
+
+and the function we want to minimize is
+ˆ =
+J(θ)
+
+X
+
+Jˆi (θ)
+
+i
+
+First we show the differentiability of this function with regard to the constraint θ.
+9
+
+(13)
+
+Lemma 2. Jˆi (θ) is differentiable in θ almost everywhere.
+Proof. The proof of this result is provided in section A.3, where we show that a variation of the
+Envelope Theorem [20] can be applied within the context of our setting.
+In order to discuss the optimization of the virtual constraint we want to use the stochastic gradient
+ascent methods of the Kiefer-Wolfowitz family [13]. The iteration scheme is
+θn+1 = ΠΘ (θn − αn ĝn )
+
+(14)
+
+where θn is the nth iterate of the parameter, ĝn represents an estimate of the gradient of the objective
+function, {αn }n is a sequence converging to 0 and ΠΘ is a projection on the space of possible virtual
+constraint vectors Θ.
+If we drop λ and π for the sake of clarity, the i-th component of the gradient estimate writes
+Jˆ (θ + cn (∆n )i ) − Jˆ (θ)
+cn (∆n )i
+
+(ĝn )i =
+
+(15)
+
+where {cn } is a sequence converging to 0 and {∆n } is an i.i.d. vector sequence
+ofperturbations
+
+of i.i.d. components {(∆n )i , i = 1, . . . , N } with zero mean and where E |(∆n )−2
+i | is uniformly
+bounded.
+The following result defines the conditions on the objective function, step-size sequence αn , and
+gradient estimates ĝn that give the convergence to a local minima.
+Theorem 1. Assume that
+• {αn } and {cn } be such that
+
+P
+
+n αn = ∞,
+
+P  αn 2
+n
+
+cn
+
+<∞
+
+
+
+• E |(∆n )i |−2 is uniformly bounded on Θ
+Then the algorithm converges to a local optimal value of minθ
+
+P ˆ
+i Ji (θ).
+
+Proof. Lemma 2 guarantees the differentiability of the objective function. The assumptions on the
+sequences αn and cn allow us to use Proposition 1 in [14] for a subset of Θ which contains the initial
+vector θ0 . This proves the convergence of the algorithm to a locally optimal solution.
+See Proposition 1 in [14] for the statement and the necessary conditions for the convergence to the
+global optimal point.
+4.5
+
+Numerical optimization of the constraints via evaluations of the local policies
+
+We conclude this section by showing how the structure of the gradient can be further simplified,
+leading to a more efficient computation.
+The following result, which is an immediate consequence of the chain rule, reveals how the computation of the gradient of the objective function can be simplified, thereby improving the overall
+efficiency of the algorithm:
+Proposition 2.
+∂ ˆ
+∂ Jˆi (θi , θ−i ) X ∂ Jˆj (θi , θ−i )
+J(θi , θ−i ) =
++
+∂θi
+∂θi
+∂θ−j
+
+(16)
+
+j̸=i
+
+∂θ
+
+Proof. After applying the chain rule, it is sufficient to observe that ∂θ−j
+= 1 when j ̸= i.
+i
+Proposition 2 illustrates how the problem structure, together with the form of the constrained value
+function, can be leveraged to compute the gradient of the approximate objective function efficiently.
+Specifically, this result allows each component of the gradient at a given point θ to be estimated
+10
+
+using only three stochastic evaluations per agent, rather than N + 1, as we would only need to
+evaluate Jˆi (θi , θ−i ), Jˆi (θi + ϵ, θ−i ) and Jˆi (θi , θ−i + ϵ).
+While Proposition 2 enables an efficient numerical estimation of the gradient, the following result
+provides a more precise analytical characterization of its components and clarifies their qualitative
+behavior.
+Proposition 3. The following is verified:
+ˆ
+
+⋆
+
+= − λM ≤ 0 a.e., where λ⋆ is the optimal value of the Lagrange multiplier in θi and
+1. ∂ J∂θi (θ)
+i
+M is a positive constant,
+ˆ
+
+= θi ∂θ∂ j d(1 + θ−i ) ≥ 0, ∀j ̸= i a.e., where πi⋆ is the optimal policy for agent i.
+2. ∂ J∂θi (θ)
+j
+Proof. It is once again a consequence of theorem 2; in particular of the definition of the directional
+derivatives. The full proof is provided in section A.4.
+Proposition 3 formalizes the intuition about the sign of the gradient components and provides the
+exact expression for the local derivatives. In particular, relaxing the constraint for one device decreases its own reward (i.e., benefits it from a selfish perspective) while penalizing the others, as a
+consequence of the shared congestion effect.
+It is worth noting, however, that this expression still relies on the exact values of the optimal multipliers λ⋆i , which are not directly available during learning. The proposed algorithm converges to
+these values asymptotically, but in practice the gradients are approximated. For this reason, in the
+numerical experiments we currently rely on finite-difference estimates.
+The additional simplification obtained by directly substituting λ⋆i in place of the local finitedifference evaluations could further reduce computation times. This refinement has not yet been
+tested in the stochastic approximation setting, though we have verified its correctness in small systems where λ⋆i was computed exactly via linear programming (section 5.5). Evaluating the performance of this direct substitution in the approximate setting is left for future work.
+The framework described in this section provides a principled and scalable approach to decentralized coordination in multi-agent systems with limited communication. By decomposing the global
+objective through constrained MDP formulations and optimizing across three timescales, agents can
+independently learn behaviors that align with system-level goals. The theoretical guarantees and
+structural properties of the reward function justify this decomposition and enable efficient learning
+despite the inherent coupling in agent behavior. These results lay the foundation for the empirical
+evaluation in the next section, where we assess the algorithm’s performance under realistic edge
+computing scenarios.
+
+5
+
+Numerical experiments
+
+We consider the environment introduced in section 3, with the toy model detailed in section B. Each
+experiment is averaged over 15 runs on independently generated environments. We focus on small
+instances where the optimal policy can be determined via Q-learning, enabling clear validation of
+our approach.
+We compare DCC-QL against two representative baselines. First, independent Q-learning (IQL),
+which represents the fully decentralized setting without communication. Second, MAPPO [32], a
+CTDE method that has shown strong performance in cooperative MARL benchmarks. We use IQL
+rather than the more common IPPO because the toy environments are very small, and IPPO’s larger
+architectures tend to overfit, obscuring the relative benefits of our coordination mechanism.
+Finally, we stress that this is an early-stage exploration of the DCC framework. Our experiments on
+toy environments are intended as proof-of-concept to validate theoretical properties and highlight
+scalability trends, rather than as comprehensive benchmarks. Extending this evaluation to realistic
+wireless network simulators constitutes an important direction for future work.
+11
+
+(a) Normalized final average reward across methods and system sizes. Rewards are scaled so that 1 equals DCC-QL ’s
+performance after the first 105 steps. Error bars indicate variability across seeds. MAPPO results for 50 devices (average
+≈ 3.5) are omitted to avoid distorting the scale.
+
+5.1
+
+(b) Evolution of the offloading frequency in
+a 10-device system. Starting from θ = 0,
+DCC-QL gradually converges to stable usage, while IQL quickly locks into a suboptimal policy with excessive offloading.
+
+Scalability properties
+
+The first experiment evaluates the scalability of DCC-QL by comparing its discounted reward after five iterations of constraint improvement—starting from θ = 0, meaning agents are initially
+prohibited from using the common resource—with that of the baselines as the number of devices
+increases. All methods are given the same total number of policy-learning steps, and rewards are
+normalized so that 1 corresponds to the reward achieved by DCC-QL after the first 105 learning
+steps. As shown in Fig. a, DCC-QL consistently outperforms independent Q-learning across all
+system sizes, while MAPPO, though competitive in small systems, degrades rapidly as the number
+of devices grows, likely due to its fixed network architecture being unable to handle the enlarged
+state–action space. We also note that in larger systems, never using the offloading action—i.e., the
+normalization baseline obtained with θ = 0 —yields higher rewards than IQL, underscoring how
+IQL’s lack of coordination prevents it from capturing the system dynamics.
+5.2
+
+Offloading action frequency
+
+As a second observation, we analyze the frequency of the offloading action in the case with 10 devices (results for N = 20 and N = 50 are provided in the additional material). Figure b shows
+that DCC-QL gradually evolves from never using the offloading action (the initial evaluation and
+normalization baseline) to a moderate and stable usage level, consistent with the constraints derived
+in section 4. In contrast, IQL quickly converges to a suboptimal policy that overuses the offloading
+action, as expected given its attractiveness (Assumption 1) and the lack of any coordination mechanism. MAPPO, meanwhile, has not converged within the limited training budget considered here
+and continues to overuse the offloading action; however, when trained for 10 million steps (six times
+more than evaluated in this experiment), it eventually achieves performance comparable to DCC-QL
+, indicating that it can learn the dynamics of the small system but only at significantly higher sample
+complexity.
+5.3
+
+Effect of Initial Constraint
+
+In the main experiments, the environments considered were relatively homogeneous. In such cases,
+starting from uniform constraints is a natural choice. We therefore repeated the first main experiment
+from section 5, initializing DCC-QL with larger values of the constraints instead of θ = 0. In
+particular, we chose as initial constraints values similar to the final values obtained by DCC-QL
+from naive initial constraints.
+As shown in fig. 2, after five iterations of constraint improvement the final discounted reward is essentially the same for both initializations, with uniform initialization yielding slightly higher values.
+The difference is more pronounced in early iterations: when starting from uniform constraints, the
+algorithm achieves higher rewards sooner, particularly in systems with fewer devices. This confirms
+that a better prior on the constraints can accelerate learning, as observed in fig. 3.
+12
+
+Figure 2: We compare the final normalized reward after 5 iteration of DCC-QL when starting from
+a naive constraint (θ = 0) and when starting from an optimized value, where the optimized one has
+been chosen by looking at the final values obtained by DCC-QL when starting from naive initial
+constraints.
+
+Figure 3: Comparison of the evolution of the reward as we start from optimized initial constraints in
+settings with a different amount of devices.
+5.4
+
+Non linear penalty
+
+We investigate how the frequency of the offloading action changes when varying the exponent α of
+the penalty function d(n) = (n − 1)α . The experiment was carried out with 20 devices, since in
+the case of 10 devices the offloading frequency remains essentially unchanged across all values of
+α. This is likely because, with fewer devices, it is rare for many of them to simultaneously use the
+shared resource, making the penalty less pronounced. Moreover, the penalty is independent of α
+when exactly two devices offload at the same time, so differences only emerge when three or more
+devices compete for the shared resource—a situation that occurs more frequently with 20 devices.
+Figure 4 shows that, across all algorithms, the offloading frequency decreases as α increases, consistent with the expectation that higher exponents strengthen the penalty and discourage simultaneous
+offloading. The effect is particularly pronounced for DCC-QL and MAPPO.
+5.5
+
+Evaluation gradient objective function
+
+We conducted an additional experiment to empirically validate the gradient properties derived in
+Proposition 3. For each value of the exponent of the penalty function, we generated 15 small random
+environments and solved each CMDP with the linear program to obtain the optimal policy and its
+13
+
+Figure 4: Evolution of the offloading action frequency for different values of the penalty exponent
+α. Increasing α leads to a consistent decrease in offloading frequency across algorithms, reflecting
+the stronger penalization of simultaneous offloading.
+
+discounted reward. First we perturbed the constraint vector by a finite noise ϵ and estimated gradients
+with respect to both the local component θi and the coupling term θ−i . The results (Fig. 5) confirm
+the theoretical prediction and the intuition: the local gradient is consistently negative, while the
+coupling gradient is positive.
+Then, using very small ϵ, we compared left and right finite-difference estimates, which matched
+
+Figure 5: In these figures we evaluate an approximation of the gradient of J˜iℓ (θ) using the finite
+difference method. We considered a noise ϵ ∈ (0.01, 0.25) for both cases, In the left figure, representing the local component of the noise, we expected negative values, while in the right figure we
+expected positive values.
+closely, confirming differentiability (not reported). Moreover, in fig. 6 we verified that the local
+derivative equals the negative of the optimal Lagrange multiplier, and that the coupling derivative
+matches the expression in Proposition 3.
+These findings validate proposition 3 and suggest a possible refinement of DCC-QL : instead of
+estimating local gradients via finite differences, the algorithm could directly substitute the Lagrange
+multiplier, potentially leading to a more efficient implementation. We leave this extension to future
+work.
+14
+
+(a) Numerical verification that the finitedifference derivative of the objective with respect
+to the local noise coincides with the negative of
+the optimal Lagrange multiplier, confirming exact
+correspondence up to solver precision.
+
+(b) Numerical verification that the finitedifference derivative of the objective with respect
+to the local noise coincides with the value given
+by proposition 3, confirming exact correspondence up to solver precision.
+
+Figure 6: In these figures we evaluate an exact gradient of J˜iℓ (θ) using the finite difference method
+with a very small noise ϵ ∈ {−0.00001, 0.00001}.
+Additional experimental results are provided in the appendix, including the complete data underlying fig. 9, the evolution of offloading behavior in larger systems, comparisons with alternative
+baselines, and numerical evaluations of the theoretical results from lemma 1 using linear programming. Together, these supplementary experiments reinforce the conclusions drawn from the main
+results.
+
+6
+
+Conclusions
+
+This paper introduced the DCC framework, a constraint-based approach to decentralized coordination in multi-agent reinforcement learning, and illustrated its potential in the context of task offloading at the wireless edge. Our focus here has been on laying the theoretical foundations and providing
+preliminary, proof-of-concept experiments to validate the core ideas. While the empirical evaluation
+is intentionally limited to toy models, the results suggest that constraint-driven implicit coordination
+can scale better than centralized methods and consistently outperform independent learners.
+Future work includes extending the framework to support asynchronous updates, exploring richer
+forms of shared constraints, and conducting broader experiments to further validate the effectiveness of our approach. In this early work we abstract away the system-level implementation of constraint updates, but envision that in practice they could be coordinated through lightweight periodic
+broadcasts from edge servers or distributed consensus protocols among devices. Exploring these
+mechanisms remains a valuable direction for future work.
+
+15
+
+References
+[1] Joshua Achiam, David Held, Aviv Tamar, and Pieter Abbeel. Constrained policy optimization.
+In Proc. of ICML, 2017.
+[2] Stefano V Albrecht, Filippos Christianos, and Lukas Schäfer. Multi-agent reinforcement learning: Foundations and modern approaches. MIT Press, 2024.
+[3] Eitan Altman. Constrained Markov decision processes. Routledge, 1999.
+[4] B. Barakat, H. Yassine, S. Keates, I. Wassell, and K. Arshad. How to measure the average and
+peak aoi in real networks? In Proc. of EWC, 2019.
+[5] Steven Bohez, Abbas Abdolmaleki, Michael Neunert, Jonas Buchli, Nicolas Heess, and Raia
+Hadsell. Value constrained model-free continuous control. arXiv preprint arXiv:1902.04623,
+2019.
+[6] Christian Schroeder De Witt, Tarun Gupta, Denys Makoviichuk, Viktor Makoviychuk,
+Philip HS Torr, Mingfei Sun, and Shimon Whiteson. Is independent learning all you need
+in the starcraft multi-agent challenge? arXiv preprint arXiv:2011.09533, 2020.
+[7] Jakob Foerster, Gregory Farquhar, Triantafyllos Afouras, Nantas Nardelli, and Shimon Whiteson. Counterfactual multi-agent policy gradients. In Proceedings of the AAAI conference on
+artificial intelligence, volume 32, 2018.
+[8] Zhaoyu Gan, Rongheng Lin, and Hua Zou. A multi-agent deep reinforcement learning approach for computation offloading in 5g mobile edge computing. In 2022 22nd IEEE International Symposium on Cluster, Cloud and Internet Computing (CCGrid), pages 645–648. IEEE,
+2022.
+[9] Shangding Gu, Long Yang, Yali Du, Guang Chen, Florian Walter, Jun Wang, and Alois Knoll.
+A review of safe reinforcement learning: Methods, theories, and applications. IEEE Trans. on
+Pattern Analysis and Machine Intelligence, 46(12), 2024.
+[10] Zihao Guo, Richard Willis, Shuqing Shi, Tristan Tomilin, Joel Z Leibo, and Yali Du. Socialjax:
+An evaluation suite for multi-agent reinforcement learning in sequential social dilemmas. arXiv
+preprint arXiv:2503.14576, 2025.
+[11] Pablo Hernandez-Leal, Bilal Kartal, and Matthew E Taylor. A survey and critique of multiagent
+deep reinforcement learning. Autonomous Agents and Multi-Agent Systems, 33(6):750–797,
+2019.
+[12] Xiaoyan Huang, Supeng Leng, Sabita Maharjan, and Yan Zhang. Multi-agent deep reinforcement learning for computation offloading and interference coordination in small cell networks.
+IEEE Transactions on Vehicular Technology, 70(9):9282–9293, 2021.
+[13] H.J. Kushner and D.S. Clark. Stochastic Approximation Methods for Constrained and Unconstrained Systems. Applied Mathematical Sciences. Springer, 1978.
+[14] Pierre L’Ecuyer and Peter W Glynn. Stochastic optimization by simulation: Convergence
+proofs for the gi/g/1 queue in steady-state. Management Science, 40(11):1562–1578, 1994.
+[15] Ji Li, Hui Gao, Tiejun Lv, and Yueming Lu. Deep reinforcement learning based computation offloading and resource allocation for mec. In 2018 IEEE wireless communications and
+networking conference (WCNC), pages 1–6. IEEE, 2018.
+[16] Yongshuai Liu, Jiaxin Ding, and Xin Liu. Ipo: Interior-point policy optimization under constraints. In Proceedings of the AAAI conference on artificial intelligence, volume 34, pages
+4940–4947, 2020.
+[17] Yongshuai Liu, Avishai Halev, and Xin Liu. Policy learning with constraints in model-free
+reinforcement learning: A survey. In Proc. of IJCAI, 2021.
+[18] Ryan Lowe, Yi I Wu, Aviv Tamar, Jean Harb, OpenAI Pieter Abbeel, and Igor Mordatch.
+Multi-agent actor-critic for mixed cooperative-competitive environments. Proc. of NIPS, 2017.
+16
+
+[19] James MacGlashan, Evan Archer, Alisa Devlic, Takuma Seno, Craig Sherstan, Peter Wurman,
+and Peter Stone. Value function decomposition for iterative design of reinforcement learning
+agents. Advances in Neural Information Processing Systems, 35:12001–12013, 2022.
+[20] Paul Milgrom and Ilya Segal. Envelope theorems for arbitrary choice sets. Econometrica,
+70(2):583–601, 2002.
+[21] Volodymyr Mnih, Koray Kavukcuoglu, David Silver, Alex Graves, Ioannis Antonoglou, Daan
+Wierstra, and Martin Riedmiller. Playing atari with deep reinforcement learning. arXiv preprint
+arXiv:1312.5602, 2013.
+[22] Antonin Raffin, Ashley Hill, Adam Gleave, Anssi Kanervisto, Maximilian Ernestus, and Noah
+Dormann. Stable-baselines3: Reliable reinforcement learning implementations. Journal of
+Machine Learning Research, 22(268):1–8, 2021.
+[23] Tabish Rashid, Mikayel Samvelyan, Christian Schroeder De Witt, Gregory Farquhar, Jakob
+Foerster, and Shimon Whiteson. Monotonic value function factorisation for deep multi-agent
+reinforcement learning. Journal of Machine Learning Research, 21(178):1–51, 2020.
+[24] Stuart J Russell and Andrew Zimdars. Q-decomposition for reinforcement learning agents.
+In Proceedings of the 20th international conference on machine learning (ICML-03), pages
+656–663, 2003.
+[25] John Schulman, Filip Wolski, Prafulla Dhariwal, Alec Radford, and Oleg Klimov. Proximal
+policy optimization algorithms. arXiv preprint arXiv:1707.06347, 2017.
+[26] Peter Sunehag, Guy Lever, Audrunas Gruslys, Wojciech Marian Czarnecki, Vinicius Zambaldi, Max Jaderberg, Marc Lanctot, Nicolas Sonnerat, Joel Z Leibo, Karl Tuyls, et al. Valuedecomposition networks for cooperative multi-agent learning. In Proc. of AAMAS, 2017.
+[27] Ming Tan. Multi-agent reinforcement learning: Independent vs. cooperative agents. In Proc.
+of ICML, 1993.
+[28] Ming Tang and Vincent WS Wong. Deep reinforcement learning for task offloading in mobile
+edge computing systems. IEEE Transactions on Mobile Computing, 21(6):1985–1997, 2020.
+[29] Chen Tessler, Daniel J. Mankowitz, and Shie Mannor. Reward constrained policy optimization.
+In Proc. of ICLR, 2019.
+[30] Christopher JCH Watkins and Peter Dayan. Q-learning. Machine learning, 8(3):279–292,
+1992.
+[31] Tsung-Yen Yang, Justinian Rosca, Karthik Narasimhan, and Peter J Ramadge. Projectionbased constrained policy optimization. In Proc. of ICLR, 2020.
+[32] Chao Yu, Akash Velu, Eugene Vinitsky, Jiaxuan Gao, Yu Wang, Alexandre Bayen, and Yi Wu.
+The surprising effectiveness of PPO in cooperative multi-agent games. Proc. of NeurIPS, 2022.
+[33] Kaiqing Zhang, Zhuoran Yang, and Tamer Başar. Multi-agent reinforcement learning: A selective overview of theories and algorithms. Handbook of reinforcement learning and control,
+pages 321–384, 2021.
+
+17
+
+A
+
+Theoretical proofs
+
+A.1
+
+Proof of Lemma 1
+
+Proof.
+"
+
+#
+X
+
+ˆ β) = Ea ∼π
+J(π, β) − J(π,
+t
+
+γt
+
+t
+
+X
+
+ri (st , at ) | s0 ∼ β − Eat ∼π
+
+"
+
+#
+X
+t
+
+i
+
+"
+= Eat ∼π
+
+r̂i (st , at ) | s0 ∼ β
+
+i
+
+#
+X
+t
+
+1
+≤
+1−γ
+
+γt
+
+X
+
+γ
+
+t
+
+X
+
+Iat,i =acrowd (d(N (at ) − d(1 + θ−i ))
+
+i
+
+!
+X
+
+θi Eat ∼π [d(N (at ) − d(E [N (t)]) | ai = acrowd ]
+
+i
+
+In the case with linear penalty function d, we can easily conclude that Rπ (β) = R̂π (β). For the
+nonlinear case, first we show that
+Eat ∼π [d(1 + θ−i ) | ai = acrowd ] = d(1 + θ−i )
+When d is convex, we can notice that
+
+
+E [Nt | ai = acrowd ] − 1
+Eat ∼π [d(N (at ) | ai = acrowd ] ≤ 1 −
+d(1)+
+Nagents − 1
+E [Nt | ai = acrowd ] − 1
++
+d(Nagents )
+Nagents − 1
+E [Nt | ai = acrowd ] − 1
+=
+d(Nagents )
+Nagents − 1
+1 + θ−i − 1
+=
+d(Nagents )
+Nagents − 1
+θ−i
+d(Nagents )
+(17)
+=
+Nagents − 1
+Note that d(1) = 0 due to its definition. This implies that, for convex penalty function d it is verified
+that
+
+
+1 X
+θ−i
+ˆ
+J(π, β) − J(π, β) ≤
+θi
+d(Nagents ) − d(1 + θ−i )
+1−γ i
+Nagents − 1
+Finally, for concave penalty function d, we can easily prove that
+θ−i
+d(Nagents )
+Eat ∼π [d(N (at ) | ai ] ≥
+Nagents − 1
+and therefore conclude that, for every nonlinear penalty function d it it verified that
+
+X 
+θ−i
+ˆ β) ≤ 1
+J(π, β) − J(π,
+θi
+d(Nagents ) − d(1 + θ−i )
+1−γ i
+Nagents − 1
+
+A.2
+
+(18)
+
+Theoretical background for the proof of lemma 2
+
+Before proving the main result, we first recall the relevant theoretical background, including the
+statement of Theorem 2. For clarity, we briefly review the envelope theorem, which applies broadly
+to optimization problems with parameterized constraints and objective functions defined over choice
+sets with arbitrary topology. A full treatment can be found in Section 3.5 of [20].
+Consider the following maximization program with k parameterized inequality constraints:
+X
+V (t) =
+f (x, t), where g : X × [0, 1] → Rk
+x∈X:g(x,t)≥0
+
+X ⋆ (t) = {x ∈ X : g(x, t) ≥ 0, f (x, t) = V (t)}.
+18
+
+(19)
+
+In the reference framework used by [20], X is a convex set, f and g are such that zero duality gap
+holds, and the Slater constraint qualification is verified at some x̂ ∈ X, i.e., gh (x̂, t) > 0 for all
+h = 1, . . . , k.
+The set of saddle points of the Lagrangian over (x, y) ∈ X × Rk+ at parameter value t takes the form
+X ⋆ (t) × Y ∗ (t), where X ∗ (t) is the set of solution to (19) and Y ∗ (t) is the set of the solutions of the
+dual program
+
+
+Y ∗ (t) = arg min∗ sup L(x, y, t)
+y∈Rk
+
+x∈X
+
+When the zero duality gap condition holds, the value V (t) of the constrained maximization problem
+equals the saddle of the Lagrangian with parameter t, i.e., V (t) = miny∈Rk+ maxx∈X L(x, y, t) =
+maxx∈X miny∈Rk+ L(x, y, t)
+The following result, which is denoted as Corollary 5 in [20], is crucial to prove the differentiability
+of (13).
+Theorem 2. Suppose that X is a convex compact set in a normed linear space, f and g are continuous in x, for the Lagrangian zero duality condition holds, ft (x, t) and gt (x, t) are continuous in
+(x, t) , and there exists x̂ ∈ X such that g(x̂, t) ≫ 0 for all t ∈ [0, 1]. Then:
+1. V is absolutely continuous and for any selection (x∗ (t), y ∗ (t)) ∈ X ∗ (t) × Y ∗ (t),
+Z t
+V (t) = V (0) +
+Lt (x∗ (s), y ∗ (s), s)ds
+0
+
+2. V is directionally differentiable, and its directional derivatives equal:
+V ′ (t+) = max
+∗
+
+min Lt (x, y, t) = min
+∗
+
+max Lt (x, y, t)
+
+for t < 1
+
+V ′ (t−) = min
+∗
+
+max Lt (x, y, t) = max
+∗
+
+min Lt (x, y, t)
+
+for t > 0
+
+x∈X (t) y∈Y ∗ (t)
+
+y∈Y (t) x∈X ∗ (t)
+
+x∈X (t) y∈Y ∗ (t)
+
+y∈Y (t) x∈X ∗ (t)
+
+The result holds since optimal dual variables are proved bounded, and hence from Theorems 4 and
+5 in [20] can be applied.
+A.3
+
+Proof of lemma 2
+
+Proof. In order to prove the desired result for the function Jˆi (θ) we need to use theorem 2 and make
+a distinction between two separate cases, t = θi and t = θj .
+We consider
+V (t) = min max L(x, y, t) = max min L(x, y, t)
+x∈X
+y∈Rk
++
+
+x∈X y∈Rk
++
+
+Next we define how all the quantities involved in the two different cases.
+A.3.1
+
+t = θi
+
+In this case, all the values of θj for j ̸= i are fixed and simply define the function f .
+Consider the following:
+• X = Lγ (β): this is the set of stationary distributions given an initial distribuiton β and the
+discount factor γ
+• it is safe to assume the existence of a vector θmax ∈ R such that, θi < θmax . This allows
+us to normalize the values of the parameter θ. A possible value of θmax could be the cost
+obtained when always choosing the crowded action. In general, as long as the cost is a
+bounded function, this property is easily verified
+P
+• f (x, t) = fθ−i (ρ) = s,a ρi (s, a)r̂i (s, a; θ−i ), with r̂i : S × A × [0, 1]N −1 → R defined
+by the fixed parameters θ−i
+P
+θi
+• g(x, t) = g(ρ, θi ) = s,a ρ(s, a)c(s, a) − θmax
+, with with c : S × A → RN
+19
+
+• the Lagrangian is explicitly written as
+Li (ρ, λ, θi ) = fθ−i (ρ) + λi g(ρ, θi )
+assuming we are studying the differentiability wrt θi
+Now we show that the hypotheses of Theorem 2 are verified.
+X is a convex compact set in a normed linear space This choice of the space of the probability
+distributions, allows us to prove that X is a convex compact set in a normed linear space, as proved
+in Corollary 10.1 in [3].
+f and g are continuous and concave in x The continuity and concavity in x of the functions f
+and g is an immediate consequence of the definition given above.
+ft (x, t) and gt (x, t) are continuous in (x, t) The immediate reward function does not depend
+1
+on θi , therefore ft (·) = 0. On the other hand, gt (·) = θmax
+Existence of x̂ ∈ X such that g(x̂, t) ≫ 0 for all t ∈ [0, 1] The existence of a point x̂ ∈ X
+such that g(x̂, t) ≫ 0 for all t ∈ [0, 1] corresponds to the existence of a stationary distribution that
+strictly satisfies all constraints. This condition is met, for example, by a policy that never selects the
+crowded action—ensuring all constraints are strictly satisfied—provided that θi > 0.
+A.3.2
+
+t = θj
+
+In this case, all the values of θk for k ̸= j are fixed; they will be considered fixed parameters in the
+definition of f and g. Consider the following:
+• X = Lγ (β) this is the set of stationary distributions
+• it is safe to assume the existence of a vector θmax ∈ R such that, θi < θmax . This allows
+us to normalize the values of the parameter θ. A possible value of θmax could be the cost
+obtained when always choosing the crowded action. In general, as long as the cost is a
+bounded function, this property is easily verified
+P
+P
+• f (x, t) = fθ−i,j (ρ, θj ) = s,a ρi (s, a)r̂i (s, a; θ−i,j , θj ), with θ−i,j = k̸=i,j θk
+P
+θi
+, with with c : S × A → RN
+• g(x, t) = gθi (ρ) = s,a ρ(s, a)c(s, a) − θmax
+• the Lagrangian is explicitly written as
+Li (ρ, λ, θj ) = fθ−i,j (ρ, θj ) + λi gθi (ρ)
+assuming we are studying the differentiability wrt θi
+To conclude our proof, it suffices to show that the hypotheses of Theorem 2 are verified for both
+choices of the parameter.
+X is a convex compact set in a normed linear space This choice of the space of the probability
+distributions, allows us to prove that X is a convex compact set in a normed linear space, as proved
+in Corollary 10.1 in [3].
+f and g are continuous and concave in x The continuity and concavity in x of the functions f
+and g is an immediate consequence of the definition given above.
+ft (x, t) and gt (x, t) are continuous in (x, t) The continuity of ft (x, t) in (x, t) is an immediate
+consequence of the definition of the reward function ri and the assumption that it is continuous with
+regard to θ−i and therefore it is differential wrt θj , ∀j ̸= i. On the other hand, gt (·) = 0
+20
+
+Existence of x̂ ∈ X such that g(x̂, t) ≫ 0 for all t ∈ [0, 1] The existence of a point x̂ ∈ X
+such that g(x̂, t) ≫ 0 for all t ∈ [0, 1] corresponds to the existence of a stationary distribution that
+strictly satisfies all constraints. This condition is met, for example, by a policy that never selects the
+crowded action—ensuring all constraints are strictly satisfied—provided that θj > 0.
+A.3.3
+
+Conclusion of the proof
+
+Thanks to what is showed in sections A.3.1 and A.3.2 we know that the objective function V (t) is
+absolutely continuous with regard to t, for all choices of t.
+Consider now the function
+
+
+Jˆiρ (θ) = Es,a∼ρ⋆i r̂i (s, a; θ−i)
+where ρ⋆i depends on θ.
+When we fix all coordinates θk for k ̸= j, the mapping
+θj 7→ Jˆiρ (θ)
+coincides with V (θj ), which is known to be absolutely continuous.
+It then follows that Jˆiρ (θ) is differentiable a.e.
+Finally, note how we can use Theorem 3.3 in [3] to show how an optimal solution ρ⋆ for LP is such
+that the stationary policy π(ρ⋆ ) is optimal for the original constrained problem. This implies that,
+from the optimal stationary distribution we can also retrieve the optimal policy.
+This allows us to conclude that the function Jˆi (θ) is differentiable wrt every component of θ and
+therefore that theorem 1 is verified for the problem studied.
+
+A.4
+
+Proof of proposition 3
+
+Proof. Theorem 2 states that V is directionally differentiable, and its directional derivatives equal:
+V ′ (t+) = max
+∗
+
+min Lt (x, y, t) = min
+∗
+
+max Lt (x, y, t)
+
+for t < 1
+
+V ′ (t−) = min
+∗
+
+max Lt (x, y, t) = max
+∗
+
+min Lt (x, y, t)
+
+for t > 0
+
+x∈X (t) y∈Y ∗ (t)
+
+y∈Y (t) x∈X ∗ (t)
+
+x∈X (t) y∈Y ∗ (t)
+
+y∈Y (t) x∈X ∗ (t)
+
+When considering the parameter t = θi and θj fixed for j ̸= i, we know that
+L(ρ, λ, θi ) = fθ−i (ρ) + λi g(ρ, θi )
+=
+
+X
+
+ρi (s, a)r̂i (s, a; θ−i,j , θj ) + λi
+
+s,a
+
+X
+
+ρ(s, a)c(s, a) −
+
+s,a
+
+θi
+
+!
+
+θmax
+
+λ
+i)
+It is easily verified that ∂L(θ
+∂θi = − θmax and therefore when θi ∈ (0, θmax ) it is verified
+
+V ′ (θi +) = − max
+min
+γ
+
+λ
+
+V ′ (θi +) = − min
+max
+γ
+
+λ
+
+ρ∈L (β) λ∈R θmax
+
+ρ∈L (β) λ∈R θmax
+
+As noted in [20], this is a special case for which it is verified that
+V ′ (t) = V ′ (θi +) = V ′ (θi −) = −
+This yields the corresponding result, with M = θmax .
+
+21
+
+λ⋆
+θmax
+
+≤ 0 a.e.
+
+On the other hand, when t = θj , with j ̸= i, we have
+L(ρ, λ, θj ) = fθ−i,j (ρ, θj ) + λi gθi (ρ)
+=
+
+X
+
+ρi (s, a)r̂i (s, a; θ−i,j , θj ) + λi
+
+s,a
+
+X
+
+ρ(s, a)c(s, a) −
+
+s,a
+
+θi
+
+!
+
+θmax
+
+It then follows that
+∂ X
+∂
+L(ρ, λ, θj ) =
+ρi (si , ai )r̂i (si , ai )
+∂θj
+∂θj s ,a
+i
+
+i
+
+∂ X
+=
+ρ(si , ai ) (ui (si , ai ) + Ia=acrowd (ai )d(1 + θ−i ))
+∂θj s ,a
+i
+
+i
+
+∂ X
+ρ(si , acrowd )d(1 + θ−i )
+=
+∂θj s
+i
+X
+∂
+=
+ρ(si , acrowd )
+d(1 + θ−i ) ≥ 0
+∂θ
+j
+s
+
+∀ρ, λ
+
+i
+
+where the final inequality follows from the assumption that the function d is strictly increasing, i.e.
+d′ > 0. Moreover, not how the derivative is equal to 0 if and only if the action acrowd is never
+chosen.
+Therefore, we can further conclude that
+X
+∂
+∂
+V̂ (θj ) = max min
+ρ(si , acrowd )
+d(1 + θ−i )
+ρ
+λ
+∂θj
+∂θ
+j
+si
+X
+∂
+=
+ρ⋆ (si , acrowd )
+d(1 + θ−i )
+∂θ
+j
+s
+i
+
+=P (ai = acrowd | ai,t ∼ πi⋆ ) ·
+=θi
+
+∂
+d(1 + θ−i )
+∂θj
+
+∂
+d(1 + θ−i )
+∂θj
+
+where the optimal stationary distribution ρ⋆ is a function of the constraint vector θ.
+
+22
+
+Energy Harvesting
+
+wait
+Data reads
+
+process
+
+Device
+
+Server Offloading
+
+Figure 7: Device performing local processing of data batches with energy harvesting and offloading.
+
+B
+
+Toy model considered
+
+Description of the toy model The device-server scheme is represented in Fig. 7 for a single device: the device can read data batches, process them locally or offload them to the edge server. Thus,
+data batches are either read and processed locally on the device or read and offloaded. Time steps
+are discrete with index t = 1, 2, . . .. To process data on the device at time t, a certain amount of
+energy units, denoted as Ct , is required. Ct is modeled as a Markov chain. When the device offloads
+to the edge server, the data processing task is offloaded and it has zero energy cost for the device.
+However, sending and retrieving processed data from the server may take some time, which depends
+on how many devices have offloaded the data. This will result in a reward that accounts for the delay in receiving the processed data. The energy to transmit data to the server is assumed negligible
+compared to that spent for local data processing. The device is equipped with a battery of capacity
+B > 0 energy units. Additionally it can harvest a certain number of energy units Ht per timestep t.
+As for the processing cost, the energy fetched per timestep, namely the harvesting rate, is described
+by a Markov chain.
+Description of the CMDP For each device we can introduce a Constrained Markov Decision Process (MDP) to model the system. The state of the device i at time t is denoted as si,t = (xi,t , , ei,t ),
+where xi,t represents the age of information (AoI), ei,t is the device battery level.
+Note that xi,t is the AoI of the last data batch processed by a tagged device and the AoI is measured
+at the end of each time slot. It holds xi,t = 1 when the device has just processed fresh data.
+Afterwards, the AoI increases of one timestep at every time slot t until either the device fetches a
+new data batch or the offloading occurs. In both cases, at the end of the data processing the AoI is
+reset to 1.
+The freshness function, denoted as ui (x), represents the utility of processing a data batch x time
+units after the processing of the last batch. The function ui (·) is bounded and non-increasing which
+means that beyond a certain value of AoI, any further processing delay would have minimal impact
+on the utility derived from the data. Consequently, it is assumed that there exists a positive constant
+M such that ui (M + k) = ui (M ) for any positive value of k, as it allows us to focus on the relevant
+time window {1, . . . , M } where the utility function exhibits meaningful changes in value in relation
+to the freshness of the data.
+Finally, it is possible that the battery available at timeslot t is not sufficient to terminate the computation immediately, namely, et + Ht − Ct < 0. In this case, a delay is incurred in order to harvest
+a sufficient amount of energy and complete the processing of the current batch. The corresponding
+timeslot has a random duration, due to the stochastic nature of energy harvesting.
+The state space of agent i is denoted Si = {1, . . . , M } × {0, . . . , B}.
+The action set is Ai = {”read”, ”local processing”, ”offload” }. The action taken by agent i at time
+t is denoted ai,t . If ai,t = 1, device i fetches a new data batch, which is processed at energy cost
+23
+
+xt
+
+1
+
+2
+
+3
+
+4
+
+5
+
+et
+
+6
+
+7
+
+8
+
+9
+
+10
+
+11
+
+12
+
+7
+
+8
+
+9
+
+10
+
+11
+
+12
+
+a6 = 1
+
+3
+
+5
+
+4
+
+6
+
+ϕ6 > 0
+
+2
+
+a4 = 1
+
+1
+
+Figure 8: A sample path of the process st = (xt , et ) for H ≡ 1 for a single agent: in red the vacation
+periods where the battery is empty. After the battery level gets negative at time t = 6 a total of 4
+timesteps of recharging are needed to complete the execution of the task.
+Ct > 0. Finally, the dynamics of the AoI for data batches is
+
+1
+if at ∈ {”local processing” and ei,t + Hi,t − Ci,t ≥ 0, ”offloading”}
+xt+1 =
+min{xt + 1, M }
+if at ∈ {”read”, ”local processing” and ei,t + Hi,t − Ci,t < 0}
+The AoI at the renewal instants is also called peak AoI ([4]) in the literature.
+As described in section 3 the reward function is composed of two components: a local utility function
+and a component which represents the congestion. For the local components, we consider the reward
+function which penalizes having negative battery level:
+
+xi − e i
+ei < 0
+ui (si , ai ) =
+(20)
+xi
+ei ≥ 0
+For the sake of simplicity, for this work we consider a simple function also for the penalty component
+which depends on the congestion. In particular,
+d(n) = nα
+
+(21)
+
+with α ∈ R. Clearly, for α = 1 we are considering the case with linear penalty.
+Finally, the cost function is defined as
+
+ci (si , ai ) =
+
+1
+0
+
+ai = ”offloading”
+otherwise
+
+24
+
+(22)
+
+C
+
+Additional numerical experiments
+
+We introduce some additional experiments. Whenever reported, the reward is always normalized so
+that 1 corresponds to the discounted reward obtained by DCC-QL after 105 learning steps.
+C.1
+
+Evolution scalability comparison: additional data
+
+We plot the reward evolution corresponding to the boxplot in section 5. This highlights why MAPPO
+results were excluded from the main figure to avoid distortion. The plot also shows that IQL converges quickly due to the small system size, while DCC-QL continues to improve over time as the
+constraint approaches its optimal value.
+
+Figure 9: Evolution of the normalized reward over training episodes for different methods (corresponding to the boxplot in section 5).
+
+C.2
+
+Evolution offloading action: additional data
+
+For completeness, we also plot the corresponding results in fig. 1b for N = 20 and N = 50.
+
+Figure 10: Evolution of the frequency of the offloading action in systems with 10, 20 and 50 devices.
+
+C.3
+
+Comparison with MAPPO over longer timeframes
+
+We include this comparison in Figure 11 to illustrate how MAPPO improves with extended training.
+While MAPPO achieves lower rewards after 107 learning steps, this comes at the cost of substantially more samples. In contrast, DCC-QL makes better use of available data thanks to its Q-learning
+foundation, achieving strong performance with far fewer interactions. Even with extended training,
+DCC-QL remains consistently better across system sizes, highlighting its sample efficiency and robustness.
+25
+
+Figure 11: Comparison of DCC-QL with MAPPO after 1.6 × 106 learning steps (as in section 5)
+and after 107 learning steps.
+
+C.4
+
+Additional algorithms for section 5
+
+For completeness, fig. 12 also reports results for IQL with a common reward and for a centralized
+baseline using A2C. Sharing a global reward signal can, in principle, improve coordination among
+agents by aligning their incentives and reducing the risk of selfish behavior. However, this comes at
+the cost of increased variance in the learning signal, and in practice the benefits are limited in our
+setting. The centralized A2C results are obtained for small system sizes using the Stable Baselines
+implementation [22] with standard hyperparameters. This corresponds to a single agent observing
+the entire system and making joint decisions for all devices. To simplify the setup, we did not
+explicitly restrict illegal actions (e.g., processing with negative energy levels), but instead imposed
+large penalties, which is generally a suboptimal approach. While this method performs reasonably
+well with 10 devices, it fails to scale: for 20 devices, the average rewards were already about 15 times
+higher than the normalization factor, making meaningful comparison impossible. Thus, centralized
+methods serve here primarily as conceptual baselines rather than practical solutions.
+
+Figure 12: Performance comparison as in section 5, including IQL with common reward and centralized A2C ( only for small system sizes).
+
+26
+
+C.5
+
+Verification of the Approximate Reward Bound
+
+In this experiment, we considered small environments with 10 devices, where the linear program
+(LP) can be applied reliably to compute the optimal policy. For each device, we compared the
+discounted reward obtained using the approximated reward definition in (6) with the corresponding
+component of the true global reward defined in (5). This comparison allows us to quantify the error
+introduced by the approximation and to assess its alignment with the theoretical analysis.
+To this end, we measured the relative error between the two evaluations and compared it with the
+theoretical bound established in lemma 1. The results confirm that the observed error is consistently
+within the predicted range, up to small numerical deviations due to stochastic evaluation. Importantly, the special case α = 1, where the penalty function is linear and the theoretical bound reduces
+to zero, was verified exactly in our experiments. For all nonlinear values of α, the empirical errors
+remained strictly below the bound, thereby validating the theoretical result in practice.
+These findings provide additional evidence for the robustness of the approximation framework,
+showing that the theoretical guarantees extend to practical instances solved via the LP in small
+environments.
+
+(a) Boxplot of the relative error as a function of
+the penalty exponent α
+
+(b) Relative error compared with the theoretical
+bound from lemma 1, showing that the error remains within the predicted range in most cases.
+
+Figure 13: Evaluation of the approximation error between the discounted reward computed with the
+exact reward and with the approximated reward.
+
+27
+
+D
+
+Extended Algorithm
+
+The following pseudocode corresponds to the version of the algorithm that uses finite differences to
+compute the gradient of the objectove function. This is the version used in the nu,erical experiments.
+Algorithm 2 Three-Timescale Decentralized Constrained MARL
+1: Initialize: Initial constraints θi0 , multipliers λ0i , policies πi0
+2: function EVALUATE OPTIMAL CONSTRAINED POLICY(i, θi , θ−i , n)
+3:
+for m = 0, 1, . . . , M (n) do
+▷ Intermediate timescale — λ update
+4:
+for t = 0, 1, . . . , T (m, n) do
+▷ Fastest timescale — policy update
+5:
+Collect trajectories using policy πit,m,n
+6:
+Compute total reward: ritotal (si , ai ; θ−i ) = r̂i (si , ai ; θ−i ) + λi ci (si , ai )
+7:
+8:
+Update policy: πit+1,m,n ← RL step on ritotal
+9:
+end for
+▷ Estimate long term cost of current policy
+10:
+K̂i ← Ki (πi·,m,n )
+m,n
+11:
+λm+1,n
+←
+λ
++
+α
+(
+K̂
+−
+θ
+)
+k
+i
+i
+i
+i
+12:
+end for
+T (M (n),n),M (n)
+13:
+return Jˆi (θi , θ−i ) ← evaluate local policy πi
+14: end function
+15:
+16:
+17: for n = 0, 1, 2, . . . do
+▷ Slowest timescale — constraint update
+18:
+for each agent i = 1, . . . , N do
+n
+n
+19:
+Jˆi (θin , θ−i
+) ← EVALUATE OPTIMAL CONSTRAINED POLICY(i, θin , θ−i
+, n)
+20:
+end for
+21:
+ϵ ← RandomNoise(0, σ)
+22:
+for each agent i = 1, . . . , N do
+n
+23:
+Jˆi (θin + ϵi , θ−i
+) ←EVALUATE OPTIMAL CONSTRAINED POLICY(i, θin + ϵi , θ−i , n)
+
+ˆ n , θn + ϵi ) ←EVALUATE OPTIMAL CONSTRAINED POLICY(i, θn , θ−i + ϵi , n)
+J(θ
+i
+i
+−i
+end for
+for each agent i do 
+
+∂ ˆ n n
+n
+ˆ n
+ˆ n n
+27:
+∂θi Ji (θi , θ−i ) ← Ji (θi + ϵi , θ−i ) − Ji (θi , θ−i ) /ϵi
+
+
+∂ ˆ n n
+n n
+n n
+ˆ
+ˆ
+28:
+J
+(θ
+,
+θ
+)
+←
+J
+(θ
+,
+θ
++
+ϵ
+)
+−
+J
+(θ
+,
+θ
+)
+/ϵi
+i i
+i
+i i
+−i
+−i
+−i
+∂θ−i i i
+P
+ˆ
+ˆ
+∂ J (θ)
+∂ ˆ
+J(θ) = ∂ J∂θi (θ)
++ j̸=i ∂θj−j
+29:
+∇ ∂θ
+i
+i
+30:
+θin+1 ← θin + ηn ∇θi Jˆi (θin )
+31:
+end for
+32: end for
+24:
+25:
+26:
+
+28
+
+E
+
+Extended Algorithm with exact evaluations of λ⋆i
+
+The following pseudocode corresponds to the version of the algorithm that assumes access to the
+exact values of λ⋆i , obtained through the learning process, for computing the gradient.
+Algorithm 3 DCC Framework
+1: Initialize: Initial constraints θi0 , multipliers λ0i , policies πi0
+2: function O PTIMIZE L OCAL CMDP(i, θ, n)
+3:
+for m = 0, 1, . . . , M (n) do
+▷ Intermediate timescale — λ update
+4:
+for t = 0, 1, . . . , T (m, n) do
+▷ Fastest timescale — policy update
+5:
+Collect trajectories using policy πit,m,n
+6:
+Compute total reward: ritotal (si , ai ; θ−i ) = r̂i (si , ai ; θ−i ) + λi ci (si , ai )
+7:
+8:
+Update policy: πit+1,m,n ← RL step on ritotal
+9:
+end for
+▷ Estimate long term cost of current policy
+10:
+K̂i ← Ki (πi·,m,n )
+m,n
++
+α
+(
+K̂
+−
+θ
+)
+←
+λ
+11:
+λm+1,n
+k
+i
+i
+i
+i
+12:
+end for
+T (M (n),n),M (n)
+13:
+Jˆi (θ) ← evaluate long term reward of policy πi
+M (n),n
+
+T (M (n),n),M (n),n
+
+14:
+return Jˆi (θ), λi
+, πi
+15: end function
+16:
+17:
+always offload
+18: Compute θiM AX for each agent i: θiM AX ← Ki (πi
+)
+19: for n = 0, 1, 2, . . . do
+▷ Slowest timescale — constraint update
+20:
+for each agent i = 1, . . . , N do
+21:
+Jˆi (θn ), λ⋆i , πi⋆ ←O PTIMIZE L OCAL CMDP(i, θn , n)
+22:
+end for
+23:
+for each agent i do
+⋆
+
+24:
+
+λi
+∂ ˆ n
+∂θi Ji (θ ) ← − θiM AX
+
+for each agent j ̸= i do
+∂ ˆ n
+∂
+∂θj Ji (θ ) ← θi ∂θj d(1 + θ−i )
+end for
+end for
+for each agent i = 1, . . . , N do
+P
+ˆ
+∂ Jˆ (θ)
+∂ ˆ
+30:
+∇ ∂θ
+J(θ) = ∂ J∂θi (θ)
++ j̸=i ∂θj i
+i
+i
+31:
+θin+1 ← θin + ηn ∇θi Jˆi (θin )
+32:
+end for
+33: end for
+25:
+26:
+27:
+28:
+29:
+
+29
+
+F
+
+Numerical experiments hyperparameters
+
+Parameters of the environment To keep a simple system, we considered both harvesting probability and processing cost probability, in an interval respectively [minH , maxH ] and
+[minC , maxC ]. The following table describes the values among which we sampled the values for
+each experiment.
+Parameter
+M
+B
+minH
+minH
+minH
+maxC
+γ
+
+F.1
+
+Sample set
+15
+15
+{0, 1}
+{1, 2, 3}
+{1}
+{5, 7, 10}
+0.95
+
+Learning parameters
+
+Table 1 reports the learning parameters used in the experiments for IQL and DCC-QL . We tested
+several learning and exploration rates, but the values shown here yielded the best performance.
+Symbols in parentheses correspond to those used in algorithm 3. For DCC-QL , the parameters αk ,
+σ, and ηn denote the initial values of sequences that decay according to the convergence conditions
+of the algorithm; these are not applicable to IQL.
+Parameter
+DCC-QL IQL
+Learning rate Q-learning
+0.5
+0.05
+Exploration rate Q-learning
+0.05
+0.05
+0.95
+0.95
+Exploration decaly Q-learning
+LM learning rate (αk )
+1
+Standard deviation constraint noise (σ)
+0.05
+Constraint learning rate (ηn )
+0.25
+Table 1: Learning parameters for DCC-QL and IQL
+For MAPPO, we used the implementation in [10] for the custom environment described in section B.
+l—c—
+
+MAPPO
+LR
+0.001
+NUM ENVS
+8
+TOTAL TIMESTEPS
+1.6e7
+UPDATE EPOCHS
+2
+NUM MINIBATCHES
+64
+GAMMA
+0.95
+GAE LAMBDA
+0.95
+CLIP EPS
+0.2
+ENT COEF
+0.01
+0.5
+VF COEF
+MAX GRAD NORM
+0.5
+ACTIVATION
+relu
+Table 2: Learning parameters MAPPO
+
+30
+
+

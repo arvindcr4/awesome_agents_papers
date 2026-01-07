@@ -1,5 +1,5 @@
 # GR00T N1 Foundation Model Humanoid
-- Paper: [GR00T_N1_Foundation_Model_Humanoid.pdf](../../../papers/robotics/GR00T_N1_Foundation_Model_Humanoid.pdf)
+- Paper: [GR00T_N1_Foundation_Model_Humanoid.pdf](../../../reinforcement_learning_papers/16_applied_rl/GR00T_N1_Foundation_Model_Humanoid.pdf)
 
 ## Gemini diagrams
 

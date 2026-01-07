@@ -1,0 +1,4049 @@
+N EO RL: Efficient Exploration for Nonepisodic RL
+
+arXiv:2406.01175v4 [cs.LG] 11 Feb 2025
+
+Bhavya Sukhija∗, Lenart Treven, Florian Dörfler, Stelian Coros, Andreas Krause
+ETH Zurich, Switzerland
+
+Abstract
+We study the problem of nonepisodic reinforcement learning (RL) for nonlinear
+dynamical systems, where the system dynamics are unknown and the RL agent has
+to learn from a single trajectory, i.e., adapt online and without resets. This setting is
+ubiquitous in the real world, where resetting is impossible or requires human intervention. We propose Nonepisodic Optimistic RL (N EO RL), an approach based on
+the principle of optimism in the face of uncertainty. N EO RL uses well-calibrated
+probabilistic models and plans optimistically w.r.t. the epistemic uncertainty about
+the unknown dynamics. Under continuity and bounded energy√
+assumptions on
+the system, we provide a first-of-its-kind regret bound of O(ΓT T ) for general
+nonlinear systems with Gaussian process dynamics. We compare N EO RL to
+other baselines on several deep RL environments and empirically demonstrate that
+N EO RL achieves the optimal average cost while incurring the least regret.
+
+1
+
+Introduction
+
+In recent years, data-driven control approaches, such as reinforcement learning (RL), have demonstrated remarkable achievements. However, most RL algorithms are devised for an episodic setting,
+where during each episode, the agent interacts in the environment for a predetermined episode length
+or until a termination condition is met. After the episode, the agent is reset back to an initial state
+from where the next episode commences. Episodes prevent the system from blowing up, i.e., maintain
+stability, while also restricting exploration to states that are relevant to the task at hand. Moreover,
+resets ensure that the agent explores close to the initial states and does not end up at undesirable
+parts of the state space that exhibit low reward. In simulation, resetting is typically straightforward.
+However, if we wish to enable agents to learn and adapt by interacting online with the real world,
+resets are often prohibitive since they typically involve manual intervention. Instead, agents should
+be able to learn autonomously (Sharma et al., 2021b) i.e., from a single trajectory. This problem is
+extensively studied in adaptive control (Åström & Wittenmark, 2013), where classical works focus
+on controller design (Lai & Wei, 1982, 1987; Krstić et al., 1992, 1995; Annaswamy, 2023) and not
+on the exploration/learning aspect of the problem. Only a few works consider these two aspects
+jointly (Abbasi-Yadkori & Szepesvári, 2011; Cohen et al., 2019; Dean et al., 2020; Simchowitz &
+Foster, 2020; Zhao et al., 2024). However, these works study linear systems with quadratic costs,
+i.e., the LQR setting. While several works in the deep RL community have also studied this problem,
+(c.f., Section 5), the theoretical results for this setting are fairly limited. In particular, theoretical
+results mostly exist for the finite state and action spaces (Kearns & Singh, 2002; Brafman & Tennenholtz, 2002; Jaksch et al., 2010) and the extension to nonlinear systems with continuous spaces is
+much less understood. In our work, we address this gap and propose a practical RL algorithm that is
+grounded in theory. In particular, we make the following contributions.
+Contributions
+1. We propose, N EO RL, a novel model-based RL algorithm based on the principle of optimism in
+the face of uncertainty. N EO RL operates in a nonepisodic setting and picks average cost optimal
+policies optimistically w.r.t. to the model’s epistemic uncertainty.
+∗
+
+Correspondence to sukhijab@ethz.ch
+
+38th Conference on Neural Information Processing Systems (NeurIPS 2024).
+
+2. We show that when the dynamics lies
+√ in a reproducing kernel Hilbert space (RKHS) of kernel k,
+N EO RL exhibits a regret of O(ΓT T ), where the regret, akin to prior work, is measured w.r.t to
+the optimal average cost under known dynamics, T is the number of environment steps, and ΓT
+the maximum information gain of kernel k (Srinivas et al., 2012). Our regret bound is similar to
+the ones obtained in the episodic setting (Kakade et al., 2020; Curi et al., 2020; Sukhija et al.,
+2024; Treven et al., 2024) and Gaussian process (GP) bandit optimization (Srinivas et al., 2012;
+Chowdhury & Gopalan, 2017; Scarlett et al., 2017) and is sublinear for common kernel such as
+the exponential kernel. To the best of our knowledge, we are the first to obtain regret bounds for
+the setting.
+3. We evaluate N EO RL on several RL benchmarks against common model-based RL baselines.
+Our experimental results demonstrate that N EO RL consistently achieves sublinear regret, also
+when neural networks are employed instead of GPs for modeling dynamics. Moreover, in all
+our experiments, N EO RL converges to the optimal average cost.
+
+2
+
+Problem Setting
+
+We consider a discrete-time dynamical system with running costs c.
+xt+1 = f ∗ (xt , ut ) + wt , (xt , ut ) ∈ X × U, x(0) = x0
+c(x, u) ∈ R≥0
+
+(1)
+(Running cost)
+
+Here xt ∈ X ⊆ Rdx is the state, ut ∈ U ⊆ Rdu the control input, and wt ∈ W ⊆ Rw the process
+noise. The dynamics f ∗ are unknown and the cost c is assumed to be known.
+Task In this work, we study the average cost RL problem (Puterman, 2014), i.e., we want to learn
+the solution to the following minimization problem
+"T −1
+#
+X
+1
+∗
+c(xt , ut ) .
+(2)
+A(π , x0 ) = min A(π, x0 ) = min lim sup Eπ
+π∈Π
+π∈Π T →∞ T
+t=0
+Moreover, we consider the nonepisodic RL setting where the system starts at an initial state x0 ∈ X
+but never resets back during learning, that is, we seek to learn online from a single trajectory. After
+each step t in the environment, the RL system receives a transition tuple (xt , ut , xt+1 ) and updates
+its policy based on the data Dt collected thus far during learning. The average cost formulation is
+common for the nonepisodic setting (Jaksch et al., 2010; Abbasi-Yadkori & Szepesvári, 2011; Cohen
+et al., 2019; Dean et al., 2020; Simchowitz & Foster, 2020), and the cumulative regret for the learning
+algorithm in this case is defined as
+RT =
+
+T
+−1
+X
+t=0
+
+Ext ,ut |x0 [c(xt , ut ) − A(π ∗ , x0 )].
+
+(3)
+
+Studying the average cost criterion for general continuous state-action spaces is challenging even
+when the dynamics are known, since the average cost exists only for special classes of nonlinear
+systems (Arapostathis et al., 1993). In the following, we impose assumptions on the dynamics and
+policy class Π that enable our theoretical analysis.
+2.1
+
+Assumptions
+
+Imposing continuity on f ∗ is quite common in the control theory (Khalil, 2015) and reinforcement
+learning literature (Curi et al., 2020; Sussex et al., 2023; Sukhija et al., 2024). To this end, for our
+analysis, we make the following assumption.
+Assumption 2.1 (Continuity of f ∗ and π). The dynamics model f ∗ and all π ∈ Π are continuous.
+Next, we make an assumption on the system’s stochastic disturbances.
+Assumption 2.2 (Process noise distribution). The process noise is i.i.d. Gaussian with variance
+i.i.d
+σ 2 , i.e., wt ∼ N (0, σ 2 I).
+Our analysis can be extended for the more general heteroscedastic case, where σ depends on
+x. However, for simplicity, we focus on the homoscedastic setting. In the following, we make
+assumptions on our policy class. To this end, we first introduce the class of K∞ functions.
+2
+
+Definition 2.3 (K∞ -functions). The function ξ : R≥0 → R≥0 is of class K∞ , if it is continuous,
+strictly increasing, ξ(0) = 0 and ξ(s) → ∞ for s → ∞.
+
+Assumption 2.4 (Policies with bounded energy). We assume there exists κ, ξ ∈ K∞ , positive
+constants K, Cu , Cl with Cu > Cl , and γ ∈ (0, 1) such that for each π ∈ Π we have,
+Bounded energy: There exists a Lyapunov function V π : X → [0, ∞) for which ∀x, x′ ∈ X ,
+|V π (x) − V π (x′ )| ≤ κ(∥x − x′ ∥)
+Cl ξ(∥x∥) ≤ V π (x) ≤ Cu ξ(∥x∥)
+Ex+ |x,π [V π (x+ )] ≤ γV π (x) + K
+
+(uniform continuity)
+(positive definiteness)
+(drift condition)
+
+where x+ = f ∗ (x, π(x)) + w.
+Bounded norm of cost:
+c(x, π(x))
+<∞
+1
++ V π (x)
+x∈X
+sup
+
+Boundedness of the noise with respect to κ:
+
+
+Ew [κ(∥w∥)] < ∞, Ew κ2 (∥w∥) < ∞
+The drift condition states that the energy between two timesteps can increase at most by K. In
+particular, the Lyapunov function V π can be viewed as an energy function for the dynamical system,
+and the bounded energy condition above ensures that the system is not “blowing up”. We do not
+perceive this as restrictive for real-world engineered systems. Other works that study learning
+nonlinear dynamics (Foster et al., 2020; Sattar & Oymak, 2022; Lale et al., 2021) in the nonepisodic
+setting also make stability assumptions such as global exponential stability for their analysis. In
+similar spirit, we make the bounded energy assumption for our policy class. The drift condition on
+the Lyapunov function is also used to study the ergodicity of Markov chains for continuous state
+spaces (Meyn & Tweedie, 2012; Hairer & Mattingly, 2011), which is crucial for our analysis of
+the infinite horizon behavior of the system. Moreover, for a very rich class of problems, the drift
+condition is satisfied. We highlight this in the corollary below.
+Lemma 2.5. Assume f ∗ is uniformly continuous and for all π ∈ Π, x ∈ X , ∥π(x)∥ ≤ umax .
+Further assume, there exists πs ∈ Π such that we have constants K, Cu , Cl with Cu > Cl , γ ∈ (0, 1),
+κ, α ∈ K∞ and a Lyapunov function V : X → [0, ∞) for which ∀x, x′ ∈ X ,
+|V (x) − V (x′ )| ≤ κ(∥x − x′ ∥)
+Cl ξ(∥x∥) ≤ V (x) ≤ Cu ξ(∥x∥)
+Ex+ |x,πs [V (x+ )] ≤ γV (x) + K,
+
+where x+ = f ∗ (x, π(x)) + w. Then, V also satisfies the drift condition for all π ∈ Π, i.e., is a
+Lyapunov function for all policies.
+We prove this lemma in Appendix B. Intuitively, if the inputs are bounded, the energy inserted into
+the system by another policy is also bounded. Nearly all real-world systems have bounded inputs due
+to the physical limitations of actuators. For these systems, it suffices if only one policy in Π satisfies
+the drift condition.
+The boundedness assumptions for the cost and the noise in Assumption 2.4 are satisfied for a rich
+class of cost and K∞ functions.
+Under these assumptions, we can show the existence of the average cost solution.
+Theorem 2.6 (Existence of Average Cost Solution). Let Assumption 2.1 – 2.4 hold. Consider any
+π ∈ Π and let P π denote its transition kernel, i.e., P π (x, A) = P(x+ ∈ A|x, π(x)) for A ⊆ X .
+Then P π admits a unique invariant measure P̄ π , and there exists C2 , C3 ∈ (0, ∞), λ ∈ (0, 1) such
+that
+Average Cost:
+"T −1
+#
+X
+1
+A(π) = lim
+Eπ
+c(xt , ut ) = Ex∼P̄ π [c(x, π(x))]
+T →∞ T
+t=0
+3
+
+Bias Cost: Letting B(π, x0 ) = limT →∞ Eπ
+
+hP
+
+T −1
+t=0 c(xt , ut ) − A(π)
+
+|B(π, x0 )| ≤ C2 (1 + V π (x0 ))
+for all x0 ∈ X .
+
+i
+
+denote the bias, we have
+
+1
+1−λ
+
+Theorem 2.6 is a crucial result for our analysis since it implies that the average cost is bounded and
+independent of the initial state x0 . Furthermore, it also shows that the bias is bounded. The average
+cost criterion satisfies the following Bellman equation (Puterman, 2014) below
+B(π, x) + A(π) = c(x, π(x)) + Ex+ [B(π, x+ )|x, π]
+
+(4)
+
+Accordingly, the bias term plays an important role in the regret analysis (also notice its similarity to
+our regret term in Equation (3)).
+Thus far, we have only made assumptions that make the average cost problem tractable. In the
+following, we make an assumption on the dynamics that allow us to learn it from data. Moreover, we
+assume that at each step n we learn a mean estimate µn of f ∗ and can quantify our uncertainty σn
+over the estimate. More formally, we learn a well-calibrated statistical model of f ∗ as defined below.
+def
+Definition 2.7 (Well-calibrated statistical model of f ∗ , Rothfuss et al. (2023)). Let Z = X × U. An
+all-time well-calibrated statistical model of the function f ∗ is a sequence {Mn (δ)}n≥0 , where
+def 
+Mn (δ) = f : Z → Rdx | ∀z ∈ Z, ∀j ∈ 1, . . . , dx : |µn,j (z) − fj (z)| ≤ βn (δ)σn,j (z) ,
+T
+if, with probability at least 1 − δ, we have f ∗ ∈ n≥0 Mn (δ). Here, fj , µn,j and σn,j denote the
+j-th element in the vector-valued functions f , µn and σn respectively, and βn (δ) ∈ R≥0 is a scalar
+function that depends on the confidence level δ ∈ (0, 1] and which is monotonically increasing in n.
+
+Next, we assume that f ∗ resides in a Reproducing Kernel Hilbert Space (RKHS) of vector-valued
+functions and show that this is sufficient for us to obtain a well-calibrated model.
+Assumption 2.8. We assume that the functions fj∗ , j ∈ 1, . . . , dx lie in a RKHS with kernel k
+dx
+dx
+and have a bounded norm B, that is f ∗ ∈ Hk,B
+, with Hk,B
+= {f | ∥fj ∥k ≤ B, j = 1, . . . , dx }.
+Moreover, we assume that k(z, z) ≤ σmax for all z ∈ Z.
+Assumption 2.8 allows us to model f ∗ with GPs for which the mean and epistemic uncertainty
+(µn (z) = [µn,j (z)]j≤dx , and σn (z) = [σn,j (z)]j≤dx ) have an analytical formula
+j
+µn,j (z) = kn⊤ (z)(Kn + σ 2 I)−1 y1:n
+,
+2
+σn,j
+(z) = k(x, x) − kn⊤ (z)(Kn + σ 2 I)−1 kn (x),
+
+(5)
+
+j
+Here, y1:n
+corresponds to the noisy measurements of fj∗ , i.e., the observed next state from the
+transitions dataset D1:n , kn = [k(z, zi )]i≤nT , zi ∈ D1:n , and Kn = [k(zi , zl )]i,l≤nT , zi , zl ∈ D1:n
+is the data kernel matrix. The restriction on the kernel k(z, z) ≤ σmax implies boundedness of f ∗
+and has also appeared in works studying the episodic setting for nonlinear systems (Mania et al.,
+2020; Kakade et al., 2020; Curi et al., 2020; Sukhija et al., 2024; Wagenmaker et al., 2023). We can
+also define f ∗ such that xk = xk−1 + f ∗ (xk−1 , uk−1 ) + wk−1 in which case the boundedness of
+f ∗ captures many real-world systems.
+dx
+Lemma 2.9 (Well calibrated confidence intervals for RKHS, Rothfuss et al. (2023)). Let f ∗ ∈ Hk,B
+.
+Suppose µn and σn are
+the
+posterior
+mean
+and
+variance
+of
+a
+GP
+with
+kernel
+k,
+c.f.,
+Equation
+(5).
+√
+There exists βn (δ) ∝ Γn , for which the tuple (µn , σn , βn (δ)) is a well-calibrated statistical model
+of f ∗ .
+
+In summary, in the RKHS setting, a GP is a well-calibrated model. For more general models like
+Bayesian neural networks (BNNs), methods such as Kuleshov et al. (2018) can be used for calibration.
+Our results can also be extended beyond the RKHS setting to other classes of well-calibrated models
+similar to Curi et al. (2020).
+
+4
+
+Algorithm 1 N EO RL: N ONEPISODIC O PTIMISTIC RL
+Init: Aleatoric uncertainty σ, Probability δ, Statistical model (µ0 , σ0 , β0 (δ)), H0
+for n = 1, . . . , N do
+πn = arg min
+min
+A(π, f )
+➤ Prepare policy
+π∈Π
+
+f ∈Mn−1 ∩M0
+
+Dn ← ROLLOUT(πn ) for Hn steps (Equation (7))
+Update (µn , σn , βn ) ← Dn
+
+➤ Collect measurements for horizon Hn
+➤ Update statistical model Mn
+
+end for
+
+3
+
+N EO RL
+
+In the following, we present our algorithm: Nonepisodic Optimistic RL (N EO RL) for efficient
+nonepisodic exploration in continuous state-action spaces. N EO RL builds on recent advances in
+episodic RL (Kakade et al., 2020; Curi et al., 2020; Sukhija et al., 2024; Treven et al., 2024) and
+leverages the optimism in the face of uncertainty paradigm to pick policies that are optimistic w.r.t. the
+dynamics within our calibrated statistical model as follows
+def
+
+(πn , fn ) =
+
+arg min
+
+A(π, f ).
+
+(6)
+
+π∈Π, f ∈Mn−1 ∩M0
+
+Here, fn is a dynamical system such that the cost by controlling fn with its optimal policy πn is
+the lowest among all the plausible systems from Mn−1 ∩ M0 . Note, from Lemma 2.9 we have
+that f ∗ ∈ Mn−1 ∩ M0 (with high probability) and therefore the solution to Equation (6) gives an
+optimistic estimate for the average cost. We take the intersection of Mn−1 with M0 to ensure that we
+maintain at least the same confidence about our model as at the beginning, i.e., n = 0, during learning.
+N EO RL proceeds in the following manner. Similar to Jaksch et al. (2010), we bin the total time T
+the agent spends interacting in the environment into N “artificial” episodes. At each episode, we pick
+a policy according to Equation (6) and roll it out for Hn steps on the system. Next, we use the data
+collected during the rollout to update our statistical model and continue to the next episode without
+resetting the system back to the initial state x0 .
+Picking the horizon Hn The horizon Hn regulates how long we roll out the policy or how often
+we update our statistical model. We propose the following selection criteria for Hn .
+
+
+cn , H0 ,
+Hn = max H
+cn = arg max H + 1
+H
+H≥1
+
+s.t.
+
+dx
+H X
+X
+k=1 j=1
+
+
+2
+log 1 + σ −2 σn−1,j
+(zk,n ) ≤ log(2),
+
+(7)
+
+where H0 > 0 is a minimal horizon we want to maintain. The last term in Equation (7) measures
+the information gain (Sukhija et al., 2024) the agent obtains for a rollout of length H at episode
+n. Crucially, we update our model once theagent has acquired more than one-bit of information,
+PH Pdx
+2
+i.e., k=1 j=1
+log 1 + σ −2 σn−1,j
+(zk,n ) > log(2). Furthermore, We can keep track of the
+information gain online during rollouts and switch the policy once we have collected sufficient
+data/information. The algorithm is summarized in Algorithm 1.
+3.1
+
+Theoretical Results
+
+In the following, we study the theoretical properties for N EO RL and provide a first-of-its-kind bound
+on the cumulative regret for the average cost criterion for general nonlinear dynamical systems. Our
+bound depends on the maximum information gain of kernel k (Srinivas et al., 2012), defined as
+1
+ΓT (k) =
+max
+log I + σ −2 KT .
+A⊂X ×U ;|A|≤T 2
+ΓT represents the complexity of learning f ∗ from T data points and is sublinear for a very rich class
+of kernels (e.g., O(logdx +du +1 (T )) for the exponential (RBF) kernel, O((dx + du ) log(T )) for the
+linear kernel). In Appendix B, we report the dependence of ΓT on T in Table 1.
+5
+
+Theorem 3.1 (Cumulative Regret of N EO RL). Let Assumption 2.1 – 2.8 hold, and define H0 as the
+smallest integer such that
+log (Cu/Cl )
+H0 >
+.
+log (1/γ )
+Then with probability at least 1 − δ, we have the following regret for N EO RL
+√
+RT ≤ C(x0 , K, γ)ΓT T .
+with C(x0 , K, γ) being bounded constant for bounded ∥x0 ∥, K, and γ < 1.
+Theorem 3.1 gives sublinear regret for a rich class of RKHS functions. Moreover, it also gives a
+minimal horizon H0 that we need to maintain before switching to the next policy. Even for the
+linear case, fast switching between stable controllers can destabilize the closed-loop system. We
+ensure this does not happen in our case by having a minimal horizon of H0 . Theorem 3.1 can also
+be derived beyond the RKHS setting for a more general class of well-calibrated models. In this case,
+the maximum information gain is replaced by the model complexity from Curi et al. (2020) (c.f.,
+Curi et al. (2020); Sukhija et al. (2024) for further detail).
+In the following, we give an intuitive proof sketch for Theorem 3.1. The detailed proof is provided in
+Appendix B.
+Proof sketch The proof can be split into three main steps. First, we show the ergodicity of the
+closed-loop system, a sufficient condition for showing the existence of the average cost and bias
+term, i.e., Theorem 2.6, for every policy π ∈ Π under Assumption 2.1 – 2.4. For this, we use
+elementary results on Markov chains in measurable spaces from Meyn & Tweedie (2012); Hairer
+& Mattingly (2011). Second, we show that under Assumption 2.8, the optimistic system selected
+in Equation (6), retains the same properties as the true system f ∗ , e.g., stability, and therefore also
+is ergodic. Crucial to show this is that the true system f ∗ and the optimistic system fn are at most
+βn σn apart. Finally, in the third step, we show that as we update our model and policy every Hn
+steps, our selection criteria for the horizon (Equation (7)) retains the system properties from above,
+and our accumulated model uncertainties across T environment steps grow with the rate ΓT . For
+the latter, we use the analysis from Kakade et al. (2020) for the episodic case, to bound the deviation
+between the optimistic average cost and the true average cost.
+3.2
+
+Practical Modifications
+
+For testing N EO RL, we make three modifications that simplify its deployment in practice in terms
+of implementation and computation time. First, instead of adaptively selecting the horizon Hn we
+pick a fixed horizon H during the experiment. This makes the planning and training of the agent
+easier. Next, we use a receding horizon controller, i.e., model predictive control (MPC) (García et al.,
+1989), instead of directly optimizing for the average cost in Equation (6). MPC is widely used to
+obtain a feedback controller for the infinite horizon setting. Moreover, while for linear systems, the
+Riccati equations (Anderson & Moore, 2007) provide an analytical solution to Equation (2), no such
+solution exists for the nonlinear case and MPC is commonly used as an approximation. Further, under
+additional assumptions on the cost and dynamics, MPC also obtains a policy with bounded average
+cost, which is crucial for the nonepisodic case (c.f., Assumption 2.4). We use the iCEM optimizer for
+planning (Pinneri et al., 2021). Finally, instead of optimizing over Mn ∩ M0 , we optimize directly
+over Mn . This allows us to use the reparameterization trick from Curi et al. (2020) and obtain a
+simple and tractable optimization problem. In summary, for each step t in the environment, we solve
+the following optimization problem
+"H −1
+#
+MPC
+X
+min
+E
+c(x̂h , uh ) ,
+(8)
+u0:HMPC −1 ,η0;HMPC −1
+
+h=0
+
+s.t. x̂h+1 = µn−1 (x̂h , uh ) + βn−1 (δ)σn−1 (x̂h , uh )ηh + wh and x̂0 = xt .
+Here HMPC is the MPC horizon. We take the first input from the solution of the problem above,
+i.e., u∗0 , and execute this in the system. We then repeat this procedure for H steps and then update
+our statistical model Mn . The resulting optimization above considers a larger action space as it
+includes the hallucinated controls η as additional input variables. The hallucinated controls are
+introduced through the reparameterization trick from Curi et al. (2020) and are used to directly
+optimize over models in f ∈ Mn . Moreover, the final algorithm can be seen as a natural extension to
+6
+
+H-UCRL (Curi et al., 2020) for the nonepisodic setting. We summarize the algorithm in Appendix C
+Algorithm 2. Note while these modifications deviate from our theoretical analysis, empirically they
+work well for GP and BNN models, c.f., Section 4.
+
+4
+
+Experiments
+
+Pendulum-GP
+
+A(π)
+
+10
+
+0
+
+200
+
+0
+
+400
+
+×103
+RT
+
+1
+
+0
+
+0
+
+0
+
+200
+400
+Env Steps T
+
+0
+
+500
+
+0
+
+1000
+
+1.0
+
+0
+
+500
+
+1000
+
+×10
+
+1000
+
+2000
+
+0.0
+
+3
+
+1.0
+
+0
+
+500
+Env Steps T
+
+1000
+
+1000
+Env Steps T
+
+2000
+
+0.0
+
+RT
+
+1000
+Env Steps T
+
+2000
+
+2
+
+0
+
+500
+Env Steps T
+
+0
+×10
+
+10000
+
+NeTS
+
+0
+
+1.0
+0.5
+
+2.5
+
+0.0
+
+20000
+
+4
+
+0
+×10
+
+0.0
+
+10000 20000
+Env Steps T
+NeMean
+
+RaceCar
+5.0
+
+1000
+
+2000
+
+0.0
+
+3
+
+2
+
+0
+×10
+
+1000
+3
+
+1
+
+0.5
+0
+
+1000
+
+SoftArm
+
+0.5
+
+0
+
+2000
+
+×101
+
+1.0
+5
+
+1000
+
+1
+0.0
+
+0.5
+
+0
+
+0
+
+3
+
+Swimmer
+
+20
+
+0.0
+
+×105
+
+0.5
+
+CartPole
+
+40
+A(π)
+
+0.2
+
+2
+
+2
+
+0
+
+Reacher
+
+50
+
+×103
+
+4
+
+0
+
+MountainCar
+
+100
+
+5
+
+5
+0
+
+Pendulum
+
+10
+
+0
+
+1000
+2000
+Env Steps T
+NeoRL
+NePETS
+
+0
+
+0
+
+1000
+Env Steps T
+
+NePETS
+NeoRL
+
+Figure 1: Average reward A(π) and cumulative regret RT over ten different seeds for all environments. We report the mean performance with one standard error as shaded regions. During all
+experiments, the environment is never reset. For all baselines, we model the dynamics with probabilistic ensembles, except in the Pendulum-GP experiment, where GPs are used instead. N EO RL
+significantly outperforms all baselines and converges to the optimal average reward, A(π ∗ ) = 0,
+showing sublinear cumulative regret RT for all environments.
+We evaluate N EO RL on the Pendulum-v1 and MountainCar environment from the OpenAI gym
+benchmark suite (Brockman et al., 2016), Cartpole, Reacher, and Swimmer from the DeepMind
+control suite (Tassa et al., 2018), the racecar simulator from Kabzan et al. (2020), and a soft robotic
+arm from Tekinalp et al. (2024). The swimmer and the soft robotic arm are fairly high-dimensional
+systems – the swimmer has a 28-dimensional state and 5-dimensional action space, and the soft arm
+is represented by a 58-dimensional state and has a 12-dimensional action space. All environments
+are never reset during learning. Moreover, the Pendulum-v1, MountainCar, CartPole, and Reacher
+environments operate within a bounded domain and thus inherently satisfy Assumption 2.4. The
+swimmer, racecar, and soft arm can operate in an unbounded domain but have a cost function that
+penalizes the distance between the system’s state xt and a target state x∗ . Therefore, the cost
+encourages the system to move towards the target and remain within a bounded domain.
+Baselines In the episodic setting, resets can be used to control the exploration space for the agent.
+However, in the absence of resets, the agent can explore arbitrarily and end up in states that are
+7
+
+irrelevant to the task at hand. Moreover, the agent has to follow an uninterrupted chain of experience,
+which makes the nonepisodic setting the most challenging one in RL (Kakade, 2003). Accordingly,
+there are only a few algorithms that consider this setting (c.f., Section 5). In this work, we focus
+on model-based RL (MBRL) algorithms due to their sample efficiency. In particular, we adopt
+common MBRL methods for our setting. MBRL algorithms typically differentiate in three ways; (i)
+propagating dynamics for planning (Chua et al., 2018; Osband & Van Roy, 2017; Kakade et al., 2020;
+Curi et al., 2020), (ii) representation of the dynamics model (Ha & Schmidhuber, 2018; Hafner et al.,
+2019; Kipf et al., 2019), and (iii) types of planners (Williams et al., 2017; Hafner et al., 2020; Pinneri
+et al., 2021). N EO RL is independent to the choice of representation or planners. Therefore, we focus
+on (i) and use probabilistic ensembles (Lakshminarayanan et al., 2017) and GPs for modeling our
+dynamics and MPC with iCEM (Pinneri et al., 2021) as the planner. Common techniques to propagate
+the dynamics for planning are using the mean, trajectory sampling (Chua et al., 2018), and Thompson
+sampling (Osband & Van Roy, 2017). We adapt these three for our setting similar to as discussed
+in Section 3.2. For all experiments with probabilistic ensembles, we consider TS1 from Chua et al.
+(2018) for trajectory sampling, and for the GP experiment, we use distribution sampling from Chua
+et al. (2018). We call the three baselines N E M EAN (nonepisodic mean), N E PETS (nonepisodic
+PETS), and N E TS (nonepisodic Thompson sampling). N E M EAN and N E PETS are greedy w.r.t. the
+current estimate of the dynamics, i.e., do not explicitly encourage exploration. In our experiments,
+we show that being greedy does not suffice to converge to the optimal average cost, that is, obtain
+sublinear regret. The code for our experiments is available online.2
+Convergence to the optimal average cost In Figure 1 we report the normalized average cost
+and cumulative regret of N EO RL, N E M EAN, N E PETS, and N E TS. The normalized average cost
+is defined such that A(π ∗ ) = 0 for all environments. We observe that N E M EAN fails to converge
+to the optimal average cost for the Pendulum-v1 environment for both probabilistic ensembles and
+a GP model. It also fails to solve the MountainCar environment and is unstable for the Reacher
+and CartPole. In general, N E M EAN performs the worst among all methods. This is similar to the
+episodic case, where using the mean model often leads to the policy “overfitting” to the model
+inaccuracies (Chua et al., 2018). N E PETS performs better than the mean, however still significantly
+worse than N EO RL. Even in the episodic setting, PETS tends to underexplore (Curi et al., 2020). We
+observe the same for the nonepisodic case, especially for the MountainCar task, which is a challenging
+RL environment with a sparse cost. Here N E PETS is also not able to achieve the optimal average
+cost and thus does not have sublinear cumulative regret. N E TS performs similarly to N E PETS and is
+also not able to solve the MountainCar task.
+N EO RL performs the best among the baselines for all experiments and converges to the optimal
+average cost achieving sublinear cumulative regret using only ∼ 103 environment interactions.
+Moreover, this observation is consistent between different dynamics models (GPs and probabilistic
+ensembles) and environments. Even in environments that are unbounded, i.e., Swimmer, SoftArm,
+and RaceCar, we observe that N EO RL converges to the optimal average cost the fastest. We believe
+this is due to the feedback control from MPC, which has a stabilizing effect.
+Calling reset when needed All the experiments in Figure 1 considered the nonepisodic setting
+where the system was never reset during learning. A special case of our theoretical analysis is the
+class of policies Π that may call for a reset / “ask for help” whenever they end up in an undesirable
+part of the state space. In this setting, the system is typically restricted to a compact subset of the
+state space X , and the policy class satisfies Assumption 2.4. For many real-world applications,
+such a policy class can be derived. To simulate this experiment, we consider the CartPoleBalance
+task in Figure 2, where the goal is to balance the pole in the upright position. A reset is triggered
+whenever the pole drops. We again observe that N EO RL achieves the best performance, i.e., lowest
+cumulative regret and thus learns to solve the task the fastest. Moreover, it also requires fewer resets
+than N E M EAN, N E PETS, and N E TS.
+
+5
+
+Related Work
+
+Average cost RL for finite state-action spaces A significant amount of work studies the average
+cost/reward RL setting for finite-state action spaces. Moreover, seminal algorithms such as E3 (Kearns
+& Singh, 2002) and R- max (Brafman & Tennenholtz, 2002) have established PAC bounds for
+the nonepisodic setting. These bounds are further improved for communicating MDPs by the
+2
+
+https://github.com/lasgroup/opax/tree/neorl
+
+8
+
+CartPoleBalance
+
+×102
+
+1.0
+
+3
+RT
+
+Total Resets
+
+4
+
+2
+
+0.5
+
+1
+0
+
+0.0
+0
+NeTS
+
+1000
+Env Steps T
+
+2000
+
+0
+
+NeMean
+
+1000
+Env Steps T
+NePETS
+
+2000
+NeoRL
+
+Figure 2: Total number of resets and cumulative regret RT for the cart pole balancing task over ten
+different seeds. We report the mean performance with one standard errors as the shaded region. The
+environment is automatically reset whenever the agent drops the pole. All baselines solve the task,
+but N EO RL converges the fastest requiring fewer resets and suffering smaller regret.
+
+UCRL2 (Jaksch et al., 2010) algorithm, which, similar to N EO RL, is based on the optimism in the
+face of uncertainty paradigm and picks policies that are optimistic w.r.t. to the estimated dynamics.
+Their result is extended for weakly-communicating MDPs by REGAL (Bartlett & Tewari, 2012),
+similar results are derived for Thompson sampling based exploration (Ouyang et al., 2017), and
+for factored-MDP (Xu & Tewari, 2020). Albeit the significant amount of work for the finite case,
+progress for continuous state-action spaces has mostly been limited to linear dynamical systems.
+Nonepisodic RL for linear systems There is a large body of work for nonepisodic learning with
+linear systems (Abbasi-Yadkori & Szepesvári, 2011; Cohen et al., 2019; Simchowitz & Foster,
+2020; Dean et al., 2020; Lale et al., 2020; Faradonbeh et al., 2020; Abeille & Lazaric, 2020; Treven
+et al., 2021). For linear systems with quadratic costs, the average reward problem, also known as
+the linear quadratic-Gaussian (LQG), has a closed-form solution which is obtained via the Riccati
+equations (Anderson & Moore, 2007). Moreover, for LQG, stability and optimality are intertwined,
+making studying linear systems much easier than their nonlinear counterpart. For studying nonlinear
+systems, additional assumptions on their stability are usually made.
+Episodic RL for nonlinear systems In the case of nonlinear systems, guarantees have mostly
+been established for the episodic setting (Mania et al., 2020; Kakade et al., 2020; Curi et al., 2020;
+Wagenmaker et al., 2023; Sukhija et al., 2024; Treven et al., 2024). In this setting, the agent begins
+each episode from an initial state x0 (or initial state distribution) and interacts with the environment
+for a fixed horizon H. It uses the data collected from the interactions to update its model. After each
+episode, the agent is reset back to x0 . The works mentioned above theoretically study this setting for
+finite-horizon MDPs and establish regret bounds for general nonlinear systems. Particularly Kakade
+et al. (2020); Curi et al. (2020); Sukhija et al. (2024); Treven et al. (2024) also use an optimism-based
+approach similar to ours. Compared to the nonepisodic case, the analysis of episodic RL methods
+is simpler as resets restrict the agent’s exploration around the initial state x0 and prevent the system
+from blowing up or visiting states from which the agent cannot recover. However, as discussed in
+Section 1, resets are often prohibitive and RL agents that learn non-episodically are preferred for
+many real-world applications.
+Nonepisodic RL beyond linear systems Only a few works consider the nonepisodic/singletrajectory case. For instance, a line of work studies data-driven MPC approaches focusing mostly on
+establishing system-theoretic guarantees such as closed-loop stability and robustness (Berberich & Allgöwer, 2024). From the learning side, Foster et al. (2020); Sattar & Oymak (2022) study the problem
+of system identification of a closed-loop globally exponentially stable dynamical system from a single
+trajectory. Lale et al. (2021) study the nonepisodic setting for nonlinear systems with MPC. Moreover,
+they consider finite-order or exponentially fading NARX systems that lie in the RKHS of infinitely
+smooth functions, which they further approximate with random Fourier features (Rahimi & Recht,
+2007) ϕ with feature size D. Further, they assume access to bounded persistently exciting inputs
+w.r.t. the feature matrix Φt Φ⊺t . This assumption is generally tough to verify and common excitation
+9
+
+strategies such as random exploration often don’t perform well for nonlinear systems (Sukhija et al.,
+2024). The algorithm also operates in two stages, where in the first stage it performs pure exploration
+for system identification and in the second stage exploitation, i.e., acting greedily w.r.t. the estimated
+dynamics, akin to N E M EAN. Additionally, the algorithm
+requires the feature size D to increase with
+
+2
+the horizon T . They give a regret bound of O T /3 where the regret is measured w.r.t. to the oracle
+MPC with access to the true dynamics. Lale et al. (2021) also assume exponential input-to-output
+stability of the system to avoid blow-up during exploration. Our work considers more general RKHS,
+naturally trades-off exploration and exploitation,√does not require apriori knowledge of persistently
+exciting inputs and gives a regret bound of O(ΓT T ) w.r.t. the optimal average cost criterion. Moreover, our regret bound is similar to the ones obtained for nonlinear systems in the episodic case and
+Gaussian process bandits (Srinivas et al., 2012; Chowdhury & Gopalan, 2017; Scarlett et al., 2017).
+To the best of our knowledge, we are the first to give such a regret bound for nonlinear systems.
+Nonepisodic Deep RL Standard deep RL approaches often fail in the nonepisodic setting (Sharma
+et al., 2021b). To this end, deep RL algorithms have also been developed for the nonepisodic
+case. Mostly, these works focus on learning to reset and formulate it from the perspective of
+safety (Eysenbach et al., 2018) (avoiding undesirable states), chaining multiple controllers (Han
+et al., 2015), skill discovery/intrinsic exploration (Zhu et al., 2020; Xu et al., 2020), curriculum
+learning (Sharma et al., 2021a), and learning initial state distributions from demonstrations (Sharma
+et al., 2022). However, in contrast to us, none of the works above provide any theoretical guarantees.
+There are several extensions of model-free deep RL algorithms to the average reward setting
+(TRPO (Zhang & Ross, 2021), PPO (Ma et al., 2021), and DDPG (Saxena et al., 2023)). However,
+they mostly focus on maximizing the long-term behavior of the RL agent and allow for resets during
+learning. Overall, extending RL algorithms for the discounted case to the average one is still an open
+problem (Dewanto et al., 2020). However, future work in this direction will benefit N EO RL. Since
+average-reward optimizers can be used in combination with N EO RL to directly minimize the average
+cost in a model-based policy optimization (Janner et al., 2019) manner.
+
+6
+
+Conclusion
+
+We propose, N EO RL, a novel model-based RL algorithm for the nonepisodic setting with nonlinear
+dynamics and continuous state and action spaces. N EO RL seeks for average-cost optimal policies and
+leverages the model’s epistemic uncertainty to perform optimistic exploration. Similar to the √
+episodic
+case (Kakade et al., 2020; Curi et al., 2020), we provide a regret bound for N EO RL of O(ΓT T ) for
+Gaussian process dynamics. To our knowledge, we are the first to obtain this result in the nonepisodic
+setting. We compare N EO RL to other model-based RL methods on standard deep RL benchmarks.
+Our experiments demonstrate that N EO RL, converges to the optimal average cost of A(π ∗ ) = 0
+across all environments, suffering sublinear regret even when Bayesian neural networks are used
+to model the dynamics. Moreover, N EO RL outperforms all our baselines across all environments
+requiring only ∼ 103 samples for learning.
+Future work may consider deriving lower bounds on the regret of N EO RL, studying different
+assumptions on f ∗ and Π, and investigating different notions of optimality such as bias optimality in
+the nonepisodic setting (Mahadevan, 1996).
+
+Acknowledgments and Disclosure of Funding
+We would like to thank Mohammad Reza Karimi, Scott Sussex, and Armin Lederer for the insightful
+discussions and feedback on this work. This project has received funding from the Swiss National
+Science Foundation under NCCR Automation, grant agreement 51NF40 180545, and the Microsoft
+Swiss Joint Research Center.
+
+References
+Abbasi-Yadkori, Y. and Szepesvári, C. Regret bounds for the adaptive control of linear quadratic systems. In
+Conference on Learning Theory, 2011.
+Abeille, M. and Lazaric, A. Efficient optimistic exploration in linear-quadratic regulators via lagrangian
+relaxation. In International Conference on Machine Learning, 2020.
+Anderson, B. D. and Moore, J. B. Optimal control: linear quadratic methods. Courier Corporation, 2007.
+
+10
+
+Annaswamy, A. M. Adaptive control and intersections with reinforcement learning. Annual Review of Control,
+Robotics, and Autonomous Systems, 2023.
+Arapostathis, A., Borkar, V. S., Fernández-Gaucherand, E., Ghosh, M. K., and Marcus, S. I. Discrete-time
+controlled markov processes with average cost criterion: A survey. SIAM Journal on Control and Optimization,
+1993.
+Åström, K. J. and Wittenmark, B. Adaptive Control. Courier Corporation, 2013.
+Bartlett, P. L. and Tewari, A. Regal: A regularization based algorithm for reinforcement learning in weakly
+communicating mdps. arXiv preprint arXiv:1205.2661, 2012.
+Berberich, J. and Allgöwer, F. An overview of systems-theoretic guarantees in data-driven model predictive
+control, 2024. URL https://arxiv.org/abs/2406.04130.
+Brafman, R. I. and Tennenholtz, M. R-max-a general polynomial time algorithm for near-optimal reinforcement
+learning. Journal of Machine Learning Research, 2002.
+Brockman, G., Cheung, V., Pettersson, L., Schneider, J., Schulman, J., Tang, J., and Zaremba, W. Openai gym.
+arXiv preprint arXiv:1606.01540, 2016.
+Chowdhury, S. R. and Gopalan, A. On kernelized multi-armed bandits. In ICML, 2017.
+Chua, K., Calandra, R., McAllister, R., and Levine, S. Deep reinforcement learning in a handful of trials using
+probabilistic dynamics models. In NeurIPS, 2018.
+√
+Cohen, A., Koren, T., and Mansour, Y. Learning linear-quadratic regulators efficiently with only T regret. In
+International Conference on Machine Learning, 2019.
+Curi, S., Berkenkamp, F., and Krause, A. Efficient model-based reinforcement learning through optimistic policy
+search and planning. NeurIPS, 33:14156–14170, 2020.
+Dean, S., Mania, H., Matni, N., Recht, B., and Tu, S. On the sample complexity of the linear quadratic regulator.
+Foundations of Computational Mathematics, 20(4):633–679, 2020.
+Dewanto, V., Dunn, G., Eshragh, A., Gallagher, M., and Roosta, F. Average-reward model-free reinforcement
+learning: a systematic review and literature mapping. arXiv preprint arXiv:2010.08920, 2020.
+Eysenbach, B., Gu, S., Ibarz, J., and Levine, S. Leave no trace: Learning to reset for safe and autonomous
+reinforcement learning. International Conference on Learning Representations, 2018.
+Faradonbeh, M. K. S., Tewari, A., and Michailidis, G. Optimism-based adaptive regulation of linear-quadratic
+systems. IEEE Transactions on Automatic Control, 2020.
+Foster, D., Sarkar, T., and Rakhlin, A. Learning nonlinear dynamical systems from a single trajectory. In
+Learning for Dynamics and Control, 2020.
+García, C. E., Prett, D. M., and Morari, M. Model predictive control: Theory and practice - a survey. Automatica,
+pp. 335–348, 1989.
+Ha, D. and Schmidhuber, J. Recurrent world models facilitate policy evolution. Advances in neural information
+processing systems, 31, 2018.
+Hafner, D., Lillicrap, T., Fischer, I., Villegas, R., Ha, D., Lee, H., and Davidson, J. Learning latent dynamics for
+planning from pixels. In International conference on machine learning, 2019.
+Hafner, D., Lillicrap, T., Ba, J., and Norouzi, M. Dream to control: Learning behaviors by latent imagination.
+ICLR, 2020.
+Hairer, M. and Mattingly, J. C. Yet another look at harris’ ergodic theorem for markov chains. In Seminar on
+Stochastic Analysis, Random Fields and Applications VI: Centro Stefano Franscini, Ascona, May 2008, pp.
+109–117. Springer, 2011.
+Han, W., Levine, S., and Abbeel, P. Learning compound multi-step controllers under unknown dynamics. In
+Intelligent Robots and Systems (IROS), 2015.
+Jaksch, T., Ortner, R., and Auer, P. Near-optimal regret bounds for reinforcement learning. Journal of Machine
+Learning Research, 2010.
+
+11
+
+Janner, M., Fu, J., Zhang, M., and Levine, S. When to trust your model: Model-based policy optimization.
+Advances in neural information processing systems, 2019.
+Kabzan, J., Valls, M. I., Reijgwart, V. J., Hendrikx, H. F., Ehmke, C., Prajapat, M., Bühler, A., Gosala, N., Gupta,
+M., Sivanesan, R., et al. Amz driverless: The full autonomous racing system. Journal of Field Robotics, 2020.
+Kakade, S., Krishnamurthy, A., Lowrey, K., Ohnishi, M., and Sun, W. Information theoretic regret bounds for
+online nonlinear control. NeurIPS, 33:15312–15325, 2020.
+Kakade, S. M. On the sample complexity of reinforcement learning. University of London, University College
+London (United Kingdom), 2003.
+Kearns, M. and Singh, S. Near-optimal reinforcement learning in polynomial time. Machine learning, 2002.
+Khalil, H. K. Nonlinear control, volume 406. Pearson New York, 2015.
+Kipf, T., Van der Pol, E., and Welling, M. Contrastive learning of structured world models. arXiv preprint
+arXiv:1911.12247, 2019.
+Krstić, M., Kanellakopoulos, I., and Kokotović, P. Adaptive nonlinear control without overparametrization.
+Systems & Control Letters, 1992.
+Krstić, M., Kokotovic, P. V., and Kanellakopoulos, I. Nonlinear and adaptive control design. John Wiley &
+Sons, Inc., 1995.
+Kuleshov, V., Fenner, N., and Ermon, S. Accurate uncertainties for deep learning using calibrated regression. In
+ICML, pp. 2796–2804. PMLR, 2018.
+Lai, T. L. and Wei, C. Z. Least squares estimates in stochastic regression models with applications to identification
+and control of dynamic systems. The Annals of Statistics, 1982.
+Lai, T. L. and Wei, C.-Z. Asymptotically efficient self-tuning regulators. SIAM Journal on Control and
+Optimization, 1987.
+Lakshminarayanan, B., Pritzel, A., and Blundell, C. Simple and scalable predictive uncertainty estimation using
+deep ensembles, 2017.
+Lale, S., Azizzadenesheli, K., Hassibi, B., and Anandkumar, A. Logarithmic regret bound in partially observable
+linear dynamical systems. Advances in Neural Information Processing Systems, 2020.
+Lale, S., Azizzadenesheli, K., Hassibi, B., and Anandkumar, A. Model learning predictive control in nonlinear
+dynamical systems. In Conference on Decision and Control (CDC). IEEE, 2021.
+Ma, X., Tang, X., Xia, L., Yang, J., and Zhao, Q. Average-reward reinforcement learning with trust region
+methods. International Joint Conference on Artificial Intelligence, 2021.
+Mahadevan, S. Average reward reinforcement learning: Foundations, algorithms, and empirical results. Machine
+learning, 1996.
+Mania, H., Jordan, M. I., and Recht, B. Active learning for nonlinear system identification with guarantees.
+arXiv preprint arXiv:2006.10277, 2020.
+Meyn, S. P. and Tweedie, R. L. Markov chains and stochastic stability. Springer Science & Business Media,
+2012.
+Osband, I. and Van Roy, B. Why is posterior sampling better than optimism for reinforcement learning? In
+International conference on machine learning, 2017.
+Ouyang, Y., Gagrani, M., Nayyar, A., and Jain, R. Learning unknown markov decision processes: A thompson
+sampling approach. Advances in neural information processing systems, 30, 2017.
+Pinneri, C., Sawant, S., Blaes, S., Achterhold, J., Stueckler, J., Rolinek, M., and Martius, G. Sample-efficient
+cross-entropy method for real-time planning. In CORL, Proceedings of Machine Learning Research, pp.
+1049–1065, 2021.
+Puterman, M. L. Markov decision processes: discrete stochastic dynamic programming. John Wiley & Sons,
+2014.
+Rahimi, A. and Recht, B. Random features for large-scale kernel machines. Advances in neural information
+processing systems, 20, 2007.
+
+12
+
+Rothfuss, J., Sukhija, B., Birchler, T., Kassraie, P., and Krause, A. Hallucinated adversarial control for
+conservative offline policy evaluation. UAI, 2023.
+Sattar, Y. and Oymak, S. Non-asymptotic and accurate learning of nonlinear dynamical systems. Journal of
+Machine Learning Research, 2022.
+Saxena, N., Khastagir, S., Kolathaya, S., and Bhatnagar, S. Off-policy average reward actor-critic with
+deterministic policy search. In International Conference on Machine Learning, 2023.
+Scarlett, J., Bogunovic, I., and Cevher, V. Lower bounds on regret for noisy Gaussian process bandit optimization.
+In Conference on Learning Theory, 2017.
+Sharma, A., Gupta, A., Levine, S., Hausman, K., and Finn, C. Autonomous reinforcement learning via subgoal
+curricula. Advances in Neural Information Processing Systems, 2021a.
+Sharma, A., Xu, K., Sardana, N., Gupta, A., Hausman, K., Levine, S., and Finn, C. Autonomous reinforcement
+learning: Formalism and benchmarking. arXiv preprint arXiv:2112.09605, 2021b.
+Sharma, A., Ahmad, R., and Finn, C. A state-distribution matching approach to non-episodic reinforcement
+learning. International Conference on Machine Learning, 2022.
+Simchowitz, M. and Foster, D. Naive exploration is optimal for online lqr. In International Conference on
+Machine Learning. PMLR, 2020.
+Srinivas, N., Krause, A., Kakade, S. M., and Seeger, M. W. Information-theoretic regret bounds for gaussian
+process optimization in the bandit setting. IEEE Transactions on Information Theory, 2012.
+Sukhija, B., Treven, L., Sancaktar, C., Blaes, S., Coros, S., and Krause, A. Optimistic active exploration of
+dynamical systems. NeurIPS, 2024.
+Sussex, S., Makarova, A., and Krause, A. Model-based causal bayesian optimization. In ICLR, May 2023.
+Tassa, Y., Doron, Y., Muldal, A., Erez, T., Li, Y., Casas, D. d. L., Budden, D., Abdolmaleki, A., Merel, J.,
+Lefrancq, A., et al. Deepmind control suite. arXiv preprint arXiv:1801.00690, 2018.
+Tekinalp, A., Kim, S. H., Bhosale, Y., Parthasarathy, T., Naughton, N., Albazroun, A., Joon, R., Cui, S.,
+Nasiriziba, I., Stölzle, M., Shih, C.-H. C., and Gazzola, M. Gazzolalab/pyelastica: v0.3.2, 2024.
+Treven, L., Curi, S., Mutnỳ, M., and Krause, A. Learning stabilizing controllers for unstable linear quadratic
+regulators from a single trajectory. In Learning for Dynamics and Control, 2021.
+Treven, L., Hübotter, J., Sukhija, B., Dörfler, F., and Krause, A. Efficient exploration in continuous-time
+model-based reinforcement learning. NeurIPS, 2024.
+Vakili, S., Khezeli, K., and Picheny, V. On information gain and regret bounds in gaussian process bandits. In
+AISTATS, 2021.
+Wagenmaker, A., Shi, G., and Jamieson, K. Optimal exploration for model-based rl in nonlinear systems. arXiv
+preprint arXiv:2306.09210, 2023.
+Williams, G., Wagener, N., Goldfain, B., Drews, P., Rehg, J. M., Boots, B., and Theodorou, E. A. Information
+theoretic mpc for model-based reinforcement learning. In ICRA, 2017.
+Xu, K., Verma, S., Finn, C., and Levine, S. Continual learning of control primitives: Skill discovery via
+reset-games. Advances in Neural Information Processing Systems, 2020.
+Xu, Z. and Tewari, A. Reinforcement learning in factored mdps: Oracle-efficient algorithms and tighter regret
+bounds for the non-episodic setting. Advances in Neural Information Processing Systems, 2020.
+Zhang, Y. and Ross, K. W. On-policy deep reinforcement learning for the average-reward criterion. In
+International Conference on Machine Learning, 2021.
+Zhao, F., Dörfler, F., Chiuso, A., and You, K. Data-enabled policy optimization for direct adaptive learning of
+the lqr. arXiv preprint arXiv:2401.14871, 2024.
+Zhu, H., Yu, J., Gupta, A., Shah, D., Hartikainen, K., Singh, A., Kumar, V., and Levine, S. The ingredients of
+real-world robotic reinforcement learning. arXiv preprint arXiv:2004.12570, 2020.
+
+13
+
+Appendices
+A
+
+Bounding the epistemic uncertainties with maximum information gain
+
+In this section, we prove the following lemma
+Lemma A.1.
+v
+uN −1 Hn −1
+h
+i
+uX X
+p
+2
+t
+0
+E n
+∥σ (xn , π (xn ))∥ ≤ C ′ Γ (k)
+n
+
+xk ,...x1 |x0
+
+n
+
+k
+
+T
+
+k
+
+n=0 k=0
+
+We update the statistical model after H0 , H1 , . . . number of environment steps. We define H0 =
+Cu/C )
+l
+⌈ log(
+log(1/γ ) ⌉, and for n ≥ 1, we define Hn as follows:
+
+
+cn , H0 ,
+Hn = max H
+cn = arg max H + 1
+H
+H≥1
+
+s.t.
+
+dx
+H X
+X
+k=1 j=1
+
+
+2
+log 1 + σ −2 σn−1,j
+(zk,n ) ≤ log(2).
+
+For the ease of notation we denote zk,n = (xnk , πn (xnk )). For z we define the kernel embedding
+kz = k(z, ·). The covariance matrix Vt : H → H in the feature form is:
+t
+
+Vt = I +
+
+1 X
+kz k ⊤ .
+σ 2 i=1 i zi
+
+(9)
+
+Note that we have xt+1 = ⟨kzt , f ∗ ⟩H + wt . With the design matrix Mt : H → Rt
+Mt = (kz1
+
+kz2
+
+···
+
+k zt )
+
+(10)
+
+we have Vt = I + σ12 Mt Mt⊤ and since Kt = Mt⊤ Mt we have
+
+
+1
+det(Vt ) = det I + 2 Kt
+σ
+
+(11)
+
+det(Vn )
+We first show that for our choice of Hn the ratio between det(V
+is bounded.
+n−1 )
+
+Corollary A.2 (Lower bound on the posterior log determinant).
+log (det(Vn )) ≥ log (det(Vn−1 )) + log 1 + σ
+
+−2
+
+Hn
+X
+k=1
+
+!
+2
+
+∥σn−1 (zk,n )∥
+
+(12)
+
+In particular, we have
+
+log
+
+det(VN )
+det(V0 )
+
+
+≥
+
+N
+X
+
+log 1 + σ
+
+n=1
+
+−2
+
+Hn
+X
+k=1
+
+!
+∥σn−1 (zk,n )∥
+
+2
+
+(13)
+
+Proof.
+log (det(Vn )) = log (det(Vn−1 ))
++ log
+
+I +σ
+
+−2
+
+−1/2
+Vn−1
+
+Hn
+X
+
+!
+−1/2
+kzk,n kz⊤k,n Vn−1
+
+k=1
+
+≥ log (det(Vn−1 ))
++ log 1 + tr
+
+σ
+
+−2
+
+−1/2
+Vn−1
+
+Hn
+X
+
+!!
+−1/2
+kzk,n kz⊤k,n Vn−1
+
+k=1
+
+14
+
+(see (*) below)
+
+= log (det(Vn−1 )) + log 1 + σ
+
+−2
+
+!
+
+Hn
+X
+
+kzk,n
+
+k=1
+
+= log (det(Vn−1 )) + log 1 + σ
+
+−2
+
+Hn
+X
+k=1
+
+2
+−1
+Vn−1
+
+!
+2
+
+∥σn−1 (zk,n )∥
+
+−1/2
+
+We prove (*) in the following, first let mk = σ −1 Vn−1 kzk,n , then we have
+!
+!
+Hn
+Hn
+X
+X
+−1/2
+−2 −1/2
+⊤
+T
+.
+log I + σ Vn−1
+kzk,n kzk,n Vn−1
+mt mt
+= log I +
+k=1
+
+k=1
+
+PHn
+
+⊤
+The
++ M| =
+Q matrix M = k=1 mk mk by definition is positive semi-definite. Moreover, |I Q
+(1
++
+α
+),
+where
+α
+≥
+0
+are
+the
+eigenvalues
+of
+M
+.
+Furthermore,
+since
+α
+≥
+0
+and
+i
+i
+i
+i≥1
+i≥1 (1 +
+
+Q
+P
+P
+Q
+αi ) = 1 + i≥1 αi + · · · + i≥1 αi , we get i≥1 (1 + αi ) ≥ 1 + i≥1 αi . Finally, since
+P
+i≥1 αi = tr (M ), we get |I + M | ≥ 1 + tr (M ).
+Corollary A.3 (Upper bound on the posterior log determinant).
+log (det(Vn )) ≤ log (det(Vn−1 )) +
+
+Hn X
+dx
+X
+
+2
+log 1 + σ −2 σn−1,j
+(zk,n )
+
+
+
+k=1 j=1
+
+Proof.
+log (det(Vn )) = log (det(Vn−1 )) + log (|I + M |)
+≤ log (det(Vn−1 )) + log (|diag (I + M )|)
+(Hadamard’s inequality for PSD matrices)
+= log (det(Vn−1 )) +
+
+dx
+Hn X
+X
+
+
+2
+log 1 + σ −2 σn−1,j
+(zk,n )
+
+k=1 j=1
+
+Lemma A.4. Let τn =
+
+Pn
+
+i=1 Hi , then we have
+
+
+log
+
+det(Vτn )
+det(Vτn−1 )
+
+
+> log(1 + log(2))
+
+(14)
+
+b n } such that
+Proof. Since Hn = max{H0 , H
+dx
+Hn X
+X
+
+log
+
+2
+1 + σ −2 σn−1,j
+(zk,n )
+
+
+
+k=1 j=1
+
+≥
+
+b n dx
+H
+X
+X
+
+
+2
+log 1 + σ −2 σn−1,j
+(zk,n )
+
+k=1 j=1
+
+> log(2).
+This implies that
+Hn
+X
+k=1
+
+2
+
+σ −2 ∥σn−1,j (zk,n )∥ =
+≥
+
+Hn X
+dx
+X
+
+2
+σ −2 σn−1,j
+(zk,n )
+
+k=1 j=1
+Hn X
+dx
+X
+
+
+2
+log 1 + σ −2 σn−1,j
+(zk,n )
+
+k=1 j=1
+
+(x ≥ log(1 + x))
+
+> log(2).
+Therefore,
+Hn
+X
+
+2
+log (det(Vτn )) ≥ log det(Vτn−1 ) + log 1 + σ −2
+∥σn−1 (zk,n )∥
+k=1
+
+
+> log det(Vτn−1 ) + log(1 + log(2))
+
+15
+
+!
+
+Next, we prove two lemmas that will help us upper bound the sum of variances.
+Lemma A.5 (Adapted Lemma 11 from Abbasi-Yadkori & Szepesvári (2011)). Let t, k ∈ N. Then
+we have:
+sup
+X̸=0
+
+X ⊤ Vt+k X
+det Vt+k
+≤
+∥X ⊤ Vt X∥
+det Vt
+
+Proof. Let us start with the case when k = 1 and Vt+1 = Vt + kzt+1 kz⊤t+1 . First notice:
+
+
+det(Vt+1 ) = det Vt + kzt+1 kz⊤t+1
+
+
+⊤ 
+− 21
+− 12
+= det(Vt ) det I + Vt kzt+1 Vt kzt+1
+
+
+− 12 2
+⊤
+= det(Vt ) 1 + kzt+1 Vt
+H
+
+Further we have:
+X ⊤ kzt+1 kz⊤t+1 X
+
+H
+
+= kz⊤t+1 X
+=
+≤
+
+2
+
+H
+2
+1
+1
+−
+kz⊤t+1 Vt 2 Vt 2 X
+H
+2
+1
+− 12 2
+⊤
+2
+kzt+1 Vt
+Vt X
+H
+H
+
+(Submultiplicativity)
+
+Hence:
+
+
+X ⊤ Vt+1 X H = X ⊤ Vt + kzt+1 kz⊤t+1 X
+⊤
+
+≤ X Vt X H + X
+
+⊤
+
+H
+
+kzt+1 kz⊤t+1 X
+−1
+
+2
+
+(Triangle inequality)
+
+H
+2
+
+1
+
+≤ X ⊤ Vt X H + kz⊤t+1 Vt 2
+Vt 2 X
+H
+H
+
+
+− 12 2
+⊤
+⊤
+X Vt X H
+= 1 + kzt+1 Vt
+
+(Previous step)
+
+H
+
+det(Vt+1 )
+=
+X ⊤ Vt X H
+det(Vt )
+Now observe:
+X ⊤ Vt+k X
+X ⊤ Vt+k X
+X ⊤ Vt+k−1 X
+X ⊤ Vt+1 X
+=
+·
+·
+·
+∥X ⊤ Vt X∥
+∥X ⊤ Vt+k−1 X∥ ∥X ⊤ Vt+k−2 X∥
+∥X ⊤ Vt X∥
+det(Vt+k ) det(Vt+k−1 )
+det(Vt+1 )
+≤
+···
+det(Vt+k−1 ) det(Vt+k−2 )
+det(Vt )
+det Vt+k
+=
+det Vt
+Lemma A.6. Let τn =
+
+Pn
+
+i=1 Hi , we have for all h > 0:
+−1
+
+2
+
+1
+
+2
+2
+Vτn−1
+≤ C̄I ,
+Vτn−1
++h−1
+H
+
+where C̄I = max log(2), (1 + σ −2 σmax )dx H0 .
+
+−1
+
+2
+Proof. We apply Lemma A.5 with t = τn−1 , k = h − 1 and X = Vτn−1
+We have:
+
+
+2
+⊤
+1
+1
+1
+− 12
+− 12
+− 12
+2
+2
+2
+Vτn−1
+Vτn−1
+= Vτn−1
+Vτn−1
++h−1
++h−1 Vτn−1 Vτn−1 +h−1
+
+H
+
+H
+
+16
+
+2
+
+−1
+
+−1
+
+2
+2
+= Vτn−1
+Vτn−1 +h−1 Vτn−1
+
+H
+− 12
+− 12 2
+Vτn−1 Vτn−1 +h−1 Vτn−1
+H
+
+=
+
+∥I∥H
+− 12 2
+− 21
+Vτn−1 Vτn−1 +h−1 Vτn−1
+H
+− 12
+− 12
+Vτn−1 Vτn−1 Vτn−1
+H
+
+=
+
+≤
+
+det(Vτn−1 +h−1 )
+det(Vτn−1 )
+
+(Lemma A.5)
+
+det I + σ12 Kτn−1 +h−1
+
+=
+det I + σ12 Kτn−1
+
+
+
+
+≤ max log(2), (1 + σ −2 σmax )dx H0 := C̄I
+
+(Definition of Hn )
+
+b n , we have
+where in the last inequality we used Corollary A.3. Moreover, for the case where Hn = H
+b
+h < Hn and therefore
+dx
+h X
+
+ X
+
+2
+log det(Vτn−1 +h−1 ) ≤ log det(Vτn−1 ) +
+log 1 + σ −2 σn−1,j
+(zk,n )
+k=1 j=1
+
+Hn X
+dx
+ X
+
+2
+≤ log det(Vτn−1 ) +
+log 1 + σ −2 σn−1,j
+(zk,n )
+b
+
+k=1 j=1
+
+
+≤ log det(Vτn−1 ) + log(2).
+Whereas for the case where Hn = H0 , h < H0 and accordingly
+dx
+h X
+
+ X
+
+2
+log det(Vτn−1 +h−1 ) ≤ log det(Vτn−1 ) +
+log 1 + σ −2 σn−1,j
+(zk,n )
+k=1 j=1
+
+H0 X
+dx
+ X
+
+2
+≤ log det(Vτn−1 ) +
+log 1 + σ −2 σn−1,j
+(zk,n )
+k=1 j=1
+
+
+≤ log det(Vτn−1 ) + dx H0 log(1 + σ −2 σmax )
+
+Proof of Lemma A.1. We have:
+N
+−1 HX
+n −1
+X
+n=0 k=0
+
+h
+i
+2
+Exnk ,...x01 |x0 ∥σn (xnk , πn (xnk ))∥ =
+
+= ExT ,...x1 |x0
+
+"N −1 H −1
+n
+X X
+n=0 k=0
+
+#
+∥σn (zk,n )∥
+
+2
+
+
+
+dx N
+−1 HX
+n −1
+X
+X
+= ExT ,...x1 |x0 
+σn,j (zk,n )2 
+j=1 n=0 k=0
+
+= dx ExT ,...x1 |x0
+
+"N H
+n
+XX
+
+#
+kz⊤k,n Vτ−1
+k
+n−1 zk,n
+
+(Same kernel in every dimension)
+
+n=1 k=1
+
+= dx ExT ,...x1 |x0
+
+"N H
+n
+XX
+n=1 k=1
+
+2
+− 12
+Vτn−1
+kzk,n
+H
+
+#
+
+17
+
+= dx ExT ,...x1 |x0
+
+"N H
+n
+XX
+n=1 k=1
+
+≤ dx ExT ,...x1 |x0
+
+"N H
+n
+XX
+n=1 k=1
+
+≤ C̄I dx ExT ,...x1 |x0
+= C̄I ExT ,...x1 |x0
+
+2
+1
+− 12
+− 12
+2
+Vτn−1
+Vτn−1
++k−1 Vτn−1 +k−1 kzk,n
+H
+2
+1
+− 12
+2
+Vτn−1
+Vτn−1
++k−1
+H
+
+"N H
+n
+XX
+n=1 k=1
+
+"N H
+n
+XX
+
+#
+
+2
+− 12
+Vτn−1
++k−1 kzk,n
+H
+
+2
+− 12
+Vτn−1
++k−1 kzk,n
+H
+
+#
+(Submultiplicativity)
+
+#
+(Lemma A.6)
+
+#
+στn−1 +k−1 (zk,n )
+
+2
+
+n=1 k=1
+
+= C̄I dx ExT ,...x1 |x0
+
+" T
+X
+t=1
+
+≤ C̄I max
+D1:T
+
+T
+X
+t=1
+
+#
+2
+
+∥σt−1 (zt )∥
+2
+
+∥σt−1 (zt )∥
+
+(Maximum is greater than expecation)
+
+
+
+T
+2
+X
+σt−1
+(zt )
+C̄I dx σmax
+≤
+log 1 +
+max
+log(1 + σ −2 σmax ) D1:T t=1
+σ2
+
+(Lemma 15 of Curi et al. (2020))
+
+C̄I dx σmax
+max I(yD1:T , f1 )
+log(1 + σ −2 σmax ) D1:T
+C̄I dx σmax
+=
+ΓT (k)
+log(1 + σ −2 σmax )
+=
+
+Therefore it follows:
+v
+uN −1 Hn −1
+uX X
+t
+E n
+n=0 k=0
+
+s
+
+h
+i
+n , π (xn ))∥2 ≤
+0
+∥σ
+(x
+n
+n
+xk ,...x1 |x0
+k
+k
+
+p
+C̄I dx σmax
+ΓT (k)
+−2
+log(1 + σ σmax )
+
+Finally, we show that the number of episodes N is bounded by ΓT .
+Lemma A.7. We have N ≤ K̄1I ΓT (k), where K̄I = log(1 + log(2)).
+Proof. From Lemma A.4, we have det(Vτn ) > exp(K̄I ) det(Vτn−1 ). From the definition, it follows
+that T = τN .
+det(Vτn ) > exp(K̄I ) det(Vτn−1 ) > exp(K̄I )2 det(Vτn−2 ) > · · · > exp(K̄I )N det(V0 ),
+T)
+we have that exp(K̄I )N < det(V
+det(V0 ) , and hence
+
+
+
+
+1
+det(VT )
+1
+det(VT )
+1
+N<
+log
+≤
+max log
+=
+ΓT (k).
+D
+det(V
+)
+det(V
+)
+K̄I
+K̄I 1:T
+K̄I
+0
+0
+
+18
+
+B
+
+Proofs
+
+In this section, we prove Theorem 2.6 and Theorem 3.1. First, we start with the proof of Lemma 2.5.
+Proof of Lemma 2.5. We first analyze the following term Ew [V (f ∗ (x, π(x)) + w) −
+V (f ∗ (x, πs (x)) + w)] for any π ∈ Π.
+Ew [V (f ∗ (x, π(x)) + w) − V (f ∗ (x, πs (x)) + w)]
+≤ Ew [κ(∥f ∗ (x, π(x)) + w − (f ∗ (x, πs (x)) + w)∥)]
+= κ(∥f ∗ (x, π(x)) − f ∗ (x, πs (x))∥)
+≤ κ(κf ∗ (∥π(x) − πs (x)∥))
+≤ κ(κf ∗ (2umax )).
+
+(Uniform continuity of V )
+(Uniform continuity of f ∗ )
+(Bounded inputs)
+
+Therefore,
+Ex′ |π,x [V (x′ )] = Ew [V (f ∗ (x, π(x)) + w)]
+≤ Ew [V (f ∗ (x, πs (x)) + w)] + κ(κf ∗ (2umax ))
+= Ex′ |πs ,x [V (x′ )] + κ(κf ∗ (2umax ))
+≤ γV (x) + K + κ(κf ∗ (2umax ))
+= γV (x) + K̃
+
+(K̃ = K + κ(κf ∗ (2umax )))
+
+Hence, V satisfies the drift condition for π. Furthermore, since V also satisfies positive definiteness
+by assumption, the bounded energy condition holds for all π ∈ Π.
+B.1
+
+Proof of Theorem 2.6
+
+For proving Theorem 2.6, we invoke the results from (Hairer & Mattingly, 2011, Theorem 1.2 – 1.3).
+For this we require that the Markov chain induced by a policy π satisfies the drift condition. In our
+setting, this corresponds to Assumption 2.4. Next, we show that the chain satisfies the following
+minorisation condition.
+Lemma B.1 (Minorisation condition). Consider the system in Equation (1) and let Assumption 2.1 – 2.4 hold. Let P π denote the transition kernel for the policy π ∈ Π, i.e., P π (x, A) =
+P(x+ ∈ A|x, π(x)) . Then, for all π ∈ Π, exists a constant α ∈ (0, 1) and a probability measure
+ζ(·) s.t.,
+inf P π (x, ·) ≥ αζ(·)
+(15)
+x∈C
+
+def
+
+π
+
+with C = {x ∈ X ; V (x) ≤ R} for some R > 2K/1−γ
+Proof. We prove it in 3 steps. First, we show that C is contained in a compact domain. From the
+Assumption 2.4 we pick the function ξ ∈ K∞ . Since Cl ξ(0) = 0, lims→∞ ξ(s) = +∞ and Cl ξ is
+continuous, there exists M such that Cl ξ(M ) = R. Then for ∥x∥ > M we have:
+V π (x) ≥ Cl ξ(∥x∥) > ξ(M ) = R.
+def
+
+Therefore we have: C ⊆ B(0, M ) = {x | ∥x − 0∥ ≤ M }. In the second step we show that
+f (C, π(C)) is bounded, in particular we show that there exists B > 0 such that: f (C, π(C)) ⊆
+B(0, B). This is true since continuous image of compact set is compact and the observation:
+C ⊆ B(0, M ) =⇒ f (C, π(C)) ⊆ f (B(0, M ), π(B(0, M ))).
+
+Since f (B(0, M ), π(B(0, M ))) is compact there exists B such thatf (C, π(C))
+⊆ B(0, B). In
+
+def
+
+2
+
+2
+
+2
+
+the last step we prove that α = 2−dx e−B /σ and ζ with law of N 0, σ2
+Lemma B.1. It is enough to show that ∀µ ∈ B(0, B), ∀x ∈ R
+1
+
+α
+dx
+
+(2π) 2
+
+ dx e
+σ2 2
+
+∥x∥2
+− σ2
+
+≤
+
+2
+
+dx
+
+we have:
+
+1
+
+(2π)
+
+dx
+2
+
+(σ 2 )
+
+satisfy condition of
+
+dx
+2
+
+e−
+
+∥x−µ∥2
+2σ 2
+
+which can be proven with simple algebraic manipulations.
+Through the minorisation condition and Assumption 2.4, we can prove the ergodicity of the closedloop system for a given policy π ∈ Π.
+19
+
+Theorem B.2 (Ergodicity of closed-loop system). Let Assumption 2.1 – 2.4, consider any probability
+measures ζ1 , ζ2 , and θ > 0, define P π ζ, ∥φ∥1+θV π , ρπ
+θ as
+Z
+(P π ζ) (A) =
+P π (x, A)ζ(dx)
+X
+
+|φ(x)|
+π
+x∈X 1 + θV (x)
+Z
+Z
+π
+ρθ (ζ1 , ζ2 ) =
+sup
+φ(x)(ζ1 − ζ2 )(dx) =
+(1 + θV π (x))|ζ1 − ζ2 |(dx).
+
+∥φ∥1+θV π = sup
+
+φ:∥φ∥1+θV π ≤1
+
+X
+
+X
+
+We have for all π ∈ Π, that P π admits a unique invariant measure P̄ π . Furthermore, there exist
+constants C1 > 0, θ > 0, λ ∈ (0, 1) such that
+π
+π
+π
+ρπ
+θ (P ζ1 , P ζ2 ) ≤ λρθ (ζ1 , ζ2 )
+
+(1)
+
+t
+
+Ex∼(P π )t [φ(x)] − Ex∼P̄ π [φ(x)] 1+V π ≤ C1 λ ∥φ − Ex∼P̄ π [φ(x)]∥1+V π .
+
+(2)
+
+holds for every measurable function φ : X → R with ∥φ∥1+V π < ∞. Here (P π )t denotes the
+t-step transition kernel under the policy π.
+Moreover, θ = α0/K , and
+
+
+2 + R/K α0 γ0
+λ = max 1 − (α − α0 ),
+(16)
+2 + R/K α0
+for any α0 ∈ (0, α) and γ0 ∈ (γ + 2K/R, 1).
+Proof. From Assumption 2.4, we have a value function for each policy that satisfies the drift condition.
+Furthermore, in Lemma B.1 we show that our system also satisfies the minorisation condition for all
+policies. Under these conditions, we can use the results from Hairer & Mattingly (2011, Theorem 1.2.
+– 1.3.).
+Note that ∥·∥1+θV π represents a family of equivalent norms for any θ > 0. Now we prove Theorem 2.6.
+Proof of Theorem 2.6. From Theorem B.2, we have
+π t+1
+π
+π t
+π
+π t−1
+π
+ρπ
+, (P π )t ) = ρπ
+) ≤ λt ρπ
+θ ((P )
+θ (P (P ) , P (P )
+θ (P δx0 , δx0 ),
+
+where δx0 is the dirac measure. Therefore, (P π )t is a Cauchy sequence. Furthermore, ρπ
+θ is complete
+π t
+π
+for the set of probability measures integrating V , thus ρπ
+((P
+)
+,
+P̄
+)
+→
+0
+for
+t
+→
+∞
+(c.f., Hairer
+θ
+& Mattingly (2011) for more details). In particular, we have for φ such that ∥φ∥1+θV π ≤ 1,
+Z
+Z
+lim
+φ(x)(P π )t (dx) =
+φ(x)P̄ π (dx).
+t→∞
+
+X
+
+X
+
+Note that since all ∥·∥1+θV π norms are equivalent for θ > 0, if ∥c∥1+V π ≤ C (Assumption 2.4),
+then ∥c∥1+θV π ≤ C ′ for some C ′ ∈ (0, ∞). Furthermore, note that c(·) ≥ 0. Therefore,
+Z
+Z
+c(x)P̄ π (dx) = lim
+c(x)(P π )t (dx)
+t→∞ X
+X
+Z
+≤ C lim
+(1 + V π (x))(P π )t (dx)
+t→∞
+
+X
+
+= C + C lim Ex∼(P π )t [V π (x)]
+t→∞
+
+= C + C lim Ex∼(P π )t−1 [Ex′ ∼(P π ) [V π (x′ )|x]]
+t→∞
+
+
+≤ C + C lim γEx∼(P π )t−1 [V π (x)] + K
+t→∞
+
+≤ C + C lim γ t V π (x0 ) + K
+t→∞
+
+20
+
+1 − γt
+1−γ
+
+(Assumption 2.4)
+
+
+=C 1+K
+
+
+1
+1−γ
+
+
+1
+In summary, we have Ex∼P̄ π [c(x)] ≤ C 1 + K 1−γ
+Consider any t > 0, and note that from Theorem B.2 we have
+|Ex∼(P π )t [c(x)] − Ex∼P̄ π [c(x)] |
+1 + V π (x0 )
+x0 ∈X
+
+Ex∼(P π )t [c(x)] − Ex∼P̄ π [c(x)] 1+V π = sup
+
+≤ C1 λt ∥c − Ex∼P̄ π [c(x)]∥1+V π
+t
+
+(Theorem B.2)
+
+t
+
+≤ C1 λ ∥c∥1+V π + C1 λ Ex∼P̄ π [c(x)]
+
+= C2 λt ,
+1
+).
+where C2 = C1 (∥c∥1+V π + CK 1−γ
+
+Moreover, since the inequality holds for all x0 , we have
+|Ex∼(P π )t [c(x)] − Ex∼P̄ π [c(x)] |
+≤ C2 λt .
+1 + V π (x0 )
+In summary,
+
+|Ex∼(P π )t [c(x)] − Ex∼P̄ π [c(x)] | ≤ C2 (1 + V π (x0 ))λt .
+
+Consider any T ≥ 0, and define with c̄ = Ex∼P̄ π [c(x, π(x))].
+"T −1
+# T −1
+X
+X
+Eπ
+c(xt , ut ) − c̄ =
+E(P π )t [c(xt , ut )] − c̄
+t=0
+
+t=0
+
+≤
+
+T
+−1
+X
+t=0
+
+E(P π )t [c(xt , ut )] − c̄
+
+≤ C2 (1 + V π (x0 ))
+
+T
+−1
+X
+
+λt
+
+t=0
+
+1 − λT
+= C2 (1 + V π (x0 ))
+1−λ
+
+Hence, we have
+lim Eπ
+
+T →∞
+
+"T −1
+X
+t=0
+
+#
+c(xt , ut ) − c̄
+
+≤ C2 (1 + V π (x0 ))
+
+1
+,
+1−λ
+
+and for any x0 in a compact subset of X
+"T −1
+#
+X
+1
+lim
+Eπ
+c(xt , ut ) − c̄ = 0.
+T →∞ T
+t=0
+Moreover,
+|B(π, x0 )| ≤ C2 (1 + V π (x0 ))
+
+1
+.
+1−λ
+
+Another interesting, inequality that follows from the proof above is the difference in bias inequality.
+Z
+C3
+|Ex0 ∼ζ1 [B(π, x0 )] − Ex0 ∼ζ2 [B(π, x0 )]| ≤
+(1 + V π (x)) |ζ1 − ζ2 | (dx)
+1−λ X
+
+for all probability measures ζ1 , ζ2 . To show this holds, define C ′ = maxπ∈Π ∥c(x, π(x))∥1+θV π .
+Furthermore, note that C ′ < ∞ from Assumption 2.4 and ∥c(x,π(x))/C ′ ∥1+θV π ≤ 1.
+Z
+Ex∼(P π )t ζ1 c(x, π(x)) − Ex∼(P π )t ζ2 c(x, π(x)) =
+c(x, π(x))((P π )t ζ1 − (P π )t ζ2 )(dx)
+X
+
+21
+
+= C′
+≤ C′
+
+Z
+
+1
+c(x, π(x))((P π )t ζ1 − (P π )t ζ2 )(dx)
+′
+X C
+Z
+π t
+π t
+sup
+φ(x)((P π )t ζ1 − (P π )t ζ2 )(dx) = C ′ ρπ
+θ ((P ) ζ1 , (P ) ζ2 )
+
+φ:∥φ∥1+θV π ≤1
+
+X
+
+′
+
+π t−1
+≤ C λρπ
+ζ1 , (P π )t−1 ζ2 )
+θ ((P )
+≤ C ′ λ t ρπ
+θ (ζ1 , ζ2 ).
+
+(Theorem B.2)
+
+Also, note that there exists Cθ ∈ (0, ∞) such that Cθ ∥φ∥1+θV π ≥ ∥φ∥1+V π due to the equivalence
+of the two norms.
+Z
+ρπ
+(ζ
+,
+ζ
+)
+=
+sup
+φ(x)(ζ1 − ζ2 )(dx)
+1
+2
+θ
+φ:∥φ∥1+θV π ≤1
+
+≤
+
+X
+
+Z
+
+φ(x)(ζ1 − ζ2 )(dx)
+
+sup
+φ:∥φ∥1+V π ≤Cθ
+
+X
+
+Z
+= Cθ
+
+sup
+φ:∥φ∥1+V π ≤1
+
+X
+
+φ(x)(ζ1 − ζ2 )(dx)
+
+= C θ ρπ
+1 (ζ1 , ζ2 )
+Therefore, for the bias we have
+|Ex0 ∼ζ1 [B(π, x0 )] − Ex0 ∼ζ2 [B(π, x0 )]|
+≤ lim
+
+T
+−1
+X
+
+T →∞
+
+t=0
+
+Ex∼(P π )t ζ1 c(x, π(x)) − Ex∼(P π )t ζ2 c(x, π(x))
+
+≤ C ′ ρπ
+θ (ζ1 , ζ2 ) lim
+
+T →∞
+
+T
+−1
+X
+t=0
+
+′
+
+Set C3 = C ′ Cθ .
+B.2
+
+λt =
+
+C Cθ π
+C ′ Cθ
+≤
+ρ1 (ζ1 , ζ2 ) =
+1−λ
+1−λ
+
+Z
+X
+
+C′ π
+ρ (ζ1 , ζ2 )
+1−λ θ
+(1 + V π (x)) |ζ1 − ζ2 | (dx)
+
+Proof of bounded average cost for the optimistic system
+
+In this section, we show that the results from Theorem 2.6 also transfer over to the optimistic
+dynamics.
+Theorem B.3 (Existence of Average Cost Solution for the Optimistic System). Let Assumption 2.1 –
+2.8 hold. Consider any n > 0 and let πn , fn denote the solution to Equation (6), P π,fn its transition
+kernel. Then P π,fn admits a unique invariant measure P̄ πn ,fn and there exists C2 , C3 ∈ (0, ∞),
+λ̂ ∈ (0, 1) such that
+Average Cost;
+"T −1
+#
+X
+1
+A(πn , fn ) = lim
+Eπn ,fn
+c(xt , ut ) = Ex∼P̄ πn ,fn [c(x, πn (x))]
+T →∞ T
+t=0
+Bias Cost;
+|B(πn , fn , x0 )| =
+
+lim Eπn ,fn
+
+T →∞
+
+"T −1
+X
+t=0
+
+#
+≤ C2 (1 + V πn (x0 ))
+
+c(xt , ut ) − A(πn , fn )
+
+1
+1 − λ̂
+
+for all x0 ∈ X .
+
+Difference in Bias;
+|Ex0 ∼ζ1 [B(πn , fn , x0 )] − Ex0 ∼ζ2 [B(πn , fn , x0 )]| ≤
+for all probability measures ζ1 , ζ2 .
+22
+
+C3
+1 − λ̂
+
+Z
+X
+
+(1 + V π (x)) |ζ1 − ζ2 | (dx)
+
+Theorem B.3 shows that the optimistic dynamics fn retain the boundedness property from the
+true dynamics f ∗ and give a well-defined solution w.r.t. average cost and the bias cost. To prove
+Theorem B.3 we show that the optimistic system also satisfies the drift and minorisation condition.
+Then we can invoke the result from Hairer & Mattingly (2011) similar to the proof of Theorem 2.6.
+Lemma B.4 (Stability of optimistic system). Let Assumption 2.1 – 2.8 hold, then we have with
+b >0
+probability at least 1 − δ for all n ≥ 0, π ∈ Π, f ∈ Mn ∩ M0 , that there exists a constant K
+such that
+b
+Ex |x,f ,π [V π (x+ )] ≤ γV π (x) + K,
++
+
+where x+ = f (x, π(x) + w.
+
+Proof. Note, that V π is uniformly continuous w.r.t. κ
+|V π (x) − V π (x′ )| ≤ κ(∥x − x′ ∥).
+Furthermore, since f ∈ Mn ∩ M0 and therefore f ∈ M0 , we have that there exists some η ∈
+[−1, 1]dx such that
+f (x, π(x)) = µ0 (x.π(x)) + β0 σ0 (x, π(x))η(x).
+Ew [V π (µ0 (x.π(x)) + β0 σ0 (x, π(x))η(x) + w)] − Ew [V π (f ∗ (x.π(x)) + w)]
+≤ κ (∥µ0 (x.π(x)) + β0 σ0 (x, π(x))η(x) − f ∗ (x.π(x))∥)
+≤ κ (∥µ0 (x.π(x)) − f ∗ (x.π(x))∥ + ∥β0 σ0 (x, π(x))η(x)∥)
+
+
+p  p
+≤ κ 1 + dx β0 dx σmax .
+(Assumption 2.8)
+Therefore,
+
+
+p  p
+1 + dx β0 dx σmax
+
+
+p  p
+= Ex+ |x,f ∗ ,π [V π (x∗+ )] + κ 1 + dx β0 dx σmax
+
+
+p  p
+≤ γV π (x) + K + κ 1 + dx β0 dx σmax ,
+(Assumption 2.4)
+
+
+√
+√
+b = K + κ 1 + dx β0 dx σmax .
+where we denoted x∗+ = f ∗ (x, π(x) + w. Define K
+Ex+ |x,f ,π [V π (x+ )] ≤ Ex+ |x,f ∗ ,π [V π (x∗+ )] + κ
+
+Lemma B.5 (Minorisation condition optimistic system). Consider the system
+x+ = f (x.π(x)) + w
+for any n ≥ 0, π ∈ Π and f ∈ Mn ∩ M0 . Let Assumption 2.1 – 2.8 hold. Let P π,f denote the
+transition kernel for the policy π ∈ Π i.e., P π,f (x, A) = P(x+ ∈ A|x, π(x), f ). Then, there exists
+a constant α̂ ∈ (0, 1) and a probability measure ζ̂(·) independent of n s.t.,
+inf P π,f (x, ·) ≥ α̂ζ̂(·)
+
+x∈C
+
+(17)
+
+def
+
+with C = {x ∈ X ; V π (x) < R̂} for some R̂ > 2Kb/1−γ
+Proof. First, we show that C is contained in a compact domain. From the Assumption 2.4 we pick
+the function ξ ∈ K∞ . Since Cl ξ(0) = 0, lims→∞ ξ(s) = +∞ and Cl ξ is continuous, there exists
+M such that Cl ξ(M ) = R̂. Then for ∥x∥ > M we have:
+
+V π (x) ≥ Cl ξ(∥x∥) > ξ(M ) = R̂.
+def
+Therefore we have: C ⊆ B(0, M ) = {x | ∥x − 0∥ ≤ M }. Since for any x ∈ C we have
+∗
+∥f (x, π(x))∥ ≤ ∥f (x, π(x))∥ + β0 σmax . Since f ∗ is continuous, there exists a B such that
+f ∗ (C, π(C)) ⊂ B(0, B). Therefore we have: f (C, π(C)) ⊂ B(0, B1 ), where
+ B1 = B + β0 σmax .
+def −dx −B 2 /σ 2
+σ2
+1
+In the last step we prove that α = 2
+e
+and ζ with law of N 0, 2 satisfy condition of
+
+Lemma B.1. It is enough to show that ∀µ ∈ B(0, B1 ), ∀x ∈ Rdx we have:
+∥x∥2
+∥x−µ∥2
+1
+1
+− σ2
+− 2σ2
+α
+e
+≤
+e
+d
+d
+d
+x
+x
+x
+dx
+2
+(2π) 2 (σ 2 ) 2
+(2π) 2 σ2 2
+which can be proven with simple algebraic manipulations.
+23
+
+Proof of Theorem B.3. As for the true system, the drift condition from Lemma B.4 and the minorisation condition from Lemma B.5 are sufficient to show ergodicity of the optimistic system
+(c.f., Theorem B.2 or Hairer & Mattingly (2011)). The rest of the proof is similar to Theorem 2.6.
+B.3
+
+Proof of Theorem 3.1
+
+Since N EO RL works in artificial episodes n ∈ {0, N − 1} of varying horizons Hn . We denote with
+xnk the state visited during episode n at time step k ≤ Hn . Crucial, to our regret analysis is bounding
+the first and second moment of V πn (xnk ) for all n, k. Given the nature of Assumption 2.4, this
+requires analyzing geometric series. Thus, we start with the following elementary result of geometric
+series.
+Corollary B.6. Consider the sequence {Sn }n≥0 with Sn ≥ 0 for all n. Let the following hold
+Sn ≤ ρSn−1 + C
+for ρ ∈ (0, 1) and C > 0. Then we have
+Sn ≤ ρn S0 + C
+
+1
+.
+1−ρ
+
+Proof.
+Sn ≤ ρSn−1 + C ≤ ρ2 Sn−2 + C(1 + ρ) ≤ ρn S0 + C
+
+n
+X
+i=0
+
+ρi ≤ ρn S0 + C
+
+1
+.
+1−ρ
+
+Lemma B.7. Let Assumption 2.1 – 2.8 hold and let H0 be the smallest integer such that
+H0 >
+
+log (Cu/Cl )
+.
+log (1/γ )
+
+Moreover, define ν = CCul γ H0 . Note, by definition of H0 , ν < 1. Then we have for all k ∈
+{0, . . . , Hn } and n > 0
+Bounded expectation over horizon
+Exnk ,...,x01 |x0 [V πn (xnk )] ≤ γ k Exn0 ,...,x01 |x0 [V πn (xn0 )] + K/(1 − γ).
+
+(18)
+
+Bounded expectation over episodes
+Exn0 ,...,x01 |x0 [V πn (xn0 )] ≤ ν n V π0 (x0 ) +
+
+Cu
+1
+.
+K/(1 − γ)
+Cl
+1−ν
+
+(19)
+
+Moreover, we have
+Exnk ,...,x01 |x0 [V πn (xnk )] ≤ D(x0 , K, γ, ν),
+
+
+1
+with D(x0 , K, γ, ν) = V π0 (x0 ) + K/(1 − γ) CCul 1−ν
++1
+
+(20)
+
+Proof. We start with proving the first claim
+Exnk ,...,x01 |x0 [V πn (xnk )] = Exnk−1 ,...,x01 |x0 [Exnk |xnk−1 [V πn (xnk )]]
+≤ Exnk−1 ,...,x01 |x0 [γV πn (xnk−1 ) + K]
+
+(Assumption 2.4)
+
+= γExnk−1 ,...,x01 |x0 [V πn (xnk−1 )] + K
+
+We can apply Corollary B.6 to prove the claim. For the second claim, we note that for any π, π ′ and
+x ∈ X we have from Assumption 2.4
+V π (x) ≤ Cu α(∥x∥) ≤
+24
+
+Cu π′
+V (x).
+Cl
+
+Therefore,
+Exn0 ,...,x01 |x0 [V πn (xn0 )]
+Cu
+0
+E n
+[V πn−1 (xn0 )]
+Cl x0 ,...,x1 |x0
+Cu
+=
+E n−1
+[V πn−1 (xn−1
+0
+Hn )]
+Cl xHn ,...,x1 |x0
+
+
+Cu
+C u Hn
+γ
+K/(1 − γ)
+Exn−1 ,...,x0 |x0 [V πn−1 (x0n−1 )] +
+≤
+0
+1
+Cl
+Cl
+≤
+
+(Since xn0 = xn−1
+Hn )
+(Equation (18))
+
+For our choice of H0 , we have for all n ≥ 0 that CCul γ Hn ≤ CCul γ H0 ≤ ν < 1. From Corollary B.6,
+we get
+
+
+Cu
+C u Hn
+πn
+n
+n
+0
+)] +
+Ex0 ,...,x1 |x0 [V (x0 )] ≤
+γ
+Exn−1 ,...,x0 |x0 [V πn−1 (xn−1
+K/(1 − γ)
+0
+0
+1
+Cl
+Cl
+Cu
+)] +
+≤ νExn−1 ,...,x0 |x0 [V πn−1 (xn−1
+K/(1 − γ)
+0
+0
+1
+Cl
+Cu
+1
+≤ ν n V π0 (x0 ) +
+.
+(Corollary B.6)
+K/(1 − γ)
+Cl
+1−ν
+Exnk ,...,x01 |x0 [V πn (xnk )] ≤ γ k Exn0 ,...,x01 |x0 [V πn (xn0 )] + K/(1 − γ)
+≤ Exn0 ,...,x01 |x0 [V
+
+πn
+
+(Equation (18))
+
+(xn0 )] + K/(1 − γ)
+
+Cu
+1
++ K/(1 − γ)
+K/(1 − γ)
+Cl
+1−ν
+Cu
+1
+≤ V π0 (x0 ) +
++ K/(1 − γ)
+K/(1 − γ)
+Cl
+1−ν
+
+≤ ν n V π0 (x0 ) +
+
+(Equation (19))
+
+Lemma B.8. Let Assumption 2.1 – 2.8 hold and let H0 be the smallest integer such that
+H0 >
+
+log (Cu/Cl )
+.
+log (1/γ )
+
+Moreover, define ν = CCul γ H0 . Note, by definition of H0 , ν < 1.
+Then we have for all k ∈ {0, . . . , Hn } and n > 0
+Bounded second moment over horizon
+i
+i D (x , K, γ, ν)
+h
+h
+2
+0
+2
+2
+Exnk ,...,x01 |x0 (V πn (xnk )) ≤ γ 2k Exn0 ,...,x01 |x0 (V πn (xn0 )) +
+(21)
+1 − γ2
+
+
+with D2 (x0 , K, γ, ν) = 2KγD(x0 , K, γ, ν) + K 2 + Cw , and Cw = Ew κ2 (∥w∥) +
+3(Ew [κ(∥w∥)])2 .
+Bounded second moment over episodes
+ 2
+h
+i
+Cu
+D2 (x0 , K, γ, ν) 1
+2
+2
+Exn0 ,...,x01 |x0 (V πn (xn0 )) ≤ ν 2n (V π0 (x0 )) +
+.
+Cl
+1 − γ2
+1 − ν2
+2
+
+Moreover, let D3 (x0 , K, γ, ν) = (V π0 (x0 )) + D2 (x0 , K, γ, ν)
+
+
+
+Cu
+Cl
+
+2
+
+h
+i
+2
+Exnk ,...,x01 |x0 (V πn (xnk )) ≤ D3 (x0 , K, γ, ν)
+
+25
+
+1
+1
+1
+1−γ 2 1−ν 2 + 1−γ 2
+
+(22)
+
+.
+
+Proof. Note that,
+2
+i 
+h
+2
+Exnk |xnk−1 (V πn (xnk )) = Exnk |xnk−1 [V πn (xnk )]
+
+2 
+.
++ Exnk |xnk−1 V πn (xnk ) − Exnk |xnk−1 [V πn (xnk )]
+We first bound the second term. Let x̄nk = f ∗ (xnk−1 , πn (xnk−1 )), i.e., the next state in the absence of
+transition noise.
+
+2 
+πn
+n
+πn
+n
+Exnk |xnk−1 V (xk ) − Exnk |xnk−1 [V (xk )]
+
+2 
+πn
+n
+πn
+n
+πn
+n
+πn
+n
+n
+n
+n
+n
+= Exk |xk−1 V (xk ) − V (x̄k ) + V (x̄k ) − Exk |xk−1 [V (xk )]
+
+2 
+πn
+n
+πn
+n
+πn
+n
+πn
+n
+n
+n
+n
+n
+= Exk |xk−1 V (xk ) − V (x̄k ) + Exk |xk−1 [V (x̄k ) − V (xk )]
+h
+i
+2
+≤ Ew (κ(∥w∥) + Ew [κ(∥w∥)])
+(uniform continuity of V πn )
+
+
+= Ew κ2 (∥w∥) + 3(Ew [κ(∥w∥)])2
+= Cw
+
+(Assumption 2.4)
+
+Therefore we have
+h
+i 
+2
+2
+Exnk |xnk−1 (V πn (xnk )) = Exnk |xnk−1 [V πn (xnk )] + Cw
+2
+
+≤ (γV πn (xnk ) + K) + Cw
+2
+= γ 2 V πn (xnk−1 ) + 2KγV πn (xnk−1 ) + K 2 + Cw .
+h
+i
+2
+Exnk ,...,x01 |x0 (V πn (xnk ))
+h
+h
+ii
+2
+= Exnk−1 ,...,x01 |x0 Exnk |xnk−1 (V πn (xnk ))
+h
+2 i
+
+
++ 2KγExnk−1 ,...,x01 |x0 V πn (xnk−1 ) + K 2 + Cw
+≤ γ 2 Exnk−1 ,...,x01 |x0 V πn (xnk−1 )
+h
+2 i
+≤ γ 2 Exnk−1 ,...,x01 |x0 V πn (xnk−1 )
++ 2KγD(x0 , K, γ, ν) + K 2 + Cw .
+(Lemma B.7)
+Let D2 (x0 , K, γ, ν) = 2KγD(x0 , K, γ, ν) + K 2 + Cw . Applying Corollary B.6 we get
+h
+i
+h
+i D (x , K, γ, ν)
+2
+0
+2
+2
+Exnk ,...,x01 |x0 (V πn (xnk )) ≤ γ 2k Exn0 ,...,x01 |x0 (V πn (xn0 )) +
+1 − γ2
+Similar to the first moment, we leverage that V πn (x) ≤ CCul V πn−1 (x) for all x ∈ X , CCul γ Hn−1 ≤ ν,
+and get,
+h
+i
+2
+Exn0 ,...,x01 |x0 (V πn (xn0 ))
+ 2
+h
+i
+Cu
+2
+≤
+Exn0 ,...,x01 |x0 (V πn−1 (xn0 ))
+Cl
+ 2
+h
+2 i
+Cu
+=
+Exn−1 ,...,x0 |x0 V πn−1 (xn−1
+)
+(Since xn0 = xn−1
+H
+Hn )
+n
+1
+Hn
+Cl
+
+2
+ 2
+h
+ i
+Cu Hn
+Cu
+D2 (x0 , K, γ, ν)
+n−1 2
+πn−1
+≤
+γ
+Exn−1 ,...,x0 |x0 V
+(x0 )
++
+(Equation (21))
+0
+1
+Cl
+Cl
+1 − γ2
+ 2
+h
+2 i
+Cu
+D2 (x0 , K, γ, ν)
+)
++
+≤ ν 2 Exn−1 ,...,x0 |x0 V πn−1 (xn−1
+0
+0
+1
+Cl
+1 − γ2
+26
+
+≤ν
+
+2n
+
+(V
+
+π0
+
+2
+
+(x0 )) +
+
+
+
+Cu
+Cl
+
+2
+
+D2 (x0 , K, γ, ν) 1
+1 − γ2
+1 − ν2
+
+(Corollary B.6)
+
+Moreover,
+h
+i
+2
+Exnk ,...,x01 |x0 (V πn (xnk ))
+h
+i D (x , K, γ, ν)
+2
+0
+2
+≤ γ 2k Exn0 ,...,x01 |x0 (V πn (xn0 )) +
+1 − γ2
+h
+i D (x , K, γ, ν)
+2
+0
+2
+≤ Exn0 ,...,x01 |x0 (V πn (xn0 )) +
+1 − γ2
+ 2
+Cu
+D2 (x0 , K, γ, ν)
+D2 (x0 , K, γ, ν) 1
+2
+≤ ν 2n (V π0 (x0 )) +
++
+Cl
+1 − γ2
+1 − ν2
+1 − γ2
+!
+ 2
+1
+1
+1
+Cu
+2
+π0
++
+≤ (V (x0 )) + D2 (x0 , K, γ, ν)
+Cl
+1 − γ2 1 − ν2
+1 − γ2
+
+(Equation (21))
+
+(Equation (22))
+
+Finally, we prove the regret bound of N EO RL.
+Proof of Theorem 3.1. In the following, let x̂nk+1 = fn (xnk , πn (xnk ))+wkn denote the state predicted
+under the optimistic dynamics and xnk+1 = fn∗ (xnk , πn (xnk )) + wkn the true state.
+"N −1 H −1
+#
+n
+X X
+n
+n
+∗
+E
+c(xk , πn (xk )) − A(π )
+n=0 k=0
+
+≤E
+=E
+
+"N −1 H −1
+n
+X X
+n=0 k=0
+
+"N −1 H −1
+n
+X X
+n=0 k=0
+
+=E
+
+"N −1 H −1
+n
+X X
+n=0 k=0
+
+=
+
+N
+−1 HX
+n −1
+X
+n=0 k=0
+
++
+
+N
+−1 HX
+n −1
+X
+n=0 k=0
+
+#
+c(xnk , πn (xnk )) − A(πn , fn )
+
+(Optimism)
+#
+
+B(πn , fn , xnk ) − B(πn , fn , x̂nk+1 )
+
+(Bellman equation ( Equation (4)))
+#
+
+B(πn , fn , xnk ) − B(πn , fn , xnk+1 ) + B(πn , fn , xnk+1 ) − B(πn , fn , x̂nk+1 )
+
+
+
+E B(πn , fn , xnk+1 ) − B(πn , fn , x̂nk+1 )
+
+(A)
+
+
+
+E B(πn , fn , xnk ) − B(πn , fn , xnk+1 )
+
+(B)
+
+First, we study the term (A).
+Proof for (A): Note that because fn ∈ Mn , there exists a η ∈ [−1, 1]dx such that x̂nk+1 =
+µn (xnk , πn (xnk )) + βn σn (xnk , πn (xnk ))η(xnk ) + wkn . Furthermore, xnk+1 = f ∗ (xnk , πn (xnk )) + wkn
+n
+n
+and the transition noise is Gaussian. Let ζ2,k
+and ζ1,k
+denote the respective distributions of the
+n
+∗
+n
+n
+2
+n
+∼ N (fn (xnk , πn (xnk )), σ 2 I).
+two random variables, i.e., ζ1,k ∼ N (f (xk , πn (xk )), σ I) and ζ2,k
+n [B(πn , fn , x)], and consider the function h(x) = B(πn , fn , x) − B̄.
+Next, define B̄ = Ex∼ζ2,k
+Then we have
+
+
+Ewkn B(πn , fn , xnk+1 ) − B(πn , fn , x̂nk+1 )
+n [B(πn , fn , x)] − Ex∼ζ n [B(πn , fn , x)]
+= Ex∼ζ1,k
+2,k
+
+
+
+
+n
+n
+= Ex∼ζ1,k
+B(πn , fn , x) − B̄ − Ex∼ζ2,k
+B(πn , fn , x) − B̄
+n [h(x)] − Ex∼ζ n [h(x)].
+= Ex∼ζ1,k
+2,k
+
+27
+
+n [h(x)] = 0 by the definition of h and thus,
+Note that Ex∼ζ2,k
+n [h(x)] − Ex∼ζ n [h(x)] = Ex∼ζ n [h(x)] ≤
+Ex∼ζ1,k
+2,k
+1,k
+
+q
+
+n [h2 (x)].
+Ex∼ζ1,k
+
+(23)
+
+In the following, we bound the term above w.r.t. the Chi-squared distance
+
+
+n [h(x)] − Ex∼ζ n [h(x)]
+Ewkn B(πn , fn , xnk+1 ) − B(πn , fn , x̂nk+1 ) = Ex∼ζ1,k
+2,k
+!
+Z
+n
+q
+q
+ζ2,k
+n
+n , ζn )
+n [h2 (x)]
+=
+h(x) 1 − n
+ζ1,k
+(dx) ≤ Ex∼ζ1,k
+dχ (ζ2,k
+1,k
+ζ1,k
+X
+((Kakade et al., 2020, Lemma C.2.,))
+n
+n
+With dχ (ζ2,k
+, ζ1,k
+) being the Chi-squared distance.
+
+2
+n
+n
+Z
+ζ1,k
+− ζ2,k
+n
+n
+(dx)
+dχ (ζ2,k
+, ζ1,k
+)=
+n
+ζ1,k
+X
+
+Since both bounds from Equation (23) and bound we got by applying (Kakade et al., 2020, Lemma
+C.2.,), we can apply minimum and have:
+r
+n
+o
+
+ q
+n
+n
+n , ζ n ), 1
+n [h2 (x)]
+min dχ (ζ2,k
+Ewkn B(πn , fn , xk+1 ) − B(πn , fn , x̂k+1 ) ≤ Ex∼ζ1,k
+1,k
+Therefore, following Kakade et al. (2020, Lemma C.2.,) we get
+
+
+Ewkn B(πn , fn , xnk+1 ) − B(πn , fn , x̂nk+1 )
+q
+∗
+n
+n
+n
+n
+n [h2 (x)] min {1/σ ∥f (x , πn (x )) − fn (x , πn (x ))∥ , 1}
+≤ Ex∼ζ1,k
+k
+k
+k
+k
+q
+√
+n [h2 (x)](1 +
+≤ Ex∼ζ1,k
+dx )βn/σ ∥σn (xnk , πn (xnk ))∥ . ((Sukhija et al., 2024, Cor. 3))
+Therefore, we have
+N
+−1 HX
+n −1
+X
+n=0 k=0
+
+≤
+≤
+
+
+
+
+Exnk ,...x01 |x0 Ewkn B(πn , fn , xnk+1 ) − B(πn , fn , x̂nk+1 )
+
+N
+−1 HX
+n −1
+X
+
+Exnk ,...x01 |x0
+
+n=0 k=0
+N
+−1 HX
+n −1
+X
+
+(1 +
+
+√
+
+i
+hq
+√
+n [h2 (x)](1 +
+Ex∼ζ1,k
+dx )βn/σ ∥σn (xnk , πn (xnk ))∥
+r
+
+dx
+
+)βn/σ
+
+n=0 k=0
+
+≤ (1 +
+
+√
+
+h
+i
+h
+i
+n , π (xn ))∥2
+n [h2 (x)] E n
+0
+Exnk ,...x01 |x0 Ex∼ζ1,k
+∥σ
+(x
+n
+n
+xk ,...x1 |x0
+k
+k
+
+v
+uN −1 Hn −1
+uX X
+β
+T
+d ) /σt
+E n
+
+xk ,...x01 |x0
+
+x
+
+n=0 k=0
+
+v
+uN −1 Hn −1
+uX X
+×t
+E n
+
+xk ,...x01 |x0
+
+n=0 k=0
+
+h
+i
+n [h2 (x)]
+Ex∼ζ1,k
+
+h
+
+2
+
+∥σn (xnk , πn (xnk ))∥
+
+i
+
+Here, for the second and third inequality, we use Cauchy-Schwarz. Now we bound the two terms
+above individually.
+ 2 
+n
+First we bound Ex∼ζ1,k
+h (x) .
+ 2 
+
+
+n
+n
+Ex∼ζ1,k
+h (x) = Ex∼ζ1,k
+(B(πn , fn , x) − B̄)2
+h
+i
+2
+n
+n [B(πn , fn , x)])
+= Ex∼ζ1,k
+(B(πn , fn , x) − Ex∼ζ2,k
+
+2
+h
+i
+C2
+πn
+n [V
+n
+≤
+(x)])2
+(Theorem B.3)
+Ex∼ζ1,k
+(2 + V πn (x) + Ex∼ζ2,k
+1 − λ̂
+28
+
+
+≤
+
+C2
+
+2
+
+h
+i
+n
+(2 + V πn (x) + γV πn (xnk ) + K̂)2
+Ex∼ζ1,k
+
+1 − λ̂
+!2
+√
+2C2
+
+≤
+
+i
+h
+n
+(V πn (x))2 + (2 + γV πn (xnk ) + K̂)2
+Ex∼ζ1,k
+
+1 − λ̂
+!2
+√
+
+2C2
+
+≤
+
+(Lemma B.4)
+
+1 − λ̂
+
+
+
+
+Exnk+1 |xnk (V πn (xk+1 ))2 + 2γ 2 (V πn (xnk ))2 + 2(2 + K̂)2
+
+Furthermore, we have from Lemma B.8.
+i
+h
+
+
+Exnk ,...x01 |x0 Exnk+1 |xnk (V πn (xk+1 ))2 + 2γ 2 (V πn (xnk ))2
+
+
+
+
+= Exnk+1 ,...x01 |x0 (V πn (xk+1 ))2 + 2γ 2 Exnk ,...x01 |x0 (V πn (xnk ))2 ≤ (1 + 2γ 2 )D3 (x0 , K, γ, ν).
+In the end, we get
+v
+uN −1 Hn −1
+uX X
+t
+E n
+
+xk ,...x01 |x0
+
+h
+i
+n [h2 (x)]
+Ex∼ζ1,k
+
+n=0 k=0
+
+√
+
+!v
+uN −1 Hn −1
+X X
+2C2 u
+t
+(1 + 2γ 2 )D3 (x0 , K, γ, ν) + 2(2 + K̂)2
+1 − λ̂
+n=0 k=0
+v
+!q
+uN −1
+√
+uX
+2C2
+2
+2
+(1 + 2γ )D3 (x0 , K, γ, ν) + 2(2 + K̂) t
+Hn
+1 − λ̂
+n=0
+!q
+√
+√
+2C2
+(1 + 2γ 2 )D3 (x0 , K, γ, ν) + 2(2 + K̂)2 T .
+1 − λ̂
+
+≤
+=
+
+=
+
+Next, we apply Lemma A.1 for the second term.
+v
+uN −1 Hn −1
+h
+i
+uX X
+p
+2
+t
+0
+E n
+∥σ (xn , π (xn ))∥ ≤ C ′ Γ
+xk ,...x1 |x0
+
+n
+
+k
+
+n
+
+k
+
+T
+
+n=0 k=0
+
+Here ΓT is the maximum information gain.
+√  q
+√
+′
+2C2
+(1 + 2γ 2 )D3 (x0 , K, γ, ν) + 2(2 + K̂)2 , we have
+If we set D4 (x0 , K, γ) = C (1+σ dx ) 1−
+λ̂
+N
+−1 HX
+n −1
+X
+n=0 k=0
+
+≤ (1 +
+
+√
+
+
+
+
+Exnk ,...x01 |x0 Ewkn B(πn , fn , xnk+1 ) − B(πn , fn , x̂nk+1 )
+v
+uN −1 Hn −1
+uX X
+d )βT/σt
+E n
+x
+
+i
+n [h2 (x)]
+Ex∼ζ1,k
+
+n=0 k=0
+
+v
+uN −1 Hn −1
+uX X
+×t
+E n
+
+xk ,...x01 |x0
+
+n=0 k=0
+
+≤ (1 +
+
+h
+
+xk ,...x01 |x0
+
+√
+
+dx )βT/σ
+
+√
+
+2C2
+
+1 − λ̂
+p
+≤ D4 (x0 , K, γ)βT T ΓT
+
+h
+i
+2
+∥σn (xnk , πn (xnk ))∥
+!q
+
+p
+√
+(1 + 2γ 2 )D3 (x0 , K, γ, ν) + 2(2 + K̂)2 T C ′ ΓT
+
+Proof for (B):
+N
+−1 HX
+n −1
+X
+n=0 k=0
+
+−1
+
+ NX
+
+
+n
+n
+E B(π, fn , xk ) − B(π, fn , xk+1 ) =
+E B(π, fn , xn0 ) − B(π, fn , xnHn )
+n=0
+
+29
+
+≤
+≤
+
+C2
+
+N
+−1
+X
+
+1 − λ̂ n=0
+
+N −1
+2C2 X
+
+1 − λ̂ n=0
+
+
+
+2 + E V π (xn0 ) + V π (xnHn )
+
+(Theorem B.3)
+
+(1 + D(x0 , K, γ))
+
+(Lemma B.7)
+
+2C2
+(1 + D(x0 , K, γ))N
+1 − λ̂
+= D5 (x0 , K, γ)N.
+=
+
+2C2
+Here D5 (x0 , K, γ) = 1−
+(1 + D(x0 , K, γ)). From Lemma A.7 follows that N < K̄1I ΓT To this
+λ̂
+end, we get for our regret
+"N −1 H −1
+#
+n
+X X
+n
+n
+∗
+RT = E
+c(xk , πn (xk )) − A(π )
+n=0 k=0
+
+p
+T ΓT + D5 (x0 , K, γ)N
+p
+1
+≤ D4 (x0 , K, γ)βT T ΓT + D5 (x0 , K, γ)
+ΓT
+K̄I
+≤ D4 (x0 , K, γ)βT
+
+This regret is sublinear for a very rich class of functions. We summarize bounds on ΓT from
+Vakili et al. (2021) in Table 1. Furthermore, note that D4 (x0 , K, γ) ∈ (0, ∞) for all x0 ∈ X with
+∥x0 ∥ < ∞, K < ∞, γ ∈ (0, 1). The same holds for D5 (x0 , K, γ). Moreover, since V π (x) is
+Θ(ζ(∥x∥)), both D4 and D5 are Θ(ζ(∥x0 ∥)).
+Table 1: Maximum information gain bounds for common choice of kernels.
+Kernel k(x, x′ )
+ΓT
+Linear
+
+x⊤ x′
+
+RBF
+
+e
+
+−
+
+Matèrn
+
+1
+Γ(ν)2ν−1
+
+∥x−x′ ∥2
+2l2
+
+√
+
+2ν ∥x−x′ ∥
+l
+
+√
+
+ν
+Bν
+
+30
+
+2ν ∥x−x′ ∥
+l
+
+
+
+O (d log(T ))
+
+
+O logd+1 (T )
+ d
+
+2ν
+O T 2ν+d log 2ν+d (T )
+
+Algorithm 2 Practical N EO RL:
+Init: Aleatoric uncertainty σ, Probability δ, Statistical model (µ0 , σ0 , β0 (δ))
+for n = 1, . . . , N do
+for h = 1, . . . , H do
+"H −1
+#
+MPC
+X
+E
+c(x̂h , uh ) ; x0 = xnh
+➤ Solve MPC problem
+min
+u0:HMPC −1 ,η0;HMPC −1
+
+h=0
+h
+∗
+h+1
+(xn , u0 , xn ) ← ROLLOUT(u∗0 )
+
+➤ Collect transition
+
+end for
+Update (µn , σn , βn ) ← Dn
+end for
+
+C
+
+Practical algorithm and Experimental Details
+
+In this section, we provide the practical algorithm Algorithm 2, provide all hyperparameters used in
+our experiments in Table 2, and the cost function for the environments. All our experiments within
+1-8 hours3 on a GPU (NVIDIA GeForce RTX 2080 Ti). For N EO RL, we use βn = 2 for all the
+experiments, except for the Swimmer and the SoftArm environment where we use βn = 1.
+Table 2: Hyperparameters for results in Section 4.
+Environment
+Number of
+samples
+Pendulum-GP
+Pendulum
+MountainCar
+Reacher
+CartPole
+Swimmer
+SoftArm
+RaceCar
+
+500
+500
+1000
+1000
+1000
+500
+500
+1000
+
+iCEM parameters
+Number of Optimizer
+elites
+steps
+50
+50
+100
+100
+100
+50
+50
+100
+
+10
+10
+5
+10
+10
+10
+10
+10
+
+HMPC
+
+Particles
+
+Number of
+ensembles
+
+20
+20
+50
+50
+50
+30
+20
+50
+
+5
+5
+5
+5
+5
+5
+5
+5
+
+10
+10
+10
+10
+10
+10
+10
+
+Model training parameters
+Network
+Learning rate Batch size
+architecture
+256 × 2
+256 × 2
+256 × 2
+256 × 2
+256 × 4
+256 × 4
+256 × 2
+
+0.01
+0.001
+0.001
+0.001
+0.001
+0.00005
+0.00005
+0.001
+
+Number of
+epochs
+
+H
+
+Action
+Repeat
+
+50
+50
+50
+50
+100
+50
+50
+
+10
+10
+10
+10
+10
+200
+20
+10
+
+1
+1
+2
+2
+2
+4
+1
+1
+
+64
+64
+64
+64
+64
+64
+64
+64
+
+Table 3: Cost function for the environments presented in Section 4.
+
+3
+
+Environment
+
+Cost c(xt , ut )
+
+Pendulum
+MountainCar
+Reacher
+CartPole
+Swimmer
+SoftArm
+RaceCar
+
+θt2 + 0.1θ̇t + 0.1u2t
+0.1u2t + 100(1{xt ̸∈ xgoal })
+∥xt − xtarget ∥ + 0.1 ∥ut ∥
+2
+2
+pos
+pos
+xt − xtarget + 10(cos(θt ) − 1)2 + 0.2 ∥ut ∥
+∥xt − xtarget ∥
+∥xt − xtarget ∥
+∥xt − xtarget ∥
+
+based on the environment
+
+31
+
+

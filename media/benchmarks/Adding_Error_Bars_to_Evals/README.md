@@ -1,5 +1,5 @@
 # Adding Error Bars to Evals
-- Paper: [Adding_Error_Bars_to_Evals.pdf](../../../papers/benchmarks/Adding_Error_Bars_to_Evals.pdf)
+- Paper: [Adding_Error_Bars_to_Evals.pdf](../../../reinforcement_learning_papers/09_agentic_rl/Adding_Error_Bars_to_Evals.pdf)
 
 ## Gemini diagrams
 

@@ -1,5 +1,5 @@
 # Composing Global Optimizers Algebraic Objects
-- Paper: [Composing_Global_Optimizers_Algebraic_Objects.pdf](../../../papers/planning/Composing_Global_Optimizers_Algebraic_Objects.pdf)
+- Paper: [Composing_Global_Optimizers_Algebraic_Objects.pdf](../../../reinforcement_learning_papers/09_agentic_rl/Composing_Global_Optimizers_Algebraic_Objects.pdf)
 
 ## Gemini diagrams
 

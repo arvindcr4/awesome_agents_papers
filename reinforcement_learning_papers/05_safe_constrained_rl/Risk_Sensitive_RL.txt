@@ -1,0 +1,1535 @@
+Safety-Aware Reinforcement Learning for Control via
+Risk-Sensitive Action-Value Iteration and Quantile
+Regression
+
+arXiv:2506.06954v2 [cs.LG] 7 Dec 2025
+
+Clinton Enwerem, Aniruddh G. Puranic, John S. Baras, and Calin Belta
+Institute for Systems Research
+University of Maryland, College Park, United States
+{enwerem, puranic, baras, calin}@umd.edu
+
+Abstract: Mainstream approximate action-value iteration reinforcement learning
+(RL) algorithms suffer from overestimation bias, leading to suboptimal policies
+in high-variance stochastic environments. Quantile-based action-value iteration
+methods reduce this bias by learning a distribution of the expected cost-to-go
+using quantile regression. However, ensuring that the learned policy satisfies
+safety constraints remains a challenge when these constraints are not explicitly
+integrated into the RL framework. Existing methods often require complex neural
+architectures or manual tradeoffs due to combined cost functions. To address this,
+we propose a risk-regularized quantile-based algorithm integrating Conditional
+Value-at-Risk (CVaR) to enforce safety without complex architectures. We also
+provide theoretical guarantees on the contraction properties of the risk-sensitive
+distributional Bellman operator in Wasserstein space, ensuring convergence to a
+unique cost distribution. Simulations of a mobile robot in a dynamic reach-avoid
+task show that our approach leads to more goal successes, fewer collisions, and
+better safety-performance trade-offs than risk-neutral methods.
+
+1
+
+Introduction
+
+Standard Reinforcement Learning (RL) methods optimize expected cumulative cost but often use
+misaligned or underspecified cost functions that oversimplify real-world safety constraints, leading to
+overlooked risks. This limitation hinders deployment in high-risk domains where safety is crucial [1].
+For instance, a risk-neutral autonomous robot may reach deadlock states, jeopardizing its mission
+and causing severe consequences [2]. Addressing this requires integrating explicit safety constraints
+to prevent risky behavior while preserving essential exploration.
+
+Agent in state,
+xa
+
+Goal, xg
+
+Restricted regions
+in X s
+
+Obstacles
+in X h
+
+(a) Task space.
+
+(b) Unsafe traversal.
+
+(c) Collision event.
+
+(d) Goal reached.
+
+Figure 1: Reach-avoid navigation task: Close-ups from our experiments (Section 6) showing a
+differentially-driven mobile robot (depicted by a red car-like object) tasked with navigating to a
+uniformly randomized 2D goal location (green cylinder), denoted by xg = [xg , y g ]⊤ , with xg , y g ∈
+[−1, 1]. En route to the goal, the robot must also avoid two regions within its environment: a
+traversable region, denoted by X s comprising purple discs shown in (b) (acting as a soft constraint),
+as well as obstacles in the set X h (represented by light blue cubes in (c)) that inhibit its motion upon
+collision (i.e., a hard constraint). These static hazards and obstacles incur distinct costs that the agent
+must minimize while learning to safely navigate to the goal.
+
+Approximate Action-Value Iteration (hereafter, AVI) methods [3, 4] estimate the action-value function
+using a neural network trained on the temporal difference between a current estimate of the action
+value and an observed target value (i.e., the sum of the stage cost and the expected future action
+value). However, in high-variance environments, these methods often suffer from overestimation bias,
+where the action-value approximation predicts values that are significantly higher than the true values
+[5]. AVI methods based on quantile regression [5, 6] address this by learning a quantile distribution
+of Q-values instead of a single expected value, reducing overestimation and improving estimation
+accuracy. By updating value distributions across quantile fractions, quantile regression RL algorithms
+enhance exploration and stabilize policy learning [5].
+While distributional RL mitigates overestimation bias, it struggles with instantaneous stage cost
+misspecification, leading to unsafe or suboptimal policies [1]. Modifying stage costs to encode
+safety constraints [7, 8] is common but challenging to tune, especially in environments with varied
+risks [9] (Fig. 1). Safe Policy Optimization [10] tackles this problem by enforcing safety through
+a separate network, which adds substantial computational overhead [11]. Furthermore, in dynamic
+environments, uncertainty from stochastic transitions, noise, perturbations, and model approximations
+can lead to brittle policies if not properly addressed [12]. To balance instantaneous stage cost
+optimization, safety adherence, and uncertainty mitigation – without the overhead of a separate cost
+network [10, 11] – we propose an RL framework that integrates risk-sensitive decision-making into
+approximate action-value iteration algorithms. Specifically, our approach penalizes safety violations
+by augmenting the quantile loss with a risk term derived from experience-based cost distributions.
+Contributions and Paper Outline
+i. Risk-regularized Quantile-Regression Based Approximate Action-Value Iteration (QR-AVI)
+(Section 4): We enhance efficiency and safety by training a single quantile-based action-value
+iteration using a risk-regularized loss that integrates quantile regression with a penalty for safety
+violations (Section 4.3).
+ii. Empirical uncertainty quantification via Kernel Density Estimation (Sections 2.4 and 4.1):
+We approximate the cost distribution using Kernel Density Estimation (KDE), providing a
+probabilistic measure of safety constraints based on cost samples and enabling risk computation.
+iii. Contraction & Finite-Time Convergence Guarantees (Section 5): We prove the contraction
+of the risk-regularized Bellman operator, ensuring stable learning and finite-time convergence
+of the quantile-based action-value iteration algorithm to a stationary policy, leveraging the
+convexity of the quantile and risk loss terms.
+iv. Modular RL Algorithmic Framework (Section 4): We introduce a risk-sensitive QR-AVI algorithm (Algorithm 1) within a flexible and modular framework that integrates safety constraints
+into the quantile loss, making our approach applicable to other approximate RL methods.
+v. Reach-Avoid Experiments (Section 6) & Comparative Study (Section 6.2): We evaluate a car-like
+agent in a dynamic reach-avoid task, comparing our algorithm to nominal and risk-neutral
+variants. Results show improved safety, lower quantile loss, and higher success rates.
+
+2
+
+Background
+
+2.1
+
+Reinforcement Learning (RL)
+
+The terminology in this subsection follow [13]. We consider an agent as a decision-making entity
+that learns from interacting with an external environment through a sequence of observations (of its
+states and those of the environment), actions, and costs. At each discrete time step t ∈ Z+ , the agent
+observes its current state as well as the current state of the environment, denoted for simplicity by the
+vector xt = [xat , xet ]⊤ ∈ X = Xa × Xe , where xat ∈ Xa represents the agent’s state, and xet ∈ Xe
+represents the environment’s state, i.e., every artifact within the environment outside the agent. The
+agent applies a control input ut ∼ µ (· | xat ) ∈ U according to a (randomized) policy or control law
+µ : Xa → ∆(U ), where U denotes the control space representing the discrete
+P set of permissible
+control inputs, ∆(U) is the set of distributions over the control space, and ut ∈U µ (ut | xat ) =
+1, ∀ xat ∈ Xa . The agent also incurs a stage cost, gt = ϕ(xat , ut ) ∈ R, and transitions to a new state
+2
+
+according to xat+1 = f a (xat , ut ), where f a is the state transition function. We define the system in
+which the agent interacts with the environment by a Markov Decision Process (MDP), given by the
+tuple M = (X , U, f a , f e , ϕ, γ), where γ is a discount factor for expected future costs.
+Example 1 (Running Example). Consider the navigation task shown in Fig. 1. The robot’s state
+space, Xa , comprises its wheel orientation, angular velocity, linear velocity, and acceleration, goal
+and obstacle lidar measurements, and Boolean indicators for obstacle collision events (the robot’s
+dynamics are outlined in Section 6). The control set, U, is 2-dimensional and consists of the torques
+applied to the left and right wheels. The stage cost, gt ∈ R, is a function of the Euclidean distance
+between the robot and the prescribed goal location at each timestep (see Section 6). The robot must
+also avoid a keep-off region, X s and an obstacle region, X h , that both incur a violation cost distinct
+from gt .
+
+Definition 1 (Safety). A trajectory {xat , ut }Tt=0 is deemed safe if it avoids environmental constraint
+violations, i.e., if
+xat ∈
+/ Xunsafe = X s ∪ X h ≡ Xa \ Xsafe , ∀ t,
+(1)
+where Xunsafe denotes the set of agent states corresponding to collisions and restricted regions, and
+Xsafe is its complement.
+
+Remark 1 (Enforcing Safety). To avoid the computational challenges associated with deriving an
+explicit expression for Xsafe , we enforce safety via unique cost functions (specified for each safety
+constraint) that assign a positive scalar penalty whenever the agent enters an unsafe region:
+ s a
+c (x ) > 0, if xat ∈ X s , 0 otherwise,
+Ct := ht ta
+(2)
+ct (xt ) > 0, if xat ∈ X h , 0 otherwise.
+To implicitly bias the agent toward safe behavior, we then minimize the cumulative sum of the violation
+costs, with the costs defined as in (2). See (26) for the full cost expression.
+2.2
+
+Action-Value Iteration (AVI)
+
+In an MDP, the agent seeks a policy µ that minimizes the expected cumulative cost. The optimal
+cost-to-go function satisfies J ⋆ (x) = minut Q⋆ (xt , ut ) , where Q⋆ (xt , ut ) is the optimal actionvalue function. The action-value function Q(xt , ut ), which estimates the future cost from a given
+state-action pair, is updated iteratively using the Bellman recursion
+
+Q (xt , ut ) ← Q (xt , ut ) + αt ϕ (xt , ut )
+
++ γ min Q (xt+1 , ut+1 ) − Q (xt , ut ) ,
+(3)
+ut+1
+
+where ϕ(xt , ut ) is the stage cost, αt ∈ (0, 1] is the learning rate, and γ ∈ (0, 1] is a discount
+factor. Since maintaining exact action values for all state-control pairs in large state-control spaces is
+impractical, we specialize our discussion to approximate value iteration methods in the next section.
+2.3
+
+Approximate AVI via Quantile Regression
+
+Approximate action-value iteration methods replace the tabular representation with a function approximator, such as a θ-parameterized neural network, i.e., Q(xt , ut ) ≈ Q(xt , ut ; θ), that is typically
+trained using data sampled uniformly from a sequence of state-control pairs, D, containing tuples of
+the form {(xt , ut , gt , xt+1 , dt )}, where dt is a Boolean indicator variable that signifies if a learning
+episode has ended. The predicted Q-values (denoted by Q(xt , ut ; θ)) are updated by minimizing the
+loss function defined by
+
+2
+L(θi ) = E (yi − Q(xt , ut ); θi ) , i = 1, 2, . . . , B,
+(4)
+where B is the size of the batch sampled from D, yi is the ith target action-value realized from a
+target network, Q(xt , ut ; θi ), with parameters, θi that are updated with a predetermined frequency to
+converge at a stable or low-variance value: yi := gt + γ minut+1 Q(xt+1 , ut+1 ; θi ). To account for
+variability in the Q-value distribution, quantile regression-based approximate AVI (QR-AVI) methods
+[5, 6] estimate the target action-value distribution using a set of quantiles (e.g., the lower tail, median,
+3
+
+upper tail etc.) instead of predicting just the mean Q-value. Specifically, in the QR-AVI framework
+[6], the loss in (4) is replaced by the quantile regression loss:
+LQR (θ̂n ) :=
+
+Nτ X
+Nτ
+
+
+1 X
+ρκτn yj − θ̂n (xt , ut ) .
+Nτ n=1 j=1
+
+(5)
+
+In (5), yj = gt + γ θ̂j (xt+1 , ut+1 ) defines the j th quantile (of the target action-value distribution)
+that depends on the system’s (agent-environment) transition dynamics and stage cost, with j ∈
+{1, . . . , Nτ }, Nτ is the prescribed number of quantile fractions, and ρκτn is the asymmetric Huber
+loss (with parameter κ) corresponding to the uniformly-distributed quantile fraction, τn ∈ (0, 1) (δw
+is the Dirac delta function at w ∈ R and n = 1, 2, . . . , Nτ ):
+ρκτn (m) = |τn − δ{m<0} |Lκ (m), τn = (n−0.5)/Nτ
+ 1 2
+2m ,
+ if |m| ≤ κ,
+Lκ (m) =
+κ |m| − 12 κ , otherwise.
+
+(6)
+(7)
+
+Remark 2 (Parameters of LQR ). The Huber loss function, ρκτn , in (5) serves to minimize the actionvalue distribution approximation error for the n-th quantile by combining the squared and absolute
+errors and switching between these errors based on a threshold parameter, κ. This switching strategy
+makes the Huber loss robust to outliers [6], which is an important requirement for real-world control
+applications with noisy or uncertain data. The Dirac function adjusts the magnitude of the error
+based on the sign of the desired cost-to-go (denoted by m) to differentiate between underestimation
+and overestimation of the action value distribution.
+2.4
+
+Data-Driven Uncertainty Quantification
+
+At each state, xat , since the agent can choose from multiple possible actions ut ∈ U according to a
+random policy, each random action thus incurs a non-deterministic stage cost given by ϕ(xat , ut ), as
+well as a random safety violation cost not captured by the stage cost function (see Example 1 and
+Definition 1). We thus model the randomness in the safety violation costs separately by assuming Ct
+follows an unknown distribution with probability density, Pc , that must be learned from cost samples
+(1)
+(2)
+(|B|)
+(e)
+in the sampled batch, {Ct , Ct , . . . , Ct
+}, for each time step, where Ct is the violation cost
+incurred at time step t in episode e. Due to the violation cost’s dependence on the policy, the associated
+cost distribution at xt is thus conditioned on µ. We define the notion of a policy-conditioned cost
+distribution next.
+Definition 2 (Policy-Conditioned Cost Distribution). Given a policy, µ, and a cost distribution, Pc ,
+the policy-conditioned cost distribution at state xt (hereafter denoted by Zcµ (· | xat )) is the cost
+distribution obtained by marginalizing over inputs
+X
+µ (ut | xat ) Pc (· | xat , ut ) ,
+(8)
+ut ∈U
+
+where Pc (· | xat , ut ) is a distribution of safety violation costs associated with the state control pair,
+(xat , ut ). For instance, if Ct is the cost incurred from violating a safety constraint, Pc (Ct | xat , ut )
+provides the likelihood of incurring a particular cost Ct given the pair, (xat , ut ).
+Remark 3 (Challenges with Computing Zcµ (· | xat )). Equation (8) provides a formal framework
+that fully captures the cost distribution for a given state and under control inputs chosen according
+to a policy. Unfortunately, due to the unavailability of an exact form of Pc (· | xat , ut ), a direct
+computation of a closed form expression for Zcµ (· | xat ) becomes infeasible. This challenge thus
+necessitates the need for an approximation of Zcµ (· | xat ), hereafter denoted as Ẑcµ , from costs
+sampled from stored experience during training.
+2.5
+
+Risk Model & Risk Measure Computation
+
+Definition 3 (Risk Measure). Consider the probability space, (Ω, F, Ẑcµ ), where Ω ⊇ X × U is
+the sample space and F is the σ-algebra over Ω. Suppose C denotes the set of all cost random
+variables defined on Ω. Omitting the time argument for brevity, we define the risk measure as a
+4
+
+function ρ̂β : C → R that assigns a real number representing the risk or variability of C, i.e., ρ̂β
+captures the tail behavior of the cost distribution; β ∈ (0, 1) is the confidence level representing the
+proportion of Ẑcµ that is covered when computing ρ̂β .
+Hereafter, we focus on coherent risk measures, widely used in risk-sensitive optimization, that
+satisfy key axioms: sub-additivity, positive homogeneity, translation invariance, monotonicity, and
+risk-utility duality [14, 15, 16]. Of these, we select the Conditional Value-at-Risk (CVaR), since it
+can distinguish between tail events [14] beyond β. Given the cost distribution Ẑcµ realized from some
+estimation scheme (see Section 4.1), the expected cost at time step t is:
+B
+1 X (e)
+(9)
+E [Ct ] =
+C .
+B e=1 t
+Using (9), and specializing to the case where ρ̂β is the β-level CVaR (CVaRβ ), the risk measure is
+given by
+CVaRβ (Ct ) = E [Ct | Ct ≥ VaRβ (Ct )] , where
+(10)
+VaRβ (Ct ) = inf {⋆ ∈ R | Ẑcµ (Ct ≤ ⋆) ≥ β}
+
+(11)
+
+⋆
+th
+is the Value-at-Risk or β percentile of Ẑcµ .
+
+3
+
+Problem Formulation
+
+Assume the setting in Section 2.1. Given an MDP representing the system, we wish to find a
+policy that minimizes the expected cumulative cost while minimizing the risk of safety constraint
+violations, that is, the risk-sensitive cumulative cost, where the risk is computed from an estimated
+(constraint-violation) cost distribution. Formally, we consider the following problem:
+Problem 1. Given an MDP (Section 2.1), a stage cost function, ϕ, a cost distribution, Ẑcµ , and an
+initial state, x0 , find a policy µ∗ such that:
+"T −1
+#
+T
+−1
+X
+X
+
+∗
+t
+µ = arg min E
+α ϕ(xt , ut ) + λ[ρ̂β
+Ct ].
+(12)
+µ
+
+t=0
+
+t=0
+
+In (12), ρ̂β denotes the β-level CVaR corresponding to Ẑcµ , estimated from cost samples collected
+during each episode, λ is a positive scalar regularization parameter that balances the cumulative stage
+cost minimization and risk minimization, and Ct ∼ Ẑcµ is the violation cost random variable. To
+solve Problem 1, we propose a risk-sensitive QR-AVI algorithm, with the risk computation enabled
+by Kernel Density Estimation (KDE). In Section 6.3.3, we provide a more application-centered
+argument in support of our choice of KDE, while Section 4 (appearing next) describes the specifics
+of our approach that draw on recent advances in risk-sensitive RL [12, 17, 18, 19, 20, 21].
+
+0.8
+
+0.175
+
+h = 0.3, B = 1000
+
+1.0
+0.18
+
+0.175
+
+0.8
+
+0.16
+
+0.4
+
+0.100
+0.075
+
+Tail Distributions
+
+|ρ̂β − ρβ |
+
+0.6
+
+0.000
+
+0.2
+
+0.000
+
+0.5
+
+0.6
+
+0.7
+X
+
+0.8
+
+0.9
+
+0.09
+
+0.050
+0.025
+
+0.2
+
+0.90 0.95 0.99
+
+β
+0.0
+0.4
+
+0.10
+
+0.075
+
+0.025
+0.90 0.95 0.99
+
+0.13
+
+0.100
+
+0.4
+
+0.050
+
+0.025
+
+0.2
+
+0.6
+
+0.075
+
+0.4
+
+0.050
+
+0.125
+
+0.11
+
+0.100
+
+p(X)
+
+p(X)
+
+0.6
+
+0.150
+
+0.13
+
+0.125
+
+|ρ̂β − ρβ |
+
+0.125
+
+0.175
+
+0.8
+
+0.150 0.15
+
+0.14
+
+0.150
+
+h = 0.3, B = 10000
+
+1.0
+
+p(X)
+
+β=0.90
+β=0.95
+β=0.99
+KDE
+
+|ρ̂β − ρβ |
+
+h = 0.3, B = 100
+
+1.0
+
+0.000
+
+0.90 0.95 0.99
+
+β
+1.0
+
+0.0
+0.4
+
+0.5
+
+0.6
+
+0.7
+X
+
+0.8
+
+0.9
+
+β
+1.0
+
+0.0
+0.4
+
+0.5
+
+0.6
+
+0.7
+X
+
+0.8
+
+0.9
+
+1.0
+
+Figure 2: Graphing the KDE-estimated probability density (p(X), shown as a gray line enclosing the
+gray-filled area) corresponding to samples of an uncertain variable (X). The inset bar plots show
+the evolution of the absolute error, |ρ̂β − ρβ |, between the CVaR computed from p(X) (i.e., ρ̂β ) and
+the true CVaR (ρβ ) for an increasing number of KDE samples, B = {100, 1000, 10000} and using
+a Gaussian kernel with a fixed bandwidth (h) of 0.3. The underlying data are from a heavy tailed
+distribution on (0, 1], and the CVaR estimate moderately improves with the number of cost samples.
+5
+
+4
+
+Approach: Risk-Regularized Quantile-Based AVI with KDE-Based Cost
+Distribution Estimation
+
+4.1
+
+KDE-Based Estimation of Zcµ
+
+Following the discussions in Section 2.4 and for reasons outlined in Remark 3, we employ Kernel
+Density Estimation (KDE) [22], a technique that provides a practical method to approximate the
+policy-conditioned cost distribution (see Definition 2) from finite training samples. By leveraging
+observed costs during policy execution, KDE constructs an empirical distribution, Ẑcµ (13), as a proxy
+for Zcµ , that enables the computation of distributional statistics essential for risk-sensitive decision(i)
+making. Denoting the cost samples observed from the training data at time step t by Ct := {Ct }B
+i=1 ,
+we can write the likelihood of Ct as follows (k is the kernel function, and h > 0 is the bandwidth):
+B
+
+Ẑcµ (Ct | xt ) =
+
+(i)
+
+Ct − C t
+h
+
+1 X
+k
+Bh i=1
+
+!
+(i)
+
+, Ct
+
+∈ Ct .
+
+(13)
+
+Remark 4 (KDE Caveats). While KDE approximates Zcµ by smoothing over observed cost values,
+thus capturing both aleatoric uncertainty (due to the inherent stochasticity in the costs) and epistemic
+uncertainty (due to finite cost samples) as argued in [23], its estimation accuracy (depends on and)
+may improve albeit marginally with the number of samples [24]. For instance, limited experiments
+with a heavy-tailed distribution (see Fig. 2) reveal that increasing B hundredfold yields only a 5%
+improvement in estimation accuracy.
+4.2
+
+Quantile Regression with Risk-Sensitive Loss Functions
+
+As noted in Section 1, encoding safety with a monolithic cost function has limitations. To better
+capture safety risks, we propose the following risk-regularized loss function (L) for QR-AVI (with
+λ ∈ (0, 1)):
+L(θ) = (1 − λ)LQR (θ) + λLρ (ρ̂β (C), cmax ),
+
+(14)
+
+where LQR (·) is the quantile regression loss given by (5), Lρ (·) is the loss corresponding to the
+risk (i.e., ρ̂β (C); see (10)) computed over the cost distribution in (13), and cmax is a positive cost
+threshold. By applying KDE on the observed cost samples C, we can compute ρ̂β (C) with respect to
+Ẑcµ .
+4.3
+
+Risk-Sensitive Approximate Value Iteration with Learned Constraint-Violation Cost
+Distribution
+
+With the KDE-estimated cost distribution, we construct the risk-sensitive loss function in (14) and
+train a function approximator that approximates the distribution of action-values using quantile
+regression. In the cost-minimizing context, two typical scenarios result from incorporating risk
+sensitivity in AVI, depending on β’s value: β values on [0.9, 1) correspond to a risk-averse setting,
+while β = 0.5 corresponds to the risk-neutral setting, since the CVaR reduces to the expected value
+of the distribution [16].
+Accordingly, to distinguish between these settings in our QR-AVI algorithm, each corresponding
+to a different instance of L (see Table 1), we adopt the respective abbreviations: E-QR-AVI and
+ρ-QR-AVI. Our algorithm (Algorithm 1) trains a risk-sensitive function approximator for an actionvalue distribution by incorporating KDE-based risk estimation into the learning process. The key
+step that enables the computation of the risk loss is the storing of state-action-cost transitions in the
+replay buffer (Algorithm 1 of Algorithm 1). To update the Q-network, we compute the risk loss using
+the KDE-estimated distribution of costs sampled from experience.
+6
+
+Table 1: Training Loss Functions (C ∼ Ẑcµ ).
+Contributions in blue.
+
+Algorithm 1: Risk-Sensitive Approximate
+Value Iteration
+Input: T, D, B, γ, β, λ, κ, {ϵt }Tt=1 , η, Nτ , cmax
+Output: Qθ
+Nτ
+1 Initialize Qθ , Qθ ′ , D, {τn }n=1
+, dt = false
+2 Observe state x0
+3 for t = 0 to T do
+4
+while dt ̸= true do // xt+1 is not
+
+Algorithm
+
+Loss Function (L)
+
+AVI
+
+(y − Q(x, u))2
+
+QR-AVI
+E-QR-AVI
+ρ-QR-AVI
+
+terminal
+
+LQR (θ̂n ) := N1τ
+
+Nτ X
+Nτ
+X
+n=1 j=1
+
+
+
+ρκτn yj − θ̂n
+
+λ′ LQR + λ[(E[C] − cmax )2 ]+ (see (9))
+λ′ LQR + λ[(ρ̂β (C) − cmax )2 ]+ (see (10))
+
+ut ∼ ϵt -greedy
+Execute ut , compute gt , observe
+Ct , xt+1 , dt
+Store (xt , ut , gt , Ct , xt+1 , dt ) in D
+if |D| ≥ B then
+Sample batch B from D
+for
+(xt,j , ut,j , gt,j , Ct,j , xt+1,j , dj,t )
+in B do
+Qtarget = gt,j + γ(1 −
+dj,t ) minut+1 E[θ̂(xt+1,j , ut+1 , τ )]
+
+5
+6
+7
+8
+9
+10
+
+11
+
+12
+
+UpdateNetwork(Qtarget , Ct,j , args*)
+
+13
+
+θ′ ← ηθ + (1 − η)θ′ // Update
+target
+
+5
+
+Theoretical Guarantees for Risk-Sensitive QR-AVI: Contraction,
+Fixed-Point Existence, & Finite-Time Convergence
+
+Definition 4 (Risk-Sensitive Distributional Bellman Operator [25]). Let Z ∈ Z denote the expected
+cumulative cost distribution, with Z given as Z = {Z | E[Z(x, u)] < ∞, ∀ x, u}. Let Zc := {Zcµ |
+E[Zcµ (x, u)] < ∞, ∀ x, u}. Suppose Ẑcµ ∈ Zc and ρ̂β (Ẑcµ ) ∈ C := {C|C(xa ) < ∞, ∀ xa }, with
+ρ̂β [Ẑcµ ](xa ) := ρ̂β (Ẑcµ [·|xa ]). The risk-sensitive distributional Bellman operator, T β , corresponding
+to a β-level coherent risk measure, ρ̂β (see Definition 3), is
+D
+
+T β Z(x, u) := gt − γ ρ̂β [Zcµ (xt+1 , ut+1 )].
+
+(15)
+
+D
+
+:= denotes distributional equivalence, and ut+1 ∼ µ(·|xt+1 ).
+
+Theorem 1 (Contraction of the Risk-Sensitive Bellman Operator with Cost-Based Risk Regularization). Assume the setting in Definition 4. Let Z1 and Z2 be two cumulative cost distributions, and
+suppose that ρ̂β is non-expansive, i.e., that it satisfies the following relationship for two random
+µ
+µ
+µ
+µ
+costs, C1 ∼ Ẑ1,c
+∈ Zc and C2 ∼ Ẑ2,c
+∈ Zc (with Ẑ1,c
+̸= Ẑ2,c
+: |ρ̂β (C1 ) − ρ̂β (C2 )| ≤ ∥C1 − C2 ∥.
+µ
+µ
+a
+Let Ẑc be related to Z by Ẑc (u|x ) = Ψ(Z(x, u)), where Ψ : R → R+ is a coherent, Lipschitz
+continuous, and bounded function with Lipschitz constant, L ∈ (0, 1). Then T β is a γ-contraction in
+the Wasserstein-1 (W1 ) metric (see [6]), i.e., W1 (T β Z1 , T β Z2 ) ≤ γW1 (Z1 , Z2 ).
+Proof. Using (15), we can write:
+D
+
+T β Z(x, u) = ϕ(x, u) − γ ρ̂β (Zcµ (xt+1 , ut+1 )),
+
+(16)
+
+so that by applying T β to Z1 and Z2 , we obtain:
+T β Z1
+T β Z2
+
+µ
+= ϕ(x, u) − γ ρ̂β (Ẑ1,c
+),
+µ
+= ϕ(x, u) − γ ρ̂β (Ẑ2,c ).
+
+7
+
+(17)
+
+Taking W1 , we obtain W1 (T β Z1 , T β Z2 ) as:
+µ
+µ
+W1 (ϕ(x, u) − γ ρ̂β (Ẑ1,c
+), ϕ(x, u) − γ ρ̂β (Ẑ2,c
+)).
+
+(18)
+
+Since ϕ(x, u) is deterministic, it cancels out, yielding:
+µ
+µ
+W1 (−γ ρ̂β (Ẑ1,c
+), −γ ρ̂β (Ẑ2,c
+)).
+
+(19)
+
+µ
+µ
+µ
+µ
+W1 (ρ̂β (Ẑ1,c
+), ρ̂β (Ẑ2,c
+)) ≤ W1 (Ẑ1,c
+, Ẑ2,c
+).
+
+(20)
+
+By the non-expansiveness of ρ̂β :
+
+Multiplying the L.H.S of (20) by γ, it follows that:
+µ
+µ
+))
+), −γ ρ̂β (Ẑ2,c
+W1 (−γ ρ̂β (Ẑ1,c
+
+µ
+µ
+µ
+µ
+= γW1 (ρ̂β (Ẑ1,c
+), ρ̂β (Ẑ2,c
+)) ≤ γW1 (Ẑ1,c
+, Ẑ2,c
+).
+
+(21)
+
+µ
+µ
+By invoking the bounded-expectation assumption of the distributions in Zc (since Ẑ1,c
+, Ẑ2,c
+∈ Zc ),
+we get:
+µ
+µ
+W1 (Ẑ1,c
+, Ẑ2,c
+) ≤ W1 (Z1 , Z2 ).
+
+(22)
+
+By the assumptions on Ψ, there exists an 0 < L < 1 s.t.
+W1 (Ψ(Z1 ), Ψ(Z2 )) ≤ L · W1 (Z1 , Z2 ),
+
+(23)
+
+i.e., Ψ is an L-contraction with respect to || ||. Since L < 1 and ||T β Z1 − T β Z2 || ≤ ||Z1 − Z2 ||,
+applying (15) yields:
+W1 (T β Z1 , T β Z2 ) ≤ γW1 (Z1 , Z2 ).
+
+(24)
+
+Hence, T β is a γ-contraction.
+Corollary 1 (Existence of a Unique Cumulative Cost Distribution). From Theorem 1, by Banach’s
+fixed-point theorem [26], there exists a unique fixed point Z ∗ such that:
+Z ∗ = T β Z ∗.
+
+(25)
+
+Remark 5 (Convergence of Risk-Sensitive QR-AVI). Suppose X and U are continuous and bounded,
+with L and Lρ convex, and assume that the agent explores the environment sufficiently often. Then,
+under a diminishing learning rate schedule such as αt = kα /(t + 1), where kα controls the decay
+rate, the risk-sensitive QR-AVI algorithm will converge to a Pareto-optimal action-value in finite
+time. This result follows from the convexity of the combined quantile and risk-sensitive losses, which
+guarantees that any local Pareto optimum is also a global one [27], together with standard stochastic
+approximation results that ensure convergence under diminishing step sizes and sufficient exploration
+[13].
+
+6
+
+Experiments
+
+In this section, we provide a comprehensive overview of our experimental study, detailing our simulation setup, followed by our training and evaluation procedures, and concluding with comparisons
+with a risk-neutral variant.
+6.1
+
+Safety-Gymnasium Learning Environment
+
+In this experiment, we train a differentially-driven mobile robot (depicted as a red wheeled car in
+Fig. 1) to navigate to a randomized goal location (xg ∈ R2 ) while minimizing the cost of traversing
+restricted areas and avoiding obstacles. The robot is equipped with a lidar sensor to measure distances
+to various environmental features such as obstacles and the goal. The state space, control space, and
+8
+
+the observations that the agent makes, as well as the goal of the experiment, are outlined below:
+
+(state space)
+(26a)
+X = xt = (xat , xs , xh , xg ) t = 1, 2, . . . , T
+
+U = ut = [vtL , vtR ] t = 1, 2, . . . , T
+(control space)
+(26b)
+(
+cst (xat ) = cs ∼ U[0,1] IX s (xat ),
+(safety-violation costs) (26c)
+Ct =
+cht (xat ) = ch ∼ U[0,1] IX h (xat ), ch > cs ,
+
+r
+R
+L
+xt+1 = xt + 2 (vt + vt ) cos θt ,
+a a
+r
+R
+L
+f (xt , ut ) = yt+1 = yt + 2 (vt + vt ) sin θt ,
+
+θt+1 = θt + 2drw (vtR − vtL ),
+
+(transition dynamics)
+
+(26d)
+
+In (26), xat = [xt , yt , θt ]⊤ defines the robot’s state vector comprising the position of its t-step center
+of curvature and orientation (θt ), and xs and xh respectively denote the position of the restricted
+region markers and obstacles. vtL and vtR are the robot’s left and right wheel (linear) velocities, r
+is its wheel radius, dw is the half-distance between the robot’s two wheels, and IX⋆ is an indicator
+function. The environment contains 10 restricted region markers, 10 obstacles scattered around the
+map, and a single goal location. The restricted regions, goal, and obstacle locations are randomized
+according to a uniform distribution, U(a,b) , at the beginning of each episode (with a, b ∈ [−1, 1]) and
+remain static (and hence do not depend on t in (26a)) till the episode ends, i.e., after a prescribed
+number of time steps, T .
+The observation space consists of 72 dimensions, with the last 48 representing 16 lidar measurements
+of the distance to the goal, restricted regions, and obstacles within a 3-meter range. Restricted areas
+are traversable and less severe constraints to avoid, while obstacles (cubes) are hard constraints that
+must be strictly avoided, incurring higher scalar costs (ch > cs ; see (26c) for the definition of each
+cost variable). The agent must minimize the cumulative
+PT −1 cost of violating these constraints over a
+training episode, as in the following equation: t=0 (ch + cs ). As such, the optimal policy may
+not always be able to ensure total avoidance of the obstacles or restricted areas, and must rather
+minimize this cost. There are thus three levels of uncertainty arising from randomness or noise in:
+lidar measurements, robot drift, and randomization of environment entities. An episode ends after the
+prescribed maximum time horizon, T , setting a terminal state indicator, d, to 1. During an episode,
+the robot may reach as many goals as possible.
+6.1.1 Training and Evaluation
+The agent learns to minimize the stage cost, defined by the change in Euclidean distance to the static
+goal, xg , between consecutive time steps, as in:
+gt = −γ(||xat − xg ||) − ||xat−1 − xg || − cg ,
+
+where cg is a positive scalar. To encourage exploration, we applied an epsilon-greedy linear exploration schedule, i.e., max{t(ϵT − ϵ0 )∆t−1 , ϵT }. To train all permutations of the QR-AVI algorithm
+(with Nτ = 32 quantile fractions), we employed a feedforward neural network with three fullyconnected (dense) layers containing two hidden layers (of dimension 120 and 84, respectively) with
+ReLU activation functions, and an output layer that produces values for each (control) input-quantile
+pair at each time step.
+For the KDE cost distribution estimation, we used a Gaussian kernel function with a bandwidth
+determined by Scott’s rule [28], i.e., h = B 0.2 , and trained ρ-QR-AVI for β = 0.9 and 0.95. On
+Fig. 3, we plot training curves for the expected cumulative cost Fig. 3a, risk Fig. 3b, and quantile loss
+Fig. 3c for all QR-AVI variants. We evaluated the models using five random seeds (0, 5, 10, 15, 20),
+with 20 episodes per seed, resulting in a total of 100 test episodes. Each seed ensures reproducibility
+by initializing the random number generator. Next, we computed the average action value, constraint
+violation cost, number of successful episodes, and goal success rate over all seeds to compare the
+performance of the algorithms. Here, the success rate represents the number of times the agent
+reaches the goal, averaged over all 100 test episodes. Table 2 summarizes our RL hyperparameters.
+9
+
+0.0050
+
+QR-AVI
+β=0.90
+β=0.95
+E-QR-AVI
+
+−10
+0
+
+0.003
+
+QR-AVI
+β=0.90
+β=0.95
+E-QR-AVI
+
+0.002
+
+LQR
+
+0
+
+Lρ
+
+Cost-to-go
+
+β=0.90
+β=0.95
+E-QR-AVI
+
+0.0075
+
+10
+
+0.001
+
+0.0025
+
+0.000
+
+2e5 4e5 6e5 8e5 1e6
+Time Steps
+
+(a) Cost-to-go per time step.
+
+0
+
+0
+
+2e5 4e5 6e5 8e5 1e6
+Time Steps
+
+(b) Risk loss (Lρ ).
+
+2e5 4e5 6e5 8e5 1e6
+Time Steps
+
+(c) Quantile loss (LQR ).
+
+Figure 3: Evolution of the (training) expected cumulative cost, risk loss, and quantile loss for the
+reach-avoid navigation task.
+Table 2: Training and Evaluation Hyperparameters
+
+6.2
+
+Param.
+
+Value
+
+Param.
+
+Value
+
+Param.
+
+Value
+
+B, α
+ϵ0 , ϵT , κ
+
+128, 2.5e-4
+1.0, 0.05, 1.0
+
+cmax , β
+|D|
+
+0.1, {.9, .95}
+0.5e6
+
+γ, Nτ , T
+Upd. Freq.
+
+0.99, 32, 1000
+10 (train), 500 (target)
+
+Juxtaposition with the Risk-Neutral Algorithm
+
+We compare the risk-sensitive QR-AVI against the nominal and expected-value configurations across
+evaluation metrics. Table 3 juxtaposes our risk-sensitive adaptation with the baselines on the training
+and evaluation metrics. From the plots, we notice a marked improvement in the average expected
+cumulative cost for the risk-sensitive QR-AVI than the baseline, with a mostly consistent cost
+evolution. The agent demonstrates a success rate (that is approximately 37.66% and 87.45% higher
+per episode) than the baselines (nominal and risk-sensitive, respectively). This is reflected in both the
+increased success rate and the higher total number of successes across all scenarios and episodes.
+Table 3: Comparison of success metrics and loss values across experiments. Mean and standard
+deviation of the evaluation cost were computed over 100 test episodes. Results using our method are
+highlighted in gray .
+Avg. Eval.
+Cost-to-go
+
+Alg.
+QR-AVI
+E-QR-AVI
+ρ-QR-AVIβ=0.9
+ρ-QR-AVIβ=0.95
+
+6.3
+
+−0.01
+−0.01
+−0.01
+−0.01
+
+ConstraintViolation Cost
+0.05 ± 0.01
+0.06 ± 0.01
+0.05 ± 0.01
+0.05 ± 0.01
+
+Quantile
+Loss (Avg.)
+0.0004
+0.0003
+0.0003
+0.0003
+
+Total
+Loss
+0.0004
+0.0032
+0.0023
+0.0023
+
+Total
+Goals Reached
+239
+329
+448
+448
+
+Normalized
+Success Rate (%)
+50%
+75%
+100%
+100%
+
+Discussions
+
+Here, we expound on the findings presented in the foregoing subsections and highlight a few
+implementation details.
+6.3.1 Training and Evaluation Metrics
+Comparing the average quantile losses (Table 3, column 4) reveals that all algorithms achieve nearidentical performance, with average losses ranging between 3e-4 and 4e-4. The nominal QR-AVI
+exhibits the highest quantile loss, while the risk-sensitive (β = 0.9 and β = 0.95) and expected-value
+variants achieve slightly lower values of 3e-4). Comparisons between ρ-QR-AVI and E-QR-AVI
+show no significant difference in quantile loss, indicating comparable regression accuracy. Both
+variants of ρ-QR-AVI also yield similar returns and costs to the baselines but with a substantially
+higher success rate.
+6.3.2 Risk-Performance Trade-offs
+Given that we trained the QR-AVI model on a single neural network, a natural question about the
+performance-risk trade-off arises. Here, performance is quantified by the minimum quantile loss. The
+10
+
+0.05
+
+Density
+LQR
+
+Ẑcπ (KDE)
+N (0.06, 0.01)
+
+0.40
+
+Distribution Comparison for C15
+
+Distribution Comparison for C5
+
+5e-04
+
+Empirical
+Ẑcπ (KDE)
+N (0.05, 0.01)
+
+0.00
+
+0.08
+
+bution Comparison for C10
+
+0
+0.02 0
+
+Distribution Comp
+0.60
+
+N (0.06, 0.01)
+
+0.00
+
+2.5e-03
+5e-03
+0.04
+0.06 7.5e-03
+0.08
+L
+Cost ρ
+
+0.04
+
+0.06
+Cost
+
+Density
+
+Ẑcπ (KDE)
+N (0.05, 0.02)
+
+c
+
+0.50
+
+c
+
+Figure 4: Pareto
+front
+and cost distribution approximation.
+N (0.06,
+0.01)
+N (0.05, 0.02)
+0.40
+
+0.40
+
+N
+
+0.20
+0.00
+
+0.08
+
+0.05
+Cost
+
+(a) ParetoDistribution
+front (dashed line)
+corresponding
+the tails of Comparison
+the KDE-estimated
+Comparison
+for Cto20data(b) Comparing
+Distribution
+for Ccost
+10
+points of the quantile loss (LQR , y-axis) and riskdistribution and a normal distribution with mean
+Empirical(β = 0.950.06 and standard deviation,
+Empirical0.1.
+loss
+(Lρ , x-axis), for the risk-sensitive
+0.75
+; β = 0.9 ) and risk-neutralẐ( π )(KDE)
+cases.
+0.60
+Ẑ π (KDE)
+
+Empirical
+
+E
+
+Ẑ
+
+0.25
+
+Density
+
+0.06
+Cost
+
+Ẑcπ (KDE)
+
+0.50
+
+0.04
+Cost
+
+Empirical
+
+0.75
+
+0.20
+0.00
+
+0.06
+Cost
+
+2.5e-04
+0.20
+
+4
+
+0.04
+
+Cost
+7.5e-04
+0.60
+
+Empirical
+
+0.00
+
+0.10
+
+Density
+
+bution Comparison for C20
+
+D
+
+D
+
+0.00
+
+0.08
+
+Distribution Comp
+0.60
+
+E
+
+Ẑ
+
+Density
+
+0.06
+Cost
+
+0.25
+
+Density
+
+D
+0.04
+
+0.20
+
+0.40
+
+N
+
+0.20
+0.20 Ẑcµ (KDE-based) and N (0.06, 0.01).
+Table0.25
+4: β vs. the tail probability difference (∆tail ) between
+β
+∆tail
+0.00
+0.00
+0.00
+0.90
+0.042
+0.04
+0.06
+0.08
+0.04
+0.06
+0.08
+0.02
+0.04
+0.06
+0.08
+0.05
+0.95
+0.041
+Cost
+Cost
+Cost
+Cost
+0.99
+0.027
+bution Comparison for C15
+Distribution Comparison for C20
+Distribution Comparison for C5
+Distribution Comp
+Empirical
+
+Empirical
+
+E
+
+Density
+
+Ẑ
+
+N
+
+7
+0.04
+Cost
+
+0.06
+
+Conclusions
+0.25
+
+0.20
+
+Density
+
+Density
+
+0.06
+0
+Cost
+Cost
+Cost
+6.3.3 Determining a Fitting Cost Distribution Approximation
+bution Comparison for C5 Due to environmental
+Distribution
+Comparison batch
+for C10costs from theDistribution
+forempirical
+C5
+Distribution Comp
+randomization,
+replay bufferComparison
+may produce
+distributions with light right tailsEmpirical
+(Fig. 4b) and negligible
+mass for extreme costs, leading 0.75
+0.60probabilityEmpirical
+Empirical
+Empirical
+to non-informative
+upper quantiles
+4). We thus favored KDE
+0.75
+π
+π that coincide with the mean (Table
+π
+Ẑc (KDE)
+Ẑc (KDE)
+Ẑc (KDE)
+Ẑcπ (KDE)
+over simpler methods like softmax
+or the normal distribution for a more
+accurate cost distribution
+0.40
+0.50
+N (0.05, 0.02)
+N (0.06, 0.02)
+N (0.05, 0.01)
+N (0.06, 0.01
+approximation.
+0.50
+Density
+
+0.06
+Cost
+
+Density
+
+Density
+
+N (0.06, 0.01)
+
+0.04
+
+Empirical
+
+Pareto 0.60
+curve, presented in Fig. 4a, depicts the trade-off
+between the quantile (LQR ) and risk losses 0.60
+0.75
+Ẑcπ (KDE) configurations of QR-AVI. The plot shows
+Ẑcπ (KDE)
+(Lρ ) for the expectation and risk-sensitive
+that E-QR-AVI
+(0.05, 0.01)better accuracy
+N
+(0.06,
+0.01)
+achieves
+the lowest quantile loss,Nindicating
+in
+predicting
+cumulative
+cost,
+but at the 0.40
+0.40
+0.50
+expense of a significantly higher risk loss, highlighting its limitations in risk-sensitive settings. In
+contrast,
+the risk-sensitive configurations with β = 0.9 and β = 0.95 prioritize safety by achieving 0.20
+0.20
+0.25
+lower risk loss values while incurring moderate increases in quantile loss. For safety-critical tasks,
+the setting with β = 0.95 is preferable due to its low risk loss, despite a marginally higher quantile
+0.00
+0.00
+0.00
+0.08loss.
+0.04
+0.06
+0.08
+0.10
+0.04
+0.06
+0.08
+0.04
+
+Ẑcπ (KDE)
+
+0.25
+
+We introduced a risk-sensitive quantile-based action-value iteration algorithm that balances safety and
+0.00 by augmenting the quantile loss with a risk
+0.00
+performance
+term encoding
+Our results 0.00
+0.025
+0.050
+0.075
+0.100
+0.04safety constraints.
+0.06
+show that risk sensitivity preserves
+consistent performance
+Cost quantile regression accuracy and ensures
+Cost
+with tunable risk aversion. The method guarantees convergence to a unique risk-sensitive cost
+distribution, providing a theoretical foundation. The risk measure is compatible with any off-policy
+RL model and can be integrated into gradient ascent. Future work will explore dynamic risk parameter
+adjustments for improved trade-offs in varying conditions.
+Acknowledgments
+This work was partially supported by the Army Research Laboratory Cooperative Agreement No.
+W911NF-23-2-0040, a Northrop Grumman Corporation grant, and by the Lockheed Martin Chair in
+Systems Engineering.
+11
+
+0.04
+
+0
+Cost
+
+References
+[1] A. Pan, K. Bhatia, and J. Steinhardt. The Effects of Reward Misspecification: Mapping and
+Mitigating Misaligned Models. arXiv preprint arXiv:2201.03544, 2022.
+[2] D. K. Beyer, D. A. Dulo, G. A. Townsley, and S. S. Wu. Risk, Product Liability Trends, Triggers,
+and Insurance in Commercial Aerial Robots. In We Robot Conference on Legal & Policy Issues
+Relating to Robotics. University of Miami School of Law, volume 4, 2014.
+[3] V. Mnih, K. Kavukcuoglu, D. Silver, A. Graves, I. Antonoglou, D. Wierstra, and M. Riedmiller.
+Playing Atari with Deep Reinforcement Learning, 2013.
+[4] H. Van Hasselt, A. Guez, and D. Silver. Deep Reinforcement Learning with Double Q-Learning.
+In Proceedings of the AAAI Conference on Artificial Intelligence, volume 30, 2016.
+[5] A. Kuznetsov, P. Shvechikov, A. Grishin, and D. Vetrov. Controlling Overestimation Bias
+with Truncated Mixture of Continuous Distributional Quantile Critics. arXiv, 2020. doi:
+10.48550/arXiv.2005.04269.
+[6] W. Dabney, M. Rowland, M. G. Bellemare, and R. Munos. Distributional Reinforcement
+Learning with Quantile Regression. arXiv preprint arXiv:1710.10044, Oct. 2017.
+[7] G. N. Tasse, T. Love, M. Nemecek, S. James, and B. Rosman. ROSARL: Reward-Only Safe
+Reinforcement Learning, 2023.
+[8] G. Thomas, Y. Luo, and T. Ma. Safe Reinforcement Learning by Imagining the Near Future.
+NeurIPS, 34:13859–13869, 2021.
+[9] N. P. Farazi, B. Zou, T. Ahamed, and L. Barua. Deep Reinforcement Learning in Transportation
+Research: A Review. Transportation Research Interdisciplinary Perspectives, 11:100425, 2021.
+[10] J. Ji, B. Zhang, J. Zhou, X. Pan, W. Huang, R. Sun, Y. Geng, Y. Zhong, J. Dai, and Y. Yang.
+Safety Gymnasium: A Unified Safe Reinforcement Learning Benchmark. NeurIPS, 36, 2023.
+[11] R. Fakoor, P. Chaudhari, and A. J. Smola. P3O: Policy-on Policy-off Policy Optimization. In
+Proceedings of The 35th Uncertainty in Artificial Intelligence Conference, pages 1017–1027.
+PMLR, 2020. URL https://proceedings.mlr.press/v115/fakoor20a.html.
+[12] C. Ying, X. Zhou, H. Su, D. Yan, N. Chen, and J. Zhu. Towards Safe Reinforcement Learning
+via Constraining Conditional Value-at-Risk, 2022.
+[13] D. P. Bertsekas. Model Predictive Control and Reinforcement Learning: A Unified Framework
+Based on Dynamic Programming, 2024. URL http://arxiv.org/abs/2406.00592.
+[14] P. Artzner, F. Delbaen, J.-M. Eber, and D. Heath. Coherent Measures of Risk. Mathematical
+Finance, 9(3):203–228, 1999. ISSN 1467-9965. doi:10.1111/1467-9965.00068.
+[15] D. Nass, B. Belousov, and J. Peters. Entropic Risk Measure in Policy Search. In IROS, pages
+1101–1106. IEEE, 2019.
+[16] R. T. Rockafellar. Risk and Utility in the Duality Framework of Convex Analysis. From Analysis
+to Visualization: A Celebration of the Life and Legacy of Jonathan M. Borwein, Callaghan,
+Australia, September 2017, pages 21–42, 2020.
+[17] C. Mavridis, E. Noorani, and J. S. Baras. Risk Sensitivity and Entropy Regularization in
+Prototype-Based Learning. In 2022 30th Med. Conf. on Control and Automation (MED), pages
+194–199. IEEE, 2022.
+[18] E. Noorani and J. S. Baras. Risk-Sensitive Reinforcement Learning: A Monte Carlo Policy
+Gradient Algorithm for Exponential Performance Criteria. In CDC. IEEE, 2021.
+[19] E. Noorani and J. S. Baras. Risk-Sensitive Reinforcement Learning and Robust Learning for
+Control. In CDC. IEEE, 2021.
+12
+
+[20] E. Noorani, C. Mavridis, and J. Baras. Risk-Sensitive Reinforcement Learning with Exponential
+Criteria. arXiv preprint, 2022.
+[21] Y. Chow, M. Ghavamzadeh, L. Janson, and M. Pavone. Risk-Constrained Reinforcement
+Learning with Percentile Risk Criteria, Apr. 2017.
+[22] B. W. Silverman. Density Estimation for Statistics and Data Analysis. Routledge, 2017. ISBN
+978-1-315-14091-9. doi:10.1201/9781315140919.
+[23] E. Hüllermeier and W. Waegeman. Aleatoric and Epistemic Uncertainty in Machine Learning:
+An Introduction to Concepts and Methods. Machine Learning, 110(3):457–506, Mar. 2021.
+ISSN 1573-0565. doi:10.1007/s10994-021-05946-3.
+[24] Y.-C. Chen. A Tutorial on Kernel Density Estimation and Recent Advances. Biostatistics &
+Epidemiology, 2017. ISSN 2470-9360.
+[25] S. H. Lim and I. Malik. Distributional Reinforcement Learning for Risk-Sensitive
+Policies.
+Advances in Neural Information Processing Systems, 35:30977–30989,
+2022.
+URL
+https://papers.nips.cc/paper_files/paper/2022/hash/
+c88a2bd0e793550d0e885aa6e31ca277-Abstract-Conference.html.
+[26] A. T. Bharucha-Reid. Fixed Point Theorems in Probabilistic Analysis. Bulletin of the American
+Mathematical Society, 82(5):641–657, 1976. ISSN 0002-9904, 1936-881X. doi:10.1090/
+S0002-9904-1976-14091-8.
+[27] K. Van Moffaert and A. Nowé. Multi-Objective Reinforcement Learning using Sets of Pareto
+Dominating Policies. The Journal of Machine Learning Research, 15(1):3483–3512, 2014.
+[28] D. W. Scott and G. R. Terrell. Biased and Unbiased Cross-Validation in Density Estimation.
+Journal of the American Statistical Association, 82(400):1131–1146, 1987. ISSN 0162-1459.
+doi:10.2307/2289391.
+
+13
+
+

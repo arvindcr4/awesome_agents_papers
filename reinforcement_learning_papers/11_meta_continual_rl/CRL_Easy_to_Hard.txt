@@ -1,0 +1,3229 @@
+C URRICULUM R EINFORCEMENT L EARNING FROM
+E ASY TO H ARD TASKS I MPROVES LLM R EASONING
+Shubham Parashar1∗ Shurui Gui1∗ Xiner Li1∗ Hongyi Ling1 Sushil Vemuri2
+Blake Olson1 Eric Li1 Yu Zhang1 James Caverlee1 Dileep Kalathil2 Shuiwang Ji1†
+1
+Department of Computer Science & Engineering, Texas A&M University
+2
+Department of Electrical & Computer Engineering, Texas A&M University
+
+arXiv:2506.06632v2 [cs.LG] 2 Nov 2025
+
+A BSTRACT
+We aim to improve the reasoning capabilities of language models via reinforcement
+learning (RL). Recent RL post-trained models like DeepSeek-R1 have demonstrated reasoning abilities on mathematical and coding tasks. However, prior
+studies suggest that using RL alone to improve reasoning on inherently difficult
+tasks is less effective. Here, we draw inspiration from curriculum learning and
+propose to schedule tasks from easy to hard (E2H), allowing LLMs to build reasoning skills gradually. Our method is termed E2H Reasoner. Empirically, we
+observe that, although easy tasks are important initially, fading them out through
+appropriate scheduling is essential in preventing overfitting. Theoretically, we
+establish convergence guarantees for E2H Reasoner within an approximate policy
+iteration framework. We derive finite-sample complexity bounds and show that,
+when tasks are appropriately decomposed and conditioned, learning through curriculum stages requires fewer total samples than direct learning. Our code can be
+found on https://github.com/divelab/E2H-Reasoning.
+
+1
+
+I NTRODUCTION
+
+Large Language Models (LLMs) have demonstrated reasoning capabilities in tasks such as multi-step
+arithmetic, planning, and code generation. However, the notion of reasoning in LLMs remains vague,
+with some works equating it to generating intermediate steps during problem solving (Wei et al.,
+2022; Cobbe et al., 2021). This view, although intuitive, blurs the line between genuine reasoning
+and surface-level pattern recognition (Stechly et al., 2024; Valmeekam et al., 2023). Therefore, we
+adopt a view focusing on generalization, defining reasoning as the ability to extract principles from
+simpler tasks and apply them to harder ones. Supporting this capability requires training methods
+that go beyond imitation and help models learn underlying problem-solving strategies.
+In this direction, the success of DeepSeek R1 (Guo et al., 2025) and OpenAI o1 (Jaech et al., 2024)
+shows that reinforcement learning (RL) based post-training enhances reasoning. RL uses task-specific
+rewards based on output correctness, unlike supervised fine-tuning (SFT), which trains models to
+imitate fixed input-output examples (Zelikman et al., 2022). However, RL struggles on harder tasks
+on which pre-trained models have low zero shot performance (Shao et al., 2024; Zeng et al., 2025)
+and since rewards are granted only for correct answers, resulting in sparse learning signals.
+To address the sparse reward problem, curriculum learning has been applied to reinforcement
+learning (CRL) by structuring training from easier to harder tasks (Bengio et al., 2009). This
+idea has recently been extended to LLM post-training (Team et al., 2025; Bercovich et al., 2025).
+However, these initial efforts primarily rely on simplified strategies, such as training on easy tasks
+before switching to hard ones after a fixed number of iterations. In contrast, we introduce E2H
+Reasoner (E2H), a CRL approach with a probabilistic scheduler that gradually shifts focus from
+easy to hard tasks, enabling even LLMs to develop core reasoning abilities and generalize to more
+complex problems. We show that LLMs can learn tasks they initially failed in the zero-shot setting
+(Fig. 1). Empirically, E2H achieves state-of-the-art performance across five reasoning tasks, i.e.
+∗
+†
+
+Equal contribution
+Correspondence to: Shuiwang Ji <sji@tamu.edu>
+
+1
+
+pass@k
+
+0.7
+0.6
+0.3
+0.0
+
+Q: Using the numbers [89, 48, 99, 28, 5, 39], create an equation
+that equals 14
+
+E2H (Qwen 1.5B)
+Qwen 1.5B
+E2H (LLaMA 3.2 3B)
+LLaMA 3.2 3B
+
+1
+
+2
+
+4
+
+8
+
+16
+
+k
+
+32
+
+Base LLaMA 3.2 3B
+<answer> I am not able to find an equation </answer>
+
+64
+
+128
+
+256
+
+E2H Reasoner (LLaMA 3.2 3B)
+<think>First, we can add 5 and 99 to get 104, then subtract 48
+from that result to get 56, then subtract 28 from that to get 28,
+then subtract 39 from that to get - 11, then subtract 5 from that to
+get - 16, then subtract 89 from that to get - 105, which is not
+equal to 14. Next, we can subtract 99 from 48 to get - 51, then
+add 89 to get 38, then subtract 5 from that to get 33, then
+subtract 28 from that to get 5, then add 39 to get 44, which is
+not equal to 14. We can also try subtracting 48 from 89 to get 41,
+then subtracting 99 from that to get - 58, then adding 5 to get
+- 53, then adding 28 to get -25, then adding 39 to get 14.</think>
+<answer>89 - 48 - 99 + 28 + 5 + 39</answer>
+
+(a) Pass@k on Countdown
+
+pass@k
+
+0.9
+
+E2H (Qwen 1.5B)
+Qwen 1.5B
+
+E2H (LLaMA 3.2 3B)
+LLaMA 3.2 3B
+
+0.6
+0.3
+0.0
+
+1
+
+2
+
+4
+
+8
+
+16
+
+k
+
+32
+
+64
+
+128
+
+256
+
+(b) Pass@k on Blocksworld
+
+(c) LLaMA-3.2 reasoning
+
+Figure 1: (a, b) Reinforcement learning (RL) based post-training is believed to improve accuracy at low k values
+in pass@k evaluation (Guo et al., 2025; Yue et al., 2025), we show that E2H Reasoner, a curriculum-based
+RL (CRL) approach, enables LLMs to solve tasks they previously could not, outperforming base models even
+at higher k. (c) LLaMA 3.2 3B reasoning trace for Countdown (Gandhi et al., 2024) after E2H Reasoner
+post-training.
+Pretraining Distribution
+
+Pretraining Distribution
+
+Pretraining Distribution
+
+Pretraining Distribution
+
+Pretraining Distribution
+
+Pretraining Distribution
+
+Trivial Tasks
+
+Trivial Tasks
+
+Trivial Tasks
+
+Trivial Tasks
+
+Easy Tasks
+
+Easy Tasks
+
+Easy Tasks
+
+Medium Tasks
+
+Medium Tasks
+
+RL
+
+Trivial Tasks
+
+RL
+Unable to
+Learn
+
+Easy Tasks
+
+Easy Tasks
+
+Task
+Distribution
+
+RL
+
+Medium Tasks
+
+Medium Tasks
+
+Medium Tasks
+
+RL
+
+Hard Tasks
+
+Hard Tasks
+
+Hard Tasks
+
+Hard Tasks
+
+Hard Tasks
+
+Hard Tasks
+
+Figure 2: Task Decomposition of Easy 2 Hard Reasoner (E2H). E2H first decomposes the overall task into
+levels of increasing difficulty, namely trivial, easy, and medium, to help the LLM acquire core skills. As training
+progresses, E2H schedules harder tasks accordingly. See Section 3.2 for scheduling details.
+
+Blocksworld (Valmeekam et al., 2024) and Countdown (Gandhi et al., 2024), as well as three
+arithmetic reasoning benchmarks (Hendrycks et al., 2021; Agarwal et al., 2021; Cobbe et al., 2021).
+On the theoretical front, we provide a comprehensive analysis of CRL through the lens of Approximate
+Policy Iteration, establishing convergence guarantees for the final performance gap and finite-sample
+complexity bounds. Importantly, we prove that with a well-designed curriculum, CRL requires fewer
+total samples than direct learning, aligning with and supporting our empirical observations.
+
+2
+
+BACKGROUND AND R ELATED W ORK
+
+Reasoning in Large Language Models remains loosely defined, with interpretations varying by
+tasks and contexts Yu et al. (2024). Prior work describes it as generating logical chains of thought Wei
+et al. (2022); Wang et al. (2023), performing multi-step deductions (Saparov & He, 2023; Yao et al.,
+2023; Ling et al., 2025), or simulating human-like problem solving (Parashar et al., 2025). These
+views, lack clear boundaries between reasoning and pattern recognition. To address this gap, we
+are inspired by prior work that frames reasoning as generalization or abstraction (Valmeekam et al.,
+2024; 2023), building on the idea that reasoning involves learning core principles and applying them
+broadly (Stechly et al., 2024; Huang et al., 2024).
+Post-training of Large Language Models has emerged as a popular approach to improve reasoning (Snell et al., 2025). These methods are grouped into Supervised Fine-Tuning (SFT) and
+Reinforcement Learning (RL) based techniques. In SFT, the model is trained to imitate outputs from
+carefully curated human-like reasoning examples (Zelikman et al., 2022; Muennighoff et al., 2025).
+However, studies have shown that SFT can lead models to overfit to surface-level patterns (Chu et al.,
+2025), limiting generalization. In contrast, RL-based post-training uses task-specific rewards and
+2
+
+updates the model through policy optimization algorithms (Schulman et al., 2017; Rafailov et al.,
+2023; Shao et al., 2024), instead of imitation. This approach has shown greater potential in improving
+reasoning performance, as demonstrated by the success of models fine-tuned with RL (Guo et al.,
+2025; Jaech et al., 2024). Still, for inherently difficult tasks that LLMs struggle to solve in zero-shot
+settings, post-training with RL alone has been insufficient Shao et al. (2024); Zeng et al. (2025).
+Curriculum Learning organizes tasks by increasing difficulty to promote smoother and more
+effective training (Bengio et al., 2009; Graves et al., 2017). In the context of RL, it has been applied
+to help agents acquire complex behaviors by first mastering simpler tasks (Narvekar et al., 2020).
+Recently efforts have been made to investigate how curriculum-based RL can enhance reasoning
+and generalization in LLMs (Qiu et al., 2025; Bae et al., 2025; Zeng et al., 2025). Others improve
+learning by removing examples that are too easy or too hard Bae et al. (2025), or by maintaining a
+balanced mix of task difficulties Zeng et al. (2025). Similarly, Chen et al. (2025), and Foster et al.
+(2025) adaptively sample problems with a 50% solve rate to maximize the GRPO advantage during
+training. Other recent efforts implement manual curricula switching from easy to hard tasks after
+a fixed number of training iterations (Xie et al., 2025; Team et al., 2025; Bercovich et al., 2025).
+In contrast, our work schedules tasks probabilistically from easy to hard, improving reasoning and
+generalization to out-of-distribution tasks.
+
+3
+
+M ETHOD
+
+RL for LLM reasoning. We formulate the reasoning process of LLMs as a RL problem defined
+over a discounted Markov Decision Process (MDP) M = (S, A, P, r, γ), where S is the state space,
+A is the finite action space, P : S × A → ∆(S) is the transition kernel, r : S × A → [0, Rmax ]
+is the reward function, and γ ∈ (0, 1) is the discount factor. The state space S consists of all
+valid token prefixes, where each state st = (x0 , x1 , . . . , xt ) is a sequence of tokens from the
+vocabulary Σ. The action space is the vocabulary itself, A = Σ. A policy πθ corresponds to the
+pre-trained LLM, which defines a distribution over the next token conditioned on the current prefix:
+πθ (xt+1 |st ) = pθ (xt+1 |x0 , . . . , xt ). We adopt the tags used in (Guo et al., 2025), i.e., <think>
+</think> and <answer> </answer>, to distinguish intermediate reasoning from final answers. The
+reward function is sparse: r(s, a, s′ ) = 0 for all intermediate states, and r(s, a, s′ ) = r(y) only when
+the final predicted answer y wrapped by <answer> </answer> is completed. The goal is to optimize
+the policy to maximize the expected cumulative reward, encouraging the model to generate correct
+and well-formatted answers through effective reasoning.
+3.1
+
+TASK DECOMPOSITION FOR RL POST- TRAINING
+
+While SFT provides strong supervision signals, Chu et al. (2025) suggest that reasoning and generalization ability are more effectively enhanced through RL-based post-training. However, applying
+RL techniques similar to DeepSeek-R1-Zero (Guo et al., 2025) to learn complicated reasoning tasks
+remains challenging. In this work, we analyze these challenges in two key aspects, the distribution
+gap and reward design.
+Challenge 1: Distribution gap. Learning tasks that exceed the base LLM’s reasoning capabilities
+introduce significant learning challenges. These challenges are often caused by a non-trivial distribution gap between the model pre-training source data distribution d0 and the target data distribution
+dK . As shown in Fig. 2, because rewards are only given for correct outputs, large distribution shifts
+can lead to low accuracy and sparse reward signals (Shao et al., 2024; Zeng et al., 2025). Moreover,
+fitting the model to a single target distribution can lead to overfitting and memorization, undermining
+the model’s generalization and reasoning ability.
+Challenge 2: Reward design. Challenging reasoning tasks often require LLMs to combine multiple
+skills to arrive at a solution. While designing a fine-grained, step-by-step reward function could
+potentially guide the model effectively, such design is generally task-specific and labor-intensive. For
+example, a computer science student is supposed to learn basic mathematics and linear algebra before
+learning machine learning. Similarly, a typical Countdown (Gandhi et al., 2024) task involves skills
+like basic arithmetic, estimating the distance to the goal, and backtracking. While it is possible to
+include a supervision signal for each intermediate step, doing so is not sustainable and generalizable
+across diverse tasks.
+3
+
+To overcome these RL learning challenges, we propose task decomposition by splitting training data
+into subsets of increasing difficulty, based on either human annotations or model performance. This
+aligns with curriculum learning, where we interpolate between the pre-training distribution d0 and
+target task distribution dK via intermediate stages dk K
+k=1 , reducing distribution shift and improving
+training stability (see Fig. 2). From the reward design perspective, decomposing tasks by difficulty
+breaks complex skill acquisition into simpler steps. For instance, the 6-number Countdown task
+involves using six integers and four operators (+, −, ×, ÷) to reach a target number, requiring the
+model to perform arithmetic, estimate distances to the goal, and backtrack effectively. In contrast,
+a 2-number problem focuses primarily on arithmetic, allowing the model to build foundational
+competence before scaling to harder variants. This avoids handcrafted reward shaping and improves
+transferability.
+For tasks like Blocksworld, MATH, and Countdown, we use human-aligned difficulty signals such as
+plan length, labeled difficulty, or operand count (see Table 6). For others like AQuA and GSM8K,
+where such annotations are unavailable, we automatically estimate difficulty based on model error
+rates under CoT prompting and group examples accordingly (see Figs. 5 and 6).
+In this work, we simplify a hard reasoning task into 3 progressively challenging tasks, namely, trivial,
+easy, and medium, then we adapt our pre-trained LLM to these tasks in a sequential curriculum. We
+adopt the reward design from Guo et al. (2025), where outputs with the correct format receive partial
+rewards, and full rewards are given only when both format and answer are correct. In Section 3.3, we
+provide a theoretical justification that, under fixed sampling and training resources, learning step by
+step leads to better performance than training directly on the hard task.
+Cosine Sampler
+
+3.2
+
+T RAINING SCHEDULERS FOR LLM REASONING ABILITY
+
+While task decomposition simplifies RL post-training, traditional
+curriculum learning poses two main challenges, mainly task forgetting and overfitting, due to the rigid progression through tasks in a
+fixed task order.
+Challenges: Task forgetting and overfitting. The first challenge,
+task forgetting, refers to the degradation in performance on earlier
+(easier) tasks as the model adapts to later (harder) tasks. According
+to the traditional model generalization literature (Arjovsky et al.,
+2019; Gulrajani & Lopez-Paz, 2021), the task distribution shifts are Figure 3: Illustration of cosine
+considered as explicit signals for the model generalization direction; scheduling.
+thus, retaining strong performance across all task distributions is essential for generalization. Therefore, the task forgetting will undermine the model’s generalization capability, i.e., the reasoning
+ability. Task overfitting, the second challenge, arises when the model overfits to trivial tasks and
+prefers simplistic patterns or short answers that bypass meaningful reasoning. This phenomenon
+is called reward hacking (Laidlaw et al., 2025), where the model exploits shortcuts on easy tasks
+and fails to learn harder ones, resulting in poor reasoning performance. To address both challenges,
+we explore different training sampling techniques, forming four different scheduling strategies as
+follows.
+Traditional scheduling. We first formulate the traditional sequential curriculum learning sampler
+with T training steps as Strad (t, k) = 1 when τk ≤ t ≤ τk+1 , otherwise, 0, where t denotes the
+current training step; for K tasks k = 1, . . . , K, τk denotes the threshold when the curriculum
+learning proceeds to the k-th stage, while τ1 = 0 and τK+1 = T . The output of the sampler denotes
+the probability of sampling data from the k-th task; therefore, at the t step, the sampling distribution
+will be [Strad (t, 1), Strad (t, 2), . . . , Strad (t, K)].
+Balanced scheduling. To avoid forgetting, the simplest way is to mix all data with different
+difficulties together and sample randomly, which can be considered as a trivial case of curriculum
+learning. Alternatively, this can be interpreted as the default behavior of any policy optimization
+algorithm (Shao et al., 2024; Schulman et al., 2017), where training occurs without considering task
+1
+difficulty. This balanced sampler can be written as: Sbalanced (t, k) = K
+, where each task difficulties
+have the same probability to be selected at each training step. Although this is an efficient way
+to avoid forgetting, this sampling introduces harder tasks too early, leading to sparser rewards and
+suboptimal CRL.
+4
+
+<latexit sha1_base64="FnIeKPU1ESDuDIutmM9+sFi3p30=">AAAB+nicbVC7SgNBFL0bXzG+opY2g0GwCrsiMWXAxjKieUCyhNnJbDJkZnaZmRXDmk+w1d5ObP0ZW7/EyWYLTTxw4XDOvZzLCWLOtHHdL6ewtr6xuVXcLu3s7u0flA+P2jpKFKEtEvFIdQOsKWeStgwznHZjRbEIOO0Ek+u533mgSrNI3ptpTH2BR5KFjGBjpbvHgTsoV9yqmwGtEi8nFcjRHJS/+8OIJIJKQzjWuue5sfFTrAwjnM5K/UTTGJMJHtGepRILqv00e3WGzqwyRGGk7EiDMvX3RYqF1lMR2E2BzVgve3PxXy8QS8kmrPspk3FiqCSL4DDhyERo3gMaMkWJ4VNLMFHM/o7IGCtMjG2rZEvxlitYJe2Lqler1m4vK416Xk8RTuAUzsGDK2jADTShBQRG8Awv8Oo8OW/Ou/OxWC04+c0x/IHz+QNL9JRG</latexit>
+
+x0
+
+<latexit sha1_base64="ECr5MQ2ER/Ka8OI5bJeiyfLkEpQ=">AAAB+nicbVDLTgJBEOzFF+IL9ehlIjHxRHaNQY4kXjxilEcCGzI7DDBhdnYz02skK5/gVe/ejFd/xqtf4gB7ULCSTipV3alOBbEUBl33y8mtrW9sbuW3Czu7e/sHxcOjpokSzXiDRTLS7YAaLoXiDRQoeTvWnIaB5K1gfD3zWw9cGxGpe5zE3A/pUImBYBStdPfYw16x5JbdOcgq8TJSggz1XvG7249YEnKFTFJjOp4bo59SjYJJPi10E8NjysZ0yDuWKhpy46fzV6fkzCp9Moi0HYVkrv6+SGlozCQM7GZIcWSWvZn4rxeES8k4qPqpUHGCXLFF8CCRBCMy64H0heYM5cQSyrSwvxM2opoytG0VbCnecgWrpHlR9irlyu1lqVbN6snDCZzCOXhwBTW4gTo0gMEQnuEFXp0n5815dz4WqzknuzmGP3A+fwC3RJSK</latexit>
+
+xt
+
+xT
+<latexit sha1_base64="Z16zGrsGG7FyQyWQ/Lq5qjpmdQk=">AAAB+nicbVC7SgNBFL0bXzG+opY2g0GwCrsiScqAjWXEvCBZwuxkNhkyM7vMzIphzSfYam8ntv6MrV/iJNlCEw9cOJxzL+dygpgzbVz3y8ltbG5t7+R3C3v7B4dHxeOTto4SRWiLRDxS3QBrypmkLcMMp91YUSwCTjvB5Gbudx6o0iySTTONqS/wSLKQEWysdP84aA6KJbfsLoDWiZeREmRoDIrf/WFEEkGlIRxr3fPc2PgpVoYRTmeFfqJpjMkEj2jPUokF1X66eHWGLqwyRGGk7EiDFurvixQLracisJsCm7Fe9ebiv14gVpJNWPNTJuPEUEmWwWHCkYnQvAc0ZIoSw6eWYKKY/R2RMVaYGNtWwZbirVawTtpXZa9Srtxdl+q1rJ48nME5XIIHVajDLTSgBQRG8Awv8Oo8OW/Ou/OxXM052c0p/IHz+QOExJRq</latexit>
+
+(a) Gaussian sampler
+
+(b) ω = 0.25 ε = 0.75
+<latexit sha1_base64="Q86KwJcZ0WPJYyg3DkBqoKP2Uyg=">AAACEHicbVC7TsMwFHXKq5RXgIGBxaJCYoqSirYsSBUsjEWiD6mJKsd1Wqu2E9kOUlX1J/gFVtjZECt/wMqX4LQZoOVIVzo+515d3xMmjCrtul9WYW19Y3OruF3a2d3bP7APj9oqTiUmLRyzWHZDpAijgrQ01Yx0E0kQDxnphOPbzO88EqloLB70JCEBR0NBI4qRNlLfPvFDotG161SqPvQVHfLsUa/27bLruHPAVeLlpAxyNPv2tz+IccqJ0JghpXqem+hgiqSmmJFZyU8VSRAeoyHpGSoQJyqYzg+YwXOjDGAUS1NCw7n6e2KKuFITHppOjvRILXuZ+K8X8qXNOroKplQkqSYCLxZHKYM6hlk6cEAlwZpNDEFYUvN3iEdIIqxNhiUTirccwSppVxyv5tTuL8uNmzyeIjgFZ+ACeKAOGuAONEELYDADz+AFvFpP1pv1bn0sWgtWPnMM/sD6/AFIhZss</latexit>
+
+(c) ω = 0.5 ε = 0.5
+<latexit sha1_base64="sV8/YoUcfs41gUp7uGRLYUAbTPA=">AAACDnicbZDLSsNAFIYnXmu9RcWVm8EiuAqJaHUjFN24rGAv0IQymZ60Q2eSMDMRSug7+Apude9O3PoKbn0Sp20W2vrDgY//nMM5/GHKmdKu+2UtLa+srq2XNsqbW9s7u/beflMlmaTQoAlPZDskCjiLoaGZ5tBOJRARcmiFw9tJv/UIUrEkftCjFAJB+jGLGCXaWF370A9Bk2vXufCxr1hfTLlrV1zHnQovgldABRWqd+1vv5fQTECsKSdKdTw31UFOpGaUw7jsZwpSQoekDx2DMRGggnz6/hifGKeHo0SaijWeur83ciKUGonQTAqiB2q+NzH/7YVi7rKOroKcxWmmIaazw1HGsU7wJBvcYxKo5iMDhEpmfsd0QCSh2iRYNqF48xEsQvPM8apO9f68Ursp4imhI3SMTpGHLlEN3aE6aiCKcvSMXtCr9WS9We/Wx2x0ySp2DtAfWZ8/THiarw==</latexit>
+
+(d) ω = 0.75 ε = 0.25
+<latexit sha1_base64="JifdyGvPS2GeKb5E6V8fgwduLMY=">AAACEHicbVC7TsMwFHXKq5RXgIGBxaJCYoqSirYsSBUsjEWiD6mJKsd1Wqu2E9kOUlX1J/gFVtjZECt/wMqX4LQZoOVIVzo+515d3xMmjCrtul9WYW19Y3OruF3a2d3bP7APj9oqTiUmLRyzWHZDpAijgrQ01Yx0E0kQDxnphOPbzO88EqloLB70JCEBR0NBI4qRNlLfPvFDotG169SrPvQVHfLsUan27bLruHPAVeLlpAxyNPv2tz+IccqJ0JghpXqem+hgiqSmmJFZyU8VSRAeoyHpGSoQJyqYzg+YwXOjDGAUS1NCw7n6e2KKuFITHppOjvRILXuZ+K8X8qXNOroKplQkqSYCLxZHKYM6hlk6cEAlwZpNDEFYUvN3iEdIIqxNhiUTirccwSppVxyv5tTuL8uNmzyeIjgFZ+ACeKAOGuAONEELYDADz+AFvFpP1pv1bn0sWgtWPnMM/sD6/AFIxpss</latexit>
+
+Figure 4: Gaussian Sampler. (a) This figure represents the Gaussian sampling process. (bcd) These
+figures denote the sampling probabilities of different tasks changing along the training steps with
+different Gaussian sampler hyperparameters.
+Cosine scheduling (E2H-C). To alleviate both the reward sparsity and forgetting issues, we propose
+a non-parametric scheduling strategy, namely, cosine sampling. This strategy can be written as:
+Scosine (t, k) = αt · (K − k − 1) + (1 − αt ) · k, and αt = 0.5 · (1 + cos( πt
+T )), where the resulting
+probabilities need to be normalized before sampling. Intuitively, this cosine sampler sets both the
+initial and ending sampling probabilities simply according to their ordinal number and interpolates
+the intermediate probabilities using a cosine function. As shown in Figure 3, the easiest task has
+the highest probability of being sampled at the beginning, and has the lowest probability of being
+sampled at the end.
+Gaussian scheduling (E2H-G). Although cosine scheduling addresses reward sparsity and forgetting,
+the parameter-free design limits flexibility in handling issues like trivial task overfitting and finegrained control over different learning stages. Empirically, while adding the trivial task can boost the
+model performance, it is also easy for the model to overfit to trivial tasks. To overcome this challenge,
+we propose a Gaussian scheduling strategy inspired by the Gaussian mixture model (Reynolds et al.,
+2009).
+As shown in Figure 4 (a), in a one-dimensional space, we assume the data distributions of tasks
+follow Gaussian distributions with the same variance σ. The means of the adjacent task’s Gaussian
+distributions are assumed to have the same distance 1, i.e., µk = k − 1. Then the sampling probability
+is defined as the likelihood of a given position xt belonging to different task Gaussian distributions,
+similar to the expectation–maximization algorithm (McLachlan & Krishnan, 2008). Therefore, the
+Gaussian scheduling strategy can be expressed as:
+
+
+ β
+(xt − µk )2
+t
+SGaussian (t, k) = exp −
+,
+and
+x
+=
+(K − 1) ,
+(1)
+t
+2σ 2
+T
+where we ignore the normalization term, and the probabilities will be normalized for sampling. In
+this sampling scheduler, we only have two hyperparameters, i.e., σ and β. While the variance σ
+controls the sampling concentration, β > 0 controls the sampling position xt ’s moving speed. When
+σ is smaller, the training is more focused, more similar to traditional curriculum learning. When
+β < 1, the sampling process will assign fewer training steps focusing on easier tasks and train
+harder tasks longer, avoiding easy task overfitting. As shown in Figure 4 (bcd), we use three typical
+hyperparameter settings for this Gaussian sampler, i.e., β = 0.25 σ = 0.75, β = 0.75 σ = 0.25, and
+β = 0.5 σ = 0.5.
+3.3
+
+T HEORETICAL A NALYSIS
+
+In this section, we analyze our curriculum reinforcement learning framework for LLMs under the
+lens of Approximate Policy Iteration (API). We follow the theoretical structure of Chen & Maguluri
+(2025); Scherrer (2014), adapting it to our curriculum setting. Specifically, we show how sequentially
+solving interpolated curriculum distributions enables convergence guarantees and improved sample
+complexity bounds, under function approximation errors. Our analysis considers action-value
+functions and explicitly tracks the impact of approximation and distribution shift across curriculum
+stages. All proofs are presented in Appendix A.
+3.3.1
+
+T HEORETICAL S ETUP
+
+Recall our MDP M = (S, A, P, r, γ). We denote the policy space as Π, where each policy π ∈ Π is
+a mapping from states to distributions over actions, π : S → ∆(A). In our curriculum setting, we
+introduce a sequence of MDPs {Mk }K
+k=1 where each MDP shares the same state and action spaces
+5
+
+but may differ in reward functions and/or transition dynamics. Each MDP induces a state visitation
+distribution dk under the optimal policy for that curriculum, with {dk }K
+k=1 interpolating between an
+easy source distribution d1 and the final hard task dK . Let πk be the learned policy at curriculum
+∗
+step k, and let πK
+be the optimal policy under the final target task. The goal is to learn a sequence of
+K
+policies {πk }k=1 such that the final policy πK performs well under the target distribution dK .
+TheP action-value function of a policy π is defined as Qπ (s, a)
+:=
+∞
+E [ t=0 γ t r(st , at )|s0 = s, a0 = a, at ∼ π(·|st ), st+1 ∼ P (·|st , at )] . Let T π be the Bellman operator for policy π, defined as T π Q(s, a) := r(s, a) + γEs′ ∼P (·|s,a),a′ ∼π(·|s′ ) [Q(s′ , a′ )] .
+We define the optimal Bellman operator T , T Q(s, a) := r(s, a) + γEs′ ∼P (·|s,a) [maxa′ Q(s′ , a′ )] .
+The fixed point of the optimal Bellman operator is T Q∗ = Q∗ .
+The Approximate Policy Iteration (API) framework is a generalization of classical policy iteration
+that accommodates function approximation and inexact updates. It serves as a foundational tool for
+analyzing practical reinforcement learning algorithms including actor-critic and deep RL methods.
+The API algorithm alternates between two stages. At iteration k, the algorithm performs two
+b k of
+algorithmic steps. (i) Policy Evaluation: Given policy πk , compute an approximate estimate Q
+πk
+its action-value function Q , (ii) Policy Improvement: Update the policy to πk+1 , which is greedy
+b k . In the context of CRL, API offers a natural framework
+or approximately greedy with respect to Q
+to study how sequentially adapted policies, defined over interpolated curriculum distributions, evolve
+toward the optimal policy and shape the final policy πK .
+We adopt the following API assumptions from Chen & Maguluri (2025); Scherrer (2014), adapted to
+the curriculum setting. Let Qk := Qπk be the action-value function for the policy πk at curriculum k.
+b k is used to estimate
+Approximate Policy Evaluation. At each iteration k, a function approximator Q
+π
+π
+π
+k
+k
+k
+b satisfies ∥Q
+b − Q ∥∞ ≤ δk .
+Qk . The estimated Q-function Q
+k
+k
+k
+b
+Approximate Greedy Policy Improvement.
+Let πk+1
+h
+i be an ϵk -greedy policy with respect to Qk :
+πk+1
+b
+Es∼µk [Q
+(s, πk+1 (s))] ≥ Es∼µk maxa Qk (s, a) − ϵk , for a sampling distribution µk at step
+π
+k
+b − Qπk+1 ∥∞ ≤ ϵk .
+k, i.e., ∥T Q
+k
+
+k
+
+Distribution Mismatch (Concentrability). Let µk be the sampling distribution for policy improvement at step k, and dk the true task distribution. We assume the distribution mismatch between µk
+and dk is bounded by Ck , i.e., sups∈S µdkk(s)
+(s) ≤ Ck .
+p
+Bounded Curriculum Drift. For the weighted norm, ∥Q∥dk = Es∼dk [maxa Q(s, a)2 ]. The
+deviation between successive optimal Q-functions satisfies ∥Q∗K − Q∗k ∥dK is bounded for all k.
+3.3.2 C ONVERGENCE G UARANTEE
+Let Q∗K be the optimal Q-function for the final task under distribution dK , and let QπK be the
+Q-function of the policy learned at the final step. Define the performance loss of the final policy
+compared to the optimal target policy as: EK := ∥Q∗K − QπK ∥dK .
+Theorem 3.1 (CRL Performance Guarantee). Let T be the number of API policy updates within each
+task. β > 0 is a tunable parameter for stepsizes specified in Chen & Maguluri (2025). Under the
+approximate greedy update and evaluation error assumptions above, the final performance gap EK
+satisfies:
+ K−1
+K 
+X
+X
+2γ(1 − γ T )
+2γ
+T
+EK ≤
+γ ηk +
+δ
++
++
+∥Q∗K − Q∗k ∥dK ,
+k
+(1 − γ)2
+β(1 − γ)2
+k=1
+
+k=1
+
+where ηk := ∥Q∗k − Qπk k ∥∞ is the per-task Bellman error, δk is the evaluation error, and ϵk is
+absorbed in ηk .
+The first term represents the convergence bias of the actor, and goes to zero geometrically fast as
+T goes to infinity. The second term captures accumulated evaluation errors, which involves the
+stochastic error due to sampling and the error due to function approximation The third term captures
+the error introduced by the policy update rule, which can be made arbitrarily small by using large
+enough β. Alternatively, we can use geometrically increasing stepsizes, in which case the third
+term goes to zero at a geometric rate. The last term captures the deviation in optimal Q-functions
+6
+
+across curriculum stages, representing the cumulative gap between intermediate curriculum-optimal
+values and the final optimal value, which we refer to as the curriculum approximation error. This
+decomposition highlights the dual effect of CRL in improving sample efficiency (small δk , ϵk ) and
+ensuring smooth interpolation (small ∥Q∗K − Q∗k ∥).
+3.3.3 F INITE S AMPLE A PPROXIMATION E RROR A NALYSES
+In this section, we perform finite-sample analysis. Considering the critic, i.e., how to obtain an
+estimate of Qπ , we can estimate the Q-function Qπ of a given target policy π using TD-learning. In
+TD-learning, especially when the state-action space size is large, the use of function approximation
+is natural. In linear function approximation, a set of basis vectors is selected to approximate the
+target value function Qπ using linear combinations of the basis vectors. Let Φ ∈ R|S||A|×d be
+the matrix of basis vectors Φ = [ϕ1 , · · · , ϕd ]. Then, the goal is to find from the linear subspace
+Q = {Q̂w = Φw | w ∈ Rd } the “best” approximation of the Q-function Qπ , where w ∈ Rd is the
+weight vector.
+Following Section 3 and 4 of Chen & Maguluri (2025), we derive the finite-sample theorem for
+CRL. Theorem A.1 and its analyses are provided in Appendix A.1.1. The result of Theorem A.1
+suggests that smoother curriculum trajectories, together with smaller approximation errors under
+finite samples, can lead to improved final policy performance. These effects are closely tied to the
+choice of stepsize and the number of updates per iteration.
+Following Chen & Maguluri (2025), let KSA ∈ R|S||A|×|S||A| be a diagonal matrix and let KSA,min
+be the minimal diagonal entry. Jk is the number of critic updates
+pper policy iteration at curriculum k.
+The bootstrapping parameter n is chosen such that γc := γ n / KSA,min < 1. Lk is the parameter
+πk
+k
+defined by 1 + (γρmax,k )n , Eapprox,k := supπ Qπc,ρ
+− Φwc,ρ
+is the critic’s function approximation
+∞
+∗
+∗
+error, ∥QK − Qk ∥∞ is the gap between the curriculum subtask and the final task, and λmin is the
+PK 2γEapprox,k
+mininum eigenvalue of the positive definite matrix ΦT KSA Φ. The term N2,1 = k=1 (1−γ)
+in
+2
+Theorem A.1 is the function approximation error and equals zero when using a complete basis. A
+term of similar form is present in all existing work studying RL with function approximation (Munos,
+2003; Agarwal et al., 2021). Based on Theorem A.1, we next derive the sample complexity result.
+Theorem 3.2 (Sample Complexity). For a given accuracy level ϵ > 0, to achieve E[∥Q∗K −
+PK−1
+QπK ∥∞ ] ≤ ϵ + N2,1 + k=1 ∥Q∗K − Q∗k ∥dK , the total number of samples (i.e., the integer
+PK
+T k=1 Jk ) required across all K curriculum stages is of the order:
+
+!
+K
+X
+log3 (1/ϵk )
+L2k n
+O
+· Õ
+,
+ϵ2k
+(1 − γ)7 (1 − γc )3 λ3min
+k=1
+
+PK
+where ϵk is the target accuracy for curriculum k, and k=1 ϵk ≤ ϵ.
+PK
+Let MCRL = k=1 Mk be the total number of samples needed by CRL with K curriculum steps to
+achieve error ϵon the final task, and let MDirect = m ∗ MK be the number of samples needed by direct
+learning, where m > 1 represents the relative difficulty factor of direct learning. Under geometric
+LK
+error and Lk allocation ϵk = ϵK · eK−k and Lk = lK−k
+for curriculums, we have:
+MCRL < MDirect ⇐⇒
+
+(e ∗ l)2(1−K) − 1
+< m − 1.
+1 − (e ∗ l)2
+
+(2)
+
+The geometric error and Lk allocation reflect the curriculum gradually increases in difficulty while
+1−K
+allowing larger errors in earlier stages. Since the function f (x) = x 1−x−1
+monotonically decrease
+2
+for x > 1 when K is a integer larger than 1, the final condition can be reasonably satisfied, e.g., with
+K = 3, e ∗ l = 1.4, and m = 1.8 in practice.
+The first half of Theorem 3.2 analysis highlights the dual benefit of curriculum design in CRL.
+First, by constructing intermediate distributions d1 , . . . , dK−1 close to dK , the curriculum error term
+∥Q∗K − Q∗k ∥ can be made small. Second, easier curriculum tasks improve estimation accuracy and
+yield more stable approximate greedy updates, enhancing sample efficiency and policy improvement.
+For the second half of Theorem 3.2, the final condition in Eq. 2 is satisfied when curriculums are
+appropriately learned, the allocation of accuracy targets ϵk is gradually optimized across curriculum
+7
+
+Table 1: Impact of task decomposition for LLM post-training. Trivial and easy examples help the model learn
+core principles that enable success on harder tasks.
+Blocksworld
+
+Countdown
+
+MATH
+
+Trivial
+
+Easy
+
+Med
+
+Hard
+
+OOD
+
+Trivial
+
+Easy
+
+Med
+
+Hard
+
+OOD
+
+Trivial
+
+Easy
+
+Med
+
+Hard
+
+OOD
+
+0.0
+2.0
+0.0
+98.0
+
+0.0
+0.0
+55.5
+100
+
+0.0
+0.0
+15.5
+83.3
+
+0.0
+0.0
+0.0
+21.1
+
+0.0
+0.0
+0.0
+2.6
+
+0.0
+12.9
+62.5
+96.1
+
+43.9
+47.8
+79.3
+64.9
+
+16.4
+33.1
+30.1
+28.8
+
+18.1
+19.2
+21.2
+18.1
+
+6.5
+8.8
+9.5
+9.2
+
+82.3
+87.1
+84.8
+87.2
+
+64.7
+68.9
+68.2
+72.0
+
+53.4
+58.1
+56.8
+61.6
+
+38.2
+42.5
+42.5
+46.3
+
+20.6
+21.0
+21.5
+25.7
+
+Hard
+Med + Hard
+Easy + Med + Hard
+Trivial + Easy + Med + Hard
+
+Table 2: Effect of scheduling strategies in LLM post-training. We compare balanced scheduling, traditional
+curriculum learning (CL), and our proposed E2H Reasoner variants, namely, E2H-G and E2H-C. CoT is
+reported as a reference.
+Blocksworld
+
+Countdown
+
+MATH
+
+Trivial
+
+Easy
+
+Med
+
+Hard
+
+OOD
+
+Trivial
+
+Easy
+
+Med
+
+Hard
+
+OOD
+
+Trivial
+
+Easy
+
+Med
+
+Hard
+
+OOD
+
+CoT
+Balanced
+CL
+
+4.0
+98.0
+46.0
+
+0.0
+100
+100
+
+0.0
+84.5
+45.2
+
+0.0
+26.3
+5.8
+
+0.0
+5.3
+0.7
+
+16.0
+96.1
+57.7
+
+5.6
+64.9
+85.8
+
+1.7
+28.8
+57.2
+
+0.1
+18.1
+31.5
+
+0.1
+9.2
+12.6
+
+40.1
+87.2
+86.2
+
+27.9
+72
+71.5
+
+22.7
+61.6
+62.4
+
+17.6
+46.3
+46.7
+
+8.2
+25.7
+25.6
+
+E2H-G (0.25, 0.75)
+E2H-G (0.5, 0.5)
+E2H-G (0.75, 0.25)
+E2H-C
+
+98.0
+100
+98.0
+100
+
+100.0
+100
+93.3
+100
+
+95.3
+34.5
+17.9
+15.5
+
+32.9
+10.5
+2.0
+0.0
+
+7.3
+0.7
+0.0
+0.0
+
+98.9
+97.9
+95.7
+96.7
+
+87.3
+87.2
+56.0
+64.0
+
+51.4
+70.4
+28.8
+25.9
+
+18.9
+41.0
+17.1
+15.8
+
+7.3
+19.2
+10.2
+6.4
+
+85.5
+85.3
+86.0
+84.6
+
+72
+71.7
+72.4
+69.6
+
+64.1
+62.5
+62.0
+63.0
+
+47.9
+48.7
+46.7
+47.6
+
+26.5
+27.6
+26.3
+28.6
+
+steps, and the designed curriculums with increasing difficulties effectively bridge the gap between
+source and target distributions. This mathematical derivation shows CRL requires fewer total samples
+than direct learning on the final task, aligning with experimental observations (see Appendix B).
+
+4
+
+E XPERIMENTS
+
+We conduct experiments investigating the following research questions. RQ1: What role does task
+decomposition play in RL-based post-training? RQ2: How does task scheduling impact the learning
+process? RQ3: Can small-scale LLMs learn to reason on hard tasks?
+4.1
+
+E XPERIMENTAL S ETUP
+
+We evaluate our method on a diverse set of reasoning and planning tasks, covering both datasets with
+and without human-annotated difficulty levels. For datasets with difficulty labels, such as Blocksworld
+(using plan length)(Valmeekam et al., 2023), Countdown (using number of operations)(Gandhi et al.,
+2025), and MATH (using problem levels) (Hendrycks et al., 2021), we use the provided annotations
+and define an out-of-distribution (OOD) split to assess generalization. For datasets without explicit
+difficulty, namely GSM8K (Cobbe et al., 2021) and AQuA (Ling et al., 2017a), we estimate difficulty
+using the zero shot error rate of the base model. Specifically, for each question in the training set,
+Responses
+we generate 20 responses and compute the error rate as 1 − Number of Correct
+and bucket the
+20
+samples into trivial, easy, medium, and hard, based on quartiles Fig. 5. More dataset details are in
+Appendix C. We conduct experiments on Qwen 2.5/1.5B Instruct (Yang et al., 2024), LLaMa 3.2 3B
+Instruct (Grattafiori et al., 2024). More models are included in Appendix G.1. We use Qwen 1.5B for
+research questions RQ1 and RQ2.
+4.2 BASELINES
+First, we report the Chain of Thought (Wei et al., 2022) (CoT) performance for all models. All
+post-training experiments use GRPO (Shao et al., 2024) as the reinforcement learning algorithm (see
+Appendix E for implementation). GRPO, by default, employs balanced scheduling over all tasks,
+which we use as our baseline and refer to as GRPO in Table 3. We also assess whether models
+can learn directly from the most challenging examples by training only on the Hard and OOD
+subsets. In addition, we evaluate traditional curriculum learning (CL) as used by Team et al. (2025);
+Bercovich et al. (2025). We compare against Self-Evolve (Chen et al., 2025), an adaptive curriculum
+baseline that samples problems with a 50% solve rate to maximize learnability. Finally, we provide a
+comparison against SFT in Appendix F.
+4.3 E XPERIMENTAL R ESULTS
+We conduct experiments addressing the research questions listed above. We examine how task
+decomposition impacts LLM post-training using Qwen-1.5B-Instruct (RQ1) with a balanced scheduler
+(Table 1). We find that including trivial and easy examples helps the model build core skills. This
+8
+
+Table 3: Results of E2H Reasoner across three models on Blocksworld (Valmeekam et al., 2023), Countdown (Gandhi et al., 2024) and MATH Hendrycks et al. (2021). Our method consistently improves performance
+especially on HARD and OOD tasks, demonstrating effective reasoning, results on more models are in Appendix G.1. Best numbers are in bold and second-best are underlined.
+Blocksworld
+
+Countdown
+
+MATH
+
+Trivial Easy Med Hard OOD Trivial Easy Med Hard OOD Trivial Easy Med Hard OOD
+
+Qwen 1.5B Instruct
+
+CoT
+GRPO (All)
+GRPO (Hard)
+GRPO (OOD)
+CL
+Self Evolve
+
+4.0 0.0 0.0 0.0
+98.0 100 83.3 21.1
+0.0 0.0 0.0 0.0
+0.0 0.0 0.0 0.0
+46.0 100 45.2 5.8
+100 100 70.2 13.8
+
+0.0
+2.6
+0.0
+0.0
+0.7
+2.1
+
+16.0 5.6 1.7 0.1 0.1
+96.1 64.9 28.8 18.1 9.2
+0.0 43.9 16.4 18.1 6.5
+3.1 23.1 18.1 11.3 5.3
+57.7 85.8 57.2 31.5 12.6
+96.6 65.3 34.2 17.8 9.5
+
+40.1 27.9 22.7 17.6
+87.2 72.0 61.6 46.3
+82.3 64.7 53.4 38.2
+37.0 21.1 15.0 8.5
+86.2 71.5 62.4 46.7
+84.0 70.6 62.6 48.6
+
+E2H-G
+E2H-C
+
+98.0 100 95.3 32.9
+100 100 15.5 0.0
+
+7.3
+0.0
+
+97.9 87.2 70.4 41.0 19.2
+96.7 64.0 25.9 15.8 6.4
+
+85.3 71.7 62.5 48.7 27.6
+84.6 69.6 63.0 47.6 28.6
+
+24.0 0.0 1.2 1.0 0.0
+100 100 94.1 38.9 13.3
+0.0 0.0 0.0 0.0 0.0
+0.0 0.0 0.0 0.0 0.0
+100 0.0 0.0 0.0 0.0
+100 100 91.1 35.8 16.6
+
+37.1 4.6 0.3 0.0 0.0
+99.9 89.5 71.6 47.9 2.7
+40.5 33.8 3.0 9.7 1.4
+8.0 0.3 0.0 0.0 0.0
+17.2 36.0 22.7 11.2 4.1
+96.7 66.6 37.9 27.5 18.5
+
+65.9 44.6 35.2 24.1
+65.9 47.0 36.0 22.0
+22.7 14.4 10.3 7.5
+63.6 39.0 31.3 19.0
+74.1 54.1 43.9 28.0
+79.1 61.4 48.9 33.1
+
+100 100 98.8 44.1 17.6
+100 0.0 0.0 0.0 0.0
+
+95.0 89.9 73.3 46.5 24.3
+100 55.3 0.0 0.0 0.0
+
+78.7 58.4 46.4 32.3 14.5
+74.8 60.6 48.3 34.3 15.8
+
+CoT
+GRPO (All)
+GRPO (Hard)
+LLaMa 3.2 3B Instruct GRPO (OOD)
+CL
+Self-Evolve
+E2H-G
+E2H-C
+
+8.2
+25.7
+20.6
+3.7
+25.6
+26.1
+
+13.6
+10.2
+0.3
+7.6
+12.5
+14.1
+
+Table 4: Performance of E2H Reasoner on Figure 5: GSM8K Difficulty distribution based on error
+GSM8K and AQuA, where difficulty splits are de- rates, grouped into quartiles.
+rived from error rates due to the absence of human
+labels. Fig. 5 shows these splits, and Table 12 conError Rate Distribution by Difficulty Bucket
+firms robustness to the number of splits..
+Qwen 1.5B Instruct
+GSM8K
+
+AQuA
+
+Trivial Easy Med Hard Avg Trivial Easy Med Hard Avg
+CoT
+GRPO
+CL
+Self-Evolve
+
+90.2 87.3 76.5 38.1 67.7
+99.0 95.3 84.1 49.9 77.1
+98.0 97.2 85.8 52.2 78.6
+98.1 95.3 87.0 50.3 77.8
+
+70.8 51.3 20.8 2.6 40.9
+95.8 68.0 48.6 21.0 63.3
+88.8 72.2 36.1 18.4 58.6
+94.4 75.0 40.3 31.6 64.2
+
+E2H-G
+E2H-C
+
+97.6 94.7 89.0 51.8 78.7
+98.0 95.3 83.9 46.6 75.7
+
+90.2 81.9 43.0 34.2 66.1
+86.1 72.2 48.6 26.3 62.5
+
+Number of Questions
+
+600
+500
+
+Trivial
+Easy
+Medium
+Hard
+
+400
+300
+200
+100
+0
+
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+Error Rate
+
+0.8
+
+1.0
+
+enables effective transfer from simpler to harder tasks and better OOD performance, consistent with
+our view of reasoning as learning core principles and applying them to harder tasks.
+Next, we examine how scheduling impacts post-training (RQ2) in Table. 2. Balanced scheduling
+serves as a strong baseline but lacks structure, leading to suboptimal learning. CL schedules tasks
+in a fixed difficulty order, which can cause forgetting of earlier tasks or overfitting to easier ones.
+In our experiments, easier tasks help initiate learning due to their dense rewards, but overexposure
+hinders generalization to harder, sparse-reward tasks. We address this through our two schedulers, i.e.,
+E2H-C and E2H-G (see Section 3.2). For tasks like MATH, where models perform reasonably well
+across all difficulty levels (as seen with CoT in Table 2), the cosine scheduling in E2H-C is effective,
+beginning with a focus on trivial and easy tasks and gradually shifting toward harder ones. However,
+on tasks like Blocksworld, where rewards are sparse since harder examples are more challenging,
+this leads to overfitting and degraded performance. E2H-G addresses this issue by using a Gaussian
+schedule that quickly decays the sampling probability of trivial and easy tasks. As shown in Fig. 4, it
+provides enough exposure early on to support initial learning while rapidly shifting focus to harder
+examples. This prevents overfitting and improves generalization in sparse-reward settings where
+E2H-C struggles.
+Next, we investigate whether models can learn to reason directly from difficult examples (RQ3). As
+shown in Table 3, the answer is largely no. For instance, Qwen-2.5 1.5B when trained on Level
+5 MATH directly, underperforms the CoT baseline on the model! This failure highlights the need
+for CRL methods for LLM reasoning. To this end, we compare with a CRL method, Self-Evolve
+(Table 3). Empirically, we find that its reasoning performance varies significantly across models and
+tasks. Self-Evolve during training, samples problems at a 50% success rate to maximize learnability
+and gradually reduces easier ones once this threshold is surpassed. However, being only halfway
+proficient at solving a problem is often not enough. For example, learning calculus requires strong
+command of school mathematics. In contrast, E2H Reasoner guides learning scheduling tasks from
+9
+
+easy to hard, improving generalization, as reflected in stronger OOD performance (RQ3). Note
+that for E2H-G we report the best numbers out of our 3 parameter settings with extensive results in
+Table 10. Finally, E2H Reasoner remains effective even without human difficulty labels by using
+error rates as a proxy for difficulty (Table 4).
+
+5 C ONCLUSION
+We introduce the E2H Reasoner (E2H), a CRL-based method for LLM post-training. E2H enables
+models to learn tasks they initially failed at by scheduling tasks from easy to hard. E2H challenges the
+assumption that small LLMs cannot reason and demonstrates strong empirical performance supported
+by theoretical analysis, offering convergence guarantees and improved sample efficiency over direct
+RL. In summary, E2H provides a scalable, theoretically grounded, and practical method for LLM
+reasoning.
+ACKNOWLEDGMENTS
+This work was supported in part by National Institutes of Health under grant U01AG070112 and
+ARPA-H under grant 1AY1AX000053.
+
+R EFERENCES
+Alekh Agarwal, Sham M Kakade, Jason D Lee, and Gaurav Mahajan. On the theory of policy
+gradient methods: Optimality, approximation, and distribution shift. Journal of Machine Learning
+Research, 22(98):1–76, 2021.
+Martin Arjovsky, Léon Bottou, Ishaan Gulrajani, and David Lopez-Paz. Invariant risk minimization.
+arXiv preprint arXiv:1907.02893, 2019.
+Sanghwan Bae, Jiwoo Hong, Min Young Lee, Hanbyul Kim, JeongYeon Nam, and Donghyun
+Kwak. Online difficulty filtering for reasoning oriented reinforcement learning. arXiv preprint
+arXiv:2504.03380, 2025.
+Yoshua Bengio, Jérôme Louradour, Ronan Collobert, and Jason Weston. Curriculum learning. In
+ICML, pp. 41–48, 2009.
+Akhiad Bercovich, Itay Levy, Izik Golan, Mohammad Dabbah, Ran El-Yaniv, Omri Puny, Ido Galil,
+Zach Moshe, Tomer Ronen, Najeeb Nabwani, et al. Llama-nemotron: Efficient reasoning models.
+arXiv preprint arXiv:2505.00949, 2025.
+Xiaoyin Chen, Jiarui Lu, Minsu Kim, Dinghuai Zhang, Jian Tang, Alexandre Piché, Nicolas Gontier,
+Yoshua Bengio, and Ehsan Kamalloo. Self-evolving curriculum for llm reasoning. arXiv preprint
+arXiv:2505.14970, 2025.
+Zaiwei Chen and Siva Theja Maguluri. An approximate policy iteration viewpoint of actor–critic
+algorithms. Automatica, 179:112395, 2025.
+Tianzhe Chu, Yuexiang Zhai, Jihan Yang, Shengbang Tong, Saining Xie, Dale Schuurmans, Quoc V
+Le, Sergey Levine, and Yi Ma. Sft memorizes, rl generalizes: A comparative study of foundation
+model post-training. arXiv preprint arXiv:2501.17161, 2025.
+Karl Cobbe, Vineet Kosaraju, Mohammad Bavarian, Mark Chen, Heewoo Jun, Lukasz Kaiser,
+Matthias Plappert, Jerry Tworek, Jacob Hilton, Reiichiro Nakano, Christopher Hesse, and John
+Schulman. Training verifiers to solve math word problems. arXiv preprint arXiv:2110.14168,
+2021.
+Thomas Foster, Anya Sims, Johannes Forkel, Mattie Fellows, and Jakob Foerster. Learning to reason
+at the frontier of learnability. arXiv preprint arXiv:2502.12272, 2025.
+Kanishk Gandhi, Denise H J Lee, Gabriel Grand, Muxin Liu, Winson Cheng, Archit Sharma, and
+Noah Goodman. Stream of search (sos): Learning to search in language. In CoLM, 2024.
+10
+
+Kanishk Gandhi, Ayush Chakravarthy, Anikait Singh, Nathan Lile, and Noah D Goodman. Cognitive
+behaviors that enable self-improving reasoners, or, four habits of highly effective stars. arXiv
+preprint arXiv:2503.01307, 2025.
+Aaron Grattafiori, Abhimanyu Dubey, Abhinav Jauhri, Abhinav Pandey, Abhishek Kadian, Ahmad
+Al-Dahle, Aiesha Letman, Akhil Mathur, Alan Schelten, Alex Vaughan, et al. The llama 3 herd of
+models. arXiv preprint arXiv:2407.21783, 2024.
+Alex Graves, Marc G Bellemare, Jacob Menick, Remi Munos, and Koray Kavukcuoglu. Automated
+curriculum learning for neural networks. In ICML, pp. 1311–1320, 2017.
+Ishaan Gulrajani and David Lopez-Paz. In search of lost domain generalization. In ICLR, 2021.
+Daya Guo, Dejian Yang, Haowei Zhang, Junxiao Song, Ruoyu Zhang, Runxin Xu, Qihao Zhu,
+Shirong Ma, Peiyi Wang, Xiao Bi, et al. Deepseek-r1: Incentivizing reasoning capability in LLMs
+via reinforcement learning. arXiv preprint arXiv:2501.12948, 2025.
+Dan Hendrycks, Collin Burns, Saurav Kadavath, Akul Arora, Steven Basart, Eric Tang, Dawn Song,
+and Jacob Steinhardt. Measuring mathematical problem solving with the math dataset. In NeurIPS,
+2021.
+Jie Huang, Xinyun Chen, Swaroop Mishra, Huaixiu Steven Zheng, Adams Wei Yu, Xinying Song,
+and Denny Zhou. Large language models cannot self-correct reasoning yet. In ICLR, 2024.
+Aaron Jaech, Adam Kalai, Adam Lerer, Adam Richardson, Ahmed El-Kishky, Aiden Low, Alec
+Helyar, Aleksander Madry, Alex Beutel, Alex Carney, et al. Openai o1 system card. arXiv preprint
+arXiv:2412.16720, 2024.
+Cassidy Laidlaw, Shivam Singhal, and Anca Dragan. Correlated proxies: A new definition and
+improved mitigation for reward hacking. In ICLR, 2025.
+Hongyi Ling, Shubham Parashar, Sambhav Khurana, Blake Olson, Anwesha Basu, Gaurangi Sinha,
+Zhengzhong Tu, James Caverlee, and Shuiwang Ji. Complex LLM planning via automated
+heuristics discovery. arXiv preprint arXiv:2502.19295, 2025.
+Wang Ling, Dani Yogatama, Chris Dyer, and Phil Blunsom. Program induction by rationale generation: Learning to solve and explain algebraic word problems. In ACL, pp. 158–167, 2017a.
+Wang Ling, Dani Yogatama, Chris Dyer, and Phil Blunsom. Program induction by rationale generation: Learning to solve and explain algebraic word problems. In ACL, pp. 158–167, 2017b.
+Geoffrey J McLachlan and Thriyambakam Krishnan. The EM algorithm and extensions. John Wiley
+& Sons, 2008.
+Niklas Muennighoff, Zitong Yang, Weijia Shi, Xiang Lisa Li, Li Fei-Fei, Hannaneh Hajishirzi, Luke
+Zettlemoyer, Percy Liang, Emmanuel Candès, and Tatsunori Hashimoto. s1: Simple test-time
+scaling. arXiv preprint arXiv:2501.19393, 2025.
+Rémi Munos. Error bounds for approximate policy iteration. In ICML, pp. 560–567, 2003.
+Sanmit Narvekar, Bei Peng, Matteo Leonetti, Jivko Sinapov, Matthew E Taylor, and Peter Stone.
+Curriculum learning for reinforcement learning domains: A framework and survey. Journal of
+Machine Learning Research, 21(181):1–50, 2020.
+Shubham Parashar, Blake Olson, Sambhav Khurana, Eric Li, Hongyi Ling, James Caverlee, and
+Shuiwang Ji. Inference-time computations for LLM reasoning and planning: A benchmark and
+insights. arXiv preprint arXiv:2502.12521, 2025.
+Chenhao Qiu, Qianglong Chen, Jintang Li, Caiyu Wang, Runsen Hua, Minghui Li, Shengshan Hu,
+and Yechao Zhang. WISDOM: Progressive curriculum synthesis makes LLMs better mathematical
+reasoner, 2025. URL https://openreview.net/forum?id=hFFAg5Dmw9.
+Rafael Rafailov, Archit Sharma, Eric Mitchell, Christopher D Manning, Stefano Ermon, and Chelsea
+Finn. Direct preference optimization: Your language model is secretly a reward model. NeurIPS,
+36:53728–53741, 2023.
+11
+
+Douglas A Reynolds et al. Gaussian mixture models. Encyclopedia of biometrics, 741(659-663):3,
+2009.
+Abulhair Saparov and He He. Language models are greedy reasoners: A systematic formal analysis
+of chain-of-thought. In ICLR, 2023.
+Bruno Scherrer. Approximate policy iteration schemes: A comparison. In ICML, pp. 1314–1322,
+2014.
+John Schulman, Filip Wolski, Prafulla Dhariwal, Alec Radford, and Oleg Klimov. Proximal policy
+optimization algorithms. arXiv preprint arXiv:1707.06347, 2017.
+Zhihong Shao, Peiyi Wang, Qihao Zhu, Runxin Xu, Junxiao Song, Xiao Bi, Haowei Zhang,
+Mingchuan Zhang, YK Li, Y Wu, et al. Deepseekmath: Pushing the limits of mathematical
+reasoning in open language models. arXiv preprint arXiv:2402.03300, 2024.
+Charlie Victor Snell, Jaehoon Lee, Kelvin Xu, and Aviral Kumar. Scaling LLM test-time compute
+optimally can be more effective than scaling parameters for reasoning. In ICLR, 2025.
+Kaya Stechly, Karthik Valmeekam, and Subbarao Kambhampati. Chain of thoughtlessness? an
+analysis of cot in planning. In NeurIPS, 2024.
+Kimi Team, Angang Du, Bofei Gao, Bowei Xing, Changjiu Jiang, Cheng Chen, Cheng Li, Chenjun
+Xiao, Chenzhuang Du, Chonghua Liao, et al. Kimi k1. 5: Scaling reinforcement learning with
+LLMs. arXiv preprint arXiv:2501.12599, 2025.
+Karthik Valmeekam, Matthew Marquez, Sarath Sreedharan, and Subbarao Kambhampati. On the
+planning abilities of large language models-a critical investigation. NeurIPS, 36:75993–76005,
+2023.
+Karthik Valmeekam, Kaya Stechly, and Subbarao Kambhampati. Llms still can’t plan; can lrms? a
+preliminary evaluation of openai’s o1 on planbench. arXiv preprint arXiv:2409.13373, 2024.
+Xuezhi Wang, Jason Wei, Dale Schuurmans, Quoc V Le, Ed H Chi, Sharan Narang, Aakanksha
+Chowdhery, and Denny Zhou. Self-consistency improves chain of thought reasoning in language
+models. In ICLR, 2023.
+Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten Bosma, Fei Xia, Ed Chi, Quoc V Le, Denny
+Zhou, et al. Chain-of-thought prompting elicits reasoning in large language models. NeurIPS, 35:
+24824–24837, 2022.
+Tian Xie, Zitian Gao, Qingnan Ren, Haoming Luo, Yuqian Hong, Bryan Dai, Joey Zhou, Kai Qiu,
+Zhirong Wu, and Chong Luo. Logic-rl: Unleashing LLM reasoning with rule-based reinforcement
+learning. arXiv preprint arXiv:2502.14768, 2025.
+An Yang, Baosong Yang, Beichen Zhang, Binyuan Hui, Bo Zheng, Bowen Yu, Chengyuan Li,
+Dayiheng Liu, Fei Huang, Haoran Wei, et al. Qwen2. 5 technical report. arXiv preprint
+arXiv:2412.15115, 2024.
+Shunyu Yao, Dian Yu, Jeffrey Zhao, Izhak Shafran, Tom Griffiths, Yuan Cao, and Karthik Narasimhan.
+Tree of thoughts: Deliberate problem solving with large language models. NeurIPS, 36:11809–
+11822, 2023.
+Fei Yu, Hongbo Zhang, Prayag Tiwari, and Benyou Wang. Natural language reasoning, a survey.
+ACM Computing Surveys, 56(12):1–39, 2024.
+Yang Yue, Zhiqi Chen, Rui Lu, Andrew Zhao, Zhaokai Wang, Shiji Song, and Gao Huang. Does
+reinforcement learning really incentivize reasoning capacity in llms beyond the base model? arXiv
+preprint arXiv:2504.13837, 2025.
+Eric Zelikman, Yuhuai Wu, Jesse Mu, and Noah Goodman. Star: Bootstrapping reasoning with
+reasoning. NeurIPS, 35:15476–15488, 2022.
+Weihao Zeng, Yuzhen Huang, Qian Liu, Wei Liu, Keqing He, Zejun Ma, and Junxian He. Simplerlzoo: Investigating and taming zero reinforcement learning for open base models in the wild. arXiv
+preprint arXiv:2503.18892, 2025.
+12
+
+A PPENDIX
+A
+
+P ROOFS
+
+We now present the proofs for the main theoretical results stated above. Our analysis closely follows
+the derivation style of Chen & Maguluri (2025); Scherrer (2014), extending it to the curriculum
+setting.
+A.1
+
+P ROOF OF T HEOREM 3.1
+
+Proof. We aim to derive a tight bound for the final performance error in task TK :
+EK := ∥Q∗K − QπKK ∥dK ,
+where Q∗K is the optimal Q-function for the final task TK , and QπKK is the Q-function under the
+learned policy πK .
+We begin by analyzing the policy performance error under API. For each task k, we define:
+ηk := ∥Q∗k − Qπk k ∥∞ .
+By norm monotonicity, we have:
+∥Q∗K − QπKK ∥dK ≤ ∥Q∗K − QπKK ∥∞ .
+We proceed by recalling the result from Theorem 2.1 of Chen & Maguluri (2025) for a fixed task k,
+applied with a step size β:
+π0
+
+∥Q∗k − Qπk k ∥∞ ≤ γ T ∥Q∗k − Qk k ∥∞ +
+
+T −1
+2γ X T −1−t
+2γ
+γ
+δk +
+,
+1 − γ t=0
+β(1 − γ)2
+π0
+
+where δk is the approximate value evaluation error at curriculum step k; γ T ∥Q∗k − Qk k ∥∞ reflects
+initialization at πk0 ; and β > 0 is the API soft update step size parameter. The finite geometric series
+T
+−1
+X
+
+γ T −1−t
+
+t=0
+
+has closed-form expression
+T
+−1
+X
+
+1 − γT
+γ =
+for γ ̸= 1
+1−γ
+i=0
+i
+
+and
+
+T
+−1
+X
+
+γ i = 1, for γ = 1.
+
+i=0
+
+Thus we simplify with
+T
+−1
+X
+i=0
+
+Since we denote:
+
+γi =
+
+1 − γT
+.
+1−γ
+
+ηk := ∥Q∗k − Qπk k ∥∞ ;
+
+then, the bound becomes:
+ηk ≤ γ T ηk +
+
+2γ(1 − γ T )
+2γ
+δk +
+.
+(1 − γ)2
+β(1 − γ)2
+
+We isolate ηk :
+2γ(1 − γ T )
+2γ
+1
+ηk (1 − γ ) ≤
+δk +
+⇒ ηk ≤
+2
+2
+(1 − γ)
+β(1 − γ)
+1 − γT
+T
+
+13
+
+
+
+2γ(1 − γ T )
+2γ
+δk +
+2
+(1 − γ)
+β(1 − γ)2
+
+
+.
+
+We want to bound:
+
+∥Q∗K − QπKK ∥dK ;
+
+using triangle inequality:
+∥Q∗K − QπKK ∥dK ≤ ∥Q∗K − QπKK ∥∞ ≤ ηK +
+
+K−1
+X
+
+∥Q∗K − Q∗k ∥dK .
+
+k=1
+
+Let us now plug in the bound for ηK :
+
+ K−1
+X
+2γ(1 − γ T )
+2γ
+1
+δ
++
++
+∥Q∗K − Q∗k ∥dK .
+∥Q∗K − QπKK ∥dK ≤
+k
+T
+2
+2
+1−γ
+(1 − γ)
+β(1 − γ)
+k=1
+
+The distribution mismatch is defined by Ck := ddKk
+. If dk is constructed by curriculum to
+∞
+smoothly interpolate toward dK , and both dK and dk are supported on the same or growing state
+space. In our analysis, we use:
+∥Q∗k − Qπk k ∥dK ≤ Ck · ∥Q∗k − Qπk k ∥∞ ,
+where ∥ · ∥dK is the L2 norm under the distribution dK and ∥ · ∥∞ is the sup norm (worst-case).
+In general, for any probability distribution µ, and any function f ,
+Z
+1/2
+∥f ∥L2 (µ) =
+f (x)2 dµ(x)
+≤ ∥f ∥∞ .
+So, in fact, we have the reverse:
+∥f ∥dK ≤ ∥f ∥∞
+
+⇒
+
+Ck ≤ 1.
+
+If we do want to write
+∥f ∥dK ≤ Ck · ∥f ∥∞ ,
+then the tightest possible value for Ck is exactly 1, and any value Ck < 1 may be possible depending
+on the support of f under dK . This holds when later curriculum stages subsume earlier ones, a design
+principle in CRL. Hence, using Ck ≤ 1 simplifies bounds without loosening them unnecessarily.
+Because curriculum proceeds sequentially, and assuming that earlier tasks are easier and learned
+more accurately, we can sum the per-step bounds for curriculum steps:
+
+ K−1
+K 
+X
+X
+1
+2γ(1 − γ T )
+2γ
+δ
++
++
+∥Q∗K − Q∗k ∥dK .
+EK = ∥Q∗K − QπKK ∥dK ≤
+k
+T
+2
+2
+1−γ
+(1 − γ)
+β(1 − γ)
+k=1
+
+k=1
+
+This completes the proof.
+Optionally, assuming γ T is small for large T , 1/(1 − γ T ) ≤ 2 leads to:
+EK ≲
+
+K 
+X
+4γ(1 − γ T )
+k=1
+
+A.1.1
+
+(1 − γ)2
+
+δk +
+
+4γ
+β(1 − γ)2
+
+
++
+
+K−1
+X
+
+∥Q∗K − Q∗k ∥dK .
+
+k=1
+
+T HEOREM A.1 AND P ROOF
+
+Theorem A.1 (Finite-Sample Guarantee). Consider the sequence of tasks {Tk }K
+k=1 , where the final
+task TK has optimal action-value function Q∗K . Suppose that πK is the final policy produced by
+CRL and assumptions hold for all curriculum stages. Following Chen & Maguluri (2025), let
+KSA ∈ R|S||A|×|S||A| be a diagonal matrix and let KSA,min be the minimal diagonal entry. Jk
+is the number of critic updates per policy iteration at curriculum k. The bootstrapping parameter
+14
+
+p
+n is chosen such that γc := γ n / KSA,min < 1. Then, when using constant stepsize α satisfying
+c )λmin
+α(tα + n + 1) ≤ (1−γ
+, we have for all Jk ≥ tα + n + 1:
+130L2
+
+E [∥Q∗K − QπK ∥∞ ] ≤ γ T K ∥Q∗K − Qπ0 ∥∞ +
+|
+{z
+}
+N1
+
++
+
+K
+X
+
+N2,1
+
+6(1 − (1 − γc )λmin α)
+
+N2,2
+
+1
+2 [Jk −(tα +n+1)]
+
+1/2
+
+k=1
+
+|
++
+
+K
+X
+2γEapprox,k 2γ 2 Ebias,k
++
+)
+(
+(1 − γ)2
+(1 − γ)4
+k=1 |
+{z } | {z }
+
+(1 − γ)3 (1 − γc )1/2 λmin
+{z
+
++
+
+K
+X
+70Lk [α(tα + n + 1)]1/2
+k=1
+
+}
+
+N2,3
+
+|
+
+λmin (1 − γc )(1 − γ)3
+{z
+}
+N2,4
+
+K−1
+X
+
+2γβK
++
+∥Q∗K − Q∗k ∥dK ,
+(1 − γ)2
+| {z } |k=1
+{z
+}
+N3
+
+Curriculum discrepancy
+
+where c(·, ·) and ρ(·, ·) are generalized importance sampling factors, Lk is the parameter defined
+πk
+k
+by 1 + (γρmax,k )n , Eapprox,k := supπ Qπc,ρ
+− Φwc,ρ
+is the critic’s function approximation error,
+∞
+Ebias,k := max0≤t≤T maxs∈S (1 − λ(s)) ∥πk,t (·|s) − πk,b (·|s)∥1 is the importance sampling bias
+at curriculum k, ∥Q∗K − Q∗k ∥∞ is the gap between the curriculum subtask and the final task, and
+λmin is the mininum eigenvalue of the positive definite matrix ΦT KSA Φ.
+The terms N1 and N3 are the same as appeared in Thm. 3.1, and together capture the error in actor
+update. Term N2,1 is the function approximation error and equals zero when using a complete
+basis. A term of similar form is present in all existing work studying RL with function approximation (Munos, 2003; Agarwal et al., 2021). Term N2,2 is the bias introduced by generalized importance
+sampling factors c(·, ·) and ρ(·, ·), and N2,2 = 0 when c(s, a) = ρ(s, a) = π(a|s)/πb (a|s). Term
+N2,3 represents the convergence bias in the critic and goes to zero geometrically fast as the inner loop
+iteration index Jk goes
+pto infinity. The term N2,4 represents the variance in the critic and is propor√
+tional to αtα = O( α log(1/α)), thus arbitrarily small given small enough stepsize α. Together,
+{N2,i }i=1∼4 correspond to the second term in Thm. 3.1. Finally, the curriculum approximation
+error is the same as the last term in in Theorem 3.1. This result suggests that smoother curriculum
+trajectories and smaller approximation errors under finite samples, which is closely related with the
+stepsize and number of updates per iteration, can lead to better final policy performance.
+
+Proof. We proceed by mathematical induction across the curriculum steps. Let πk,T denote the final
+policy after T iterations at curriculum step k. Base case: For the first curriculum step (k = 1), we
+directly apply Theorem 4.1 from Chen & Maguluri (2025):
+E[∥Q1 − Qπ1,T ∥∞ ] ≤ γ T ∥Q1 − Qπ1 0 ∥∞
+
+(3)
+2
+
++
+
+2γEapprox,1
+2γ Ebias,1
++
+(1 − γ)2
+(1 − γ)4
+
+(4)
+
+1
+
++
++
+
+6(1 − (1 − γc )λmin α) 2 [J1 −(tα +n+1)]
+1/2
+
+(1 − γ)3 (1 − γc )1/2 λmin
+70L1 [α(tα + n + 1)]1/2
+2γβ
++
+λmin (1 − γc )(1 − γ)3
+(1 − γ)2
+15
+
+(5)
+(6)
+
+Inductive step: Assume that for curriculum step k, we have:
+
+E[∥Qk − Qπk,T ∥∞ ] ≤ γ T k ∥Q1 − Qπ1 0 ∥∞
++
+
+k
+X
+j=1
+
+2γ 2 Ebias,j
+2γEapprox,j
++
+(1 − γ)2
+(1 − γ)4
+1
+
++
+
+6(1 − (1 − γc )λmin α) 2 [Jj −(tα +n+1)]
+1/2
+
+(1 − γ)3 (1 − γc )1/2 λmin
+
+70Lj [α(tα + n + 1)]1/2
+2γβ
++
++
+3
+λmin (1 − γc )(1 − γ)
+(1 − γ)2
++
+
+k−1
+X
+
+!
+
+∥Qk − Qj ∥dk
+
+j=1
+
+For curriculum step k + 1, we initialize with policy πk,T and apply Theorem 4.1 from Chen &
+Maguluri (2025):
+
+π
+
+k,T
+E[∥Qk+1 − Qπk+1,T ∥∞ ] ≤ γ T ∥Qk+1 − Qk+1
+∥∞
+
++
+
+2γEapprox,k+1
+2γ 2 Ebias,k+1
++
+(1 − γ)2
+(1 − γ)4
+1
+
++
++
+
+6(1 − (1 − γc )λmin α) 2 [Jk+1 −(tα +n+1)]
+1/2
+
+(1 − γ)3 (1 − γc )1/2 λmin
+70Lk+1 [α(tα + n + 1)]1/2
+2γβ
++
+3
+λmin (1 − γc )(1 − γ)
+(1 − γ)2
+
+π
+
+k,T
+We need to relate ∥Q∗k+1 − Qk+1
+∥∞ to our induction hypothesis. By triangle inequality:
+
+π
+
+π
+
+π
+
+π
+
+k,T
+k,T
+∥Qk+1 − Qk+1
+∥∞ ≤ ∥Qk+1 − Qk ∥∞ + ∥Qk − Qk k,T ∥∞ + ∥Qk k,T − Qk+1
+∥∞
+γ
+π
+≤ ∥Qk+1 − Qk ∥∞ + ∥Q∗k − Qk k,T ∥∞ +
+∥rk − rk+1 ∥∞
+1−γ
+
+where the last inequality follows from the performance difference lemma with respect to rewards. For
+curriculum learning, we design the reward functions to satisfy ∥rk − rk+1 ∥∞ ≤ δr for some small
+δr . Thus:
+
+π
+
+π
+
+k,T
+∥Qk+1 − Qk+1
+∥∞ ≤ ∥Qk+1 − Qk ∥∞ + ∥Qk − Qk k,T ∥∞ +
+
+16
+
+γδr
+1−γ
+
+Substituting our induction hypothesis:
+
+π
+
+E[∥Qk+1 − Qπk+1,T ∥∞ ] ≤ γ T E[∥Qk+1 − Qk ∥∞ + ∥Qk − Qk k,T ∥∞ +
++
+
+γδr
+]
+1−γ
+
+2γEapprox,k+1
+2γ 2 Ebias,k+1
++
+2
+(1 − γ)
+(1 − γ)4
+1
+
++
++
+
+6(1 − (1 − γc )λmin α) 2 [Jk+1 −(tα +n+1)]
+1/2
+
+(1 − γ)3 (1 − γc )1/2 λmin
+2γ
+70Lk+1 [α(tα + n + 1)]1/2
++
+λmin (1 − γc )(1 − γ)3
+β(1 − γ)2
+π
+
+≤ γ T ∥Qk+1 − Qk ∥∞ + γ T E[∥Q∗k − Qk k,T ∥∞ ] +
++
+
+γ T +1 δr
+1−γ
+
+2γEapprox,k+1
+2γ 2 Ebias,k+1
++
+(1 − γ)2
+(1 − γ)4
+1
+
++
++
+
+6(1 − (1 − γc )λmin α) 2 [Jk+1 −(tα +n+1)]
+1/2
+
+(1 − γ)3 (1 − γc )1/2 λmin
+2γβ
+70Lk+1 [α(tα + n + 1)]1/2
++
+3
+λmin (1 − γc )(1 − γ)
+(1 − γ)2
+
+Applying the induction hypothesis:
+
+E[∥Qk+1 − Qπk+1,T ∥∞ ] ≤ γ T ∥Qk+1 − Qk ∥∞ + γ T · γ T k ∥Q1 − Qπ1 0 ∥∞
++ γT
+
+k
+X
+j=1
+
+2γEapprox,j
+2γ 2 Ebias,j
++
+2
+(1 − γ)
+(1 − γ)4
+1
+
++
+
+6(1 − (1 − γc )λmin α) 2 [Jj −(tα +n+1)]
+1/2
+
+(1 − γ)3 (1 − γc )1/2 λmin
+
+70Lj [α(tα + n + 1)]1/2
+2γ
++
++
+λmin (1 − γc )(1 − γ)3
+β(1 − γ)2
++ γT
+
+k−1
+X
+
+∥Qk − Qj ∥dk +
+
+j=1
+
++
+
+!
+
+γ T +1 δr
+1−γ
+
+2γEapprox,k+1
+2γ 2 Ebias,k+1
++
+2
+(1 − γ)
+(1 − γ)4
+1
+
++
++
+
+6(1 − (1 − γc )λmin α) 2 [Jk+1 −(tα +n+1)]
+1/2
+
+(1 − γ)3 (1 − γc )1/2 λmin
+70Lk+1 [α(tα + n + 1)]1/2
+2γβ
++
+λmin (1 − γc )(1 − γ)3
+(1 − γ)2
+17
+
+Simplifying:
+E[∥Qk+1 − Qπk+1,T ∥∞ ] ≤ γ T (k+1) ∥Q1 − Qπ1 0 ∥∞
++
+
+k+1
+X
+j=1
+
+2γ 2 Ebias,j
+2γEapprox,j
++
+(1 − γ)2
+(1 − γ)4
+1
+
+6(1 − (1 − γc )λmin α) 2 [Jj −(tα +n+1)]
+
++
+
+1/2
+
+(1 − γ)3 (1 − γc )1/2 λmin
+
+70Lj [α(tα + n + 1)]1/2
+2γβ
++
++
+3
+λmin (1 − γc )(1 − γ)
+(1 − γ)2
++
+
+k
+X
+
+!
+
+∥Qk+1 − Qj ∥dk+1
+
+j=1
+
+where we used the fact that
+∥Q∗k+1 − Q∗k ∥dk+1 + γ T
+
+k−1
+X
+
+∥Q∗k − Q∗j ∥dk ≤
+
+j=1
+
+k
+X
+
+∥Q∗k+1 − Q∗j ∥dk+1
+
+(7)
+
+j=1
+
+due to the triangle inequality and the curriculum design. By induction, for the final curriculum step
+K, we have:
+E[∥QK − QπK ∥∞ ] ≤ γ T K ∥Q1 − Qπ1 0 ∥∞
++
+
+K
+X
+k=1
+
+2γEapprox,k
+2γ 2 Ebias,k
++
+2
+(1 − γ)
+(1 − γ)4
+1
+
++
+
+6(1 − (1 − γc )λmin α) 2 [Jk −(tα +n+1)]
+1/2
+
+(1 − γ)3 (1 − γc )1/2 λmin
+
+2γβ
+70Lk [α(tα + n + 1)]1/2
++
++
+3
+λmin (1 − γc )(1 − γ)
+(1 − γ)2
++
+
+K−1
+X
+
+!
+
+∥QK − Qk ∥dK
+
+k=1
+
+This completes the proof.
+
+A.1.2
+
+P ROOF OF T HEOREM 3.2
+
+Proof. From the Finite-Sample Theorem for CRL, we aim to control all error terms to achieve the
+desired accuracy. We allocate the total error budget ϵ across the K curriculum steps, with ϵk being
+PK
+the error allocation for step k, such that k=1 ϵk ≤ ϵ. For each curriculum k, we need to control the
+following terms:
+ϵ
+4
+1
+6(1 − (1 − γc )λmin α) 2 [Jk −(tα +n+1)]
+ϵk
+≤
+1/2
+4
+(1 − γ)3 (1 − γc )1/2 λmin
+γ T K ∥Q∗1 − Qπ1 0 ∥∞ ≤
+
+70Lk [α(tα + n + 1)]1/2
+ϵk
+≤
+3
+λmin (1 − γc )(1 − γ)
+4
+2γβ
+ϵk
+≤
+(1 − γ)2
+4
+18
+
+(8)
+(9)
+(10)
+(11)
+
+We can solve each of these constraints. For the first constraint, we need:
+
+
+1
+ϵ
+T ≥
+logγ
+K
+4∥Q∗1 − Qπ1 0 ∥∞
+1
+Since ∥Q∗1 − Qπ1 0 ∥∞ ≤ 1−γ
+, we have:
+
+1
+log γ
+T ≥
+K
+For the second constraint, we need:
+
+
+
+ϵ(1 − γ)
+4
+
+
+
+
+=O
+
+log(1/ϵ)
+K
+
+
+
+1/2
+
+1
+
+(1 − (1 − γc )λmin α) 2 [Jk −(tα +n+1)] ≤
+
+ϵk (1 − γ)3 (1 − γc )1/2 λmin
+,
+24
+
+thus by taking log,
+1
+[Jk − (tα + n + 1)] log(1 − (1 − γc )λmin α) ≤ log
+2
+
+1/2
+
+ϵk (1 − γ)3 (1 − γc )1/2 λmin
+24
+
+!
+,
+
+thus
+
+2 log
+Jk ≥ (tα + n + 1) +
+
+1/2
+
+ϵk (1−γ)3 (1−γc )1/2 λmin
+24
+
+
+
+log(1 − (1 − γc )λmin α)
+
+.
+
+c )λmin
+Using log(1 − x) ≈ −x for small x, and α(tα + n + 1) ≤ (1−γ
+, we have:
+130L2k
+
+
+24
+2 log
+1/2
+ϵk (1−γ)3 (1−γc )1/2 λmin
+Jk ≥ (tα + n + 1) −
+(1 − γc )λmin α
+
+
+1/2
+ϵk (1−γ)3 (1−γc )1/2 λmin
+2 log
+24
+= (tα + n + 1) +
+(1 − γc )λmin α
+For the third constraint, we need:
+
+ϵ2k (1 − γ)6 (1 − γc )2 λ2min
+4900L2k
+ 2
+
+ϵ (1 − γ)6 (1 − γc )2 λ2min
+=O k
+L2k
+
+α(tα + n + 1) ≤
+
+For the fourth constraint, we need:
+ϵk (1 − γ)2
+8γ
+Combining these constraints, the dominant factor in the sample complexity comes from the third
+constraint, which gives us:
+ 2
+
+ϵk (1 − γ)6 (1 − γc )2 λ2min
+α≤O
+L2k (tα + n + 1)
+β≤
+
+The mixing time tα is O(log(1/α)), which gives us:
+ 2
+
+ϵ (1 − γ)6 (1 − γc )2 λ2min
+α≤O k 2
+Lk (log(1/α) + n + 1)
+This implies:
+
+ 2
+ϵk (1 − γ)6 (1 − γc )2 λ2min
+L2k log(1/α)
+ 2
+
+ϵk (1 − γ)6 (1 − γc )2 λ2min
+α log(1/α) = O
+L2k
+α=O
+
+19
+
+Using the Lambert W function, we can solve for α:
+
+
+2
+6
+2 2
+ϵ
+(1
+−
+γ)
+(1
+−
+γ
+)
+λ
+c
+min  
+α = Θ k 
+L2k
+2
+Lk log ϵ2 (1−γ)6 (1−γc )2 λ2
+min
+k
+ 2
+
+ϵk (1 − γ)6 (1 − γc )2 λ2min
+= Θ̃
+L2k
+where Θ̃ hides logarithmic factors. The number of samples required for curriculum step k is:
+Mk = Jk · T
+
+
+
+
+log(1/ϵ)
+log(1/ϵk )
+·O
+= O (tα + n + 1) +
+(1 − γc )λmin α
+K
+
+
+log(1/α) + n + 1
+log(1/ϵk ) log(1/ϵ)
+=O
+log(1/ϵ) +
+K
+K(1 − γc )λmin α
+
+
+2
+Lk
++ n log(1/ϵ)
+log(1/ϵ) log ϵ2 (1−γ)6 (1−γ
+2
+2
+c ) λmin
+k
+=O
+K
+!
+
+L2k
+log(1/ϵk ) log(1/ϵ)L2k log ϵ2 (1−γ)6 (1−γ
+2 λ2
+)
+c
+min
+k
++
+Kϵ2k (1 − γ)6 (1 − γc )3 λ3min
+
+
+log(1/ϵk ) log(1/ϵ)L2k
+n log(1/ϵ)
++
+= Õ
+K
+Kϵ2k (1 − γ)6 (1 − γc )3 λ3min
+The second term dominates, giving us:
+
+Mk = Õ
+
+log2 (1/ϵk ) log(1/ϵ)L2k
+Kϵ2k (1 − γ)6 (1 − γc )3 λ3min
+
+
+(12)
+
+The total number of samples across all curriculum steps is:
+MCRL =
+
+K
+X
+
+Mk
+
+k=1
+
+=
+
+K
+X
+k=1
+
+
+Õ
+
+log2 (1/ϵk ) log(1/ϵ)L2k
+Kϵ2k (1 − γ)6 (1 − γc )3 λ3min
+K
+
+
+
+log2 (1/ϵk )L2k
+log(1/ϵ) X
+= Õ
+2
+K
+ϵk (1 − γ)6 (1 − γc )3 λ3min
+
+!
+
+k=1
+
+Assuming ϵk = Kϵ for all k (uniform error allocation), we get:
+K
+
+MCRL = Õ
+= Õ
+
+= Õ
+
+log(1/ϵ) X
+log2 (K/ϵ)L2k
+K
+(ϵ/K)2 (1 − γ)6 (1 − γc )3 λ3min
+k=1
+!
+K
+log(1/ϵ) log2 (K/ϵ)K X 2
+Lk
+ϵ2 (1 − γ)6 (1 − γc )3 λ3min
+k=1
+!
+K
+X
+log3 (1/ϵ)K
+L2k
+ϵ2 (1 − γ)6 (1 − γc )3 λ3min
+
+!
+
+k=1
+
+Adding the dependence on the bootstrapping parameter n, we have:
+
+!
+K
+X
+log3 (1/ϵk )
+L2k n
+MCRL = O
+· Õ
+ϵ2k
+(1 − γ)7 (1 − γc )3 λ3min
+k=1
+
+20
+
+(13)
+
+This completes the proof for the first half of the Theorem. Now we move on to prove the second half
+of the Theorem.
+The sample complexity for the final task K is:
+
+ 3
+C
+log (1/ϵK )
+2
+·
+L
+·
+.
+MK = O
+K
+ϵ2K
+(1 − γ)7 (1 − γc )3 λ3min
+We can factor this term out of the total sum:
+K−1
+X
+
+!
+L2k · log3 (1/ϵk ) · ϵ2K
+1+
+.
+L2K · log3 (1/ϵK ) · ϵ2k
+k=1
+
+MCRL = MK ·
+Define the curriculum efficiency factor:
+
+CEF = 1 +
+
+K−1
+X
+
+L2k · log3 (1/ϵk ) · ϵ2K
+.
+L2K · log3 (1/ϵK ) · ϵ2k
+k=1
+
+This factor represents the ratio of total curriculum sample complexity to the sample complexity of
+just the final task. We make two structure assumptions about our curriculum design, geometric error
+allocation and Lk progression, ϵk = ϵK · eK−k and Lk = LK /lK−k , where e > 1. This reflect a
+curriculum that gradually increases in difficulty while allowing larger errors in earlier stages. For a
+well-designed curriculum where early tasks are simpler than later ones, l > 1.
+For the error ratio term:
+
+ϵ2K
+ϵ2K
+=
+= e−2(K−k) ,
+2
+ϵk
+(ϵK · eK−k )2
+
+and for the Lk ratio term:
+
+L2k
+L2k
+=
+= l−2(K−k) .
+2
+LK
+(Lk · lK−k )2
+
+For the logarithmic term:
+log(1/ϵk ) = log(1/(ϵK · eK−k )) = log(1/ϵK ) − (K − k) log(e).
+Substituting these expressions into CEF :
+CEF = 1 +
+
+K−1
+X −2(K−k)
+
+l
+
+k=1
+
+· [log(1/ϵK ) − (K − k) log(e)]3 · e−2(K−k)
+.
+log3 (1/ϵK )
+
+Since e > 1 and K ≥ k, (K − k) log(e) ≥ 0. Thus we have
+CEF = 1 +
+
+≤1+
+
+K−1
+X
+
+[log(1/ϵK ) − (K − k) log(e)]3
+· (el)−2(K−k)
+3
+log
+(1/ϵ
+)
+K
+k=1
+
+K−1
+X
+
+(el)−2(K−k) .
+
+k=1
+
+The sum is a geometric series:
+K−1
+X
+k=1
+
+(el)−2(K−k) =
+
+K−1
+X
+
+(el)2(k−K) = (el)2(1−K)
+
+k=1
+
+(el)2(1−K) − 1
+1 − (el)2(K−1)
+=
+1 − (el)2
+1 − (el)2
+
+CRL is more sample-efficient than direct learning when:
+MCRL < MDirect
+21
+
+Since MCRL = MK · CEF and for a comparable direct learning approach, MDirect = MK · m
+where m represents the relative difficulty factor of direct learning, our condition becomes:
+CEF < m.
+Thus for MCRL < MDirect , substituting expressions it becomes:
+MCRL = MK · CEF ≤ MK · (1 +
+Thus
+MCRL < MDirect ⇐⇒
+
+(el)2(1−K) − 1
+) < MK · m = MDirect .
+1 − (el)2
+(el)2(1−K) − 1
+< m − 1.
+1 − (el)2
+
+This completes the proof.
+
+B
+
+S AMPLE E FFICIENCY G AINS WITH CRL
+
+Our theoretical analysis (see Sec.3.3) establishes that curriculum reinforcement learning (CRL)
+attains target performance while requiring fewer hard samples than non-curriculum RL methods. To
+show this empirically, we count how many training samples from each difficulty level are seen during
+post-training. All methods are trained for 1600 iterations with an effective batch size of 8, totaling
+12,800 samples, which allows a direct comparison of their sample efficiency under the same budget.
+For simplicity, we perform this analysis on Blocksworld, shown Table 5. Our empirical results show
+that CRL methods are between 2.5 − 3× more sample efficient than non-CRL methods that train
+exclusively on hard samples, while also achieving better performance, underscoring the importance
+of curriculum design for post-training.
+Table 5: Consistent with our theoretical guarantees, CRL methods (E2H-C, E2H-G) attain strong
+performance while requiring substantially fewer hard samples than non-curriculum baselines. For
+example, E2H-G uses 3580 hard samples versus 12800 for GRPO (HARD). Training exclusively on
+OOD (GRPO-OOD) trained on 12800 OOD samples performs poorly (see Table 3).
+Number of Training Samples
+Method
+
+Trivial Easy Medium Hard OOD Total
+
+GRPO (All)
+3200 3200
+GRPO (HARD)
+0
+0
+GRPO (OOD)
+0
+0
+E2H-C
+3200 3200
+E2H-G (0.5, 0.5) 1628 2997
+
+C
+
+3200 3200
+0 12800
+0 12800
+0 12800
+0
+0 12800 12800
+3200 3200
+0 12800
+4595 3580
+0 12800
+
+DATASET D ETAILS
+
+In this section we provide details of the datasets used for evaluation. We categorize the datasets into
+two categories, datasets that contain human annotated difficulties and others that do not.
+C.1
+
+DATASETS WITH H UMAN A NNOTATED D IFFICULTIES
+
+Blocksworld (Valmeekam et al., 2023) is a dataset used to evaluate the planning capabilities of LLMs.
+Each task involves transitioning from an initial block configuration to a target configuration, which
+requires LLMs to generate a sequence of actions, or plan to achieve the goal. Tasks become more
+difficult as the required number of steps increases, since the model must reason over longer sequences
+and maintain correct intermediate states. To study this, we group tasks into four in-distribution
+difficulty levels: Trivial with 1 step, Easy with 2 steps, Medium with 4 steps, and Hard with 6 steps.
+Additionally, we include an out-of-distribution (OOD) split with 8-step plans to test generalization
+22
+
+Table 6: Difficulty splits for datasets with human-annotated difficulty levels. Each dataset is categorized based
+on task-specific properties, specifically, plan length for Blocksworld, number of operands for Countdown, and
+problem level for MATH.
+
+Difficulty
+Trivial (T)
+Easy (E)
+Medium (M)
+Hard (H)
+OOD
+
+Blocksworld Countdown
+MATH
+(Plan Length) (Num. Operands) (Problem Level)
+1
+2
+4
+6
+8
+
+2
+3
+4
+5
+6
+
+1
+2
+3
+4
+5
+
+beyond the training distribution. Trivial tasks are especially simple because the model only needs
+to predict one correct action out of four possible choices to complete the plan. This setup allows
+the LLM to first grasp fundamental planning mechanics, which can then be leveraged to learn more
+complex multi-step tasks.
+Countdown (Gandhi et al., 2024) is a task where the model must reach a target value by combining
+given numbers using basic arithmetic operations. While the original dataset uses four numbers per
+instance, we extend it to create a range of difficulty levels based on the number of input numbers,
+mainly, Trivial (2), Easy (3), Medium (4), Hard (5), and OOD (6). As the number of inputs increases,
+the space of possible operation sequences grows rapidly, making it harder for the model to identify
+the correct combination and order of operations. In contrast, the trivial setting is extremely simple,
+requiring just one operation between two numbers to reach the target, allowing the model to first
+learn basic arithmetic before scaling to more complex multi-step problems.
+MATH (Hendrycks et al., 2021) is a benchmark of 7,500 training and 5,000 test problems covering
+high-school level mathematics, with each problem labeled from Level 1 (easiest) to Level 5 (hardest).
+The dataset covers topics such as algebra, geometry, number theory, and probability, including stepby-step solutions. We create a difficulty-based setup using the existing labels, specifically, Trivial
+(Level 1), Easy (Level 2), Medium (Level 3), Hard (Level 4), and OOD (Level 5). As difficulty
+increases, problems require more complex reasoning, multi-step solutions, and deeper mathematical
+understanding. Trivial problems are typically short and rely on basic techniques, making them ideal
+for teaching foundational reasoning. We use Levels 1 through 4 for training and treat Level 5 as
+out-of-distribution to assess generalization to the most difficult problems.
+We provide the summery of the difficulty splits for each dataset in Table 6.
+
+C.2
+
+DATASETS WITHOUT H UMAN A NNOTATED D IFFICULTIES
+
+GSM8K (Cobbe et al., 2021) is a dataset of high-quality, linguistically diverse grade school math
+word problems designed to evaluate multi-step arithmetic reasoning. Each problem typically requires
+between two and eight steps involving basic arithmetic operations such as addition, subtraction,
+multiplication, and division. To assess performance across varying difficulty levels, we create a 4-way
+split into Trivial, Easy, Medium, and Hard, based on model error rates, as described in Section. 4 and
+illustrated in Figure. 5
+AQuA (Ling et al., 2017b) is a dataset of algebraic word problems with multiple-choice answers
+and detailed rationales, designed to test arithmetic reasoning and symbolic manipulation. For our
+experiments, we randomly sample 5,000 problems for training. Similar to GSM8K, we use model
+error rates to define four difficulty levels, Trivial, Easy, Medium, and Hard (see Figure. 6).
+Since both GSM8K and AQuA lack explicit difficulty annotations, we construct difficulty splits using
+model error rates and do not include an out-of-distribution (OOD) category for these datasets.
+23
+
+Error Rate Distribution by Difficulty Bucket
+
+Number of Questions
+
+500
+
+Trivial
+Easy
+Medium
+Hard
+
+400
+300
+200
+100
+0
+
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+Error Rate
+
+0.8
+
+1.0
+
+Figure 6: AQuA Difficulty distribution based on error rates, grouped into quartiles.
+
+D
+
+M ODEL L ICENSE I NFORMATION
+
+For our experiments, we use LLaMA 3.2 3B Instruct, Qwen 2.5 1.5B Instruct, and Qwen 2.5 3B
+Instruct. Qwen 2.5 1.5B Instruct is released under the Apache 2.0 License, Qwen 2.5 3B Instruct
+under the Qwen Research License, and LLaMA 3.2 3B Instruct under the Meta Community License.
+
+E
+
+I MPLEMENTATION D ETAILS
+
+In this section, we provide implementation details for E2H Reasoner. We begin by describing the
+hardware setup, followed by training parameters, and finally the inference settings used to report the
+final results.
+E.1
+
+H ARDWARE D ETAILS
+
+For our experiments, we use up to three 80GB NVIDIA A100 GPUs, particularly for the 3B parameter
+models. One GPU is dedicated to vLLM for fast inference, while the remaining two are used for
+model training. On average our experiments require anywhere between 16-18 hours for training.
+E.2
+
+T RAINING D ETAILS
+
+We use GRPO as the policy optimization algorithm, combined with parameter-efficient fine-tuning
+using LoRA. All models are trained for up to 1600 GRPO steps, with hyperparameters listed in
+Table 7. For fair comparison, the same configuration is used in our SFT experiments. All training is
+conducted using the TRL library from Hugging Face, averaged across 3 seeds. For the Self-Evolve
+baseline (Chen et al., 2025), we use the same hyper-parameters as reported by authors.
+E.3
+
+I NFERENCE D ETAILS
+
+For inference, we use a temperature of 0.0 in all experiments to ensure deterministic outputs and
+reproducibility. For pass@k evaluations, we enable sampling with a temperature of 0.7, top_p of 0.9,
+and top_k of 50, where top_k controls the number of candidate tokens considered at each decoding
+step.
+
+F
+
+C OMPARISONS WITH SFT
+
+We compare vanilla supervised fine-tuning (SFT) with RL-based post-training methods (see Table 8). The results show that SFT performance varies significantly across tasks. For instance, in
+Blocksworld (Valmeekam et al., 2023), where most problems involve fewer than four blocks, SFT
+performs well—the LLM learns effectively due to the small gap between the training and test distributions. This aligns with prior work suggesting that SFT is most effective when the training data is high
+quality and closely aligned with the downstream task (Muennighoff et al., 2025; Chu et al., 2025). In
+contrast, on tasks like Countdown, where the problem distribution is much broader, SFT performs
+24
+
+Table 7: Training hyperparameters used for GRPO post-training and LoRA adaptation.
+Component Parameter
+
+GRPO
+
+LoRA
+
+Value
+
+learning_rate
+lr_scheduler_type
+per_device_train_batch_size
+gradient_accumulation_steps
+gradient_checkpointing
+max_steps
+bf16
+tf32
+num_generations
+beta
+use_vllm
+vllm_gpu_memory_utilization
+r
+alpha
+dropout
+target_modules
+task_type
+
+1e-6
+cosine
+2
+4
+true
+1600
+true
+true
+8
+0.001
+true
+0.2
+32
+64
+0.1
+q_proj, v_proj
+CAUSAL_LM
+
+Table 8: Comparison of RL-based post-training and supervised fine-tuning (SFT). SFT performance varies
+noticeably across tasks, highlighting its inconsistency in generalizing across domains.
+
+Models
+
+Methods
+
+Blocksworld
+
+Countdown
+
+Trivial Easy Med Hard OOD Trivial Easy Med Hard OOD
+Qwen 2.5 / 1.5B Instruct
+
+Qwen 2.5 / 3B Instruct
+
+LLaMA 3.2 / 3B Instruct
+
+SFT
+GRPO
+
+100.0 97.8 88.1 55.3 16.5
+98.0 100.0 84.5 26.3 5.3
+
+97.4 41.8 14.2 4.6
+96.1 64.9 28.8 18.1
+
+E2H-G
+E2H-C
+
+98.0 100.0 95.3 32.9
+100.0 100.0 15.5 0.0
+
+95.2 84.1 48.1 28.1 14.2
+96.7 64.0 25.9 15.8 6.4
+
+SFT
+GRPO
+
+100.0 100.0 94.0 62.5 27.8
+100.0 100.0 88.1 38.8 14.6
+
+E2H-G
+E2H-C
+
+100.0 100.0 96.4 53.3 23.2 98.5 90.8 71.0 43.5 19.4
+100.0 100.0 94.1 52.0 22.5 100.0 90.4 69.7 35.7 12.6
+
+SFT
+GRPO
+
+100.0 97.8 96.4 72.3 37.8 100.0 66.6 27.2 12.1
+100.0 100.0 94.1 38.9 13.3 99.9 89.5 71.6 47.9
+
+E2H-G
+E2H-C
+
+100.0 100.0 98.8 44.1 17.6 95.0 89.9 73.3 46.5 24.3
+100.0 0.0 0.0 0.0 0.0 100.0 55.3 0.0 0.0 0.0
+
+7.3
+0.0
+
+99.9 63.9 30.8 13.3
+99.6 89.3 73.4 41.7
+
+0.0
+9.2
+
+0.0
+9.4
+
+0.0
+2.7
+
+notably worse than RL-based post-training. This gap is especially clear in the out-of-distribution
+(OOD) setting, where SFT fails to solve any Countdown OOD examples, unlike in Blocksworld,
+where its performance generalizes more successfully. We highlight these two tasks to illustrate
+how SFT performance can vary across distributions, in contrast to the more consistent behavior of
+RL-based post-training methods.
+
+G
+
+A DDITIONAL A NALYSIS AND A BLATIONS
+
+G.1
+
+R ESULTS ON M ORE LLM S
+
+Additional results on more LLMs are reported in this subsection.
+25
+
+Table 9: Results on Qwen-2.5 3B Instruct.
+Blocksworld
+
+Countdown
+
+MATH
+
+Trivial Easy Med Hard OOD Trivial Easy Med Hard OOD Trivial Easy Med Hard OOD
+Qwen 2.5 3B Instruct
+CoT
+GRPO (All)
+GRPO (Hard)
+GRPO (OOD)
+CL
+Self-Evolve
+
+1.0 6.7 7.1 1.0 0.0
+100 100 88.1 38.3 14.6
+50.0 42.2 86.9 72.4 48.3
+0.0 13.3 9.5 0.0 0.0
+100 100 77.3 42.1 20.5
+100 100 88.1 42.5 18.5
+
+E2H-G
+E2H-C
+
+100
+100
+
+24.0
+99.6
+1.6
+0.4
+39.0
+99.6
+
+15.9 4.4 0.5 0.0
+89.3 73.4 41.7 9.4
+49.5 38.7 27.7 12.6
+25.1 21.2 13.8 8.5
+91.0 72.9 38.7 12.5
+91.4 79.8 56.8 29.3
+
+68.0
+90.1
+90.6
+91.3
+90.6
+92.2
+
+55.8 48.8 33.4 20.0
+78.5 71.9 57.4 36.8
+78.4 70.5 58.0 36.0
+78.1 70.0 58.7 36.8
+78.9 72.5 57.2 36.6
+80.8 70.6 58.6 37.1
+
+100 96.4 53.3 23.2 98.5 90.8 81.2 60.7 32.3 90.4 81.0 71.5 58.2 37.2
+100 94.1 52.0 22.5 100 90.4 69.7 35.7 12.6 90.4 80.0 73.4 58.9 38.1
+
+Table 10: Effect of scheduling strategies in LLM post-training. We compare balanced scheduling, traditional
+curriculum learning (CL), and our proposed E2H Reasoner variants, namely, E2H-G and E2H-C. CoT is
+reported as a reference.
+Blocksworld
+
+Countdown
+
+MATH
+
+Trivial Easy Med Hard OOD Trivial Easy Med Hard OOD Trivial Easy Med Hard OOD
+Qwen 2.5 3B Instruct
+CoT
+Balanced
+CL
+
+1.0 6.7 7.1 1.0 0.0
+100.0 100.0 88.1 38.8 14.6
+100.0 100.0 77.3 42.1 20.5
+
+24.0 15.9 4.4 0.5 0.0
+99.6 86.9 57.8 23.6 7.8
+39.0 91.0 72.9 38.7 12.5
+
+68.0 55.8 48.8 33.4 20.0
+90.1 78.5 71.9 57.4 36.8
+90.6 78.9 72.5 57.2 36.6
+
+E2H-G (0.25, 0.75)
+E2H-G (0.5, 0.5)
+E2H-G (0.75, 0.25)
+E2H-C
+
+100.0 100.0 96.4 53.3 23.2 98.5 90.8 71.0 43.5 19.4
+100.0 100.0 89.2 32.9 10.6 99.6 89.3 73.4 41.7 9.4
+100.0 100.0 42.9 3.9 2.0 100.0 87.8 52.3 16.7 6.5
+100.0 100.0 94.1 52.0 22.5 100.0 90.4 69.7 35.7 12.6
+
+CoT
+Balanced
+CL
+
+24.0 0.0 1.2 1.0 0.0
+100.0 100.0 94.1 38.9 13.3
+100.0 0.0 0.0 0.0 0.0
+
+37.1 4.6 0.3 0.0
+99.9 89.5 71.6 47.9
+17.2 36.0 22.7 11.2
+
+0.0
+2.7
+4.1
+
+65.9 44.6 35.2 24.1 13.6
+65.9 47.0 36.0 22.0 10.2
+74.1 54.1 43.9 28.0 12.5
+
+E2H-G (0.25, 0.75)
+E2H-G (0.5, 0.5)
+E2H-G (0.75, 0.25)
+E2H-C
+
+100.0 100.0 98.8 44.1 17.6
+100.0 100.0 88.1 26.3 9.6
+100.0 97.8 75.0 21.1 4.0
+100.0 100.0 15.5 0.0 0.0
+
+95.0 89.9 73.3 46.5 24.3
+94.4 86.7 65.1 27.9 2.3
+98.9 89.4 48.6 0.7 0.0
+96.7 64.0 25.9 15.8 6.4
+
+78.7 58.4 46.4 32.3 14.5
+66.1 45.0 36.2 24.4 11.4
+63.8 48.2 35.6 24.0 8.6
+84.6 69.6 63.0 47.6 28.6
+
+90.4 81.0 71.5 58.2
+91.1 78.2 70.5 56.6
+90.0 79.3 70.6 57.1
+90.4 80.0 73.4 58.9
+
+37.2
+35.0
+35.9
+38.1
+
+LLaMA 3.2 3B Instruct
+
+G.2
+
+R ESULTS ACROSS G AUSSIAN PARAMETERS
+
+In this section, we expand on the results presented in the main paper by reporting all three parameter
+settings of Gaussian scheduling in Table 10. Similarly, for Qwen 2.5 1.5B Instruct we include the
+results for all Gaussian scheduling variants on GSM8K and AQuA in Table 11.
+G.3
+
+C HOICE OF N UMBER OF D IFFICULTY S PLITS
+
+The number of difficulty splits can be treated as a hyperparameter in E2H Reasoner, particularly
+for datasets without human-annotated difficulty labels such as GSM8K (Cobbe et al., 2021) and
+AqUA (Ling et al., 2017a). We set this value to 4, consistent with the range of 3 to 5 used in the
+curriculum learning literature (Bengio et al., 2009). As shown in Table 12, our method remains robust
+across different choices of this parameter.
+G.4
+
+Q UALITATIVE A NALYSIS OF S CHEDULING T ECHNIQUES
+
+We provide a qualitative analysis of scheduling techniques in Table 13, highlighting their respective
+strengths and weaknesses. The results show that different schedulers are suited to different tasks and
+model scales. Inspired by the effectiveness of E2H Reasoner, we hope this motivates the community
+to explore more sophisticated scheduling strategies for LLM post-training.
+26
+
+Table 11: Expanded results for Qwen 2.5 1.5B Instruct showing all E2H-G (Gaussian scheduling) variants on
+GSM8K and AQuA. We provide a comparison against Balanced and E2H-C (Cosine scheduling).
+
+AQuA
+
+GSM8K
+
+Trivial Easy Med Hard Avg Trivial Easy Med Hard Avg
+Balanced
+
+95.8 68.0 48.6 21.0 63.3
+
+99.0 95.3 84.1 49.9 77.1
+
+E2H-C
+E2H-G (0.25, 0.75)
+E2H-G (0.5, 0.5)
+E2H-G (0.75, 0.25)
+
+86.1 72.2 48.6 26.3 62.5
+93.0 70.8 40.2 23.6 61.4
+90.2 81.9 43.0 34.2 66.1
+83.3 79.1 54.5 26.3 64.1
+
+98.0 95.3 83.9 46.6 75.7
+98.5 96.3 83.6 51.2 77.6
+97.6 94.7 89.0 51.8 78.7
+98.0 97.3 85.9 47.7 77.1
+
+Table 12: Results on GSM8K (Cobbe et al., 2021) across different Gaussian parameter splits. The
+main experiments use the 4-split setting; below we show that our method is robust to the number of
+splits.
+Method 3 Splits 4 Splits 5 Splits
+E2H-C
+E2H-G
+
+H
+
+79.1
+78.6
+
+75.7
+78.7
+
+76.1
+78.5
+
+LLM U SAGE
+
+LLMs were used for text-refining purposes only.
+
+I
+
+L IMITATIONS
+
+Despite the strengths of E2H Reasoner, it has certain limitations. Our approach uses simple and
+intuitive probabilistic schedulers, specifically based on Gaussian and cosine functions, which do not
+adapt during training. While these choices are effective, our results suggest that incorporating adaptive
+strategies, such as advantage-based scheduling, could offer further improvements. Comparisons
+with adaptive curriculum methods that aim to maximize learnability reveal an important insight:
+maximizing learnability does not always lead to stronger reasoning. This outcome depends on the
+structure and difficulty of the problems within the dataset. Combining our method with adaptive
+approaches presents a promising direction for future work.
+
+J
+
+S OCIETAL I MPACTS
+
+Our work introduced E2H Reasoner, a curriculum-based reinforcement learning (RL) approach
+designed to enhance the reasoning capabilities of small-scale large language models (LLMs). This
+advancement holds significant societal implications. Enhanced reasoning in LLMs can improve
+decision-making processes in critical domains such as healthcare, education, and legal systems, where
+nuanced understanding is paramount. Moreover, by empowering smaller models, E2H Reasoner
+promotes broader accessibility to advanced AI capabilities. Although our tasks focus on reasoning,
+future extensions involving real-world interaction could pose risks, including potential misuse of
+language models.
+
+27
+
+Table 13: Qualitative comparison of scheduling strategies, outlining their strengths and weaknesses in the
+context of LLM post-training.
+Scheduling Strengths
+
+Weaknesses
+
+Balanced
+
+1. Default in LLM post-training.
+2. Parameter-free and easy to use.
+
+1. Assumes uniform difficulty across the dataset.
+2. Often fails to improve reasoning on hard tasks.
+
+Traditional
+
+1. Simple and parameter-free.
+2. Easy to implement.
+
+1. Can cause overfitting to easy tasks.
+2. May lead to forgetting earlier tasks.
+
+E2H-C
+
+1. Parameter-free and simple to apply.
+1. May overfit to easy tasks when rewards for hard
+2. Suitable for tasks with similar zero-shot
+tasks are sparse.
+performance across difficulty levels.
+
+E2H-G
+
+1. Effective across tasks and models.
+2. Enables fine-grained control.
+
+1. Requires tuning two hyperparameters.
+
+28
+
+

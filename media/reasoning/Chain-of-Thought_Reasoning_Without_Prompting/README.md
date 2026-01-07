@@ -1,5 +1,5 @@
 # Chain-of-Thought Reasoning Without Prompting
-- Paper: [Chain-of-Thought_Reasoning_Without_Prompting.pdf](../../../papers/reasoning/Chain-of-Thought_Reasoning_Without_Prompting.pdf)
+- Paper: [Chain-of-Thought_Reasoning_Without_Prompting.pdf](../../../reinforcement_learning_papers/09_agentic_rl/Chain-of-Thought_Reasoning_Without_Prompting.pdf)
 
 ## Gemini diagrams
 

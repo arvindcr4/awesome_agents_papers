@@ -1,0 +1,1172 @@
+Hierarchical Multi-agent Reinforcement Learning for Cyber
+Network Defense
+Aditya Vikram Singh1 , Ethan Rathbun1 , Emma Graham2 , Lisa Oakley1 ,
+Simona Boboila1 , Peter Chin2 , Alina Oprea1
+
+arXiv:2410.17351v3 [cs.LG] 5 Sep 2025
+
+1
+
+Northeastern University
+2
+Dartmouth College
+
+Abstract
+Recent advances in multi-agent reinforcement learning (MARL) have created opportunities to solve
+complex real-world tasks. Cybersecurity is a notable application area, where defending networks against
+sophisticated adversaries remains a challenging task typically performed by teams of security operators.
+In this work, we explore novel MARL strategies for building autonomous cyber network defenses that
+address challenges such as large policy spaces, partial observability, and stealthy, deceptive adversarial
+strategies. To facilitate efficient and generalized learning, we propose a hierarchical Proximal Policy
+Optimization (PPO) architecture that decomposes the cyber defense task into specific sub-tasks like network investigation and host recovery. Our approach involves training sub-policies for each sub-task using
+PPO enhanced with cybersecurity domain expertise. These sub-policies are then leveraged by a master
+defense policy that coordinates their selection to solve complex network defense tasks. Furthermore, the
+sub-policies can be fine-tuned and transferred with minimal cost to defend against shifts in adversarial
+behavior or changes in network settings. We conduct extensive experiments using CybORG Cage 4,
+the state-of-the-art MARL environment for cyber defense. Comparisons with multiple baselines across
+different adversaries show that our hierarchical learning approach achieves top performance in terms of
+convergence speed, episodic return, and several interpretable metrics relevant to cybersecurity, including
+the fraction of clean machines on the network, precision, and false positives.
+
+1
+
+Introduction
+
+Cyber defense is critical in both private and public network infrastructures, which are frequently targeted
+by increasingly sophisticated external attackers with malicious intentions. In 2024, the number of security
+breaches has surpassed 10,000 and attackers constantly adapt their tools and strategies to evade existing
+defenses [1]. The implications for national security are significant, as security breaches often lead to theft
+of intellectual property, compromise of sensitive information, and disruption of critical infrastructures. Currently, organizations employ teams of security professionals who constantly oversee the security of their
+networks and design the overall security strategy using their domain expertise. While a range of machine
+learning (ML) tools are available for detecting specific classes of attacks [2, 3, 4, 5, 6, 7], the advancement
+of deep reinforcement learning (DRL) presents an opportunity to automate the cyber defense strategy and
+reduce the burden on security operators.
+Towards this goal, the technical cooperation program (TTCP), a collaborative working group including
+UK, USA, Canada, Australia and New Zealand, developed a series of CAGE challenges for advancing cyber
+defense [8]. These challenges leverage the Cyber Operations Research Gym (CybORG), a simulated environment that can be used for creating realistic interactions (or games) between attackers and defenders on
+realistic network topologies. These environments task defenders (blue agents) with monitoring and restoring
+compromised machines on a simulated enterprise network, to prevent external adversaries (red agents) from
+1
+
+accessing critical assets. The first CAGE challenges model a cyber game between a single blue agent and a
+single red agent, leading to the development of DRL techniques for training a blue agent interacting against
+a red agent [9, 10, 11]. The most recent CAGE 4 challenge [12] models a team of multiple blue agents
+defending a distributed network, playing against multiple red agents compromising the network. Existing
+techniques for single defensive agents are either computationally expensive (by training a different agent for
+each red agent [9, 10]), do not generalize to new attackers, or require extensive, causal pre-processing which
+is intractable as the network size scales [11]. Thus, they cannot be immediately applied to the multi-agent
+CAGE 4 environment, which requires new methods. Additional challenges for training multi-agent defenders
+in this environment include large policy spaces, partial observability of the network, shared rewards among
+all blue agents, and playing against stealthy, deceptive adversarial strategies.
+In this paper, we propose the first scalable multi-agent reinforcement learning (MARL) technique for
+automating defense in cyber security environments such as CAGE 4. We formulate the problem as a decentralized, partially-observable Markov decision process (Dec-POMDP) [13] and propose two hierarchical
+strategies, H-MARL Expert and H-MARL Meta, each with their own advantages. Both methods decompose the complex cyber defense task into smaller sub-tasks, and train sub-policies for each sub-task using
+PPO enhanced with domain expertise. The difference between the methods is in the design of the master
+policy that coordinates the selection of the sub-policies at each time step. H-MARL Expert utilizes security
+domain expertise to define a top master policy based on well-established practices for cyber defense, and
+performs best in most of our experiments. However, there are situations when it is difficult to define a
+deterministic Expert policy. To address this issue, we propose H-MARL Meta, that trains the master policy,
+and, thus, has the advantage of generalizing to new, unseen adversarial behavior. Another insight in our
+design is that extended observation spaces including security indicators, such as presence of malicious files
+and malicious processes on a host, are beneficial in increasing the blue agent’s ability to defend the network.
+We evaluate our methods against multiple baselines at different stages of the design process to motivate
+our methodology and design decisions. We further propose multiple relevant and interpretable metrics for
+cyber defense, including ratio of uninfected hosts, false/true positive rates on host recovery, and number of
+adversarial impacts on hosts. Across these metrics our proposed hierarchical techniques display significant
+improvements over traditional MARL approaches.
+To summarize, our contributions are: (1) scalable hierarchical multi-agent reinforcement learning methods for cyber defense; (2) a design guided by domain expertise to enhance the agents’ observation space and
+decompose the complex cyber defense task into multiple sub-tasks; (3) evaluation in CybORG CAGE 4, a
+realistic cyber environment with partial observability and deceptive, stealthy adversaries; (4) empirical transferability of trained sub-policies after fine-tuning to new adversarial agents, and (5) multiple interpretable
+metrics for providing insights to security operators. The source code is available on GitHub 1 .
+
+2
+
+Related Work and Background
+
+Traditional cyber defenses, such as anti-virus and network intrusion detection tools, leverage specific detection
+rules for thwarting existing attacks, but they are relatively easy to evade. To address their limitations,
+organizations employ security operators who perform “threat hunting” to detect novel attacks on their
+networks. A variety of machine learning (ML) tools are available for threat detection [4, 2, 5, 3, 6, 7], but
+the overall defensive strategy in most organizations is still manually designed. The advancement of DRL
+and MARL provides an opportunity to automate cyber defense strategies and improve the security of cyber
+infrastructures.
+The CAGE-4 challenge [12] is a recent security environment aimed at encouraging research in autonomous
+cyber defense. It provides a cyber simulation of attacker and defender actions in realistic network topologies.
+CAGE-4 is a partially observable environment with multiple, decentralized blue agents defending the network
+by playing against a team of red agents performing various attacks over time. It can be modeled as a decentralized, partially observable Markov decision process (Dec-POMDP). Dec-POMDPs [13] are a special class
+1 https://github.com/adityavs14/Hierarchical-MARL
+
+2
+
+of MDP where multiple, independent and decentralized agents with incomplete observations interact to optimize a shared reward signal. Formally, a Dec-POMDPs is defined as the tuple M = (I, S, A, T , Ω, O, R, bo ),
+where I = {1 · · · n} is the set of n agents, S is a finite set of states, A = ×i∈I Ai is the set of joint actions
+composed of individual actions Ai for each agent i, T is the state transition function, Ω = ×i∈I Ωi is the set
+of joint observations, O : S × A → Ω is the joint observation function, and b0 is a distribution over initial
+states.
+Several methods have been developed for solving general Dec-POMDPs, including multi-agent PPO
+(MAPPO) [14, 15], Q-MIX [16], independent PPO (IPPO) [17], or decision trees. However, these methods
+are often uninterpretable and struggle to converge in settings with large joint action spaces. These approaches
+have usually been applied to simpler 2-player environments [9, 10, 11, 18]. Prior works in the more complex
+CAGE-4 environment explore defenses based on heuristics [19] or on traditional PPO algorithms [20]. In
+contrast, we implement an observation-enhanced hierarchical learning method that is more adaptive than
+previous heuristic approaches, and more scalable than single-policy PPO architectures.
+Hierarchical and meta-learning methods in reinforcement learning have led to adaptations of hierarchical
+MARL for different domains, such as multi-robot teamwork tasks [21, 22, 23] and complex navigation [24].
+To the best of our knowledge, our work is the first to study the design and capabilities of hierarchical MARL
+approaches in the cyber defense domain.
+
+3
+
+Problem Statement
+
+In cyber security, red teams act as attackers who attempt to exploit network vulnerabilities and carry out
+malicious activities aimed at compromising the system. Blue teams are tasked with defending against red
+team opponents to secure the networks, while maintaining network operations. In this work, we focus on the
+CybORG CAGE 4 cybersecurity MARL framework [12], which is a realistic environment that models cyber
+defense. We discuss several aspects of the environment below. For additional details, please see Section 1 in
+the supplemental materials, and the CAGE 4 description [12].
+Network topology. Cyber networks are often segmented into operational enterprise networks that encompass multiple security zones depending on the proximity to critical resources. This setup leads to a
+multi-agent competitive environment, where each defender agent is protecting its own security zone(s), with
+the overarching team goal of defending the entire network. The CAGE 4 network consists of seven security
+zones (subnets), assigned to five blue agents. To increase robustness of defenses, the number of hosts in each
+zone and their services are randomized, with each zone having between 4-16 servers and user machines (or
+hosts). An additional network (Contractor) is completely undefended, so that the red team always maintains
+a presence in the network.
+Threat Model. The two teams are represented by multi-agent systems: defender (the blue team) and
+attacker (the red team). Defender and attacker have competing goals, while the agents on each team
+collaborate to achieve their goals. The attacker’s goal is to maximize its reward by degrading services
+available to users, represented by green agents, and compromising the critical Operational Technology (OT)
+service. The defender’s goals are two-fold: maintain the security of the cyber network by reducing the
+adversarial presence, and minimize the operational impact on users. We face a strong adversary, whose
+capabilities include stealth, phishing, propagating through the network, and the ability to discover blue
+agents’ deception. Red agents maintain persistent presence on the Contractor network, which is the starting
+point of the attack and cannot be defended with blue actions. Red agents scan machines for vulnerable
+services to exploit and propagate through the network. CAGE 4 implements both an aggressive service
+discovery action, which is faster (1 time step), but has a high chance (0.75) of raising alerts, and a stealthy
+service discovery action, which is slower (3 time steps), but less likely (0.25) to raise alerts. In addition to
+moving laterally through the network by exploiting remote services, red agents can also spawn with a given
+probability when a green user opens a phishing email or accesses a compromised service. Furthermore, red
+agents can use the discover deception action to determine if the blue team has installed decoy services on
+a specific host, and avoid to infect that host to maintain stealth. CAGE 4 implements a default deceptive
+3
+
+Table 1: Challenges of a realistic RL model for cybersecurity, with concrete examples from the CybORG
+environment.
+Partially-observable
+
+Memoryless
+Duration of actions
+Large policy space
+Shared reward
+
+Stealth
+Deception
+Ease of spreading
+Strong foothold
+
+Environment
+Blue agents receive incomplete information from the environment. Lacking access to the true state, agents monitor and analyse hosts to discover compromised
+hosts. Monitoring is noisy, affected by false positives and false negatives (depending on detection rate).
+Once reported, alerts are not maintained.
+Actions take between one time step and 5 time steps in the environment.
+Blue agents defend between 1 and 3 subnets, of up to 16 hosts each. This maps
+to an 92-242 action space, and an 82-210 observation space.
+Blue agents are rewarded collectively, as a team, for defending the network.
+However, they only receive local observations.
+Adversary
+Low chance (0.25) of raising alerts via the Stealthy Service Discovery action.
+Ability to withdraw from a security zone after impact.
+Can detect and avoid decoy services.
+Appears via phishing emails, in addition to moving laterally through the network.
+Can not be removed from the Contractor subnet, which is undefended. The red
+team scores about 60 points on average in this subnet.
+
+red agent, called FiniteStateRedAgent, but we also create our own red agents with more aggressive service
+discovery and even stealthier presence on the network to measure the generality of our defense.
+Defensive actions. The blue team monitors the network for suspicious events, and detects and responds to
+attacks through the following actions: analyze a host looking for malware information; start a decoy service
+on a host (blue team is alerted when a red agent attempts to compromise the decoy service); block traffic
+to and from a specified security zone (at the expense of disrupting the work of green agents); allow traffic
+to and from a specified security zone; remove malicious processes from a host; restore the host to an earlier
+secure state (temporarily making its services unavailable).
+Rewards. The reward scheme models a general-sum game where blue agents incur penalties when green
+agents are impacted due to degraded services becoming inaccessible. In addition, blue agents are penalized
+when red agents impact the critical OT security service, or when they use a costly action like Restore machine.
+The specific reward values depend on the mission phase and are specified on the challenge page [12]. Three
+mission phases are carried out throughout each episode, to reflect the changing criticality of security zones on
+current operations. Note that the reward includes the penalties incurred inside the contractor subnet, which
+cannot be defended. This additional reward should not affect the training process. For a fair comparison,
+the contractor reward is present in all the methods studied in this paper, including the baselines.
+Challenges. A series of features, described in Table 1, make the CybORG environment particularly realistic
+and challenging for training multi-agent blue defenders. The environment provides partial observability of
+red presence, as blue agents need to run monitor and analyse actions to discover compromised hosts, and
+these actions incur false positives and false negatives. The policy space is large, including a set of actions
+for each host on the network, and the observation space is memoryless. In addition, actions have variable
+duration, and all blue agents share a common reward, even though each of them protects a different part of
+the network.
+
+4
+
+4
+
+H-MARL Methodology
+
+For complex real-world tasks, action spaces can grow intractably large as the problem scales, making task
+learning difficult for many standard reinforcement learning (RL) approaches [25]. These issues are compounded by the introduction of high-dimensional, noisy state spaces. Many hierarchical RL methods aim to
+solve these problems by breaking large action spaces down into smaller sub-tasks. However, learning these
+partitions online remains a challenging problem [26]. Therefore, in this section, we introduce our hierarchical
+framework showing how domain expertise can be leveraged to solve issues of intractability in both the state
+and action spaces.
+observation
+
+Master Policy
+
+obs_subvector_1
+
+Subpolicy_1
+
+obs_subvector_2
+
+Subpolicy_2
+
+obs_subvector_n
+
+Subpolicy_n
+
+master
+action
+
+action
+
+Choose
+subpolicy
+
+action
+
+Figure 1: Hierarchical MARL. Upon receiving an observation, the master policy first chooses a sub-policy,
+which selects the final primitive action.
+An overview of the hierarchical design is shown in Figure 1. The action space A is split into n smaller
+subsets, or classes, chosen using domain expertise. For example, the “recover” class refers to all primitive
+actions for removing processes and restoring machines on the network. Thus, each sub-policy handles one
+class of primitive actions that will be executed in the network. We define the action space of the master policy
+as a new set Am comprised of meta-actions, where each meta-action corresponds to a different sub-policy.
+The master policy chooses a meta-action, and the associated sub-policy then samples a primitive action from
+its subset. In cyber domains, the agent must choose the machine to investigate or restore potentially from a
+list of thousands. In our design, these additional details, such as what machine to restore, will be abstracted
+away, under a single meta-action, significantly reducing the action space.
+Under this formulation we first establish a master policy πm whose objective is to choose some metaaction Ac ∈ Am given observation ot at time step t. We then assign each meta-action Ac to a corresponding
+sub-policy ψc whose goal is to choose the primitive action at ∈ Ac given some input history ht at time step t.
+This primitive action at is the final action executed in the environment. Under this design the master policy
+must learn the best policy πm : H → Am over meta-actions, while each sub-policy ψc : H → Ac must learn
+the best policy over all actions in their respective meta-action class. Here H represents the set of possible
+observation histories. This reduces the larger, more complex task posed by the base Dec-POMDP into a
+much manageable set of sub-tasks.
+We enhance each sub-policy’s respective observations with transformation functions fc : O → Oc for
+sub-policy observation spaces Oc . In practice, these transformations are applied to observation histories.
+The transformation function reduces the observation space of each sub-policy by keeping only information
+relevant to their respective class of actions. For example, the sub-policy responsible for restoring machines
+only needs to know about the hosts that present clear indicators of compromise, rather than about all the
+alerts in the system.
+
+5
+
+Algorithm 1 Sub-policy training (H-MARL Expert)
+
+Algorithm 2 Master policy training (H-MARL
+Meta)
+
+Input Dec-POMDP M, Expert policy πE , Transformations
+{fc }k
+c=1
+k
+Initialize Sub-Policies {ψc }k
+c=1 , Replay Memories {Dc }c=1 ,
+Transformations {fc }k
+,
+Episode
+Length
+T
+,
+Iterations
+N
+c=1
+1: for i ← 1, N do
+2:
+Sample initial observation o0 ∼ M
+3:
+for t ← 1, T do
+4:
+Update history ht given observation ot−1
+5:
+Sample c ← πE (ht ) from expert policy
+6:
+Sample ot , rt ∼ M given action at ∼ ψc (fc (ht ))
+7:
+Store (ht , at , rt ) in Dc
+8:
+for j ← 1, k do
+9:
+Update ψj given Dj using PPO
+
+4.1
+
+Input Dec-POMDP M, Sub-Policies {ψc }sp
+c=1 , Transformations
+{fc }k
+c=1
+Initialize Master Policy πm , Replay Memory Dm , Episode
+Length T , Iterations N
+1: for i ← 1, N do
+2:
+Sample initial observation o0 ∼ M
+3:
+for t ← 1, T do
+4:
+Update history ht given observation ot−1
+5:
+Sample ct ← πm (ht ) from master policy
+6:
+Sample ot , rt ∼ M given action at ∼ ψct (fc (ht ))
+7:
+Store (ht , ct , rt ) in Dm
+8:
+Update πm given Dm using PPO
+
+Hierarchical MARL Design
+
+We now propose our methods H-MARL Expert and H-MARL Meta, which are designed to overcome a
+multitude of challenges induced by multi-agent training, such as environment and training instability. In
+particular, there are three key inter-dependencies that make learning in this setting difficult: (i) interdependence between each agent under a shared reward signal, (ii) between master and sub-policy performance,
+and (iii) between sub-policies under shared episodic returns.
+The first interdependence results in agents receiving rewards that are not related to actions they have
+taken. This is particularly challenging in our cyber defense setting as each agent interacts with disjoint
+sub-networks, but receives a shared reward considering the state of the whole network. This leads us to use
+IPPO [17] as the foundation of our approach, where each agent has a separate critic which only receives
+observations corresponding to their respective sub-network. Each agent is then trained in parallel along with
+its respective critic. This setup prevents the critics from being biased by occurrences outside their respective
+agent’s sub-network, resulting in greater stability and less bias in each agent. Secondly, the performance
+of the master policy depends on the performance of each sub-policy – poorly trained sub-policies can make
+otherwise optimal meta-actions sub-optimal – resulting in a biased master policy. To overcome this, we utilize
+a two-phase training approach seen in Algorithm 1 and Algorithm 2. For both algorithms, the training is
+guided by the reward signal received from the environment (see Section 3).
+Algorithm 1: Sub-policy training (H-MARL Expert). Our first method, H-MARL Expert, uses
+an expert master policy πE defined by domain expertise and only trains sub-policies for each agent, using
+Algorithm 1. The H-MARL Expert Pipeline is presented in Figure S-2 from the Supplemental Materials.
+At the start of each episode, we receive an initial observation from M and use it to initialize our history ht .
+At each time step, πE then uses ht to choose the best meta-action Ac . Next, the sub-policy ψc (corresponding
+to meta-action Ac ) chooses a primitive action at given its transformed history fc (ht ). This action is used
+to sample the next observation and reward from M which is stored in the replay memory Dc of ψc . Each
+policy is then updated with PPO on its respective replay memory Dc . This design allows the sub-policies
+to address only their related tasks and train to near-optimal while avoiding instability caused by a trained
+master policy. Additionally, this allows us to solve our third form of interdependence, as the deterministic,
+static expert policy πE allows for stability in the training of each sub-policy.
+H-MARL Expert in cybersecurity. Figure 2 illustrates the Expert master policy πE for partitioning
+the sub-tasks in CybORG CAGE-4. We identify three types of sub-tasks: investigate host, recover host, and
+control traffic between zones. The state-level abstraction used to partition the tasks refers to the presence
+of indicators of compromise (IOCs) within an agent’s security zone(s). This partitioning is defined via
+Expert Rules, including: (1) If IOCs (malicious files) are detected on a host, the agent will choose the
+Recover subpolicy, which selects either to remove the malware or to restore the machine to a clean state;
+(2) If network IOCs are detected, then the Control Traffic subpolicy is chosen; (3) Otherwise, the agent will
+
+6
+
+Master
+Policy
+
+No IOCs
+
+Host
+IOCs
+
+Recover
+Subpolicy
+
+Investigate
+Subpolicy
+Actions
+
+Observation
+
+Actions
+
+Observation
+
+• Analyse host • suspicious events
+• Deploy decoy • host IOCs
+
+• Remove procs. • host IOCs
+• Restore host
+
+Network
+IOCs
+Control Traffic
+Subpolicy
+Observation
+Actions
+Observation:
+• Block traffic • subnet info
+• Allow traffic • network IOCs
+
+Figure 2: H-MARL in cybersecurity. The Expert Master Policy knows this IOC-based partitioning, while
+the Meta Master Policy is learning it using frozen subpolicies.
+Investigate.
+Algorithm 2: Master policy training (H-MARL Meta). Algorithm 2 provides the second phase of
+training for the master policy. Here sub-policies {ψ}k1 trained with Algorithm 1 are kept frozen and just used
+to generate primitive actions. The H-MARL Meta Pipeline is presented in Figure S-3 from the Supplemental
+Materials.
+We define a master policy πm called H-MARL Meta whose action space size is the number of sub-policies
+k. Similar to before, at each time step we sample an action ct ∼ πm (ht ) given updated history ht . The
+sub-policy ψct is invoked to sample action at to take a step in M given transformed history fc (ht ). The
+current history ht , action ct and reward from M given action at are then stored in the replay memory Dm .
+Finally, the master policy πm is updated with PPO given trajectories stored in Dm .
+
+4.2
+
+Observation Space Design
+
+This section presents our enhancements to the observation space of blue agents and evaluate their ability to
+facilitate learning of a better defense strategy. In cybersecurity environments, the state holds a lot of data,
+such as information on system configuration, processes, active sessions, etc. The observation is presented to
+the agent as a data structure with various fields, which may vary depending on the output of the action.
+This observation structure needs to be filtered and converted to a consistent vector representation to enable
+the use of deep reinforcement learning techniques.
+subnet info
+mission subnet_count x 3
+(0, 1, or 2) values in {0,1}
+
+suspicious
+processes
+
+suspicious
+connections
+
+IOCs
+detected
+
+host_count
+values in {0,1}
+
+host_count
+values in {0,1}
+
+host_count
+values in {0,1, 2, 3}
+based on attack stage
+
+Figure 3: Observation space components. The basic CybORG observation is enhanced with IOCs.
+The basic observation vector of CybORG blue agents consists of the first four components from Figure 3.
+The first bit represents the current mission phase. It is followed by a one-hot encoded vector with subnetrelated information: what subnet(s) is the agent protecting, whether the traffic to/from other subnets is
+blocked, and which interfaces should be blocked based on the current mission phase restrictions. Next,
+the observation vector contains information on alerts detected with the Monitor action, using a 1/0 binary
+encoding to denote whether suspicious processes or connection events occurred on a host.
+Enhancing observation with memory. Given that a single defense action can be taken per round, blue
+agents need a persistence mechanism to store alerts that have not been addressed yet. In CybORG, the
+Monitor action runs automatically at the end of each step but only reports new events that have been raised
+
+7
+
+on the current step. This requires us to maintain an updated observation history ht that keeps track of past
+events. Therefore, we add new events to the agent’s history ht at each time step given a new observation ot ,
+and only remove these events from ht when they have been handled by a respective recover action.
+Enhancing observation with IOCs. Indicators of compromise (IOCs) [27] are signs or evidence of a
+cyber threat being present in the network. IOCs are generally classified in three categories: atomic (IP
+addresses, malware names, registry keys, process names, URLs, etc.), computed (hash of a malicious file),
+and behavioral [28]. MITRE ATT&CK (Adversarial Tactics, Techniques, and Common Knowledge) [29] is
+a comprehensive database of adversarial behaviors observed in real-world attacks.
+One of our main insights for automating cyber defense is to extend the observation vector with IOCrelated information per host, as illustrated in Figure 3. We use two types of atomic IOCs: malicious file
+names that are placed on the victim machine and the IP address of the compromised host that issues service
+requests to a decoy service. We also capture adversarial behaviors by prioritizing IOCs based on the attack
+phase. A value of zero in the observation vector denotes that no IOC has been detected on the corresponding
+host. The other values differentiate between attack phases: priority 1 for IOCs detected during privilege
+escalation attempts, such as malicious files with root access; priority 2 for IOCs due to attacker’s exploit
+actions (namely malicious files with user-level access); and priority 3 for IOCs due to the attacker’s scanning
+activity (decoy accesses).
+Observation space evaluation. Figure 4 shows the contribution of each of our enhancements to the
+observation space design for a blue agent trained with a decentralized actor-critic PPO architecture, using
+the same hyper-parameters from Section 5. Compared to the basic CybORG observation, keeping track
+of history on suspicious events offers a small performance boost (12% increase in reward). The biggest
+gain, however, comes from incorporating indicators of compromise related to malicious files (an additional
+increase in reward of 42%). These files are detected when blue agents perform Analyse actions on hosts in
+their assigned subnet. Access to decoys, another clear indicator of adversarial behavior, further improves
+the defense strategy of the blue team by 11%. Note that the H-MARL architecture can not be applied on
+the basic CybORG observation space. This is because task partitioning in H-MARL is based on indicators
+of compromise, which are not tracked in the original CybORG. In the rest of the paper, we consider the
+enhanced observation space with history, IOCs, and decoys for training all agents.
+
+Figure 4: Blue team reward for different observation space designs. We incrementally add each of our
+enhancements to the observation space, to show their individual contribution. Incorporating history and
+IOCs provides a high performance boost. (MARL Decentralized training)
+
+8
+
+5
+
+Experimental Evaluation
+
+We now evaluate our proposed hierarchical MARL architecture in the CybORG CAGE 4 environment against
+different baselines, aiming to answer the following research questions: (i) How effective is our H-MARL approach in protecting the network compared to other methods, against different adversaries (Sections 5.1
+and 5.2)? (ii) Is it feasible to transfer previously trained sub-policies to learn new defense strategies (Section 5.3)? (iii) Can we provide some interpretable insights to security operators related to the performance
+of our defenses (Section 5.5)?
+Training configuration. Our experiments use the state-of-the-art actor-critic PPO algorithm [15]. The
+actor and critic are represented by two feedforward neural networks with two hidden layers and 256 neurons
+per layer. The training hyper-parameters have been tuned to the following values: a learning rate of 5×10−5 ,
+a discount factor of 0.99, and a train buffer size of 1 million samples. The SGD algorithm uses the Generalized
+Advantage Estimation (GAE) function, a mini-batch size of 32,768 within each epoch, with 30 SGD iterations
+in each outer loop. Evaluation results are averaged across 100 randomized episodes, where each episode is
+500 time steps long, and are accompanied by standard deviation information. The network topology in the
+CybORG environment is randomized and the models are trained on topologies with varying configurations,
+which ensures that they generalize to different network environments. The size of the network at initialization
+is randomly chosen between 32 and 128 hosts across 8 subnets, and up to 10 services are selected randomly
+to be placed on each host. All our models have been trained on 30 versions of the network, with separate
+workers collecting the experiences in their own network.
+Duration of actions. For increased realism, actions take more than one step to execute. Some of the longer
+actions are Exploit Remote Services (4 steps) and Restore host (5 steps). In our implementation, while an
+action is in progress in the environment, we associate the “in-progress” state with a special observation and
+mask out other actions except sleep to guide PPO training.
+
+5.1
+
+H-MARL Performance
+
+MARL Baselines. We compare the hierarchical architecture with two single-policy MARL paradigms [30]:
+Decentralized Training Decentralized Execution (DTDE), and Centralized Training Decentralized Execution
+(CTDE). The DTDE baseline uses an actor-critic architecture that learns a decentralized policy and critic
+for each of the agents locally (MARL Decentralized ). The CTDE baseline uses the centralized critic approach
+presented in MAPPO [14]. Since each learning blue agent is required to guide its strategy based on the joint
+team reward, we augment the critic with state and actions of all blue agents on the team, while the actor
+only has access to local observations. Note that our MARL Centralized Critic baseline uses the global state
+instead of incomplete agent observations to compute the joint value function. This is a reasonable assumption
+during training, in an effort to provide an unbiased and up-to-date critic for a strong baseline [30].
+H-MARL Methods. We evaluate two hierarchical methods, H-MARL Expert and H-MARL Meta. HMARL Expert implements Algorithm 1, where the master policy is replaced with a rule informed by domain
+knowledge: If IOCs are detected, Recover; otherwise, Investigate. The goal is to recover right away to
+minimize the attacker’s damage. H-MARL Meta implements Algorithms 1 and 2, following a curriculum
+style approach [31]: the Recover and Investigate sub-policies pre-trained until convergence, are maintained
+fixed while training the master policy. H-MARL Collective is an additional baseline that attempts to learn
+both the master and sub-policies from scratch, simultaneously. All the hierarchical variants use IPPO, in
+the decentralized actor-critic framework.
+The training process for the blue agents is presented in Figure 5. The H-MARL Collective method
+performs the worst, in line with previous work [24] that also observed the sub-optimal performance of
+updating both sub-policies and the master policy at the same time. Both single-policy methods MARL
+Decentralized and MARL Centralized Critic converge to a high reward, with a clear advantage for the
+shared critic method that estimates the return based on joint information.
+As expected, the H-MARL Expert performs best (−129.53 reward), given that recovery actions are carried
+
+9
+
+Figure 5: Average training return for all algorithms. H-MARL Expert is guided by a rule-based master
+policy and performs best. H-MARL Meta converges 3 − 5× faster than MARL Decentralized.
+Table 2: Mean evaluation reward against different adversaries, under different learning frameworks.
+Opponent
+MARL Decentralized
+MARL Centralized Critic
+H-MARL Collective
+H-MARL Expert
+H-MARL Meta
+H-MARL Meta with fine-tuning
+
+Default Red
+−179.8 ± 92.98
+−245.66 ± 132.98
+−237.61 ± 102.6
+−129.53 ± 44.60
+−181.62 ± 65.85
+−186.24 ± 81.28
+
+Stealthy Red
+−165.8 ± 53.45
+−217.52 ± 115.06
+−204.18 ± 83.24
+−99.54 ± 38.28
+−184.76 ± 91.40
+−162.51 ± 57.97
+
+Aggressive Red
+−227.93 ± 87.98
+−255.98 ± 138.70
+−282.5 ± 120.50
+−118.16 ± 37.74
+−207.66 ± 86.48 &
+n/a
+
+Impact Red
+−247.15 ± 71.53
+−332.96 ± 108.13
+−350.21 ± 115.25
+−173.17 ± 64.04
+−278.78 ± 97.76
+−264.96 ± 81.53
+
+out promptly, before the attack amplifies. H-MARL Meta reaches a similar reward to MARL Decentralized
+(−181.62). However, training a master policy is significantly faster than training a single policy from scratch
+(about 3-5 times faster), as we are only tasked with choosing the correct sub-policy, rather than also learning
+the primitive sub-tasks, i.e., how to recover or investigate hosts. H-MARL Meta invokes the fixed sub-policies
+that have been pre-trained with H-MARL Expert to take a step though the environment. The ability to
+learn how to combine sub-tasks to solve higher-level tasks effectively with H-MARL Meta is particularly
+important in situations where defining an expert policy is difficult. We discuss such a scenario in Section 5.4.
+
+5.2
+
+Evaluation against different adversaries
+
+We evaluated so far the performance of blue agents against the default red agent in CAGE 4, but we are
+interested in how the policy generalizes against other red attacks. We simulate red agent attackers that
+vary in their ability to circumvent the defense by employing more aggressive scanning, stealthier behavior,
+or a stronger focus on impacting critical services. In the CybORG environment, red agents use finite state
+machine transitions to determine what actions to take for each known host. For a detailed description of the
+default finite state red agent and the transition matrix please see [32].
+We consider four different finite state adversaries: (1) Default Red – equal choice between the two available
+service discovery actions (stealthy and aggressive), and equal split between the two attack objectives (Impact
+and Degrade Service); (2) Aggressive Red – always performs aggressive service discovery, a short duration
+action (1 time step) that has a high chance of being detected by blue agents (0.75); (3) Stealthy Red –
+stealthy service discovery, characterized by low detection rate (0.25) and long duration (3 time steps); (4)
+Impact Red – fully committed to impacting the critical OT service, without attempting to degrade other
+services.
+The evaluation results against these four different adversaries are presented in Table 2. Impact Red is
+
+10
+
+the strongest attacker collecting the highest reward against the blue team, in this zero-sum cyber game.
+Successful impact actions receive the highest reward of -10 during the second and third mission phases, more
+than any other network compromise. For comparison, users’ failed access to degraded services only costs the
+blue team between -1 and -3. Aggressive Red is the second strongest opponent: the higher chance of being
+detected by blue agents is offset by the short duration of service discovery actions (1 time step), which enable
+this attacker to carry out more frequent attempts. Conversely, and somewhat non-intuitively, Stealthy Red
+poses less of a threat to blue agents due to the longer duration spent in covert scanning, before attempting
+to exploit.
+H-MARL Expert is the best strategy against all four red agents and H-MARL Meta attains similar
+reward to the single policy baseline method (MARL Decentralized), but training converges significantly
+faster, as shown in the previous section. We confirm that H-MARL Meta performs better than H-MARL
+Collective across all adversaries. Interestingly, it is also more effective than the MARL Centralized Critic
+method. Even though the centralized critic was trained jointly, using the global state, it is unable to utilize
+the shared information effectively on the individual actors during evaluation. This limitation of centralized
+critic policies has been previously investigated in the literature [30].
+
+5.3
+
+H-MARL Transferability
+
+In this section, we explore the possibility of knowledge transfer [33, 34, 35, 36] – given a defense strategy that
+has already been trained, can we use it to accelerate the learning of a new defense that protects against a
+different adversary? The adversaries in this study are stationary randomized agents, which consistently apply
+the same probabilistic rules to make decisions. We leave as future work the study of H-MARL transferability
+to evolving adversaries that adapt their policies based on opponent behavior or environment feedback. We
+adapt the pre-trained sub-policy models to new attacks via fine-tuning, a well-established powerful transfer
+method for deep models [35, 37] that is significantly less costly than training from scratch. In our current
+design, we only fine-tune the sub-policies for a few iterations. Next, we fully train a new master policy, using
+the tuned sub-policies.
+
+Figure 6: The Investigate sub-policy pre-trained against Aggressive Red is fine-tuned separately against
+other red agents, performing similarly to training from scratch.
+Figure 6 presents the fine-tuning results of the Investigate sub-policy, pre-trained against Aggressive Red,
+the average-performing attacker. A short fine-tuning is enough to adapt to a new adversary, resulting in
+learning curves similar to those obtained when training from scratch. The fine-tuning results for the Recover
+sub-policy are included in Section S-5 the Supplemental Material. We note that Investigate learns different
+strategies for each adversary (due to different patterns of suspicious events), while Recover is relatively
+agnostic to the attack (due to working on clear indicators of compromise) and can be directly reused against
+
+11
+
+other red agents.
+Last row in Table 2 shows the evaluation results of the master policy that was trained with the fine-tuned
+sub-policy models. In this case, the master policy performs comparably to (and sometimes even better than)
+H-MARL Meta that uses sub-policies trained from scratch. For instance, against the Stealthy Red agent,
+the fine-tuned H-MARL Meta policy attains an average reward of −162.51, compared to an average −184.76
+reward when training from scratch. Our empirical results are supported by previous research, which has
+shown that pre-trained deep learning models have been proven to generalize better than randomly initialized
+ones [38, 37].
+
+5.4
+
+What method to use: Expert or Meta?
+
+In our previous experiments, we have seen that H-MARL Expert performs best, as it is guided by a deterministic master policy generated from domain knowledge, specifically: If host IOCs are present, invoke the
+Recover sub-policy; otherwise Investigate. To show that such expert rules do not generalize in all situations,
+we consider a scenario with a third sub-policy, Control Traffic, in which a defender may choose to block
+traffic between subnets.
+However, block actions incur penalties for preventing the remote activity of green users, rendering a
+deterministic blocking rule unfavorable. We instead experimented with a probabilistic master policy: If
+host IOCs are present, invoke the Recover sub-policy; otherwise split 75%-25% between Investigate and
+Control Traffic. With this probabilistic rule, the H-MARL Expert method becomes unstable, while H-MARL
+Meta performs better and converges quickly to a stable performance (see Figure 7). This demonstrates the
+importance of learning the master policy and is discussed in more detail in Section S-4 of the Supplemental
+Material.
+
+Figure 7: H-MARL with 3 sub-policies: Investigate, Recover, and Control Traffic. Due to the probabilistic
+expert rule, H-MARL Expert method is unstable, while H-MARL Meta performs well, converging fast to a
+stable performance.
+
+Table 3: Interpretable metrics for various blue strategies against Default Red, 100-episode averages.
+Blue Strategy
+H-MARL Expert
+H-MARL Meta
+H-MARL Collective
+MARL Decentralized
+
+Clean
+Hosts
+(ratio)
+0.81
+0.77
+0.85
+0.77
+
+Non-Escalated
+Hosts
+(ratio)
+0.99
+0.97
+0.97
+0.97
+
+Mean
+Time to
+Recover
+44.76
+62.63
+35.52
+56.08
+
+Useful
+Recoveries
+(true positives)
+6.07
+5.79
+3.41
+10.45
+
+12
+
+Wasted
+Recoveries
+(false positives)
+2.2
+3.74
+5.79
+27.99
+
+Recovery
+Precision
+
+Recovery
+Error
+
+0.73
+0.61
+0.37
+0.27
+
+0.27
+0.39
+0.63
+0.73
+
+Red
+Impact
+Count
+0.88
+1.14
+1.93
+1.54
+
+Reward
+-129.53
+-181.62
+-255.56
+-180
+
+5.5
+
+Interpretable Metrics
+
+In cybersecurity applications, the defender has two main objectives: keep the network secure and maintain
+operational workflows. Total discounted rewards is a natural metric for training and measuring performance
+in reinforcement learning, however, a single-valued reward provides little interpretable information to security
+operators. To address this problem, we propose a set of interpretable metrics and analyze their relationship
+to the existing reward computation. The new metrics provide insight on defense performance from three
+perspectives – network security, effectiveness of recoveries, and impact on operations – as follows:
+• Network Security Posture:
+– Clean Hosts: Fraction of hosts with no red presence (from total hosts in the network).
+– Non-Escalated Hosts: Fraction of hosts with no red root sessions.
+• Recovery Metrics:
+– Mean Time to Recover : Mean number of consecutive steps spent in a compromised state.
+– Useful Recoveries: Recoveries performed on infected machines (true positives, TP).
+– Wasted Recoveries: Recoveries performed on clean machines (false positives, FP).
+– Recovery Error : Err = FP / (TP + FP).
+– Recovery Precision: TP / (TP + FP) = 1-Err.
+• Operational Metrics:
+– Red Impact Count: Number of times the OT service is impacted becoming unavailable.
+We evaluate our blue agent strategies according to these metrics in Table 3. We observe a number of
+insights that are not evident by comparing policies using solely the reward metric. For instance, MARL
+Decentralized performs more recoveries than other policies, but its recovery precision is only 0.27. While
+H-MARL Meta and MARL Decentralized have similar rewards, H-MARL Meta has a much better recovery
+precision of 0.61. Moreover, red agents are less successful at impacting the critical services with H-MARL
+Meta, compared to MARL Decentralized. These indicators show that H-MARL Meta is a more effective
+defense strategy than the single-policy approach (MARL Decentralized), despite having similar reward. HMARL Expert has the highest recovery precision across all policies, as its expert master policy selects the
+Recovery sub-policy when IOCs are present on hosts, a strong indication of host compromise. Our analysis
+demonstrates the need of using the reward signal in conjunction with other metrics that are relevant in the
+cyber domain. To better align the reward with the defender’s goals, one can also incorporate these new
+metrics in the reward.
+
+6
+
+Conclusion
+
+We propose novel hierarchical multi-agent reinforcement learning (MARL) strategies to train multiple blue
+agents tasked with protecting a network against red agents. Our H-MARL strategy decomposes cyber
+defense into multiple sub-tasks, trains sub-policies for each sub-task guided by domain expertise, and finally
+trains a master policy to coordinate sub-policy selection. We evaluated our proposed hierarchical methods
+(Expert and Meta) and compared them against standard decentralized and centralized MARL in a realistic
+cyber security environment, CybORG CAGE 4. We demonstrated that our hierarchical method converges
+faster than a single PPO policy and generalizes across various red agent behavior, while H-MARL Expert
+consistently performs better than the baselines.
+Acknowledgments
+This research was funded by the Defense Advanced Research Projects Agency (DARPA), under contract
+W912CG23C0031.
+
+13
+
+References
+[1] C. David Hylender, Philippe Langlois, Alex Pinto, and Suzanne Widup. Verizon 2024 data breach
+investigations report. https://www.verizon.com/business/resources/reports/dbir/, 2024.
+[2] Manos Antonakakis, Roberto Perdisci, Yacin Nadji, Nikolaos Vasiloglou, Saeed Abu-Nimeh, Wenke
+Lee, and David Dagon. From throw-away traffic to bots: Detecting the rise of DGA-based malware. In
+Presented as part of the 21st USENIX Security Symp. (USENIX Security 12), pages 491–506. USENIX
+Association, 2012.
+[3] Terry Nelms, Roberto Perdisci, and Mustaque Ahamad. ExecScent: Mining for new c&c domains in
+live networks with adaptive control protocol templates. In Proceedings of the 22nd USENIX Conf. on
+Security, page 589–604, USA, 2013. USENIX Association.
+[4] Manos Antonakakis, Roberto Perdisci, Wenke Lee, Nikolaos Vasiloglou, II, and David Dagon. Detecting
+malware domains at the upper DNS hierarchy. In Proceedings of the 20th USENIX Conf. on Security,
+pages 27–27. USENIX Association, 2011.
+[5] Leyla Bilge, Engin Kirda, Christopher Kruegel, and Marco Balduzzi. EXPOSURE: Finding malicious
+domains using passive dns analysis. In Proceedings of the Network and Distributed System Security
+Symposium, NDSS, 2012.
+[6] Ting-Fang Yen, Alina Oprea, Kaan Onarlioglu, Todd Leetham, William Robertson, Ari Juels, and
+Engin Kirda. Beehive: Large-scale log analysis for detecting suspicious activity in enterprise networks.
+In ACSAC, pages 199–208, 2013.
+[7] Talha Ongun, Oliver Spohngellert, Benjamin A. Miller, Simona Boboila, Alina Oprea, Tina Eliassi-Rad,
+Jason Hiser, Alastair Nottingham, Jack W. Davidson, and Malathi Veeraraghavan. PORTFILER: portlevel network profiling for self-propagating malware detection. In IEEE Conference on Communications
+and Network Security, CNS 2021, Tempe, AZ, USA, October 4-6, 2021, pages 182–190. IEEE, 2021.
+[8] CAGE. Cage challenge 1. IJCAI-21 1st International Workshop on Adaptive Cyber Defense., 2021.
+[9] Sanyam Vyas, John Hannay, Andrew Bolton, and Professor Pete Burnap. Automated cyber defence: A
+review. arXiv preprint arXiv:2303.04926, 2023.
+[10] Garrett Mcdonald, Li Li, and Ranwa Al Mallah. Finding the optimal security policies for autonomous
+cyber operations with competitive reinforcement learning. IEEE Access, 12:120292–120305, 2024.
+[11] Kim Hammar, Neil Dhir, and Rolf Stadler. Optimal defender strategies for cage-2 using causal modeling
+and tree search. arXiv preprint arXiv:2407.11070, 2024.
+[12] CAGE-4. TTCP CAGE Working Group. CAGE Challenge 4. https://github.com/cage-challenge/
+cage-challenge-4, 2023.
+[13] Frans A. Oliehoek and Chris Amato. A concise introduction to decentralized pomdps. In SpringerBriefs
+in Intelligent Systems, 2016.
+[14] Chao Yu, Akash Velu, Eugene Vinitsky, Jiaxuan Gao, Yu Wang, Alexandre Bayen, and Yi Wu. The
+surprising effectiveness of ppo in cooperative multi-agent games. Advances in Neural Information Processing Systems, 35:24611–24624, 2022.
+[15] John Schulman, Filip Wolski, Prafulla Dhariwal, Alec Radford, and Oleg Klimov. Proximal policy
+optimization algorithms. arXiv preprint arXiv:1707.06347, 2017.
+[16] Tabish Rashid, Mikayel Samvelyan, Christian Schroeder De Witt, Gregory Farquhar, Jakob Foerster,
+and Shimon Whiteson. Monotonic value function factorisation for deep multi-agent reinforcement learning. Journal of Machine Learning Research, 21(178):1–51, 2020.
+14
+
+[17] Christian Schroeder De Witt, Tarun Gupta, Denys Makoviichuk, Viktor Makoviychuk, Philip HS Torr,
+Mingfei Sun, and Shimon Whiteson. Is independent learning all you need in the starcraft multi-agent
+challenge? arXiv preprint arXiv:2011.09533, 2020.
+[18] Alec Wilson, Ryan Menzies, Neela Morarji, David Foster, Marco Casassa Mont, Esin Turkbeyler, and
+Lisa Gralewski. Multi-agent reinforcement learning for maritime operational technology cyber security.
+arXiv:2401.10149, 2024.
+[19] Mitchell Kiely and Others. Exploring the efficacy of multi-agent reinforcement learning for autonomous
+cyber defence: A cage challenge 4 perspective. In AAAI, pages 28907–28913, 2025.
+[20] Mingjun Wang and Remington Dechene.
+arXiv:2410.09134, 2024.
+
+Multi-agent actor-critics in autonomous cyber defense.
+
+[21] Yuchen Xiao, Joshua Hoffman, Tian Xia, and Christopher Amato. Learning multi-robot decentralized
+macro-action-based policies via a centralized q-net. In 2020 IEEE International Conference on Robotics
+and Automation (ICRA), pages 10695–10701, 2020.
+[22] Elliot Fosong, Arrasy Rahman, Ignacio Carlucho, and Stefano V. Albrecht. Learning complex teamwork
+tasks using a given sub-task decomposition. In Proceedings of the 23rd International Conference on Autonomous Agents and Multiagent Systems, AAMAS ’24, page 598–606, Richland, SC, 2024. International
+Foundation for Autonomous Agents and Multiagent Systems.
+[23] Lu Chang, Liang Shan, Weilong Zhang, and Yuewei Dai. Hierarchical multi-robot navigation and formation in unknown environments via deep reinforcement learning and distributed optimization. Robotics
+and Computer-Integrated Manufacturing, 83:102570, 2023.
+[24] Kevin Frans, Jonathan Ho, Xi Chen, Pieter Abbeel, and John Schulman. Meta learning shared hierarchies. arXiv:1710.09767, 2018.
+[25] Gabriel Dulac-Arnold, Richard Evans, Hado van Hasselt, Peter Sunehag, Timothy Lillicrap, Jonathan
+Hunt, Timothy Mann, Theophane Weber, Thomas Degris, and Ben Coppin. Deep reinforcement learning
+in large discrete action spaces. arXiv preprint arXiv:1512.07679, 2015.
+[26] Matthias Hutsebaut-Buysse, Kevin Mets, and Steven Latré. Hierarchical reinforcement learning: A
+survey and open research challenges. Machine Learning and Knowledge Extraction, 4(1):172–221, 2022.
+[27] Mohammed Asiri, Neetesh Saxena, Rigel Gjomemo, and Pete Burnap. Understanding indicators of
+compromise against cyber-attacks in industrial control systems: A security perspective. ACM Trans.
+Cyber-Phys. Syst., 7(2), April 2023.
+[28] Eric M Hutchins, Michael J Cloppert, and Rohan M Amin. Intelligence-driven computer network defense
+informed by analysis of adversary campaigns and intrusion kill chains. Leading Issues in Information
+Warfare & Security Research, 1:80, 2011.
+[29] Blake E Strom, Andy Applebaum, Doug P Miller, Kathryn C Nickels, Adam G Pennington, and Cody B
+Thomas. Mitre att&ck: Design and philosophy. In Technical report. The MITRE Corporation, 2018.
+[30] Xueguang Lyu, Yuchen Xiao, Brett Daley, and Christopher Amato. Contrasting centralized and decentralized critics in multi-agent reinforcement learning. arXiv:2102.04402, 2021.
+[31] Yoshua Bengio, Jérôme Louradour, Ronan Collobert, and Jason Weston. Curriculum learning. In
+Proceedings of the 26th Annual International Conference on Machine Learning, ICML ’09, page 41–48,
+New York, NY, USA, 2009. Association for Computing Machinery.
+[32] CybORG Team. Red overview. https://github.com/cage-challenge/cage-challenge-4/blob/
+main/documentation/docs/pages/reference/agents/red_overview.md, 2024. CAGE Challenge 4
+Documentation.
+15
+
+[33] Daphna Weinshall, Gad Cohen, and Dan Amir. Curriculum learning by transfer learning: Theory and
+experiments with deep networks. ICML, 2018.
+[34] Ying WEI, Yu Zhang, Junzhou Huang, and Qiang Yang. Transfer learning via learning to transfer. In
+Jennifer Dy and Andreas Krause, editors, Proceedings of the 35th International Conference on Machine
+Learning, volume 80 of Proceedings of Machine Learning Research, pages 5085–5094. PMLR, 10–15 Jul
+2018.
+[35] Fuzhen Zhuang, Zhiyuan Qi, Keyu Duan, Dongbo Xi, Yongchun Zhu, Hengshu Zhu, Hui Xiong, and
+Qing He. A comprehensive survey on transfer learning. arXiv:1911.02685, 2020.
+[36] Hadi Nekoei, Akilesh Badrinaaraayanan, Aaron C. Courville, and Sarath Chandar. Continuous coordination as a realistic scenario for lifelong learning. In Marina Meila and Tong Zhang, editors, ICML,
+volume 139 of Proceedings of Machine Learning Research, pages 8016–8024. PMLR, 2021.
+[37] Qianru Sun, Yaoyao Liu, Tat-Seng Chua, and Bernt Schiele. Meta-transfer learning for few-shot learning.
+In 2019 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR), pages 403–412,
+2019.
+[38] Dumitru Erhan, Yoshua Bengio, Aaron Courville, Pierre-Antoine Manzagol, Pascal Vincent, and Samy
+Bengio. Why does unsupervised pre-training help deep learning? J. Mach. Learn. Res., 11:625–660,
+March 2010.
+
+16
+
+Supplementary Materials
+S-1
+
+The Cyber Game
+
+This section presents additional details on the cyber game simulated in CybORG CAGE 4 2 . For increased
+realism, users on enterprise machines are represented by green agents, which are present on every host. Green
+agents randomly access local and remote services, such as SSHD, MySQL, FTP, etc. Upon compromise, red
+agents are able to degrade these services, preventing users from completing their work or slowing them down.
+The red team can attack the network through several actions: scan the network to discover new hosts; scan
+a host to discover active services; exploit a vulnerability to compromise a host; escalate privileges on a
+compromised node to gain root access; degrade user experience of green agents; impact (stop) the critical
+Operational technology (OT) service; discover deception (i.e., probe a host to determine if it is running decoy
+services).
+The action sets for green agents (users), blue agents (defenders) and red agents (attackers) are presented
+in Table S-1. Both blue and red agent actions have a specified time duration, ranging from one time step
+(block/allow traffic) to five time steps for longer actions (restore host). Agents are not allowed to choose
+another action before the previous action had completed.
+Table S-1: Action sets for green agents (users), blue agents (defenders), and red agents (attackers).
+Green Access Service
+Green Local Work
+
+Monitor
+Analyse
+Deploy Decoy
+Remove
+Restore
+Block Traffic
+Allow Traffic
+Discover Remote Systems
+Aggressive Service Discovery
+Stealth Service Discovery
+Exploit Network Services
+Privilege Escalate
+Impact
+Degrade Services
+Discover Deception
+Withdraw
+
+Green actions
+Communicate with a server in the local zone or another zone. It has a small
+chance of being flagged as malicious by Monitor.
+Do work on the local host without communicating. It has a small chance
+that this action results in red gaining a foothold on the host (e.g. as a result
+of a Phishing email). Also, it has a small chance of being flagged as malicious
+by Monitor.
+Blue actions
+Collection of information about flagged malicious activity on the network.
+Collection of further information relating to malware files, on a specific host.
+Setup of a decoy service (type randomly assigned) on a specified host. Blue
+is alerted if Red accesses this service.
+Attempts to stop all processes identified as malicious by the monitor action.
+Restoring a system to a known good state.
+Block traffic to and from the specified zone.
+Allow traffic to and from the specified zone.
+Red actions
+Discovers new hosts/IP addresses in the network through active scanning
+using tools such as ping.
+Discovers responsive services on a selected host by initiating a connection
+with that host.
+Same as Aggressive Service Discovery but slower and quieter (i.e., lower
+chance of raising alerts).
+Attempts to exploit a specified service on a remote system.
+This action escalates the agent’s privilege on the host.
+This action disrupts the performance of the network and fulfils red’s objective
+of denying the operational service.
+If red has root privileges on a host, it may degrade the user experience for a
+green agent.
+Probe a host to determine if it is running decoy services.
+Remove red presence from target host.
+
+2 https://github.com/cage-challenge/cage-challenge-4/tree/main
+
+17
+
+The red agent in CAGE 4 is rather sophisticated and randomized, not deterministic, and is modeled by:
+• State transition diagram: The adversary follows a state transition diagram with eight states and nine
+transitions (that is, actions) that defines the allowed subset of actions based on the state of the host.
+• State transition probability matrix: The adversary’s actions are randomized, using a state transition
+probability matrix to choose among the subset of possible actions in each state. For example, in State
+S (i.e., a Service was discovered on a host), the Red agent can choose to Discover Remote Systems
+with 0.25 probability, Discover Deception with 0.25 probability, or Exploit Remote Service with 0.5
+probability.
+We vary the probabilities in the state transition probability matrix to create additional red agent variants
+and cover a wider range of Red behaviors (fully Aggressive, Stealthy, or Impact). These new attack vectors
+explore how two important characteristics of any cyber attack, namely the speed/stealth of discovering
+vulnerabilities, and the attacker’s objective affect the attack success.
+
+S-2
+
+Communication and Cooperation
+
+In this section, we explore other possible extensions that can help the defense strategy, focusing on communication among agents. In the CybORG CAGE 4 environment, blue agents are facing a challenging
+adversary, who can move through the network in two ways: (1) phishing emails, and (2) active scanning
+of hosts and services. Each red agent conducts scanning activity mostly within its own assigned subnet(s),
+and rarely reaches remotely into other subnets. This partitioning is useful from a scaling perspective, to
+limit the observation and action spaces. However, it also leads to limited compromise attempts that cross
+subnet boundaries. Thus, each defender can focus its efforts on its own assigned subnet(s), requiring little
+communication or coordination with other blue agents. Still, communication can be useful in other game
+settings, to send information about network-level indicators of compromise, such as malicious file names, the
+hash of a malicious file, or a compromised IP.
+
+Figure S-1: Blue agents use 8-bit messages to warn other team members of potential compromised hosts.
+This communication strategy shows some benefit over the case when no communication is used. (MARL
+Decentralized training)
+As a case study, we implemented a red agent that chooses external scanning in 50% of the time (once it
+becomes aware of another subnet), and a blue agent that relies heavily on decoys (90% of blue actions) to
+detect the adversary during the scanning phase of the attack. Blue agents broadcast 8-bit messages encoding
+which remote host is accessing their decoys to warn other agents of potential attackers. We uniquely identify
+the compromised hosts with 3 bits for the subnet number (1-7), and 4 bits for the host index (0-15). Each
+blue agent decodes the message to check if it refers to hosts from its own subnet. If so, the message provides
+an indicator of compromise that will be added to the observation vector. Figure S-1 shows that there is some
+18
+
+benefit of using this method of communication. However, the benefit is small, due to other factors, such as
+phishing, stealth, and false positives of the Monitor actions.
+
+S-3
+
+H-MARL Pipeline
+
+Meta actions describe a class of actions (e.g., Restore, Investigate, Control Traffic), which the master policy
+selects. This partitioning abstracts away additional details, such as what machine to restore, making training
+and generalization easier for the master policy. Sub-policies describe the policies that choose the primitive
+action ultimately executed in the environment (e.g., restore host 13). In effect the master policy chooses a
+meta action, and then samples a primitive action from the respective sub-policy.
+observation (enhanced with IOCs)
+select relevant
+subset of obs
+
+Expert Rules
+(defined by
+security experts)
+
+Expert
+Master
+
+meta-action 𝐴𝑖
+
+Sub-policy
+𝜓𝑖
+
+Example:
+If IOCs, then call
+Recover sub-policy.
+
+action 𝑎
+Environment
+reward
+
+Figure S-2: H-MARL Expert Pipeline. The Master uses expert rules to choose a sub-policy that steps
+through the environment. Sub-policy training is guided by the reward from the environment.
+An overview of the H-MARL Expert pipeline is shown in Figure S-2. Upon receiving an observation
+the expert master uses pre-defined rules to choose a meta-action indexed by i The observation is then
+processed into the respective observation space of sub-policy i, which chooses the final primitive action to
+step through the environment. This approach aims to learn sub-policies that are specialized for a single task.
+
+observation (enhanced with IOCs)
+select relevant
+subset of obs
+
+Meta
+Master
+
+meta-action 𝐴𝑖
+
+Sub-policy
+𝜓𝑖
+
+action 𝑎
+Environment
+reward
+
+Figure S-3: H-MARL Meta Pipeline. The Master learns a probability distribution over meta-actions. The
+Master training uses frozen sub-policies and is guided by the reward from the environment.
+An overview of the H-MARL Meta pipeline is shown in Figure S-3. The meta master policy learns to
+reason on a higher-level about the decisions it can make by using state abstractions (e.g. are IOCs present in
+the network?). During the training of the meta master, the sub-policies are kept frozen. The master learns
+a probability distribution over the meta-actions, guided by the reward from the environment.
+
+19
+
+S-4
+
+Traffic Control
+
+Our next case study explores the use of Block and Allow Traffic actions to control the access between security
+zones. The H-MARL architecture consist of a Master policy and three sub-policies: Investigate, Recover,
+and Control Traffic. We extended the observation space with network-level indicators of compromise – blue
+agents communicate whether their assigned subnet(s) contain any IOCs – enabling each agent to have a
+global view on the network, and facilitating the training of the Control Traffic sub-policy.
+
+Figure S-4: H-MARL with 3 sub-policies: Investigate, Recover, and Control Traffic. Due to the probabilistic
+expert rule, H-MARL Expert method is unstable, while H-MARL Meta performs well, converging fast to a
+stable performance.
+
+Figure S-5: H-MARL with 3 sub-policies: Investigate, Recover, and Control Traffic, after removing the
+penalty on failed user access (no degrade). All sub-policies are fine-tuned in this new context, against a new
+red that attempts frequent remote exploits into other subnets. The H-MARL Expert has regained a stable
+high performance and H-MARL Meta has similar performance.
+Defining an expert knowledge to guide the training of a Control Traffic sub-policy to near-optimal is
+particularly difficult, due to the conflicting outcomes of using Block actions – stop red agents from moving
+through the network, but at the expense of preventing user agents from completing their work.
+For our current experiments, we use the following expert master policy to train the sub-policies (Algorithm
+1), and leave further research into other expert rules for future work: If indicators of compromise are present
+20
+
+on hosts, call the Recover sub-policy; otherwise, randomly choose Investigate for 75% of the time, and Control
+Traffic for the remaining 25%. Thus, the Investigate sub-policy is assigned more weight, as we expect it to
+be useful more frequently. In fact, for best performance, we use (keep fixed) the Investigate and Recover
+sub-policies trained previously (see paper), since they have been learned with well-defined expert knowledge,
+and only train the Control Traffic sub-policy, using the rule specified above.
+Next, we follow Algorithm 2 to train the Master policy using the three pre-trained sub-policies. Figure S4 shows the reward as training progresses during Algorithm 1 (using the expert rule), and Algorithm 2 (train
+the master). We observe the instability of the expert, which has been trained with a probability-based rule,
+reinforcing the importance of learning the master policy. The H-MARL Meta algorithm is more stable, as
+the master policy learns how to combine the sub-policies to solve the meta-task, and is not restricted by a
+fixed, deterministic rule.
+Turning off Degrade Service. In our next set of experiments illustrated in Figure S-5, we fine-tuned
+the sub-policies after turning off the reward penalty of green agents being affected by failed service access.
+We also used the modified red agent introduced in Section S-2 of the supplemental material, which performs
+remote scanning into other subnets more often, and can still collect rewards by impacting the critical OT
+service. With block actions being now useful at preventing red agents from spreading, without incurring
+penalties, H-MARL Expert regains a stable, high performance, as expected. H-MARL Meta achieves similar
+performance with H-MARL Expert in this setting. The blue agents are using 4× more block actions when
+the failed user access penalty has been removed.
+
+S-5
+
+H-MARL Transferability
+
+Figure S-6 presents the fine-tuning results of the Recover sub-policy, pre-trained against Aggressive Red,
+the average-performing attacker. The Recover sub-policy is trained on an observation space consisting of
+indicators of compromise within a subnet. This sub-policy learns a strong strategy regardless of the attack,
+and can be directly reused against other red agents.
+
+Figure S-6: The Recover sub-task is rather agnostic to the attack type and can be re-used against other
+adversaries.
+
+21
+
+

@@ -1,5 +1,5 @@
 # Tree Search for Language Model Agents
-- Paper: [Tree_Search_for_Language_Model_Agents.pdf](../../../papers/planning/Tree_Search_for_Language_Model_Agents.pdf)
+- Paper: [Tree_Search_for_Language_Model_Agents.pdf](../../../reinforcement_learning_papers/09_agentic_rl/Tree_Search_for_Language_Model_Agents.pdf)
 
 ## Gemini diagrams
 

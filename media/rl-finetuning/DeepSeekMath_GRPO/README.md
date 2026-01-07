@@ -1,5 +1,5 @@
 # DeepSeekMath GRPO
-- Paper: [DeepSeekMath_GRPO.pdf](../../../papers/rl-finetuning/DeepSeekMath_GRPO.pdf)
+- Paper: [DeepSeekMath_GRPO.pdf](../../../reinforcement_learning_papers/02_rlhf_alignment/DeepSeekMath_GRPO.pdf)
 
 ## Gemini diagrams
 

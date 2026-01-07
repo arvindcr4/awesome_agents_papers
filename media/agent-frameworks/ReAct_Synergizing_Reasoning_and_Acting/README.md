@@ -1,5 +1,5 @@
 # ReAct Synergizing Reasoning and Acting
-- Paper: [ReAct_Synergizing_Reasoning_and_Acting.pdf](../../../papers/agent-frameworks/ReAct_Synergizing_Reasoning_and_Acting.pdf)
+- Paper: [ReAct_Synergizing_Reasoning_and_Acting.pdf](../../../reinforcement_learning_papers/09_agentic_rl/ReAct_Synergizing_Reasoning_and_Acting.pdf)
 
 ## Gemini diagrams
 

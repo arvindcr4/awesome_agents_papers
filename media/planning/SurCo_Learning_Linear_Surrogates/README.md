@@ -1,5 +1,5 @@
 # SurCo Learning Linear Surrogates
-- Paper: [SurCo_Learning_Linear_Surrogates.pdf](../../../papers/planning/SurCo_Learning_Linear_Surrogates.pdf)
+- Paper: [SurCo_Learning_Linear_Surrogates.pdf](../../../reinforcement_learning_papers/09_agentic_rl/SurCo_Learning_Linear_Surrogates.pdf)
 
 ## Gemini diagrams
 

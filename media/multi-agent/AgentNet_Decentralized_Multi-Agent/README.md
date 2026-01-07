@@ -1,5 +1,5 @@
 # AgentNet Decentralized Multi-Agent
-- Paper: [AgentNet_Decentralized_Multi-Agent.pdf](../../../papers/multi-agent/AgentNet_Decentralized_Multi-Agent.pdf)
+- Paper: [AgentNet_Decentralized_Multi-Agent.pdf](../../../reinforcement_learning_papers/03_multi_agent_rl/AgentNet_Decentralized_Multi-Agent.pdf)
 
 ## Gemini diagrams
 

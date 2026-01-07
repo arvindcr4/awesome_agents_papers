@@ -1,5 +1,5 @@
 # DeepSeek-R1 Reasoning via RL
-- Paper: [DeepSeek-R1_Reasoning_via_RL.pdf](../../../papers/rl-finetuning/DeepSeek-R1_Reasoning_via_RL.pdf)
+- Paper: [DeepSeek-R1_Reasoning_via_RL.pdf](../../../reinforcement_learning_papers/02_rlhf_alignment/DeepSeek-R1_Reasoning_via_RL.pdf)
 
 ## Gemini diagrams
 

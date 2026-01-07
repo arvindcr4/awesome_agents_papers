@@ -1,0 +1,1207 @@
+Modelling the Dynamic Joint Policy of Teammates
+with Attention Multi-agent DDPG
+
+arXiv:1811.07029v1 [cs.LG] 13 Nov 2018
+
+Hangyu Mao
+Peking University
+hy.mao@pku.edu.cn
+
+Zhengchao Zhang
+Peking University
+zhengchaozhang@pku.edu.cn
+
+Zhen Xiao∗
+Peking University
+xiaozhen@net.pku.edu.cn
+
+Zhibo Gong
+Huawei Technologies Co., Ltd.
+gongzhibo@huawei.com
+
+Abstract
+Modelling and exploiting teammates’ policies in cooperative multi-agent systems
+have long been an interest and also a big challenge for the reinforcement learning (RL) community. The interest lies in the fact that if the agent knows the
+teammates’ policies, it can adjust its own policy accordingly to arrive at proper
+cooperations; while the challenge is that the agents’ policies are changing continuously due to they are learning concurrently, which imposes difficulty to model
+the dynamic policies of teammates accurately. In this paper, we present ATTention Multi-Agent Deep Deterministic Policy Gradient (ATT-MADDPG) to address
+this challenge. ATT-MADDPG extends DDPG, a single-agent actor-critic RL
+method, with two special designs. First, in order to model the teammates’ policies, the agent should get access to the observations and actions of teammates.
+ATT-MADDPG adopts a centralized critic to collect such information. Second,
+to model the teammates’ policies using the collected information in an effective
+way, ATT-MADDPG enhances the centralized critic with an attention mechanism.
+This attention mechanism introduces a special structure to explicitly model the dynamic joint policy of teammates, making sure that the collected information can
+be processed efficiently. We evaluate ATT-MADDPG on both benchmark tasks
+and the real-world packet routing tasks. Experimental results show that it not
+only outperforms the state-of-the-art RL-based methods and rule-based methods
+by a large margin, but also achieves better performance in terms of scalability and
+robustness.
+
+1
+
+Introduction
+
+There are many real-world tasks involving multiple agents, such as the network packet routing (Vicisano et al., 1998; Tao et al., 2001), the autonomous intersection management (Dresner and Stone,
+2008) and the Poker games (Billings et al., 1998). In the past decades, researchers have made continuous attempts to apply reinforcement learning (RL) (Sutton and Barto, 1998) to deal with these
+multi-agent tasks, because solving these tasks using a learning-based method is a crucial step to build
+artificial intelligent systems. Nevertheless, it remains an open question due to many challenges, for
+example, the partial observability of agents, the cooperation and competition among agents, the
+changing number of agents, and etc.
+∗
+
+The contact author.
+
+Preprint. Work in progress.
+
+In this paper, we focus on the cooperative distributed multi-agent RL setting. In cooperative setting,
+the agents need to take collaborative actions to achieve a shared goal. In distributed setting, the
+agents are located in different areas with partial observability. A representative task is the packet
+routing where the routers are treated as the autonomous agents and the goal is to transmit the packets
+using as less resource as possible.
+Even in this simplified setting, it is still difficult to handle such tasks due to the complex agent modelling problem (Albrecht and Stone, 2018). Specifically, if the agent maintains the models about
+teammates’ policies, it can adjust its own policy accordingly to achieve a proper cooperation. However, since the agents are learning concurrently in the same environment, their policies are changing
+continuously. This kind of dynamically changing policy is very hard to model in an accurate manner.
+Even if one can manage to do it, it is easily outdated anyway.
+In fact, modelling and exploiting teammates’ policies have long been an interest for the RL community, as summarized in this excellent survey (Albrecht and Stone, 2018). Nevertheless, most
+methods are introduced in the Game Theory (Ganzfried and Sandholm, 2011) or simple grid-world
+settings, and they usually model each teammates’ policy separately. It is hard to scale these methods
+to real-world applications like the network packet routing.
+Recently, Deep Reinforcement Learning (DRL) has been explored for large scale tasks. In order
+to achieve generalization in tasks with large state space and action space, DRL-based methods
+adopt deep neural network as function approximator to generate similar actions for similar states.
+However, the existing DRL-based agent modelling methods (He et al., 2016; Foerster et al., 2018;
+Raileanu et al., 2018; Yang et al., 2018; Hong et al., 2018) mostly focus on improving the deep
+Q-network (DQN) (Mnih et al., 2015), and they usually learn centralized policies. To apply the
+centralized policy in distributed systems, the agents have to exchange information during execution,
+which is too costly or even unattainable in many cases (Roth et al., 2005; Zhang and Lesser, 2013;
+Chen et al., 2017; Dobbe et al., 2017). In addition, the DQN-based methods target at addressing
+tasks with discrete action space. Other DQN-based methods (Sunehag et al., 2017; Rashid et al.,
+2018) or researches (Foerster et al., 2017; Lowe et al., 2017; Chu and Ye, 2017) based on actorcritic RL algorithm can generate decentralized policies, but they do not explicitly build models for
+other agents. Instead, they investigate other topics such as the credit assignment among multiple
+agents.
+In this paper, we present ATTention Multi-Agent Deep Deterministic Policy Gradient (ATTMADDPG) to address the complex agent modelling problem. In contrast to previous works, ATTMADDPG explicitly model the dynamic joint policy of teammates in an adaptive manner, and it is
+designed for training decentralized policies to handle large-scale distributed tasks with continuous
+action space.
+Specifically, ATT-MADDPG extends DDPG (Lillicrap et al., 2015), a single-agent actor-critic RL
+algorithm, with two special designs. First, as a necessary step to do agent modelling, the agent
+should get access to the observations and actions of teammates. ATT-MADDPG adopts a centralized
+critic to collect these information. Second, in order to make sure that the collected information can
+be processed in an effective way to model the teammates’ policies, ATT-MADDPG further embeds
+an attention mechanism into the centralized critic. This attention mechanism introduces a special
+structure to explicitly model the dynamic joint policy of teammates in an adaptive manner. Once
+the teammates change their policies, the associated attention weight will change adaptively, and the
+agent will adjust its policy quickly. Consequently, all agents will cooperate efficiently. In addition,
+since DDPG targets at continuous action space tasks, ATT-MADDPG can naturally deal with such
+tasks. Moreover, the policy is decentralized because we do not change the actor part of DDPG, and
+the actor can generate action based on its own observation history.
+We evaluate ATT-MADDPG on the real-world packet routing tasks as well as benchmark cooperative navigation and predator prey tasks. In all tasks, ATT-MADDPG can obtain more rewards than
+both the state-of-the-art RL-based methods and rule-based methods. Experiments also show that
+ATT-MADDPG achieves better scalability and robustness. Furthermore, we conduct experiments
+on packet routing task to reveal some insights about the attention mechanism, and on cooperative
+navigation task to show the cooperation among the agents’ policies.
+Our main contributions can be summarized as follows.
+
+2
+
+• In contrast to most agent modelling methods, ATT-MADDPG trains a decentralized policy
+for each agent to handle distributed tasks with continuous action.
+• The proposed attention mechanism introduces a special structure to explicitly model the
+dynamic joint policy of teammates in an adaptive manner. To our knowledge, we are the
+first to do agent modelling in this novel way.
+• We empirically test ATT-MADDPG on both real-world tasks and benchmark tasks to show
+that it achieves good performance in terms of the reward, scalability and robustness.
+
+2
+
+Background
+
+DEC-POMDP. We consider a multi-agent setting that can be formulated as DEC-POMDP (Bern~ T, R,
+~ O,
+~ Z, γi, where N is the number
+stein et al., 2002). It is formally defined as a tuple hN, S, A,
+~
+of agents; S is the set of state s; A = [A1 , ..., AN ] represents the set of joint action ~a, and Ai is
+~ × S → [0, 1] represents the state
+the set of local action ai that agent i can take; T (s0 |s, ~a) : S × A
+N
+~ = [R1 , ..., RN ] : S × A
+~ → R is the joint reward function; O
+~ = [O1 , ..., ON ]
+transition function; R
+~
+~ γ ∈ [0, 1] is
+is the set of joint observation ~o controlled by the observation function Z : S × A → O;
+the discount factor.
+In a given state s, each agent takes an action ai based on its own observation (history) oi , resulting
+in a new state s0 and a reward ri 2 . The agent tries to learn a policy πi : Oi × Ai → [0, 1] that
+PH
+can maximize E[Gi ] where Gi is the discount return defined as Gi = t=0 γ t rit , and H is the time
+horizon. In addition, we also assume that the environment is joint fully observable (Bernstein
+et al., 2002), i.e., s , ~o = hoi , ~o−i i where ~o−i is the joint observation (history) of teammates of
+agent i.
+Reinforcement Learning (RL). RL (Sutton and Barto, 1998) is generally used to solve special
+DEC-POMDP problems where N = 1. In practice, the Q-value function Qπ (s, a) is defined as
+Qπ (s, a)
+
+=
+
+Eπ [G|S = s, A = a]
+
+(1)
+
+then the optimal policy is derived by π ∗ = arg maxπ Qπ (s, a).
+Policy Gradient methods (Sutton et al., 2000) directly learn the parameterized policy πθ = π(a|s; θ),
+which is an approximation of any policy π. To maximize the objective J(θ) = Es∼pπ ,a∼πθ [G], the
+parameters θ are adjusted in the direction of ∇θ J(θ) = Es∼pπ ,a∼πθ [∇θ log π(a|s; θ)Qπ (s, a)],
+where pπ is the stable state distribution. We can use deep neural network Q(s, a; w) to approximate Qπ (s, a), resulting in the actor-critic algorithms (Konda and Tsitsiklis, 2003; Grondman et al.,
+2012). Both the parameterized actor π(a|s; θ) and critic Q(s, a; w) are used during training, while
+only the actor π(a|s; θ) is needed during execution. This merit will be used to train decentralized
+policies in our method.
+Deterministic Policy Gradient (DPG) (Silver et al., 2014) is a special actor-critic algorithm where
+the actor adopts a deterministic policy µθ : S → A and the action space A is continuous. Deep DPG
+(DDPG) (Lillicrap et al., 2015) uses deep neural networks to approximate µθ (s) and Q(s, a; w).
+DDPG is an off-policy method, which applies the target network and experience replay to stabilize
+training and to improve data efficiency. Specifically, the critic and actor are updated based on the
+following equations:
+δ = r + γQ(s0 , a0 ; w− )|a0 =µθ− (s0 ) − Q(s, a; w)
+2
+
+L(w) = E(s,a,r,s0 )∼D [(δ) ]
+∇θ J(θ) = Es∼D [∇θ µθ (s) ∗ ∇a Q(s, a; w)|a=µθ (s) ]
+
+(2)
+(3)
+(4)
+
+where D is the replay buffer containing recent experience tuples (s, a, r, s0 ); Q(s, a; w− ) and µθ− (s)
+are the target networks whose parameters w− and θ− are periodically updated by copying w and θ.
+Attention Mechanism. The Soft Attention (Xu et al., 2015) (sometimes referred as Global Attention (Luong et al., 2015)) is the most popular one as shown in Figure 1. The inputs are several
+2
+
+In practice, we map observation history instead of current observation to an action. In cooperative setting,
+ri = rj for different i and j.
+
+3
+
+𝐶 contextual vector
+
+𝑊 attention weight vector
+
+𝑆2
+
+𝑆1
+
+…
+
+𝑆𝑘
+
+…
+
+𝑆𝐾
+
+𝑇
+
+Figure 1: The Soft Attention (Xu et al., 2015; Luong et al., 2015).
+source vectors [S1 , S2 , .., Sk , .., SK ] and one target vector T . The model can adaptively attend to
+more important Sk , where the importance is measured by a user-defined function f (T, Sk ); and
+the important information contained in Sk can be encoded into a contextual vector C adaptively
+according to the normalized importance score wk as follows:
+exp(f (T, Sk ))
+
+wk = PK
+
+i=1 exp(f (T, Si ))
+
+; C=
+
+K
+X
+
+wk Sk
+
+(5)
+
+k=1
+
+Besides, the attention weight vector W , [w1 , w2 , .., wk , .., wK ] can also be seen as a probabilPK
+ity distribution because k=1 wk ≡ 1. The ingenuity for generating a probability distribution
+adaptively will be applied in our method.
+
+3
+
+Attention Multi-agent DDPG
+
+Before digging into the details, we list the key variables used in this paper in Table 1. Please notice
+~ −i |s).
+the differences between ~
+π−i , ~
+π−i (~
+a−i |s) and ~
+π−i (A
+Table 1: The key variables used in this paper.
+~a
+The joint action of all agents.
+ai
+The local action of agent i.
+~a−i
+The joint action of teammates of agent i.
+~ Ai , A
+~ −i are denoted similarly.
+The action set A,
+The observation (history) ~o, oi , ~o−i are denoted similarly.
+The policy ~π , πi , ~π−i are denoted similarly.
+s0
+The next state after s.
+~o0 , o0i , ~o0−i , ~a0 , a0i , and ~a0−i are denoted similarly.
+~
+π−i
+The joint policy of teammates of agent i.
+The probability value for generating ~a−i
+~
+π−i (~
+a−i |s) under policy ~π . Σ
+π−i (~a−i |s) = 1.
+−i
+~ −i ~
+~
+a−i ∈A
+The
+probability
+distribution
+over the
+~ −i |s)
+~
+π−i (A
+~ −i under policy ~π−i .
+joint action space A
+3.1
+
+The Overall Approach
+
+The proposed ATT-MADDPG extends the actor-critic RL algorithm with a centralized critic and an
+attention mechanism. To make our method more easy to understand, we present the overall approach
+without considering the attention mechanism. We will introduce it in the next section.
+Specifically, as can be seen from Figure 2, the centralized critic Qi (i.e., the Q-value function that is
+related to agent i) can get access to the observations and actions of all agents, while the independent
+actor πi can only get access to its own observation oi . Accordingly, ATT-MADDPG works as
+follows during training.
+Step 1: the actors πi generate the actions ai based on their own observations oi to interact with the
+environment.
+4
+
+environment
+
+reward
+
+reward
+
+...
+
+𝑸𝟏
+
+𝑸𝑵
+
+step 2
+
+BP
+
+BP
+
+𝑨𝟏
+
+𝑶𝟏
+
+...
+
+step 3
+
+𝑶𝑵
+
+𝑨𝑵
+
+step 1
+π𝟏
+
+...
+
+π𝑵
+
+decentralized execution
+centralized training
+Figure 2: The overall approach of ATT-MADDPG.
+Step 2: the centralized critics estimate the Q-values Qi based on the observations and actions of all
+agents.
+Step 3: after receiving the feedback reward from the environment, the actors and critics are jointly
+trained using back propagation (BP) based on Equation 10, 11, and 12.
+Although the overall approach is simple, it has great ability to address the agent modelling problem
+in distributed setting: (1) note that only step 1 is needed during execution, thus the independent
+actor πi can learn decentralized policies that are suitable for the distributed setting; (2) generally,
+there is no way to model the policies of other agents without accessing their observations ~o−i and
+actions ~a−i ; in step 2, the centralized critic Qi is designed to collect ~o−i and ~a−i , which forms the
+necessary foundation to do agent modelling. Moreover, with centralized critics, the agents can be
+trained with stable reward signal ri , hence our method can also relieve the non-stationary problem
+(Weinberg and Rosenschein, 2004; Hernandez-Leal et al., 2017)3 .
+3.2
+
+The Attention Critic
+
+To arrive at a proper cooperation, the agent is expected to model the teammates’ policies and to
+adjust its own policy accordingly. We design and embed a kind of Soft Attention into the centralized
+critic, making sure that the dynamic joint policies of teammates can be modelled adaptively.
+To make our design more easy to understand, we introduce it based on the assumption that the action
+is discrete. The extension to continuous action is presented in Section 3.3.
+Recall that the environment is influenced by ~a in multi-agent setting. From the perspective of agent i,
+the outcome of ai taken in s is dependent on ~a−i . Therefore, similar to the definition of Qπ (s, a) in
+π |~
+π
+Equation 1, we define the Q-value function relative to the joint policy of teammates as Qi i −i (s, ai )
+3
+
+The reason is that a joint action ~a = hai , ~a−i i taken in a given state s , ~o = hoi , ~o−i i can invariably
+result in the same ri and s0 with deterministic probability, which is regardless of the changing policies of other
+teammates. More discussion can be found in (Lowe et al., 2017; Foerster et al., 2017; Mao et al., 2017; Chu
+and Ye, 2017; Gupta et al., 2017), which also adopt centralized critics (but do not study agent modelling).
+
+5
+
+: fully-connected layer
+: attention operation
+
+real
+𝑸𝟏
+Q-value
+
+Attention
+Module
+
+contextual 𝒄
+𝒓 𝒍𝒓
+Q-value 𝑸𝟏 (𝒔, 𝒂𝟏 , 𝒂−𝟏 )
+
+𝑾𝟏 attention weight
+action conditional
+Q-values
+
+𝑸𝟏𝟏 (𝒔, 𝒂𝒓𝟏 |𝒂𝒍𝒍
+−𝟏 )
+
+𝑸𝟐𝟏 (𝒔, 𝒂𝒓𝟏 |𝒂𝒍𝒓
+−𝟏 )
+
+𝑸𝟑𝟏 (𝒔, 𝒂𝒓𝟏 |𝒂𝒓𝒓
+−𝟏 )
+
+𝑸𝟒𝟏 (𝒔, 𝒂𝒓𝟏 |𝒂𝒓𝒍
+−𝟏 )
+
+𝒉𝟏
+
+𝑨𝟑 =𝒓
+
+K-head
+Module
+
+𝒉𝒊𝒅𝒅𝒆𝒏 𝒍𝒂𝒚𝒆𝒓
+
+𝑶𝟏
+
+𝑨𝟏 =𝒓
+
+𝑶𝟐
+
+𝑨𝟐 =𝒍
+
+𝑶𝟑
+
+Figure 3: The attention critic of ATT-MADDPG. We show the detailed generation of Q1 using a
+three-agent example: the discrete action space is {l, r}, and the agents prefer to take the actions r,
+l, and r, respectively. In this case, the second action conditional Q-value Q21 will contribute more
+weights to the computation of the contextual Q-value Qc1 , as indicated by thicker red links. Note
+that we call Qi the real Q-value, Qci the contextual Q-value, and Qki the action conditional Q-value.
+The difference is that Qci and Qki are multi-dimensional vectors, while Qi is the real scalar Q-value
+used in Equation 10, 11 and 12.
+
+as previous studies (He et al., 2016; Banerjee and Sen, 2007), and our new objective is to find the
+π |~
+π
+π |~
+π
+optimal policy πi∗ = arg maxπi Qi i −i (s, ai ). Mathematically, Qi i −i (s, ai ) can be calculated
+by4
+π |~
+π−i
+
+Qi i
+
+(s, ai ) = E~a−i ∼~π−i [Qπi i (s, ai , ~a−i )]
+= Σ~a−i ∈A~ −i [~π−i (~a−i |s)Qπi i (s, ai , ~a−i )]
+
+(6)
+(7)
+
+π |~
+π
+
+Equation 7 implies that in order to estimate Qi i −i (s, ai ), the critic network of agent i should have
+the abilities:
+~ −i .
+(1) to estimate Qπi (s, ai , ~a−i ) for each ~a−i ∈ A
+i
+
+(2) to calculate the expectation of all Qπi i (s, ai , ~a−i )5 .
+~ −i , we design a K-head Module where K=|A
+~ −i |.
+To estimate Qπi i (s, ai , ~a−i ) for each ~a−i ∈ A
+As shown at the bottom of Figure 3, the K-head Module generates K action conditional Q-value
+Qki (s, ai |~a−i ; wi ) for each ~a−i to approximate the true Qπi i (s, ai , ~a−i ), where wi is the parameters
+of the critic network of agent i. Specifically, Qki (s, ai |~a−i ; wi ) is generated using ai and all obser4
+
+The detailed derivation can be found in (He et al., 2016) and the Appendix.
+The expectation is equivalent to the weighted summation, and the weight of Qπi i (s, ai , ~a−i ) is ~π−i (~a−i |s)
+as shown in Equation 7.
+5
+
+6
+
+vations hoi , ~o−i i = ~o , s; as for the information about ~a−i , it is provided by an additional hidden
+vector hi (wi ), which will be introduced shortly6 .
+To calculate the expectation of all Qπi i (s, ai , ~a−i ), the weights ~π−i (~a−i |s) of all Qπi i (s, ai , ~a−i ) are
+also required as indicated by Equation 7. However, it is hard to approximate these weights. On one
+hand, for different s, the teammates will take different ~a−i with different probabilities ~π−i (~a−i |s)
+based on the policy ~π−i . On the other hand, the policy ~π−i is changing continuously, because the
+agents are learning concurrently to adapt to each other.
+~ −i |s) jointly by a weight vector Wi (wi ) ,
+We propose to approximate all ~π−i (~a−i |s) ∈ ~π−i (A
+[Wi1 (wi ), ..., WiK (wi )], where wi is the parameters of the critic network of agent i. That is to say, we
+~ −i |s), rather than approximating each
+use Wi (wi ) to approximate the probability distribution ~π−i (A
+probability value ~π−i (~a−i |s) separately. A good Wi (wi ) should satisfy the following conditions:
+k
+(1) ΣK
+k=1 Wi (wi ) ≡ 1, such that Wi (wi ) is a probability distribution indeed; (2) Wi (wi ) can change
+adaptively when the joint policy of teammates ~π−i is changed, such that Wi (wi ) can really model
+the teammates’ joint policy in an adaptive manner.
+Recall that the attention mechanism is intrinsically suitable for generating a probability distribution
+in an adaptive manner (please refer Section 2), so we leverage it to design an Attention Module. As
+shown at the middle of Figure 3, Attention Module works as follows.
+Firstly, a hidden vector hi (wi ) is generated based on all actions of teammates (i.e., ~a−i ).
+Then, the attention weight vector Wi (wi ) is generated by comparing hi (wi ) with all action conditional Q-values Qki (s, ai |~a−i ; wi ). Specifically, we apply the dot score function (Luong et al., 2015)
+to calculate the element Wik (wi ) ∈ Wi (wi ):
+exp(hi (wi )Qki (s, ai |~a−i ; wi ))
+Wik (wi ) = PK
+k
+a−i ; wi ))
+k=1 exp(hi (wi )Qi (s, ai |~
+
+(8)
+
+Lastly, the contextual Q-value Qci (s, ai , ~a−i ; wi ) is calculated as a weighted summation of Wik and
+Qki :
+Qci (s, ai , ~a−i ; wi ) =
+
+K
+X
+
+Wik (wi )Qki (s, ai |~a−i ; wi )
+
+(9)
+
+k=1
+
+Summary: Teammates have been considered in Equation 7, while Equation 9 is an approximation of Equation 7, because Wik (wi ) and Qki (s, ai |~a−i ; wi ) can learn to approximate ~π−i (~a−i |s)
+and Qπi i (s, ai , ~a−i ), respectively. Thus, the agents controlled by ATT-MADDPG can cooperate
+efficiently.
+3.3
+
+Key Implementation
+
+Attention Module. After getting the contextual Q-value Qci (s, ai , ~a−i ; wi ), we need to transform
+the multi-dimensional Qci into a scalar real Q-value Qi using a fully-connected layer with one output
+neuron, as shown at the top of Figure 3.
+The reason is that many researches have shown that multi-dimensional vector works better than
+scalar when implementing the Soft Attention (Xu et al., 2015). In our Attention Module, we also
+find that vector works better than scalar, so the Qci , Qki , hi (wi ) and Wi (wi ) are all implemented
+using vectors. However, the standard RL adopts a scalar real Q-value Qi , thus we should transform
+Qci into a scalar real Q-value Qi .
+K-head Module. We have limited the above discussion to discrete action space. A natural question
+~ −i ? What if the action space is
+is that should we generate one Qki (s, ai |~a−i ; wi ) for each ~a−i ∈ A
+continuous?
+~ −i |. Many researchers have shown that only a small set of
+In fact, there is no need to set K = |A
+actions are crucial in most cases, and the conclusion is suitable for both continuous (Silver et al.,
+2014) and discrete (Wang et al., 2015) action space environments.
+This is why we use Qki (s, ai |~a−i ; wi ) instead of Qki (s, ai , ~a−i ; wi ) to represent the defined action conditional Q-value.
+6
+
+7
+
+We argue that if Qki (s, ai |~a−i ; wi ) could group similar ~a−i (i.e., representing different but similar
+~a−i using one Q-value head), it will be much more efficient. As deep neural network is an universal
+function approximator (Cybenko, 1989; Hornik et al., 1989; Schaul et al., 2015), we expect that our
+method can possess this ability. Further analysis in Section 4.1.3 also indicates that our hypothesis
+is reasonable. Hence, we adopt a small K (e.g., 4 or 8) even in tasks with continuous action space.
+Parameter Updating Method. Since the critic network has considered the observations and
+actions of all agents, the network’s output (i.e., the real Q-value Qi ) can be represented as
+Qi (hoi , ~o−i i, ai , ~a−i ; wi ). Therefore, we can extend Equation 2, 3 and 4 into multi-agent formulations:
+δi = ri + γQi (ho0i , ~o0−i i, a0i , ~a0−i ; wi− )|a0j =µ − (o0j )
+θ
+
+j
+
+− Qi (hoi , ~o−i i, ai , ~a−i ; wi )
+L(wi ) = E(oi ,~o−i ,ai ,~a−i ,ri ,o0i ,~o0−i )∼D [(δi )2 ]
+
+(10)
+(11)
+
+∇θi J(θi ) = E(oi ,~o−i )∼D [∇θi µθi (oi )
+∗ ∇ai Qi (hoi , ~o−i i, ai , ~a−i ; wi )|aj =µθj (oj ) ]
+
+(12)
+
+In practice, we adopt the centralized training with decentralized execution paradigm (Oliehoek et al.,
+2008; Foerster et al., 2017; Lowe et al., 2017; Chu and Ye, 2017) to train and deploy our model, thus
+the information in the above equations can be collected easily. Besides, the K-head Module and
+Attention Module are submodules embedded in the centralized critic, so they can be optimized
+jointly with the agent’s policy in an end-to-end manner using back propagation.
+3.4
+
+The Discussion
+
+Our attention critic has great ability to explicitly model the dynamic joint policy of teammates in an
+adaptive manner. This can be understood from three perspectives.
+k
+The first perspective is the joint policy. Equation 8 makes sure that ΣK
+k=1 Wi (wi ) ≡ 1, thus Wi (wi )
+~
+must be able to represent the probability distribution ~π−i (A−i |s) of a specific joint policy ~π−i .
+
+The second perspective is the adaptive manner. That is to say, Wi (wi ) can react to the teammates’
+dynamic policies adaptively. The reason is that the action conditional Q-value Qki (s, ai |~a−i ; wi ) has
+considered all actions of the agent team, thus its values can be estimated using the experience tuple
+(s, hai , ~a−i i, ri , s0 ) , (hoi , ~o−i i, hai , ~a−i i, ri , ho0i , ~o0−i i), which is independent of the current ~π−i .
+It means that Qki has no need to shift its values even if ~π−i has changed (yet Qki still need to be
+learned). Given a stable Qki , the attention weight Wi (wi ) can adapt to different ~π−i easily, and the
+agent will adjust its policy quickly.
+The last perspective is that the critic network is designed based on mathematical analysis, which
+introduces a special structure to explicitly approximate Equation 7. This is similar to the renowned
+Dueling Network (Wang et al., 2015), which explicitly approximates the Q-value as the summation
+of the advantage and the baseline (i.e., Q(s, a) = A(s, a) + V (s)). In contrast, if the centralized
+critic is implemented using fully-connected network like previous studies (Foerster et al., 2017; Mao
+et al., 2017; Lowe et al., 2017), it will be hard for the fully-connected critic network to accomplish
+such meticulous task.
+
+4
+
+Experiment
+
+The experiments are conducted based on the following settings. The critics adopt 4-head attention
+networks by default. The actors use feed-forward networks with two hidden layers. For both actors
+and critics, each hidden layer has 32 neurons. Other hyperparameters are as follows: learning rate
+of actor is 0.001; learning rate of critic is 0.01; learning rate of target network is τ = 0.001; replay
+buffer size is 100000; batch size is 128; discount factor is γ = 0.95. The network architecture is
+shown in the Appendix.
+8
+
+4.1
+
+The Packet Routing Environment
+
+Environment Description. Figuring out a better way to route the packets on the Internet is the
+research topic of our group, so we evaluate our methods on the routing tasks. As shown in Figure
+4, the small topology is most classical in the Internet Traffic Engineering community (Kandula
+et al., 2005); the large topology is the real topology in our application. In each topology, there are
+several edge routers. Each edge router has an aggregated flow that should be transmitted to other
+edge routers through available paths (e.g., in Figure 4(a), B is set to transmit flow to D, and the
+available paths are BEF D and BD). Each path is made up of several links, and each link has
+a link utilization, which equals to the ratio of the current flow on this link to the maximum flow
+transmission capacity of this link. The necessity of cooperation among routers is as follows: one
+link can be used to transmit the flow from more than one router, so the routers should not split too
+much or too little flow to the same link at the same time; otherwise this link will be either overloaded
+or underloaded.
+
+A
+
+C
+E
+
+B
+
+F
+D
+
+A
+
+Paths:
+AC
+AEFC
+BEFC
+BD
+
+Paths:
+
+1
+
+C
+
+2
+
+4
+
+3
+
+5
+
+6
+7
+
+B
+
+8
+D
+
+(a) The small topology.
+
+A16C
+A146C
+A147C
+A246C
+A247C
+A257C
+A147D
+A247D
+A257D
+A258D
+
+B246C
+B247C
+B257C
+B357C
+B247D
+B257D
+B258D
+B357D
+B358D
+B38D
+
+(b) The large topology.
+
+Figure 4: The packet routing environment. The large topology has the same complexity as the real
+Abilene Network8 in terms of the numbers of routers, links and paths. It is used for scalability test.
+Problem Definition. The routers are controlled by our algorithm, and they try to learn a good
+flow splitting policy to minimize the Maximum Link Utilization in the whole network (MLU). The
+intuition behind this goal is that high link utilization is undesirable for dealing with bursty traffic.
+The observation includes the flow demands in the routers’ buffers, the latest ten steps’ estimated
+link utilizations and the latest action taken by the router. The action is the splitting ratio of each
+available path. The reward is 1 − M LU because we want to minimize MLU. Exploration bonus
+based on local link utilization can be added accordingly.
+Baseline. MADDPG (Lowe et al., 2017) and PSMADDPGV2 (Chu and Ye, 2017) are adopted as
+baselines, because they are the state-of-the-art RL-based methods that can deal with distributed tasks
+with continuous action space. They also apply centralized critics to collect teammates’ information,
+but without attention mechanism. MADDPG uses plain fully-connected network to implement the
+centralized critic, while PSMADDPGV2 uses the parameter sharing method (i.e., sharing part of
+the critic network with other agents) to model other agents inexplicitly. In addition, the rule-based
+WCMP and Khead-MADDPG are compared. WCMP (Zhou et al., 2014; Kang et al., 2015) is a
+Weighted-Cost version of the Equal-Cost Multi-Path routing algorithm9 , which is the most popular
+multi-path routing algorithm applied in real-world routers. Khead-MADDPG is an ablation model
+that directly merges the branches of K-head Module to generate the real Q-value, and there is no
+attention mechanism in this model.
+4.1.1
+
+Simple Case Test and Scalability Test.
+
+The average rewards of 20 independent experiments are shown in Figure 5 and 6. As can be seen, for
+the small topology, ATT-MADDPG can obtain more rewards than MADDPG and PSMADDPGV2,
+while the Khead-MADDPG model does not work at all. It means that the combination of K-head
+Module and Attention Module (but not a single K-head Module) is necessary for achieving good
+results. The performance of PSMADDPGV2 turns out to be unsatisfactory, which may result from
+the heterogeneity of the agents.
+For the large topology, ATT-MADDPG outperforms other methods by a larger margin. It indicates
+that ATT-MADDPG has better scalability. A possible reason is that the Attention Module can make
+8
+9
+
+A backbone network https://en.wikipedia.org/wiki/Abilene_Network.
+https://en.wikipedia.org/wiki/Equal-cost_multi-path_routing.
+
+9
+
+mean average reward
+
+14
+12
+10
+8
+6
+4
+2
+0
+2
+
+ATT-MADDPG
+MADDPG
+PSMADDPGV2
+Khead-MADDPG
+WCMP
+0
+
+500
+
+1000 1500 2000
+training episode
+
+2500
+
+3000
+
+mean average reward
+
+Figure 5: The average rewards on small topology.
+
+15.0
+12.5
+10.0
+7.5
+5.0
+2.5
+0.0
+2.5 0
+
+1000
+
+2000
+3000
+training episode
+
+ATT-MADDPG
+MADDPG
+PSMADDPGV2
+Khead-MADDPG
+WCMP
+4000
+5000
+
+Figure 6: The average rewards on large topology.
+
+the Q-value estimation attend to the actions of more relevant agents (and accordingly, the influence
+of irrelevant agents is weakened). Take Figure 4(b) as an example, agent4 is very likely to attend
+to agent1 and agent2 rather than agent3. This property enables ATT-MADDPG to work well even
+within a complex environment with an increasing number of agents. In contrast, without a mechanism to explicitly model the agents, MADDPG will not be furnished with such scalability.
+For both topologies, ATT-MADDPG exhibits better performance than the rule-based WCMP after
+training a thousand episodes. The reason lies in that the RL-based ATT-MADDPG can take the
+future effect of actions into consideration, which is in favor of accomplishing the cooperation at a
+high level, whereas the rule-based WCMP can only consider the current effect of actions.
+Robustness Test.
+
+mean average reward
+
+4.1.2
+
+17.5
+15.0
+12.5
+10.0
+7.5
+5.0
+2.5
+0.0
+2.5 0
+
+K=2
+K=4
+K=8
+K=12
+K=16
+MADDPG
+
+500
+
+1000 1500 2000
+training episode
+
+2500
+
+Figure 7: The robustness test on small topology.
+
+10
+
+3000
+
+mean average reward
+
+15.0
+12.5
+10.0
+7.5
+5.0
+2.5
+0.0
+2.5
+
+K=2
+K=4
+K=8
+K=12
+K=16
+MADDPG
+
+0
+
+1000
+
+2000
+3000
+training episode
+
+4000
+
+5000
+
+Figure 8: The robustness test on large topology.
+ATT-MADDPG introduces a special hyperparameter K. It is indispensable to investigate how the
+setting of K influences the performance. As mentioned before, the above results are obtained when
+K = 4. We further set K as 2, 8, 12 and 16 to conduct the same experiments. The average rewards
+of 20 independent experiments are shown in Figure 7 and 8. As can be observed, for the small
+topology, the obtained rewards are increasing as K becomes greater, and there is a great increase
+when K is set to 8. For the large topology, a small increase is observed when K is set to 16.
+Overall, ATT-MADDPG can obtain more rewards than MADDPG in all settings. Consequently, it
+can be concluded that ATT-MADDPG can stay robust at a wide range of K to achieve good results.
+4.1.3
+
+Further Study on K-head and Attention.
+
+head1
+
+head2
+
+head3
+
+head4
+
+realQ
+
+Q-value
+
+2
+1
+0
+-1
+
+1
+
+3
+
+5
+
+7
+
+9 11 13 15 17 19 21 23 25 27 29
+data sample index
+
+(a) The different heads’ Q-values.
+
+weight distribution
+
+head1
+
+head2
+
+head3
+
+head4
+
+1
+0.8
+0.6
+0.4
+0.2
+0
+1
+
+3
+
+5
+
+7
+
+9 11 13 15 17 19 21 23 25 27 29
+data sample index
+(b) The attention weights.
+
+Figure 9: The Q-values and attention weights generated by router B in the small topology.
+In Section 3.3, we claim that the attention weight Wik (wi ) is used to approximate the probability
+~π−i (~a−i |s), and the K-head Module is expected to have the ability to group similar ~a−i . In this
+11
+
+experiment, we want to verify whether the above claim is consistent with the experimental results.
+Specifically, we randomly sample 3000 experience tuples (s, a, Q(s, a)) from the replay buffer, and
+show the different heads’ Q-values and the attention weights of 30 non-cherry-picked samples10 in
+Figure 9. As can be seen, head4 has the smoothest Q-values, and the weights of head4 are much
+greater than the weights of other heads. In contrast, head1 has a large range of Q-value volatility,
+and the weights of head1 are much smaller.
+The above phenomenon leads us to believe that the K-head Module can group similar ~a−i indeed.
+For example, the heavily weighted head4 may represent a large set of non-crucial ~a−i (e.g., a flow
+splitting ratio between [0.3, 0.7]), while the lightly weighted head1 may represent a small set of
+crucial ~a−i (e.g., a flow splitting ratio between [0.8, 0.9]). The explanation is as follows. From the
+perspective of Q-value, since head4 may represent the non-crucial ~a−i , most local actions ai will
+not have a great impact on the M LU (and accordingly, the reward and the Q-value); therefore it
+is reasonable that head4 has smooth Q-values. From the perspective of attention weight, as head4
+may represent a large set of non-crucial ~a−i that are preferred by many routers, the probability
+summation Σ~a−i ~π−i (~a−i |s) of the ~a−i grouped by head4 will be great; given that the attention
+weight is an approximation of the probability ~π−i (~a−i |s), it will be reasonable that head4 has
+greater attention weights than other heads. The Q-values and the attention weights of head1 can be
+analysed similarly to show that our hypothesis (i.e., the K-head Module can group similar ~a−i ) is
+reasonable.
+4.2
+
+The Benchmark Environment
+
+We consider two benchmark environments that are also adopted by MADDPG. They are shown in
+Figure 10.
+agent
+
+predator
+
+prey
+randomly
+escape
+
+landmark
+(a) Cooperative Navigation.
+
+(b) Predator Prey.
+
+Figure 10: The benchmark environments.
+Cooperative Navigation (Co. Na.). Three agents and three landmarks are generated at random
+locations of a 10-by-10 2D plane. The agents are controlled by our algorithm, and they try to
+cooperatively cover all landmarks. The observation is the relative positions and velocities of other
+agents and landmarks. The action is the velocity. The reward is the negative proximity of any agent
+to each landmark.
+Predator Prey (Pr. Pr.). Three predators and a prey are generated at random locations of a 10-by10 2D plane. The predators are controlled by our algorithm, and they try to cooperatively catch the
+prey. The observation and action are the same as those of the cooperative navigation environment.
+The reward is the negative proximity of any predator to the prey. In addition, the predators will get
+a 10 reward when they catch the prey.
+Baseline. Besides MADDPG, PSMADDPGV2 and Khead-MADDPG, we also compare with a
+rule-based method called GreedyPursuit: for cooperative navigation, the agent always goes to the
+nearest landmark; for predator prey, the predator always goes to the current location of the prey.
+The Result. The average final stable rewards of 50 independent experiments are shown in Table
+2. In contrast to the results in the packet routing environments, PSMADDPGV2 works better than
+MADDPG in the current environments. The reason may be that the agents are homogeneous in
+10
+
+We only show 30 samples to make the illustration easy to read. To better illustrate all of the 3000 samples,
+we generate the 2D PCA projections of (s, a), and show a group of 3D figures about (s, a, Q(s, a)) in the
+Appendix. In addition, the Q-value heads are 32D vectors, so we merge the last two layers of the critic network
+to transform the vector into a scalar Q-value shown in Figure 9(a). See the Appendix for detailed information.
+
+12
+
+Table 2: The average final stable rewards.
+ATT-MADDPG, K=2
+ATT-MADDPG, K=4
+ATT-MADDPG, K=8
+ATT-MADDPG, K=12
+ATT-MADDPG, K=16
+PSMADDPGV2
+MADDPG
+GreedyPursuit
+Khead-MADDPG
+
+Co. Na.
+-1.279
+-1.268
+-1.322
+-1.353
+-1.317
+-1.586
+-1.767
+-2.105
+-2.825
+
+Pr. Pr.
+3.986
+3.589
+3.012
+3.170
+3.004
+2.473
+1.920
+1.903
+1.899
+
+Figure 11: A convergent joint policy learned by ATT-MADDPG under an instance of the cooperative navigation task. L1, L2 and L3 represent different landmarks. A1, A2 and A3 stand for
+different agents. The red arrows indicate the agents’ actions. Note that one picture stands for several
+timesteps.
+
+current environments, which makes the parameter sharing method more efficient. Furthermore, ATTMADDPG can obtain more rewards than MADDPG and PSMADDPGV2 in both environments.
+It indicates that our method asserts itself with general applicability and good performance. The
+GreedyPursuit performs badly because it does not consider that the teammates will go to the same
+landmark, and that the prey will randomly escape to other place. The Khead-MADDPG behaves
+even worse, because it sometimes cannot converge well, resulting random agents.
+Policy Analysis. Figure 11 shows a convergent joint policy learned by ATT-MADDPG under the
+cooperative navigation task. In the beginning (i.e., the first picture), A1 and A2 share the closest
+landmark L2, while A3 is very closed to L1 and L3. Therefore, A1 hesitantly moves to the center
+of L1 and L2, A2 to the center of L2 and L3, A3 to the center of L1 and L3. After some timesteps,
+the state changes to the second picture. At this point, A2 and A3 understand that A1 will go to L1.
+Thus, A2 directly moves to L2, A3 to L3, and A1 to L1 in the following timesteps (i.e., the three
+pictures in the middle). Consequently, the agents cover to all landmarks as shown in the last picture.
+These behaviors indicate that the agents really learned a cooperative joint policy.
+
+5
+
+Related Work
+
+Agent modelling is the process of constructing models for other agents based on the interaction history. The models include any property of interest such as belief, policy, action, class, goal (Albrecht
+and Stone, 2018). Most previous methods are based on the Game Theory (Ganzfried and Sandholm,
+2011) or grid-world settings, which are hardly scaled to real-world applications like the network
+packet routing.
+Recently, DRL-based methods has been explored to do agent modelling for large scale problems.
+Our method is an instance of such method, and the most relevant researches are DRON (He et al.,
+2016), DPIQN (Hong et al., 2018), LOLA (Foerster et al., 2018), SOM (Raileanu et al., 2018), Mean
+Field Reinforcement Learning (MFRL) (Yang et al., 2018). DRON embeds the opponent’s action
+into the agent’s policy network. In this way, the opponent’s action can be seen as a hidden variable
+of the agent’s policy. Another gating network is used to control how much the hidden variable influences the policy. DPIQN is very similar to DRON. It embeds the collaborator’s policy feature into
+the controllable agent’s DQN (Mnih et al., 2015), such that it is able to generate cooperative actions.
+13
+
+LOLA explicitly includes an additional term into the agent’s policy updating rules. This additional
+term can account for the impact to other agents. SOM trains a shared policy network for all agents.
+The input of the policy network contains a goal field to distinguish different agents. The authors
+find that the policy network can model the agent’s action to some extent. MFRL approximately
+models the interaction among multiple agents by that between a single agent and the mean effect of
+other teammates. In contrast to these DQN-based methods that train centralized policies for tasks
+with discrete action space, our method can generate decentralized policies for tasks with continuous
+action space. A few DQN-based methods (Sunehag et al., 2017; Rashid et al., 2018) can generate
+decentralized policies; the baseline MADDPG (Lowe et al., 2017) and PSMADDPGV2 (Chu and
+Ye, 2017) can train decentralized policies with continuous action space; however, they do not efficiently build models for other agents, instead they address other problems such as credit assignment,
+competitive agents, and etc. More related studies are shown in the Appendix.
+
+6
+
+Conclusion
+
+This paper presents a novel actor-critic RL method to model and exploit teammates’ policies in
+the cooperative distributed multi-agent setting. Our method embeds an attention mechanism into a
+centralized critic, which introduces a special structure to explicitly model the dynamic joint policy
+of teammates in an adaptive manner. Consequently, all agents will cooperate with each other efficiently. Furthermore, our method can train decentralized policies to handle distributed tasks with
+continuous action space.
+We evaluate our method on both benchmark tasks and the real-world packet routing tasks. The
+results show that it not only outperforms the state-of-the-art RL-based methods and rule-based
+methods by a large margin, but also achieves good scalability and robustness. Moreover, to better understand our method, we also make thorough experiments: (1) the ablation model illustrates
+that all components of the proposed model are necessary; (2) the study on Q-values and attention
+weights demonstrates that our method has mastered a sophisticated attention mechanism indeed; (3)
+the analysis of a concrete policy shows that the agents really learned a cooperative joint policy.
+Future work will extend our method to the settings with discrete action space and competitive agents.
+Acknowledgments
+The authors would like to thank prof. Zhihua Zhang for helpful suggestions. The authors would also
+like to thank Yan Ni, Shiru Ren, Xiangyu Liu, Yuanxing Zhang, Shihan Xiao and the anonymous
+reviewers for their insightful comments. This work was supported by the National Natural Science
+Foundation of China under Grant No.61572044. The contact author is Zhen Xiao.
+
+References
+Stefano V Albrecht and Peter Stone. 2018. Autonomous agents modelling other agents: A comprehensive survey and open problems. Artificial Intelligence 258 (2018), 66–95.
+Dipyaman Banerjee and Sandip Sen. 2007. Reaching pareto-optimality in prisoners dilemma using
+conditional joint action learning. Autonomous Agents and Multi-Agent Systems 15, 1 (2007),
+91–108.
+Daniel S Bernstein, Robert Givan, Neil Immerman, and Shlomo Zilberstein. 2002. The complexity
+of decentralized control of Markov decision processes. Mathematics of operations research 27, 4
+(2002), 819–840.
+Darse Billings, Denis Papp, Jonathan Schaeffer, and Duane Szafron. 1998. Opponent modeling in
+poker. Aaai/iaai 493 (1998), 499.
+Yu Fan Chen, Miao Liu, Michael Everett, and Jonathan P How. 2017. Decentralized noncommunicating multiagent collision avoidance with deep reinforcement learning. In Robotics and
+Automation (ICRA), 2017 IEEE International Conference on. IEEE, 285–292.
+Xiangxiang Chu and Hangjun Ye. 2017. Parameter Sharing Deep Deterministic Policy Gradient for
+Cooperative Multi-agent Reinforcement Learning. arXiv preprint arXiv:1710.00336 (2017).
+14
+
+George Cybenko. 1989. Approximation by superpositions of a sigmoidal function. Mathematics of
+control, signals and systems 2, 4 (1989), 303–314.
+Roel Dobbe, David Fridovich-Keil, and Claire Tomlin. 2017. Fully decentralized policies for multiagent systems: An information theoretic approach. In Advances in Neural Information Processing
+Systems. 2941–2950.
+Kurt Dresner and Peter Stone. 2008. A multiagent approach to autonomous intersection management. Journal of artificial intelligence research 31 (2008), 591–656.
+Jakob Foerster, Richard Y Chen, Maruan Al-Shedivat, Shimon Whiteson, Pieter Abbeel, and Igor
+Mordatch. 2018. Learning with opponent-learning awareness. In Proceedings of the 17th International Conference on Autonomous Agents and MultiAgent Systems. International Foundation for
+Autonomous Agents and Multiagent Systems, 122–130.
+Jakob Foerster, Gregory Farquhar, Triantafyllos Afouras, Nantas Nardelli, and Shimon Whiteson.
+2017. Counterfactual multi-agent policy gradients. arXiv preprint arXiv:1705.08926 (2017).
+Sam Ganzfried and Tuomas Sandholm. 2011. Game theory-based opponent modeling in large
+imperfect-information games. In The 10th International Conference on Autonomous Agents and
+Multiagent Systems-Volume 2. International Foundation for Autonomous Agents and Multiagent
+Systems, 533–540.
+Ivo Grondman, Lucian Busoniu, Gabriel AD Lopes, and Robert Babuska. 2012. A survey of actorcritic reinforcement learning: Standard and natural policy gradients. IEEE Transactions on Systems, Man, and Cybernetics, Part C (Applications and Reviews) 42, 6 (2012), 1291–1307.
+Jayesh K Gupta, Maxim Egorov, and Mykel Kochenderfer. 2017. Cooperative multi-agent control using deep reinforcement learning. In International Conference on Autonomous Agents and
+Multiagent Systems. Springer, 66–83.
+He He, Jordan Boyd-Graber, Kevin Kwok, and Hal Daumé III. 2016. Opponent modeling in deep
+reinforcement learning. In International Conference on Machine Learning. 1804–1813.
+Pablo Hernandez-Leal, Michael Kaisers, Tim Baarslag, and Enrique Munoz de Cote. 2017. A
+survey of learning in multiagent environments: Dealing with non-stationarity. arXiv preprint
+arXiv:1707.09183 (2017).
+Zhang-Wei Hong, Shih-Yang Su, Tzu-Yun Shann, Yi-Hsiang Chang, and Chun-Yi Lee. 2018. A
+Deep Policy Inference Q-Network for Multi-Agent Systems. In Proceedings of the 17th International Conference on Autonomous Agents and MultiAgent Systems. International Foundation for
+Autonomous Agents and Multiagent Systems, 1388–1396.
+Kurt Hornik, Maxwell Stinchcombe, and Halbert White. 1989. Multilayer feedforward networks
+are universal approximators. Neural networks 2, 5 (1989), 359–366.
+Srikanth Kandula, Dina Katabi, Bruce Davie, and Anna Charny. 2005. Walking the tightrope: Responsive yet stable traffic engineering. In ACM SIGCOMM Computer Communication Review,
+Vol. 35. ACM, 253–264.
+Nanxi Kang, Monia Ghobadi, John Reumann, Alexander Shraer, and Jennifer Rexford. 2015. Efficient traffic splitting on sdn switches. In Proceedings of CoNEXT, Vol. 15.
+Vijay R Konda and John N Tsitsiklis. 2003. On actor-critic algorithms. SIAM journal on Control
+and Optimization 42, 4 (2003), 1143–1166.
+Timothy P Lillicrap, Jonathan J Hunt, Alexander Pritzel, Nicolas Heess, Tom Erez, Yuval Tassa,
+David Silver, and Daan Wierstra. 2015. Continuous control with deep reinforcement learning.
+arXiv preprint arXiv:1509.02971 (2015).
+Ryan Lowe, Yi Wu, Aviv Tamar, Jean Harb, OpenAI Pieter Abbeel, and Igor Mordatch. 2017.
+Multi-agent actor-critic for mixed cooperative-competitive environments. In Advances in Neural
+Information Processing Systems. 6379–6390.
+15
+
+Minh-Thang Luong, Hieu Pham, and Christopher D Manning. 2015. Effective approaches to
+attention-based neural machine translation. arXiv preprint arXiv:1508.04025 (2015).
+Hangyu Mao, Zhibo Gong, Yan Ni, and Zhen Xiao. 2017. ACCNet: Actor-Coordinator-Critic Net
+for” Learning-to-Communicate” with Deep Multi-agent Reinforcement Learning. arXiv preprint
+arXiv:1706.03235 (2017).
+Volodymyr Mnih, Koray Kavukcuoglu, David Silver, Andrei A Rusu, Joel Veness, Marc G Bellemare, Alex Graves, Martin Riedmiller, Andreas K Fidjeland, Georg Ostrovski, et al. 2015.
+Human-level control through deep reinforcement learning. Nature 518, 7540 (2015), 529.
+Frans A Oliehoek, Matthijs TJ Spaan, and Nikos Vlassis. 2008. Optimal and approximate Q-value
+functions for decentralized POMDPs. Journal of Artificial Intelligence Research 32 (2008), 289–
+353.
+Roberta Raileanu, Emily Denton, Arthur Szlam, and Rob Fergus. 2018. Modeling Others using
+Oneself in Multi-Agent Reinforcement Learning. arXiv preprint arXiv:1802.09640 (2018).
+Tabish Rashid, Mikayel Samvelyan, Christian Schroeder de Witt, Gregory Farquhar, Jakob Foerster,
+and Shimon Whiteson. 2018. QMIX: Monotonic Value Function Factorisation for Deep MultiAgent Reinforcement Learning. arXiv preprint arXiv:1803.11485 (2018).
+Maayan Roth, Reid Simmons, and Manuela Veloso. 2005. Reasoning about joint beliefs for
+execution-time communication decisions. In Proceedings of the fourth international joint conference on Autonomous agents and multiagent systems. ACM, 786–793.
+Tom Schaul, Daniel Horgan, Karol Gregor, and David Silver. 2015. Universal value function approximators. In International Conference on Machine Learning. 1312–1320.
+David Silver, Guy Lever, Nicolas Heess, Thomas Degris, Daan Wierstra, and Martin Riedmiller.
+2014. Deterministic policy gradient algorithms. In ICML.
+Peter Sunehag, Guy Lever, Audrunas Gruslys, Wojciech Marian Czarnecki, Vinicius Zambaldi,
+Max Jaderberg, Marc Lanctot, Nicolas Sonnerat, Joel Z Leibo, Karl Tuyls, et al. 2017. Valuedecomposition networks for cooperative multi-agent learning. arXiv preprint arXiv:1706.05296
+(2017).
+Richard S Sutton and Andrew G Barto. 1998. Introduction to reinforcement learning. Vol. 135. MIT
+press Cambridge.
+Richard S Sutton, David A McAllester, Satinder P Singh, and Yishay Mansour. 2000. Policy gradient methods for reinforcement learning with function approximation. In Advances in neural
+information processing systems. 1057–1063.
+Nigel Tao, Jonathan Baxter, and Lex Weaver. 2001. A multi-agent, policy-gradient approach to
+network routing. In In: Proc. of the 18th Int. Conf. on Machine Learning. Citeseer.
+Lorenzo Vicisano, Luigi Rizzo, and Jon Crowcroft. 1998. TCP-like congestion control for layered
+multicast data transfer. In IEEE infocom, Vol. 3. INSTITUTE OF ELECTRICAL ENGINEERS
+INC (IEEE), 996–1003.
+Ziyu Wang, Tom Schaul, Matteo Hessel, Hado Van Hasselt, Marc Lanctot, and Nando De Freitas. 2015. Dueling network architectures for deep reinforcement learning. arXiv preprint
+arXiv:1511.06581 (2015).
+Michael Weinberg and Jeffrey S Rosenschein. 2004. Best-response multiagent learning in nonstationary environments. In Proceedings of the Third International Joint Conference on Autonomous Agents and Multiagent Systems-Volume 2. IEEE Computer Society, 506–513.
+Kelvin Xu, Jimmy Ba, Ryan Kiros, Kyunghyun Cho, Aaron Courville, Ruslan Salakhudinov, Rich
+Zemel, and Yoshua Bengio. 2015. Show, attend and tell: Neural image caption generation with
+visual attention. In International conference on machine learning. 2048–2057.
+Yaodong Yang, Rui Luo, Minne Li, Ming Zhou, Weinan Zhang, and Jun Wang. 2018. Mean Field
+Multi-Agent Reinforcement Learning. arXiv preprint arXiv:1802.05438 (2018).
+16
+
+Chongjie Zhang and Victor Lesser. 2013. Coordinating multi-agent reinforcement learning with limited communication. In Proceedings of the 2013 international conference on Autonomous agents
+and multi-agent systems. International Foundation for Autonomous Agents and Multiagent Systems, 1101–1108.
+Junlan Zhou, Malveeka Tewari, Min Zhu, Abdul Kabbani, Leon Poutievski, Arjun Singh, and Amin
+Vahdat. 2014. WCMP: Weighted cost multipathing for improved fairness in data centers. In
+Proceedings of the Ninth European Conference on Computer Systems. ACM, 5.
+
+17
+
+

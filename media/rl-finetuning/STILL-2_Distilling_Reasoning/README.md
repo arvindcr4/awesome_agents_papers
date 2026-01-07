@@ -1,5 +1,5 @@
 # STILL-2 Distilling Reasoning
-- Paper: [STILL-2_Distilling_Reasoning.pdf](../../../papers/rl-finetuning/STILL-2_Distilling_Reasoning.pdf)
+- Paper: [STILL-2_Distilling_Reasoning.pdf](../../../reinforcement_learning_papers/02_rlhf_alignment/STILL-2_Distilling_Reasoning.pdf)
 
 ## Gemini diagrams
 

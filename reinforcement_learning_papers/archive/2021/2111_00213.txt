@@ -1,0 +1,3435 @@
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+
+1
+
+Adjacency Constraint for Efficient Hierarchical
+Reinforcement Learning
+
+arXiv:2111.00213v4 [cs.LG] 22 Aug 2022
+
+Tianren Zhang† , Shangqi Guo† , Tian Tan, Xiaolin Hu, Senior Member, IEEE, and
+Feng Chen, Member, IEEE
+Abstract—Goal-conditioned Hierarchical Reinforcement Learning (HRL) is a promising approach for scaling up reinforcement learning
+(RL) techniques. However, it often suffers from training inefficiency as the action space of the high-level, i.e., the goal space, is large.
+Searching in a large goal space poses difficulty for both high-level subgoal generation and low-level policy learning. In this paper, we
+show that this problem can be effectively alleviated by restricting the high-level action space from the whole goal space to a k-step
+adjacent region of the current state using an adjacency constraint. We theoretically prove that in a deterministic Markov Decision
+Process (MDP), the proposed adjacency constraint preserves the optimal hierarchical policy, while in a stochastic MDP the adjacency
+constraint induces a bounded state-value suboptimality determined by the MDP’s transition structure. We further show that this
+constraint can be practically implemented by training an adjacency network that can discriminate between adjacent and non-adjacent
+subgoals. Experimental results on discrete and continuous control tasks including challenging simulated robot locomotion and
+manipulation tasks show that incorporating the adjacency constraint significantly boosts the performance of state-of-the-art
+goal-conditioned HRL approaches.
+Index Terms—Hierarchical reinforcement learning (HRL), reinforcement learning (RL), goal-conditioning, subgoal generation,
+adjacency constraint.
+
+F
+
+1
+
+I NTRODUCTION
+
+H
+
+IERARCHICAL reinforcement learning (HRL) has
+shown great potential in scaling up reinforcement
+learning (RL) methods to tackle large, temporally extended
+problems with long-term credit assignment and sparse rewards [1, 2, 3]. As one of the prevailing HRL paradigms,
+goal-conditioned HRL framework [4, 5, 6, 7, 8, 9], which
+
+† indicates equal contribution.
+•
+
+T. Zhang and F. Chen are with the Department of Automation, Tsinghua
+University, Beijing 100086, China, with the Beijing Innovation
+Center for Future Chip, Beijing 100086, China, and with the
+LSBDPA Beijing Key Laboratory, Beijing 100084, China (e-mail:
+zhang-tr19@mails.tsinghua.edu.cn; chenfeng@mail.tsinghua.edu.cn).
+
+•
+
+S. Guo is with the Department of Automation, Tsinghua University,
+Beijing 100086, China (e-mail: shangqi guo@foxmail.com).
+
+•
+
+T. Tan is with the Department of Civil and Environmental
+Engineering, Stanford University, Stanford CA 94305, USA (email: tiantan@stanford.edu).
+
+•
+
+X. Hu is with the Department of Computer Science and Technology,
+Institute for Artificial Intelligence, Beijing National Research Center for
+Information Science and Technology, State Key Laboratory of Intelligent
+Technology and Systems, Tsinghua University, Beijing 100084, China (email: xlhu@mail.tsinghua.edu.cn).
+
+This work was supported in part by the National Natural Science Foundation
+of China under Grant 62176133 and 61836004, and in part by the TsinghuaGuoqiang Research Program under Grant 2019GQG0006, and in part by
+the National Key Research and Development Program of China under Grant
+2021ZD0200300.
+Corresponding authors: Shangqi Guo and Feng Chen.
+© © 2022 IEEE. Personal use of this material is permitted. Permission
+from IEEE must be obtained for all other uses, in any current or future
+media, including reprinting/republishing this material for advertising
+or promotional purposes, creating new collective works, for resale or
+redistribution to servers or lists, or reuse of any copyrighted component
+of this work in other works.
+
+comprises a high-level policy that breaks the original task
+into a series of subgoals and a low-level policy that aims
+to reach those subgoals, has recently achieved significant
+success in video games [6, 7] and robotics [8, 10, 9]. However, the effectiveness of goal-conditioned HRL relies on
+the acquisition of effective and semantically meaningful
+subgoals, which remains a key challenge.
+As subgoals can be interpreted as high-level actions, it
+is feasible to directly train the high-level policy to generate
+subgoals using external rewards as supervision, which has
+been widely adopted in previous research [8, 10, 9, 6, 7].
+Although these methods require little task-specific design,
+they often suffer from training inefficiency. This is because
+the action space of the high-level, i.e., the goal space, is
+often as large as the state space [10, 11, 12]. Such a large
+action space leads to inefficient high-level exploration and a
+non-ignorable burden of both high-level and low-level value
+function approximation, thus often resulting in inefficient
+learning.
+One effective way of handling large action spaces is
+action space reduction. However, it is difficult to perform
+action space reduction in general scenarios without additional information, since a restricted action set may not be
+expressive enough to express the optimal policy. There has
+been limited literature [13, 14, 15] studying action space
+reduction in RL, and to our knowledge, there is no prior
+work studying action space reduction in HRL, since the
+information loss in the goal space can lead to severe performance degradation [10].
+In this paper, we present an optimality-preserving highlevel action space reduction method for goal-conditioned
+HRL. Concretely, we show that the high-level action space
+can be restricted from the whole goal space to a k -step adja-
+
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+
+2
+
+Goal
+
+Subgoal 3
+•
+
+Subgoal 2
+
+Start
+
+Subgoal 1
+
+Environment
+
+Adjacency Space
+
+Fig. 1. A high-level illustration of our motivation: distant subgoals
+g1 , g2 , g3 (blue) can be surrogated by closer subgoals g̃1 , g̃2 , g̃3 (yellow) that fall into the k-step adjacent regions.
+
+cent region centered at the current state. Our main intuition
+is depicted in Fig. 1: distant subgoals can be substituted by
+closer subgoals, as long as they drive the low-level to move
+towards the same “direction”. Therefore, given the current
+state s and the subgoal generation frequency k , the highlevel only needs to explore in a subset of subgoals covering
+states that the low-level can possibly reach within k steps.
+By reducing the action space of the high-level, the learning
+efficiency of both the high-level and the low-level can be
+improved: a considerably smaller action space compared
+with the raw state space relieves the burden of high-level
+exploration and both high-level and low-level value function approximation; in addition, adjacent subgoals provide a
+stronger learning signal for the low-level than non-adjacent
+subgoals when intrinsic rewards are sparse, as the agent
+can be intrinsically rewarded with a higher frequency for
+reaching these subgoals. Formally, we introduce a k -step
+adjacency constraint for high-level action space reduction,
+and further show that this constraint can be practically
+implemented by training an adjacency network that enables
+succinct judgment of the k -step adjacency between all states
+and subgoals. Theoretically, we prove that in a deterministic Markov Decision Process (MDP), the proposed adjacency constraint preserves the optimal hierarchical policy,
+while in a stochastic MDP the adjacency constraint induces
+a bounded state-value suboptimality determined by the
+MDP’s transition structure.
+We benchmark our method on various kinds of tasks,
+including discrete control and planning tasks on grid worlds
+and challenging continuous control tasks based on the
+MuJoCo simulator [16], which has been widely used in
+HRL literature [8, 9, 10, 17]. Experimental results exhibit
+the superiority of our method on both sample efficiency
+and asymptotic performance compared with state-of-theart goal-conditioned HRL approaches, demonstrating the
+effectiveness of the proposed adjacency constraint.
+A preliminary version of this manuscript was previously
+published at the conference of NeurIPS 2020 [18]. Compared
+with the previous paper, in this work we further make the
+following contributions:
+•
+
+Theoretically, we analyze the impact on the suboptimality of the adjacency constraint in the context of
+
+•
+
+stochastic MDPs (in our previous work [18] a similar
+result is derived only in deterministic MDPs), showing that in the general case the adjacency constraint
+induces a bounded suboptimality determined by the
+MDP’s transition structure in terms of the state value
+of the optimal policy.
+Our analysis on stochastic MDPs shows that the distribution mismatch between the subgoal (state) distribution proposed by the high-level policy and the
+state distribution yielded by the subgoal-conditioned
+low-level policy plays a key role in upper-bounding
+the suboptimality induced by the hierarchical policy
+with goal-conditioning, which we believe is of independent interest.
+Empirically, we apply our method to additional robot
+control tasks, including a quadrupedal robot locomotion task that simultaneously involves locomotion
+and object manipulation and two robot arm manipulation tasks with sparse rewards. Experimental
+results on these tasks further exhibit the efficacy of
+our method. Also, we provide additional subgoal
+generation visualization to illustrate the effect of the
+adjacency constraint.
+
+The rest of this paper is organized as follows: in Section 2, we introduce the preliminaries on MDPs and HRL;
+in Section 3, we formalize the proposed adjacency constraint
+and analyze the suboptimality induced by the constraint,
+respectively in deterministic and stochastic settings; in Section 4, we detail our practical implementation of the adjacency constraint and the overall HRL algorithm; in Section 5, we show our main experimental results and empirical
+analyses; in Section 6, we introduce the related work of this
+paper; in Section 7, we discuss potential implications and
+conclude the paper.
+
+2
+
+P RELIMINARIES
+
+We consider a finite-horizon, goal-conditioned MDP defined
+as a tuple hS, G, A, P, R, γi, where S is a state space, G is a
+goal space, A is an action set, P (s0 | s, a) is the one-step state
+transition probability, R(r | s, a, s0 ) is the one-step reward,
+and γ ∈ [0, 1) is a discount factor. We define the expected
+reward function as r(s, a, s0 ) := E[R(· | s, a, s0 )]. We assume
+that the reward function R is bounded within the range
+[0, Rmax ] with Rmax ∈ R+ , which is a common assumption
+in the theoretical RL literature. We assume communicating
+MDPs [19], i.e., all MDP states are strongly connected, which
+is widely used in the literature [20, 21, 22, 23, 24] and is
+natural in many reinforcement learning applications such as
+video games and robotics [25, 26]. This assumption is also
+necessary in our context for ensuring that all subgoals in the
+goal space are reachable.
+Following prior works [6, 7, 8], we consider a hierarchical framework comprising two levels of policies: a highlevel policy πhi (g | s) and a low-level policy πlo (a | s, g),
+as shown in Fig. 2. We assume that the high-level and
+the low-level policies are parameterized by two function
+approximators, e.g., neural networks, with parameters θhi
+and θlo respectively. The high-level policy aims to maximize
+the external reward and generates a high-level action, i.e.,
+a subgoal gt ∼ πhi (g | st ) ∈ G every k time steps when
+
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+
+3
+
+t ≡ 0 (mod k), where k > 1 is a pre-determined hyperparameter. The high-level policy modulates the behavior of the
+low-level policy by intrinsically rewarding the low-level for
+reaching these subgoals. The low-level aims to maximize the
+intrinsic reward provided by the high-level, and performs a
+primary action at ∼ πlo (a | st , gt ) ∈ A at every time step.
+Following prior methods [8, 27], we consider a pre-defined
+goal space G with a mapping function ϕ : S → G and an inverse mapping function ϕ−1 : G → S . When t 6≡ 0 (mod k),
+a pre-defined goal transition process gt = h(gt−1 , st−1 , st )
+is utilized. We adopt the setting of directional subgoal that
+represents the difference between the desired state and the
+current state [7, 8], i.e., the low-level agent is supposed to
+perform atomic actions to reach the state st+k that is similar
+to st +ϕ−1 (gt ), corresponding to the goal transition function
+h(gt−1 , st−1 , st ) = gt−1 +ϕ(st−1 )−ϕ(st ). The reward of the
+high-level is given by
+hi
+rkt
+∼ Rhi (skt , gkt , πlo )
+
+:=
+
+kt+k−1
+X
+
+R(ri | si , ai , si+1 ),
+
+t = 0, 1, · · · ,
+
+(1)
+
+: Forward
+
+Adjacency space
+
+: Backward
+
+Adjacency Loss
+Fig. 2. The goal-conditioned HRL framework combined with the proposed k-step adjacency constraint, which is implemented by the adjacency network ψ (dashed orange box).
+
+i=kt
+
+which is the accumulation of the external reward in the time
+interval [kt, kt + k − 1]. Note that the state value function
+h
+i
+max
+of the high-level policy is then bounded by 0, kR
+for
+1−γ
+high-level action frequency k and discounting γ ∈ [0, 1),
+where the maximum is reached when the agent receives the
+maximal one-step reward Rmax at every step.
+While the high-level controller is motivated by the environmental reward, the low-level controller has no direct
+access to this external reward. Instead, the low-level is
+supervised by the intrinsic reward that describes subgoalreaching performance, defined as rtlo := −D (gt , ϕ(st+1 )),
+where D is a binary or continuous distance function. In
+practice, we employ Euclidean distance as D.
+The goal-conditioned HRL framework enables us to train
+high-level and low-level policies concurrently in an end-toend fashion. However, it often suffers from training inefficiency due to the unconstrained subgoal generation process,
+as we have mentioned in Section 1. In the following section,
+we will introduce the k -step adjacency constraint to mitigate
+this problem.
+
+3
+
+F ORMULATION AND T HEORETICAL A NALYSIS
+
+In this section, we formalize the k -step adjacency constraint
+which has been intuitively explained in Section 1. We will
+also provide our theoretical results, showing that the optimality can be fully (deterministic MDPs) or approximately
+preserved (stochastic MDPs) when learning a high-level
+policy with the adjacency constraint. We begin by introducing a distance measure that can decide whether a state is
+“close” to another state. In this regard, common distance
+functions such as Euclidean distance are not suitable, as they
+cannot reveal the transition structure of the MDP. Instead,
+we introduce shortest transition distance, which equals the
+minimum number of steps required to reach a target state
+from a start state. In stochastic MDPs, the number of steps
+required is not a fixed number, but a random variable of
+which the distribution is conditioned on a specific policy.
+
+In this case, we resort to the notion of first hit time from
+stochastic processes and define the shortest transition distance by minimizing the expected first hit time over all
+possible policies.
+Definition 1 (Shortest transition distance). Let s, s0 ∈ S . The
+shortest transition distance from s to s0 is defined as:
+
+dst (s, s0 ) := inf E[Ts,s0 | π]
+π∈Π
+
+= inf
+
+π∈Π
+
+∞
+X
+
+tP (Ts,s0 = t | π),
+
+(2)
+
+t=0
+
+where Π is set of all possible policies and Ts,s0 denotes the first hit
+time from s to s0 , which is a random variable defined by
+
+Ts,s0 := inf {t ∈ N | st = s0 , s0 = s}.
+
+(3)
+
+Note that Ts,s0 also depends on the policy.
+The shortest transition distance is determined by a policy
+that connects states s1 and s2 in the most efficient way,
+which has also been studied by several prior works [28, 29].
+This policy is optimal in the sense that it requires the
+minimum number of steps to reach state s2 from state s1 .
+Compared with the dynamical distance [30], our definition
+here does not rely on a specific non-optimal policy. Also,
+we do not assume that the environment is reversible, i.e.,
+dst (s1 , s2 ) = dst (s2 , s1 ) may not hold for all pairs of states.
+Therefore, the shortest transition distance is a quasi-metric
+as it does not satisfy the symmetry condition. However, this
+limitation does not affect the following analysis as we only
+need to consider the transition from the start state to the
+goal state without the reversed transition.
+Given the definition of the shortest transition distance,
+we now formulate the property of an optimal (deterministic)
+goal-conditioned policy π ∗ : S × G → A [31]. For every
+s ∈ S and g ∈ G , we have:
+
+π ∗ (s, g) ∈ arg min
+a∈A
+
+X
+s0 ∈S
+
+
+P (s0 | s, a) dst s0 , ϕ−1 (g) .
+
+(4)
+
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+
+We then consider a goal-conditioned HRL framework
+with high-level action frequency k . Different from a flat
+goal-conditioned policy, in this setting, the low-level policy
+is required to reach the subgoals with k limited steps. As
+a result, only a subset of the original states can be reliably
+reached even with an optimal goal-conditioned policy. We
+introduce the notion of k -step adjacent region to describe the
+set of subgoals mapped from this “adjacent” subset of states.
+Definition 2 (Average k -step adjacent region). Let s ∈ S .
+The average k -step adjacent region of s is defined as:
+
+GA (s, k) := {g ∈ G | dst s, ϕ−1 (g) ≤ k}.
+
+(5)
+
+In deterministic MDPs, average k -step adjacent region
+describes the goal subspace that incorporates all subgoals
+that has a shortest transition distance upper-bounded by k
+from the starting state. Since the transitions between states
+and subgoals are deterministic, sampling subgoals from this
+subspace suffices for the high-level policy because all other
+subgoals can only be reached with probability zero due to
+the step limit. However, in stochastic MDPs where the transitions between states are stochastic, this region may exclude
+some distant subgoals that can also be reached in k steps
+with a probability larger than zero, albeit reaching them is
+a rather rare event. Hence, for general cases we extend the
+notion of average k -step adjacent region as follows:
+Definition 3 (Maximal k -step adjacent region). Let s ∈ S .
+The maximal k -step adjacent region of s is defined as:
+
+
+GAM (s, k) := g ∈ G
+
+
+sup P Ts,ϕ−1 (g) ≤ k | π > 0 .
+
+
+π∈Π
+
+(6)
+Note that the definition of maximal k -step adjacent region GAM generalizes the notion of average k -step adjacent
+region GA : in stochastic MDPs, the maximal k -step adjacent region GAM includes all subgoals that can be possibly
+reached from s within k steps, while some of them may
+not be reached within an average number of steps k , thus
+falling out of the average k -step adjacent region GA . Also,
+it is easy to verify that in deterministic MDPs, for all s ∈ S
+and k ∈ N+ , we have GAM (s, k) = GA (s, k).
+Leveraging the tools defined above, we formulate the
+high-level objective incorporating this k -step adjacency constraint as:
+
+max Eπθhi
+θhi
+
+hi
+
+T
+−1
+X
+
+hi
+γ t rkt
+
+t=0
+
+subject to gkt ∈ GAM (skt , k),
+
+, (7)
+
+4
+
+3.1
+
+Analysis on Deterministic MDPs
+
+We begin by considering a rather simple case of deterministic MDPs, i.e., MDPs with deterministic transition functions.
+In this case, given a subgoal and a deterministic low-level
+policy, the agent’s state trajectory is fixed. Then, by harnessing the property of π ∗ , we can show that in deterministic
+∗
+MDPs, given an optimal low-level policy πlo
+= π ∗ , subgoals
+that fall in the k -step adjacent region of the current state can
+“represent” all optimal subgoals in the whole goal space in
+terms of the induced k -step low-level action sequence. We
+summarize this result in the following lemma.
+Lemma 1. Let s ∈ S, g ∈ G and π ∗ an optimal goalconditioned policy defined by Equation (4). Under the assumption that the MDP is deterministic, for all k ∈ N+ satisfying
+k ≤ dst (s, ϕ−1 (g)), there exists a surrogate goal g̃ such that:
+
+g̃ ∈ GA (s, k),
+π ∗ (si , g̃) = π ∗ (si , g),
+
+∀si ∈ τ (i 6= k),
+
+(8)
+
+where τ := (s0 , s1 , · · · , sk ) is the k -step state trajectory starting
+from state s0 = s under π ∗ and g .
+Proof. See Appendix A.1.
+Lemma 1 suggests that the k -step low-level action sequence generated by an optimal low-level policy conditioned on a distant subgoal can be induced using a subgoal
+that is closer. Naturally, we can generalize this result to a
+two-level goal-conditioned HRL framework, where the lowlevel is actuated not by a single subgoal, but by a subgoal
+sequence produced by the high-level policy.
+Theorem 1. Given high-level action frequency k and high-level
+planning horizon T , for s ∈ S , let ρ∗ = (g0 , gk , · · · , g(T −1)k )
+be the high-level subgoal trajectory starting from state s0 =
+∗
+s under an optimal high-level policy πhi
+. Also, let τ ∗ =
+(s0 , sk , s2k , · · · , sT k ) be the high-level state trajectory under ρ∗
+∗
+and an optimal low-level policy πlo
+as defined by Equation (4).
+Then, under the assumption that the MDP is deterministic, there
+exists a surrogate subgoal trajectory ρ̃∗ = (g̃0 , g̃k , · · · , g̃(T −1)k )
+such that:
+
+g̃kt ∈ GA (skt , k),
+Q∗ (skt , g̃kt ) = Q∗ (skt , gkt ),
+
+t = 0, 1, · · · , T − 1,
+
+(9)
+
+where Q∗ is the optimal high-level state-action value function.
+Proof. See Appendix A.2.
+Theorem 1 shows that when the MDP is deterministic,
+we can constrain the high-level action space to state-wise k step adjacent regions without the loss of optimality, which
+matches our intuition as presented in Section 1.
+
+t = 0, 1, · · · , T − 1
+3.2
+
+hi
+where rkt
+is the high-level reward defined by Equation (1)
+and gkt ∼ πhi (g | skt ).
+In the sequel, we will analyze the impact on the optimality of the k -step adjacency constraint formalized above. For
+ease of exposition, we will first focus on the deterministic
+case and then the general stochastic case. We hope that by
+first analyzing the deterministic case separately, we can help
+our readers build more intuition on our method before we
+delve deeper into the more complicated stochastic case.
+
+Analysis on Stochastic MDPs
+
+In this section, we extend our theoretical results from deterministic MDPs to stochastic MDPs. Before the concrete
+analysis, we first provide some explanations to help build
+the intuition on the reason that the result in deterministic MDPs does not apply to stochastic MDPs directly.
+In Lemma 1, we have shown that for each non-adjacent
+subgoal, there exists a surrogate adjacent subgoal given that
+the low-level goal-conditioned policy is optimal. Intuitively,
+this is because an optimal low-level policy can only reach
+
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+
+5
+
+an intermediate state in the trajectory to the non-adjacent
+subgoal due to the step limit. By the construction of setting
+the surrogate subgoal as the subgoal defined by the reached
+state, it is clear that both the original subgoal and the
+surrogate subgoal induce the same k -step state trajectory
+since the dynamics of the MDP is deterministic. However,
+in the sequel, we will show that such construction does
+not preserve the optimality in stochastic MDPs since an
+adjacent subgoal may still not be reached within k steps
+when state transitions are non-deterministic, even with an
+optimal low-level policy. Therefore, unlike the deterministic
+case, in the stochastic case the adjacency constraint does not
+fully preserve the optimality of the original high-level action
+space (though we will show that the suboptimality can be
+upper-bounded).
+We now begin our analysis. Our general idea is to compare the state value induced by an optimal hierarchical policy without the k -step adjacency constraint and the optimal
+policy after the constraint is imposed. We will show that if
+we allow the high-level policy to generate non-deterministic
+subgoals (i.e., subgoal distributions), then there exists a
+subgoal distribution that induces a bounded state value suboptimality while satisfying the k -step adjacency constraint.
+First, we note that for every state s ∈ S , given a high-level
+policy πhi and a low-level policy πlo , the high-level state
+value function under πhi can be written as:
+
+X
+V πhi ,πlo (s) =
+πhi (g | s) rhi (s, g, πlo ) +
+
+where rehi : S × S → [0, kRmax ] is a k -step accumulated reward
+function defined only on starting and ending states of the k -step
+transition.
+
+g∈G
+
+γ
+
+X
+
+k
+
+0
+
+P (s | s, g, πlo )V
+
+πhi
+
+
+(s ) ,
+
+(10)
+
+0
+
+s0 ∈S
+
+V
+
+(s) := V
+(s)
+
+X
+=
+πhi (g | s) rhi (s, g) +
+g∈G
+
+γ
+
+(13)
+∗
+We then consider an optimal high-level policy πhi
+, which
+generates a subgoal distribution for state s. Each subgoal
+g ∈ G in this distribution can be mapped to a k -step
+transition P k (s0 | s, g). According to Definition 3, this transition will result in a conditional state distribution defined
+on the maximal k -step adjacent region GAM of s, since
+the probability of arriving at other states from s within k
+steps is zero. Our key insight is that this state distribution
+itself can be used as the subgoal distribution generated
+by an adjacency-constrained high-level policy. That is, we
+adj
+construct our adjacency-constrained high-level policy πhi
+by setting
+X
+ ∗ 0
+adj
+P k ϕ−1 (g) | s, g 0 πhi
+(g | s).
+(14)
+πhi
+(g | s) :=
+Intuitively, we construct an adjacency-constrained highlevel policy from an optimal high-level policy without the
+constraint, by substituting each raw subgoal generated by
+the policy with its induced state distribution. The state value
+adj
+function of πhi is then:
+adj
+
+V πhi (s)
+
+
+X
+X adj
+adj
+P k (s0 | s, g) rehi (s, s0 ) + γV πhi (s0 )
+πhi (g | s)
+=
+s0 ∈S
+
+g∈G
+
+X X
+
+P
+
+k
+
+ ∗ 0
+ϕ−1 (g) | s, g 0 πhi
+(g | s)
+
+g∈G g 0 ∈G
+
+X
+(11)
+
+
+P k (s0 | s, g)V πhi (s0 ) .
+
+s0 ∈S
+
+Note that for the high-level policy, the subgoal g represents
+the desired state that it would like to reach, while the intermediate low-level state and action details are inaccessible.
+Therefore, given a fixed low-level policy, it is natural to
+assume that the high-level reward only depends on the state
+where the agent starts and the state where the agent arrives,
+which we formalize as follows:
+Assumption 1. For all s ∈ S and g ∈ G , the expected k -step
+high-level reward can be written as the following form:
+X
+rhi (s, g) =
+P k (s0 | s, g) rehi (s, s0 ),
+(12)
+s0 ∈S
+
+s0 ∈S
+
+g∈G
+
+=
+
+∗
+πhi ,πlo
+
+X
+
+V πhi (s)
+X
+X
+=
+πhi (g | s)
+P k (s0 | s, g) (rehi (s, s0 ) + γV πhi (s0 )) .
+
+g 0 ∈G
+
+where rhi (s, g, πlo ) := E[Rhi (s, g, πlo )] defines the expected
+k -step high-level reward, and P k (s0 | s, g, πlo ) denotes the
+k -step transition probability. Similar to the deterministic
+case, here we are interested in analyzing the suboptimality
+when the low-level policy πlo is an optimal goal-conditioned
+∗
+policy πlo
+as defined by Equation (4). For brevity, in what
+follows we use rhi (s, g) and P k (s0 | s, g) as shorthand for
+∗
+∗
+rhi (s, g, πlo
+) and P k (s0 | s, g, πlo
+) respectively, and write the
+high-level state-value function for πhi and an optimal low∗
+level policy πlo
+as:
+πhi
+
+As we have mentioned above, this assumption is natural
+in the setting of goal-conditioned hierarchical reinforcement
+learning, since it is well-aligned with the spirit of subgoalbased task decomposition. Meanwhile, this assumption benefits further analysis on the state-value functions of different
+high-level policies by transforming the difference between
+immediate rewards to the difference between state transitions, as we will detail in the following. First, plugging
+Equation (12) into Equation (11) gives
+
+
+
+adj
+P k (s0 | s, g) rehi (s, s0 ) + γV πhi (s0 ) .
+
+s0 ∈S
+
+(15)
+Since the state distribution P k (s0 | s, g) is defined on the
+maximal k -step adjacent region GAM of the state, the constructed high-level policy must satisfy the adjacency constraint. Therefore, to compute the expected state value unadj
+der πhi we only need to consider the subgoals falling into
+GAM . This gives
+X
+X
+ ∗ 0
+adj
+V πhi (s) =
+P k ϕ−1 (g) | s, g 0 πhi
+(g | s)
+g∈GAM (s,k) g 0 ∈G
+
+X
+
+
+
+adj
+P k (s0 | s, g) rehi (s, s0 ) + γV πhi (s0 ) .
+
+s0 ∈S
+
+(16)
+Next, we would like to bound the state-value suboptimality induced by such construction. We first formalize a
+
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+
+6
+
+Proof. See Appendix A.3.
+The difference is
+determined by
+
+-step
+trajectory
+distribution
+
+-step
+trajectory
+distribution
+
+Theorem 2 indicates a direct dependence on the transition mismatch rate µk when bounding the suboptimality
+induced by the adjacency constraint. As mentioned above,
+in deterministic MDPs we have µk = 0, which yields an upper bound of 0 by Equation (18), recovering our theoretical
+results in deterministic MDPs in Section 3.1.
+
+4
+
+Fig. 3. A high-level illustration of our theoretical result in stochastic
+MDPs. ∆g (GAM ) and ∆g̃ (GAM ) denote the k-step state distribution
+induced by the subgoal g and the subgoal distribution g̃ respectively.
+
+critical factor termed transition mismatch rate that reflects the
+transition structure of the MDP and plays an important role
+in our analysis.
+Definition 4 (Transition mismatch rate). Let M be a goalconditioned MDP as defined in Section 2 and P k (s0 | s, g) its
+k -step transition probability under an optimal goal-conditioned
+policy as defined by Equation (4). The k -step transition mismatch
+rate of M is defined as:
+
+µk := max0 P k (s0 | s, g) −
+s,g,s
+
+X
+
+P k (s0 | s, ϕ(se))P k (se | s, g) .
+
+e∈S
+s
+
+(17)
+
+The above definition captures the transition structure of
+MDP in terms of “goal-reaching reliability”: a small µk indicates that for every state, its adjacent goals can be reached
+with a high probability if the goal-reaching policy is itself
+optimal. For example, in deterministic MDPs, every subgoal
+that falls into the maximal k -step adjacent region GAM can
+be reliably reached with probability 1 given an optimal lowlevel policy since all transitions are deterministic; it is easy
+to verify that in this case, we have µk = 0. Intuitively,
+this parameter should play an important role in bounding
+the suboptimality in subgoal conditioning: if all adjacent
+subgoals can be perfectly reached with probability 1, then
+our construction (14) should fully preserve the optimality
+as in deterministic cases; when this is not true, then the
+“harder” adjacent subgoals can be reached, the larger the
+difference between the state distribution induced by our
+construction (14) and that induced by the original subgoal.
+Fig. 3 is an illustration of the idea above.
+Given Definition 4, we have the following theorem
+which provides a suboptimality upper bound.
+Theorem 2. Let V πhi be the high-level state value function
+given a high-level policy πhi , under an optimal low-level policy
+∗
+as defined by Equation (4). Let πhi
+be an optimal high-level policy
+without the adjacency constraint. Then, there exists a high-level
+adj
+policy πhi that satisfies the k -step adjacency constraint (that is,
+adj
+given a state s ∈ S , all subgoals generated by πhi fall into the
+maximal k -step adjacent region GAM (s, k)), such that:
+∗
+
+adj
+
+V πhi − V πhi
+
+∞
+
+≤
+
+µk kRmax
+γµk kRmax
++
+,
+2(1 − γ)
+2(1 − γ)2
+
+where µk is the k -step transition mismatch rate of the MDP.
+
+(18)
+
+HRL WITH A DJACENCY C ONSTRAINT
+
+In this section, we will present our method of Hierarchical
+Reinforcement learning with k -step Adjacency Constraint
+(HRAC). First, since in practice our original formulation (7)
+is hard to optimize due to the strict constraint, we employ
+the relaxation technique and derive the following unconstrained optimizing objective:
+"
+#
+T
+−1
+
+X
+ 
+t hi
+−1
+max Eπθhi
+γ rkt − η · H dst skt , ϕ (gkt ) , k ,
+θhi
+
+hi
+
+t=0
+
+(19)
+where H(x, k) := max( xk − 1, 0) is the hinge loss function
+and η is a balancing coefficient. However, the exact calculation of the shortest transition distance dst (s1 , s2 ) between
+two arbitrary states s1 , s2 ∈ S remains complex and nondifferentiable. In the sequel, we introduce a simple method
+to collect and aggregate the adjacency information from
+the environment interactions. We then train an adjacency
+network using the aggregated adjacency information to
+approximate the shortest transition distance in a parameterized form, which enables practical optimization of Equation (19).
+4.1
+
+Practical Implementation of Adjacency Constraint
+
+As shown in prior research [32, 28, 29, 30], accurately computing the shortest transition distance is not easy and often
+has the same complexity as learning an optimal low-level
+goal-conditioned policy. However, from the perspective of
+goal-conditioned HRL, we do not need a perfect shortest
+transition distance measure or a low-level policy that can
+reach any distant subgoals. Instead, only a discriminator of
+k -step adjacency suffices, and it is enough to learn a lowlevel policy that can reliably reach nearby subgoals (more
+accurately, subgoals that fall into the k -step adjacent region
+of the current state) rather than all potential subgoals in the
+goal space.
+Given the analysis above, here we introduce a simple
+approach to determine whether a subgoal satisfies the k step adjacency constraint. We first note that Equation (2)
+can be approximated as follows:
+
+dst (s1 , s2 ) ≈
+
+min
+
+π∈{π1 ,π2 ,··· ,πn }
+
+∞
+X
+
+tP (Ts1 s2 = t | π),
+
+(20)
+
+t=0
+
+where {π1 , π2 , · · · , πn } is a finite policy set containing n
+different deterministic policies. Obviously, if these policies
+are diverse enough, we can effectively approximate the
+shortest transition distance with a sufficiently large n. However, training a set of diverse policies separately is costly,
+and using one single policy to approximate the policy set
+(n = 1) [33, 34] often leads to non-optimality. To handle
+
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+
+this difficulty, we exploit the fact that the low-level policy
+itself changes over time during the training procedure. We
+can thus build a policy set by sampling policies that emerge
+in different training timesteps. To aggregate the adjacency
+information gathered by multiple policies, we propose to
+explicitly memorize the adjacency information by constructing a binary k -step adjacency matrix of the explored states.
+The adjacency matrix has the same size as the number of
+explored states, and each element represents whether two
+states are k -step adjacent. In practice, we use the agent’s
+trajectories, where the temporal distances between states
+can indicate their adjacency, to construct and update the
+adjacency matrix online. The detailed process is as follows.
+Constructing and updating the adjacency matrix: the adjacency matrix is initialized to an empty matrix at the
+beginning of training. Each time when the agent explores
+a new state that it has never visited before, the adjacency
+matrix is augmented by a new row and a new column
+with zero elements, representing the k -step adjacent relation between the new state and explored states. When
+the temporal distance between two states in one trajectory
+is not larger than k , then the corresponding element in
+the adjacency matrix will be labeled to 1, indicating the
+adjacency. (The diagonal of the adjacency matrix will always
+be labeled to 1.) Although the temporal distance between
+two states based on a single trajectory is often larger than
+the real shortest transition distance, it can be easily shown
+that the adjacency matrix with this labeling strategy can
+converge to the optimal adjacency matrix asymptotically
+with sufficient trajectories sampled by different policies. In
+our implementation, we employ a trajectory buffer to store
+newly-sampled trajectories and update the adjacency matrix
+online in a fixed frequency using the stored trajectories. The
+trajectory buffer is cleared after each update.
+In practice, using an adjacency matrix is insufficient as
+this procedure is non-differentiable and cannot generalize
+to newly-visited states. Therefore, we further distill the
+adjacency information stored in a constructed adjacency
+matrix into an adjacency network ψφ parameterized by φ.
+The adjacency network learns a mapping from the goal
+space to an adjacency space, where the Euclidean distance
+between the state and the goal is consistent with their
+shortest transition distance:
+k
+d˜adj (s1 , s2 | φ) := kψφ (g1 ) − ψφ (g2 )k2 ,
+(21)
+k
+where g1 = ϕ(s1 ), g2 = ϕ(s2 ) and k ∈ R+ is a scaling
+factor. As we have mentioned above, it is hard to regress
+the Euclidean distance in the adjacency space to the shortest
+transition distance accurately, and we only need to ensure a
+binary relation for implementing the adjacency constraint,
+i.e., kψφ (g1 ) − ψφ (g2 )k2 > k for dst (s1 , s2 ) > k , and
+kψφ (g1 ) − ψφ (g2 )k2 < k for dst (s1 , s2 ) < k , as shown in
+Fig. 4. Inspired by the works in metric learning research [35],
+we adopt a contrastive-like loss function for this distillation
+process:
+
+Ldis (φ) = Esi ,sj ∈S [ l · max (kψφ (gi ) − ψφ (gj )k2 − k , 0)
++ (1 − l) · max (k + δ − kψφ (gi ) − ψφ (gj )k2 , 0)] ,
+(22)
+where gi = ϕ(si ), gj = ϕ(sj ), and a hyperparameter
+δ > 0 is used to create a gap between the embeddings.
+
+7
+
+Adjacency Space
+-ball
+
+share
+weights
+
+share
+weights
+
+Environment
+Fig. 4. The functionality of the adjacency network. The k-step adjacent
+region is mapped to an k -ball with Euclidean metric in the adjacency
+space, where egi = ψφ (gi ), i = 1, 2, 3.
+
+l ∈ {0, 1} represents the label indicating k -step adjacency
+derived from the k -step adjacency matrix. Equation (22)
+penalizes adjacent state embeddings (l = 1) with large
+Euclidean distances in the adjacency space and non-adjacent
+state embeddings (l = 0) with small Euclidean distances.
+In practice, the adjacency network is trained by minimizing the objective defined by Equation (22). We use states
+uniformly sampled from the adjacency matrix (i.e., from the
+set of all explored states) to approximate the expectation,
+and train the adjacency network each time after the adjacency matrix is updated with new trajectories. Note that
+by explicitly aggregating the adjacency information using
+an adjacency matrix, we can perform uniform sampling
+over all explored states and thus achieve a nearly unbiased
+estimation of the expectation, which cannot be realized
+when we directly sample state-pairs from the trajectories
+(see the comparison with the work of Savinov et al. [33, 34]
+in Appendix B for details).
+Embedding all subgoals with a single adjacency network
+is enough to express adjacency when the environment is
+reversible. However, when this condition is not satisfied,
+it is insufficient to express directional adjacency using one
+adjacency network since the parameterized approximation
+defined by Equation (21) is symmetric for s1 and s2 . In
+this case, one can use two separate sub-networks to embed
+g1 and g2 in Equation (21) respectively using the structure
+proposed in UVFA [31].
+Although the construction of an adjacency matrix limits
+our method to tasks with tabular state spaces, we can
+also handle continuous state spaces using goal space discretization (see our continuous control experiments in Section 5). For applications with vast state spaces, constructing
+a complete adjacency matrix in the raw goal space will be
+intractable, but it is still possible to scale our method to
+these scenarios using specific feature construction [36] or dimension reduction methods like VQ-VAE [37], or replacing
+the distance learning procedure with more accurate distance
+learning algorithms [28, 29] at the cost of some efficiency. We
+consider possible extensions in this direction as future work.
+
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+
+8
+
+Algorithm 1 HRAC
+Require: High-level policy πhi parameterized by θhi , lowlevel policy πlo parameterized by θlo , adjacency netork
+ψφ parameterized by φ, state-goal mapping function ϕ,
+goal transition function h, high-level action frequency k ,
+number of training episodes N , adjacency learning frequency C , empty adjacency matrix M, empty trajectory
+buffer B .
+1: Sample and store trajectories in the trajectory buffer B
+using a random policy.
+2: Construct the adjacency matrix M using the trajectory
+buffer B .
+3: Pre-train ψφ using M by minimizing Equation (22).
+4: Clear B .
+5: for n = 1 to N do
+6:
+Reset the environment and sample the initial state s0 .
+
+where gkt ∼ πhi (g | skt ). Equation (24) will output a nonzero value when the generated subgoal and the current state
+have a Euclidean distance larger than k in the adjacency
+space, indicating non-adjacency. It is thus consistent with
+the k -step adjacency constraint. In practice, we plug Ladj
+as an extra loss term into the original policy loss term of a
+specific high-level RL algorithm, e.g., TD error for temporaldifference learning methods. In the loss backpropagation
+phase, we keep the adjacency network fixed, and use the
+gradients only to update policy networks. We provide Algorithm 1 to detail the training procedure of HRAC.
+
+t = 0.
+repeat
+if t ≡ 0 (mod k) then
+Sample subgoal gt ∼ πhi (g | st ).
+else
+Perform subgoal transition gt = h(gt−1 , st−1 , st ).
+end if
+Sample low-level action at ∼ πlo (a | st , gt ).
+Sample next state st+1 ∼ P (s | st , at ).
+Sample reward rt ∼ R(r | st , at , st+1 ).
+Sample episode end signal done.
+t = t + 1.
+until done is true.
+Store the sampled trajectory in B .
+Update the parameters of the high-level policy θhi
+according to Equation (23) and (24).
+22:
+Update the parameters of the low-level policy θlo .
+23:
+if n ≡ 0 (mod C) then
+24:
+Update the adjacency matrix M using the trajectory
+buffer B .
+25:
+Fine-tune ψφ using M by minimizing Equation (22).
+26:
+Clear B .
+27:
+end if
+28: end for
+
+7:
+8:
+9:
+10:
+11:
+12:
+13:
+14:
+15:
+16:
+17:
+18:
+19:
+20:
+21:
+
+4.2
+
+Combining Adjacency Constraint and HRL
+
+With a learned adjacency network ψφ , we can now incorporate the adjacency constraint into the goal-conditioned HRL
+framework. According to Equation (19), we introduce an
+adjacency loss Ladj to replace the original strict adjacency
+constraint and minimize the following high-level objective:
+
+Lhigh (θhi ) = −Eπθhi
+hi
+
+T
+−1 
+X
+
+
+hi
+γ t rkt
+− η · Ladj ,
+
+(23)
+
+t=0
+
+where η is the balancing coefficient, and the adjacency
+loss Ladj is derived by replacing dst with d˜st defined by
+Equation (21) in the second term of Equation (19):
+
+ 
+Ladj (θhi ) = H d˜adj skt , ϕ−1 (gkt ) | φ , k
+(24)
+∝ max (kψφ (ϕ(skt )) − ψφ (gkt )k2 − k , 0) ,
+
+5
+
+E XPERIMENTAL E VALUATION
+
+We have presented the formulation and implementation
+of HRAC. Our experiments are designed to answer the
+following questions: (1) Can HRAC promote the generation
+of adjacent subgoals? (2) Can HRAC improve the sample
+efficiency and the overall performance of goal-conditioned
+HRL? (3) Can HRAC outperform other strategies that may
+also improve the learning efficiency of hierarchical agents,
+e.g., low-level hindsight experience replay [27]?
+5.1
+
+Environment Setup
+
+We employed two types of tasks with discrete and continuous state and action spaces to evaluate the effectiveness
+of our method. Discrete control tasks include Key-Chest
+and Maze, where the agents are spawned in grid worlds
+with injected stochasticity and need to accomplish tasks that
+require both low-level control and high-level planning, as
+shown in Fig. 5. Continuous control tasks include two task
+suites. The first suite is a collection of quadrupedal robot locomotion tasks including Ant Gather, Ant Maze, Ant Push,
+and Ant Maze Sparse, where the first three tasks are widelyused benchmarks in the HRL community [38, 17, 8, 10, 9],
+and the last task is a more challenging locomotion task
+with sparse rewards, as shown in Fig. 7. The second suite
+contains two robot arm manipulation tasks with sparse
+rewards, including FetchPush and FetchPickAndPlace introduced by [39], as depicted in Fig. 6. In discrete tasks and
+quadrupedal robot locomotion tasks, we used a pre-defined
+2-dimensional goal space that represents the (x, y) position
+of the agent; in manipulation tasks, we used a pre-defined 3dimensional goal space representing the (x, y, z) position of
+the gripper. The details of each environment are as follows:
+Key-Chest: this environment is a grid world with size
+13 × 17, as shown in Fig. 5(a). In this environment, the
+agent (A) starts from a random position and needs to pick
+up the key (K) first, then uses the key to open the chest
+(C). The environment has a discrete 3-dimensional state
+space, where the first two dimensions represent the (x, y)
+position of the agent respectively, and the third dimension
+represents whether the agent has picked up the key (1 if
+the agent has the key and 0 otherwise). The action space is
+discrete with size 4, containing actions moving towards four
+directions. The agent is provided with sparse rewards of +1
+and +5, respectively for picking up the key and opening
+the chest. Each episode ends if the agent opens the chest or
+runs out of the step limit of 500. Environmental stochasticity
+is introduced by replacing the action of the agent with a
+random action each step with a probability of 0.25.
+
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+
+reward at each time step according to its negative Euclidean
+distance from the target position with a scaling of 0.1. At
+the evaluation stage, the target position is fixed to a hard
+goal at the top left of the maze, and success is defined as
+being within a Euclidean distance of 5 from the target. Each
+episode ends at 500 time steps. No random action is applied.
+
+C
+G
+
+K
+
+A
+
+(a)
+
+A
+
+(b)
+
+Fig. 5. Discrete control environments used in our experiments. (a) KeyChest. (b) Maze.
+
+(a)
+
+9
+
+(b)
+
+Fig. 6. Robot arm manipulation environments used in our experiments.
+(a) FetchPush. (b) FetchPickAndPlace.
+
+Maze: this environment is a grid world with size 13 × 17,
+as shown in Fig. 5(b). The agent (A) starts from a fixed
+position and needs to reach the final goal (G) in the middle
+of the maze. The environment has a discrete 2-dimensional
+state space representing the (x, y) position of the agent. The
+action space is the same as the Key-Chest environment. The
+agent is provided with dense rewards to facilitate exploration, i.e., +0.1 each step if the agent moves closer to the
+goal, and −0.1 each step if the agent moves farther. Each
+episode has a maximum length of 200. The random action
+probability of the environment is 0.25.
+Ant Gather: this environment defines a quadrupedal
+robot locomotion task, as shown in Fig. 7(a). The ant robot
+is spawned at the center of the map and needs to gather
+apples while avoiding bombs. Both apples and bombs are
+randomly placed in the environment at the beginning of
+each episode. The environment has a continuous state space
+including the current position and velocity of the robot,
+the current time step t, and the depth readings defined by
+the standard Gather environment [38]. The depth readings
+represent the Euclidean distances between the agent and the
+nearby apples and bombs. Following the settings in prior
+works [17, 8], we set the activity range of the sensor to 10
+and the sensor span to 2π . We use the ant robot pre-defined
+by Rllab, with an 8-dimensional continuous action space.
+The agent receives a positive reward of +1 for each apple
+and a negative reward of −1 for each bomb. Each episode
+terminates at 500 time steps. No random action is applied.
+Ant Maze: this environment defines a quadrupedal robot
+locomotion task, as shown in Fig. 7(b). The ant robot starts
+from the bottom left of a maze and needs to reach a
+target position. The environment has a continuous state
+space including the current position and velocity, the target
+location, and the current time step t. In the training stage,
+the environment randomly samples a target position at the
+beginning of each episode, and the agent receives a dense
+
+Ant Maze Sparse: this environment defines a quadrupedal
+robot locomotion task with sparse rewards, as shown in
+Fig. 7(c). The ant robot starts from a random position in
+a maze and needs to reach a target position at the center
+of the maze. The environment has the same state and action
+spaces as the Ant Maze environment. The agent is rewarded
+by +1 only if it reaches the goal, which is defined as having
+a Euclidean distance smaller than 1 from the goal. At the
+beginning of each episode, the agent is randomly placed
+in the maze except at the goal position. Each episode is
+terminated if the agent reaches the goal or after 500 steps.
+No random action is applied.
+Ant Push: this environment defines a quadrupedal robot
+locomotion task with object manipulation, as shown in
+Fig. 7(d). The ant robot starts at the bottom of the maze
+and needs to reach a target position at the top. Since the
+goal is initially blocked by a movable block (red), the agent
+needs to first push the block away before reaching the
+goal. The environment has the same state and action spaces
+as the Ant Maze environment. During training, the agent
+receives a dense reward at each time step according to its
+negative Euclidean distance from the target position with a
+scaling of 0.1. At the evaluation stage, success is defined as
+being within a Euclidean distance of 5 from the target. Each
+episode ends at 500 time steps. No random action is applied.
+FetchPush: this environment defines a robot arm manipulation task with sparse rewards. In this environment,
+an object is placed in front of the robot and the goal is
+to move it to a target location on the table, as shown in
+Fig. 6(a). The environment has a continuous state space that
+includes the Cartesian positions and the velocities of the
+gripper and the object as well as their relative positions
+and velocities, as detailed in [39]. The action space is 4dimensional, with the first 3 dimensions specifying the
+desired gripper movement in Cartesian coordinates and the
+last dimension representing the opening and closing status
+of the gripper. The environment has a 3-dimensional goal
+space that describes the desired position of the object, which
+is randomized at the beginning of each episode. The agent
+receives a sparse reward of 0 if the object is at the target
+location within a tolerance of 5 cm and −1 otherwise. No
+random action is applied.
+FetchPickAndPlace: this environment defines a robot arm
+manipulation task with sparse rewards. In this environment,
+an object is placed in front of the robot and the goal is
+to grasp the box and move it to the target location which
+may be on the table or in the air above the table, as shown
+in Fig. 6(b). The state space, action space, goal space and
+reward setting are the same as the FetchPush task. Compared with FetchPush, this task is more challenging since
+the robot often needs to grasp the object first and then move
+it to the target position before obtaining the final reward,
+which poses difficulty on exploration. No random action is
+applied.
+
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+
+10
+
+1.0
+
+FetchPush
+
+0.8
+
+0.8
+
+Average reward
+
+Average reward
+
+0.6
+
+0.6
+
+0.4
+
+0.4
+
+0.2
+
+0.2
+
+(a)
+
+0.0
+0.0
+
+(b)
+
+FetchPickAndPlace
+
+0.8 1.6 2.4 3.2
+Steps (in millions)
+
+HRAC
+
+4.0
+
+0.0
+0.0
+
+HIRO
+
+1.6 3.2 4.8 6.4
+Steps (in millions)
+
+8.0
+
+DDPG
+
+Fig. 9. Learning curves of HRAC and baselines on manipulation tasks.
+
+(c)
+
+(d)
+
+Fig. 7. Quadrupedal robot locomotion environments used in our experiments. (a) Ant Gather (adapted from Duan et al. [38]). (b) Ant Maze.
+(c) Ant Maze Sparse. (d) Ant Push.
+
+Key-Chest
+
+Maze
+6
+5
+4
+3
+2
+1
+0
+0.0
+
+Average reward
+
+Average reward
+
+6
+5
+4
+3
+2
+1
+0
+0.0
+
+0.4 0.8 1.2 1.6
+Steps (in millions)
+
+HRAC
+
+HIRO
+
+2.0
+
+HIRO-B
+
+0.2 0.4 0.6 0.8
+Steps (in millions)
+
+HRL-HER
+
+1.0
+
+Vanilla
+
+Fig. 8. Learning curves of HRAC and baselines on discrete control tasks.
+
+5.2
+
+Comparative Experiments
+
+To comprehensively evaluate the performance of HRAC
+with different HRL implementations, we employed different
+HRL instances on different tasks. On discrete tasks, we used
+off-policy TD3 [40] for high-level training and on-policy
+A2C, the synchronous variant of A3C [41], for the lowlevel. On quadrupedal robot locomotion tasks, we used TD3
+for both the high-level and the low-level training, following
+prior work [8], and discretized the goal space to 1 × 1 grids
+for adjacency learning. For robot arm manipulation tasks,
+since the action space of Fetch environments directly represents the desired difference of coordinates (on quadrupedal
+robot locomotion tasks, the original action space represents
+the torque of each joint of the ant robot), training a lowlevel goal-reaching policy is no longer necessary. Instead, we
+implement our hierarchical agent with a high-level policy
+network. We repeat the 4-dimension action output by the
+network for K steps (with subgoal transitions on the first
+3 dimensions) to introduce temporal abstraction. The base
+training algorithm is DDPG [25], which matches [39]. The
+precision of goal space discretization is 0.1. More implementation details, network architectures and hyperparameters
+are in Appendix C.
+5.2.1
+
+Discrete Control Tasks
+
+We compared HRAC with the following baselines.
+
+HIRO [8]: one of the state-of-the-art goal-conditioned
+HRL approaches. By limiting the range of directional subgoals generated by the high-level, HIRO can roughly control
+the Euclidean distance between the absolute subgoal and
+the current state in the raw goal space rather than the
+learned adjacency space.
+HIRO-B: a baseline analogous to HIRO, using binary
+intrinsic reward for subgoal reaching instead of the shaped
+reward used by HIRO.
+HRL-HER: a baseline that employs hindsight experience
+replay (HER) [27] to produce alternative successful subgoalreaching experiences as complementary low-level learning
+signals [9].
+Vanilla: Kulkarni et al. [6] used absolute subgoals instead
+of directional subgoals and adopted a binary intrinsic reward setting.
+The learning curves of HRAC and baselines across all
+tasks are plotted in Fig. 8. Each curve and its shaded region
+represent mean episode reward and standard error of the
+mean respectively, averaged over 5 independent trials. All
+curves have been smoothed equally for visual clarity. In the
+Maze task with dense rewards, HRAC achieves comparable
+performance with HIRO and outperforms other baselines,
+while in the Key-Chest task HRAC achieves better convergency speed and final performance. We can also identify the
+effect of reward shaping and hindsight: the baseline HIRO
+that uses reward shaping achieves a very fast convergence
+rate in the Maze task with dense external rewards, but its
+performance severely degrades in more difficult Key-Chest
+and Ant Maze Sparse tasks with sparse reward. Analagous
+phenomena can be found in the use of the hindsight strategy. Finally, HRAC consistently outperforms the vanilla
+baseline among all tasks, demonstrating the effectiveness of
+the introduced k -step adjacency constraint.
+5.2.2 Quadrupedal Robot Locomotion Tasks
+We considered the same baselines as discrete control tasks,
+including HIRO, HIRO-B, HRL-HER, and Vanilla.
+The learning curves of HRAC and baselines across all
+tasks are plotted in Fig. 10. Each curve and its shaded region
+represent mean episode reward (for Ant Maze) or mean
+success rate (for others) and standard error of the mean
+respectively, averaged over 5 independent trials. All curves
+have been smoothed equally for visual clarity. Across all
+tasks, HRAC consistently surpasses all baselines in terms
+of both sample efficiency and asymptotic performance. We
+note that the performance of the baseline HRL-HER matches
+
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+
+Average reward
+
+Average reward
+
+Average reward
+
+0.8
+
+2.0
+
+0.6
+
+1.5
+
+0.4
+
+1.0
+
+0.2
+
+0.5
+0.0
+0
+
+1
+
+1.0
+
+Ant Maze Sparse
+
+2
+3
+4
+Steps (in millions)
+
+5
+
+0.0
+0
+
+1
+
+2
+3
+4
+Steps (in millions)
+
+HRAC
+
+5
+
+Average reward
+
+Average reward
+
+6
+5
+4
+3
+2
+1
+0
+0.0
+
+1
+
+2
+3
+4
+Steps (in millions)
+
+HRAC
+
+5
+
+HIRO
+
+0.0
+0.0
+
+1.2 2.4 3.6 4.8
+Steps (in millions)
+
+HIRO-B
+
+HRL-HER
+
+6.0
+
+Vanilla
+
+Fig. 10. Learning curves of HRAC and baselines on locomotion tasks.
+Stochastic Ant Maze
+
+3.0
+
+1.0 Stochastic Ant Maze Sparse
+
+2.5
+
+0.8
+
+Average reward
+
+Average reward
+
+0.8
+
+2.0
+
+0.6
+0.2
+1
+
+2
+3
+4
+Steps (in millions)
+
+5
+
+1
+
+2
+3
+4
+Steps (in millions)
+
+5
+
+0.0
+0
+
+1
+
+2
+3
+4
+Steps (in millions)
+
+5
+
+Fig. 11. Learning curves in stochastic Ant Maze, stochastic Ant Gather,
+and stochastic Ant Maze Sparse environments.
+
+the results in the previous study [8] where introducing
+hindsight techniques often degrades the performance of
+HRL, potentially due to the additional burden introduced
+on low-level training.
+5.2.3 Robot Arm Manipulation Tasks
+We compare HRAC with HIRO and DDPG [25], of which the
+latter is a common, non-hierarchical reinforcement learning
+method in this task suite. For all methods, we do not use the
+(high-level) HER technique to better underline the efficacy
+of policy hierarchy in sparse reward tasks.
+The learning curves of HRAC and baselines across all
+tasks are plotted in Fig. 9. Each curve and its shaded region
+represent mean success rate and standard error of the mean
+respectively, averaged over 5 independent trials. All curves
+have been smoothed equally for visual clarity. In both tasks,
+HRAC consistently surpasses HIRO and DDPG. Note that
+HIRO also outperforms DDPG, which indicates the superiority of HRL in better exploration due to the introduced
+temporal abstraction.
+5.3
+
+HRAC-O
+
+1.0
+
+NoAdj
+
+0.0
+0
+
+1
+
+2
+3
+4
+Steps (in millions)
+
+5
+
+NegReward
+
+Ant Maze
+
+1.0
+0.8
+0.6
+0.4
+0.2
+
+0.2 0.4 0.6 0.8
+Steps (in millions)
+
+= 20
+
+1.0
+
+0.0
+0
+
+= 10
+
+1
+
+2
+3
+4
+Steps (in millions)
+
+5
+
+=1
+
+Fig. 13. Learning curves with different balancing coefficients.
+
+0.2
+
+0.5
+0.0
+0
+
+0.5
+
+0.2 0.4 0.6 0.8
+Steps (in millions)
+
+0.4
+
+1.0
+
+HRAC, = 0.01
+HRAC, = 0.05
+HRAC, = 0.1
+HIRO, = 0.1
+
+1.0
+
+0.6
+
+1.5
+
+0.4
+0.0
+0
+
+Stochastic Ant Gather
+
+Average reward
+
+1.0
+
+1.5
+
+Average reward
+
+0.2
+
+0.2
+
+2.0
+
+Maze
+
+0.4
+
+0.4
+
+2.5
+
+Fig. 12. Learning curves in the ablation study.
+
+0.6
+
+0.6
+
+0.4 0.8 1.2 1.6
+Steps (in millions)
+
+Ant Gather
+
+3.0
+
+Ant Push
+
+0.8
+
+0.8
+
+6
+5
+4
+3
+2
+1
+0
+2.0 0.0
+
+Average reward
+
+6
+5
+4
+3
+2
+1
+0
+0.0
+
+Average reward
+
+2.5
+
+0.0
+0
+
+Ant Maze
+
+1.0
+
+Average reward
+
+Ant Gather
+
+3.0
+
+11
+
+Maze
+
+Key-Chest
+
+Ablation Study
+
+We also compared HRAC with several variants to investigate the effectiveness of each component in our method.
+HRAC-O: An oracle variant that uses a perfect adjacency
+matrix directly obtained from the environment. We note that
+compared to other methods, this variant uses additional
+information that is not available in many applications
+
+NoAdj: A variant that uses an adjacency training method
+analogous to the work of Savinov et al. [33, 34], where
+no adjacency matrix is maintained. The adjacency network
+is trained using state pairs directly sampled from stored
+trajectories, under the same training budget as HRAC.
+NegReward: This variant implements the k -step adjacency constraint by penalizing the high-level with a negative reward when it generates non-adjacent subgoals, which
+is used by HAC [9].
+We provide learning curves of HRAC and these variants in Fig. 12. In all tasks, HRAC yields similar performance with the oracle variant HRAC-O while surpassing
+the NoAdj variant by a large margin, exhibiting the effectiveness of our adjacency learning method. Meanwhile,
+HRAC achieves better performance than the NegReward
+variant, suggesting the superiority of implementing the
+adjacency constraint using a differentiable adjacency loss,
+which provides stronger supervision than a reward-based
+penalty. We also empirically studied the effect of different
+balancing coefficients η . Results are shown in Fig. 13, which
+suggests that generally, a large η can lead to better and more
+stable performance.
+5.4 Empirical Study in Stochastic Environments with
+Additive State Noise
+To empirically verify the robustness of HRAC, we applied it
+to a set of stochastic tasks, including stochastic Ant Gather,
+stochastic Ant Maze, and stochastic Ant Maze Sparse. These
+tasks are modified from the original ant tasks respectively.
+Although in Section 5.1 we have mentioned that discrete
+tasks also have inherent stochasticity implemented as random actions, the reason for additionally conducting an
+empirical analysis here is that the discrete environments we
+used are generally toy domains, which tend to be insufficient to accurately reflect the performance of the algorithm
+
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+
+12
+
+in the face of stochasticity. In contrast, the testbeds that
+we consider in this section are adapted from widely-used,
+challenging locomotion tasks, which we believe are more
+suitable for benchmarking.
+Concretely, we added Gaussian noise with different
+standard deviations σ to the (x, y) position of the ant
+robot at every step, including σ = 0.01, σ = 0.05 and
+σ = 0.1, representing increasing environmental stochasticity. This simulates some common real-world scenarios such
+as in robotics, where the stochasticity in state transitions is
+often induced by the noise in the environment or in the
+sensors and actuators of the robots [42]. In these tasks,
+we compare HRAC with the baseline HIRO, which has
+exhibited generally better performance than other baselines,
+in the noisiest scenario when σ = 0.1. As displayed in
+Fig. 11, HRAC achieves similar asymptotic performances
+with different noise magnitudes in stochastic Ant Gather
+and Ant Maze tasks and consistently outperforms HIRO,
+exhibiting robustness to stochastic environments.
+
+available in many scenarios. There are also prior works
+focusing on the unsupervised acquisition of subgoals based
+on potentially pivotal states [43, 44, 45, 33, 46, 11]. However,
+these subgoals are not guaranteed to be well-aligned with
+the downstream tasks and thus are often sub-optimal.
+Several prior works have constructed an environmental
+graph for high-level planning used search nearby graph
+nodes as reachable subgoals for the low-level [33, 29, 11, 47].
+However, these approaches hard-coded the high-level planning process based on domain-specific knowledge, e.g., treat
+the planning process as solving a shortest-path problem in
+the graph instead of a learning problem, and thus are limited
+in scalability. Nasiriany et al. [48] used goal-conditioned
+value functions to measure the feasibility of subgoals, but
+a pre-trained goal-conditioned policy is required. A more
+general topic of goal generation in RL has also been studied
+in the literature [49, 50, 51]. However, these methods only
+have a flat architecture and therefore often struggle on tasks
+that require complex high-level planning.
+Our method relates to prior research that studied transition distance or reachability [32, 33, 34, 28, 30]. Most of these
+works learn the transition distance based on RL [32, 28, 30]
+with a high cost. Savinov et al. [33, 34] proposed a supervised learning approach for reachability learning. However,
+the metric they learned depends on a certain policy used
+for interaction and thus could be sub-optimal compared
+to our method and we provide detailed comparison and
+discussion in Appendix B. There are also other metrics that
+can reflect state similarities in MDPs, such as successor
+represention [52, 45] that depends on both the environmental dynamics and a specific policy, and bisimulation
+metrics [53, 54] that depend on both the dynamics and the
+rewards. Compared to these metrics, the shortest transition
+distance depends only on the dynamics and therefore may
+be seamlessly applied to multi-task settings.
+
+5.5
+
+Subgoal and Adjacency Metric Visualization
+
+We visualize the subgoals generated by the high-level policy
+and the adjacency heatmaps in Fig. 14. The visualization
+indicates that the agent does learn to generate adjacent
+and interpretable subgoals, and verifies the effectiveness
+of our adjacency metric learning strategy. Additionally, in
+Fig. 15 we visualize state and subgoal distributions on the
+Ant Maze task by randomly sampling transitions from the
+replay buffer at different training stages, illustrating the impact of the adjacency constraint by comparing the subgoals
+generated by HRAC and HIRO. As shown in the figure,
+the subgoal distribution generated by HRAC is “closer”
+to the state distribution compared to HIRO without the k step adjacency constraint, significantly reducing undesirable
+subgoals (e.g., subgoals that correspond to unreachable wall
+states) that hinders efficient exploration. The results suggest
+that thanks to the adjacency constraint, the subgoals generated by HRAC exhibit higher quality compared to HIRO
+and lead to better exploration and more efficient learning.
+
+6
+
+R ELATED W ORK
+
+Effectively learning policies with multiple hierarchies has
+been a long-standing problem in RL. Goal-conditioned
+HRL [4, 5, 6, 7, 8, 9] aims to resolve this problem with a
+framework that separates high-level planning and low-level
+control using subgoals. Recent advances in goal-conditioned
+HRL mainly focus on improving the learning efficiency of
+this framework. Nachum et al. [8, 10] proposed an off-policy
+correction technique to stabilize training, and addressed
+the problem of goal space representation learning using a
+mutual-information-based objective. However, the subgoal
+generation process in their approaches is unconstrained and
+supervised only by the external rewards, and thus these
+methods may still suffer from training inefficiency. Levy
+et al. [9] used hindsight techniques [27] to train multilevel policies in parallel and also penalized the high-level
+for generating subgoals that the low-level failed to reach.
+However, their method has no theoretical guarantee, and
+they directly obtain the reachability measure from the environment, using the environmental information that is not
+
+7
+
+C ONCLUSION
+
+We present a novel k -step adjacency constraint for goalconditioned HRL framework to mitigate the issue of training inefficiency, with the theoretical guarantee of bounded
+suboptimality in both deterministic and stochastic MDPs.
+We show that the proposed adjacency constraint can be
+practically implemented with an adjacency network. Experiments on several testbeds with discrete and continuous
+state and action spaces demonstrate the effectiveness and
+robustness of our method.
+As one of the most promising directions for scaling up
+RL, goal-conditioned HRL provides an appealing paradigm
+for handling large-scale problems. However, some key issues involving how to devise effective and interpretable
+hierarchies remain to be solved, such as how to empower
+the high-level policy to learn and explore in a more semantically meaningful action space [55], and how to enable
+the subgoals to be shared and reused in multi-task settings.
+Other future work includes extending our method to tasks
+with high-dimensional state spaces, e.g., by encompassing
+modern representation learning schemes [56, 10, 57], and
+leveraging the adjacency network to improve the learning
+efficiency in more general scenarios.
+
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+
+G
+
+A
+
+G
+
+G
+
+A
+
+g
+
+13
+
+g
+A
+
+g
+
+G
+
+A
+
+G
+
+g
+
+g
+A
+
+Fig. 14. Subgoal and adjacency heatmap visualizations of the Maze task, based on a single evaluation run. The agent (A), goal (G), and subgoal
+(g) at different time steps in one episode are plotted. Colder colors in the adjacency heatmaps represent smaller shortest transition distances.
+
+HRAC
+
+: Start
+
+HIRO
+
+: Goal
+0.2 million
+
+0.4 million
+
+0.6 million
+
+0.8 million
+
+1.0 million
+
+Steps
+
+Fig. 15. Subgoal Visualizations on the Ant Maze task. The state (blue) and subgoal (orange) distributions at different training periods are plotted.
+States and subgoals are uniformly sampled from the replay buffer.
+
+R EFERENCES
+[1]
+
+[2]
+
+[3]
+
+[4]
+
+[5]
+
+[6]
+
+[7]
+
+R. S. Sutton, D. Precup, and S. Singh, “Between MDPs
+and semi-MDPs: A framework for temporal abstraction
+in reinforcement learning,” Artificial Intelligence, vol.
+112, no. 1-2, pp. 181–211, 1999.
+D. Precup, “Temporal abstraction in reinforcement
+learning,” Ph.D. dissertation, University of Massachusetts, Amherst, 2000.
+A. G. Barto and S. Mahadevan, “Recent advances in
+hierarchical reinforcement learning,” Discrete event dynamic systems, vol. 13, no. 1-2, pp. 41–77, 2003.
+P. Dayan and G. E. Hinton, “Feudal reinforcement
+learning,” in Advances in Neural Information Processing
+Systems, S. J. Hanson, J. D. Cowan, and C. L. Giles,
+Eds., 1992, pp. 271–278.
+J. Schmidhuber and R. Wahnsiedler, “Planning simple
+trajectories using neural subgoal generators,” in From
+Animals to Animats 2: Proceedings of the Second International Conference on Simulation of Adaptive Behavior,
+vol. 2. MIT Press, 1993, p. 196.
+T. D. Kulkarni, K. Narasimhan, A. Saeedi, and J. Tenenbaum, “Hierarchical deep reinforcement learning: Integrating temporal abstraction and intrinsic motivation,”
+in Advances in Neural Information Processing Systems,
+2016, pp. 3675–3683.
+A. S. Vezhnevets, S. Osindero, T. Schaul, N. Heess,
+M. Jaderberg, D. Silver, and K. Kavukcuoglu, “FeUdal
+networks for hierarchical reinforcement learning,” in
+
+International Conference on Machine Learning, 2017, pp.
+3540–3549.
+[8] O. Nachum, S. S. Gu, H. Lee, and S. Levine, “Dataefficient hierarchical reinforcement learning,” in Advances in Neural Information Processing Systems, 2018, pp.
+3307–3317.
+[9] A. Levy, G. Konidaris, R. Platt, and K. Saenko, “Learning multi-level hierarchies with hindsight,” in International Conference on Learning Representations, 2019.
+[10] O. Nachum, S. Gu, H. Lee, and S. Levine, “Nearoptimal representation learning for hierarchical reinforcement learning,” in International Conference on
+Learning Representations, 2019.
+[11] Z. Huang, F. Liu, and H. Su, “Mapping state space using landmarks for universal goal reaching,” in Advances
+in Neural Information Processing Systems, 2019, pp. 1940–
+1950.
+[12] S. Guo, Q. Yan, X. Su, X. Hu, and F. Chen, “Statetemporal compression in reinforcement learning with
+the reward-restricted geodesic metric,” IEEE Transactions on Pattern Analysis and Machine Intelligence, pp. 1–
+1, 2021.
+[13] T. Zahavy, M. Haroush, N. Merlis, D. J. Mankowitz,
+and S. Mannor, “Learn what not to learn: Action elimination with deep reinforcement learning,” in Advances
+in Neural Information Processing Systems, 2018, pp. 3566–
+3577.
+[14] T. Van de Wiele, D. Warde-Farley, A. Mnih, and
+
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+
+14
+
+V. Mnih, “Q-learning in enormous action spaces via
+amortized approximate maximization,” in International
+Conference on Learning Representations, 2020.
+[15] K. Khetarpal, Z. Ahmed, G. Comanici, D. Abel, and
+D. Precup, “What can I do here? A theory of affordances in reinforcement learning,” in International
+Conference on Machine Learning, 2020, pp. 5243–5253.
+[16] E. Todorov, T. Erez, and Y. Tassa, “MuJoCo: A physics
+engine for model-based control,” in International Conference on Intelligent Robots and Systems, 2012, pp. 5026–
+5033.
+[17] C. Florensa, Y. Duan, and P. Abbeel, “Stochastic neural networks for hierarchical reinforcement learning,”
+in International Conference on Learning Representations,
+2017.
+[18] T. Zhang, S. Guo, T. Tan, X. Hu, and F. Chen, “Generating adjacency-constrained subgoals in hierarchical
+reinforcement learning,” in Advances in Neural Information Processing Systems, 2020, pp. 21 579–21 590.
+[19] M. L. Puterman, Markov decision processes: Discrete
+stochastic dynamic programming. John Wiley & Sons,
+1994.
+[20] T. Jaksch, R. Ortner, and P. Auer, “Near-optimal regret
+bounds for reinforcement learning,” Journal of Machine
+Learning Research, vol. 11, no. 51, pp. 1563–1600, 2010.
+[21] S. Agrawal and R. Jia, “Optimistic posterior sampling
+for reinforcement learning: Worst-case regret bounds,”
+in Advances in Neural Information Processing Systems,
+2017, pp. 1184–1194.
+[22] R. Fruit and A. Lazaric, “Exploration-exploitation in
+MDPs with options,” in International Conference on Artificial Intelligence and Statistics, 2017, pp. 576–584.
+[23] Y. Abbasi-Yadkori, P. L. Bartlett, K. Bhatia, N. Lazic,
+C. Szepesvári, and G. Weisz, “Politex: Regret bounds
+for policy iteration using expert prediction,” in International Conference on Machine Learning, 2019, pp. 3692–
+3702.
+[24] C.-Y. Wei, M. Jafarnia-Jahromi, H. Luo, and R. Jain,
+“Learning infinite-horizon average-reward MDPs with
+linear function approximation,” in International Conference on Artificial Intelligence and Statistics, 2021, pp.
+3007–3015.
+[25] T. P. Lillicrap, J. J. Hunt, A. Pritzel, N. Heess, T. Erez,
+Y. Tassa, D. Silver, and D. Wierstra, “Continuous control with deep reinforcement learning,” in International
+Conference on Learning Representations, 2016.
+[26] X. Chen, J. Hu, C. Jin, L. Li, and L. Wang, “Understanding domain randomization for sim-to-real transfer,”
+in International Conference on Learning Representations,
+2022.
+[27] M. Andrychowicz, F. Wolski, A. Ray, J. Schneider,
+R. Fong, P. Welinder, B. McGrew, J. Tobin, P. Abbeel,
+and W. Zaremba, “Hindsight experience replay,” in
+Advances in Neural Information Processing Systems, 2017,
+pp. 5048–5058.
+[28] C. Florensa, J. Degrave, N. Heess, J. T. Springenberg,
+and M. Riedmiller, “Self-supervised learning of image embedding for continuous control,” arXiv preprint
+arXiv:1901.00943, 2019.
+[29] B. Eysenbach, R. R. Salakhutdinov, and S. Levine,
+“Search on the replay buffer: Bridging planning and
+
+reinforcement learning,” in Advances in Neural Information Processing Systems, 2019, pp. 15 220–15 231.
+[30] K. Hartikainen, X. Geng, T. Haarnoja, and S. Levine,
+“Dynamical distance learning for semi-supervised and
+unsupervised skill discovery,” in International Conference on Learning Representations, 2020.
+[31] T. Schaul, D. Horgan, K. Gregor, and D. Silver, “Universal value function approximators,” in International
+Conference on Machine Learning, 2015, pp. 1312–1320.
+[32] V. Pong, S. Gu, M. Dalal, and S. Levine, “Temporal
+difference models: Model-free deep RL for modelbased control,” in International Conference on Learning
+Representations, 2018.
+[33] N. Savinov, A. Dosovitskiy, and V. Koltun, “Semiparametric topological memory for navigation,” in International Conference on Learning Representations, 2018.
+[34] N. Savinov, A. Raichuk, R. Marinier, D. Vincent,
+M. Pollefeys, T. Lillicrap, and S. Gelly, “Episodic curiosity through reachability,” in International Conference
+on Learning Representations, 2019.
+[35] R. Hadsell, S. Chopra, and Y. LeCun, “Dimensionality
+reduction by learning an invariant mapping,” in 2006
+IEEE Computer Society Conference on Computer Vision and
+Pattern Recognition, 2006, pp. 1735–1742.
+[36] A. Ecoffet, J. Huizinga, J. Lehman, K. O. Stanley, and
+J. Clune, “First return, then explore,” Nature, vol. 590,
+no. 7847, pp. 580–586, 2021.
+[37] A. v. d. Oord, O. Vinyals, and K. Kavukcuoglu, “Neural
+discrete representation learning,” in Advances in Neural
+Information Processing Systems, 2017, pp. 6306–6315.
+[38] Y. Duan, X. Chen, R. Houthooft, J. Schulman, and
+P. Abbeel, “Benchmarking deep reinforcement learning
+for continuous control,” in International Conference on
+Machine Learning, 2016, pp. 1329–1338.
+[39] M. Plappert, M. Andrychowicz, A. Ray, B. McGrew,
+B. Baker, G. Powell, J. Schneider, J. Tobin, M. Chociej,
+P. Welinder, V. Kumar, and W. Zaremba, “Multigoal reinforcement learning: Challenging robotics environments and request for research,” arXiv preprint
+arXiv:1802.09464, 2018.
+[40] S. Fujimoto, H. van Hoof, and D. Meger, “Addressing
+function approximation error in actor-critic methods,”
+in International Conference on Machine Learning, 2018, pp.
+1582–1591.
+[41] V. Mnih, A. P. Badia, M. Mirza, A. Graves, T. Lillicrap, T. Harley, D. Silver, and K. Kavukcuoglu, “Asynchronous methods for deep reinforcement learning,” in
+International Conference on Machine Learning, 2016, pp.
+1928–1937.
+[42] X. B. Peng, M. Andrychowicz, W. Zaremba, and
+P. Abbeel, “Sim-to-real transfer of robotic control with
+dynamics randomization,” in 2018 IEEE International
+Conference on Robotics and Automation (ICRA), 2018, pp.
+3803–3810.
+[43] A. McGovern and A. G. Barto, “Automatic discovery
+of subgoals in reinforcement learning using diverse
+density,” in International Conference on Machine Learning,
+2001, pp. 361–368.
+[44] Ö. Şimşek, A. P. Wolfe, and A. G. Barto, “Identifying useful subgoals in reinforcement learning by local
+graph partitioning,” in International Conference on Ma-
+
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+
+15
+
+chine Learning, 2005, pp. 816–823.
+[45] T. D. Kulkarni, A. Saeedi, S. Gautam, and S. J. Gershman, “Deep successor reinforcement learning,” arXiv
+preprint arXiv:1606.02396, 2016.
+[46] J. Rafati and D. C. Noelle, “Unsupervised methods
+for subgoal discovery during intrinsic motivation in
+model-free hierarchical reinforcement learning,” in Proceedings of the 2nd Workshop on Knowledge Extraction from
+Games co-located with 33rd AAAI Conference on Artificial
+Intelligence, 2019, pp. 17–25.
+[47] A. Zhang, A. Lerer, S. Sukhbaatar, R. Fergus, and
+A. Szlam, “Composable planning with attributes,” in
+International Conference on Machine Learning, 2018, pp.
+5837–5846.
+[48] S. Nasiriany, V. H. Pong, S. Lin, and S. Levine, “Planning with goal-conditioned policies,” in Advances in
+Neural Information Processing Systems, 2019, pp. 14 814–
+14 825.
+[49] C. Florensa, D. Held, X. Geng, and P. Abbeel, “Automatic goal generation for reinforcement learning
+agents,” in International Conference on Machine Learning,
+2018, pp. 1514–1523.
+[50] A. V. Nair, V. Pong, M. Dalal, S. Bahl, S. Lin, and
+S. Levine, “Visual reinforcement learning with imagined goals,” in Advances in Neural Information Processing
+Systems, 2018, pp. 9209–9220.
+[51] Z. Ren, K. Dong, Y. Zhou, Q. Liu, and J. Peng, “Exploration via hindsight goal generation,” in Advances in
+Neural Information Processing Systems, 2019, pp. 13 464–
+13 474.
+[52] P. Dayan, “Improving generalization for temporal difference learning: The successor representation,” Neural
+Computation, vol. 5, no. 4, pp. 613–624, 1993.
+[53] N. Ferns, P. Panangaden, and D. Precup, “Metrics for
+finite Markov Decision Processes,” in Proceedings of the
+20th Conference in Uncertainty in Artificial Intelligence,
+2004, pp. 162–169.
+[54] P. S. Castro, “Scalable methods for computing state
+similarity in deterministic Markov Decision Processes,”
+in Proceedings of the AAAI Conference on Artificial Intelligence, 2020, pp. 10 069–10 076.
+[55] O. Nachum, H. Tang, X. Lu, S. Gu, H. Lee, and
+S. Levine, “Why does hierarchy (sometimes) work so
+well in reinforcement learning?” in Advances in Neural
+Information Processing Systems DeepRL Workshop, 2019.
+[56] I. Higgins, L. Matthey, A. Pal, C. Burgess, X. Glorot, M. Botvinick, S. Mohamed, and A. Lerchner, “β VAE: Learning basic visual concepts with a constrained
+variational framework.” in International Conference on
+Learning Representations, 2017.
+[57] A. Srinivas, M. Laskin, and P. Abbeel, “CURL: Contrastive unsupervised representations for reinforcement learning,” pp. 5639–5650, 2020.
+[58] A. Paszke, S. Gross, F. Massa, A. Lerer, J. Bradbury,
+G. Chanan, T. Killeen, Z. Lin, N. Gimelshein, L. Antiga,
+A. Desmaison, A. Kopf, E. Yang, Z. DeVito, M. Raison,
+A. Tejani, S. Chilamkurthy, B. Steiner, L. Fang, J. Bai,
+and S. Chintala, “PyTorch: An imperative style, highperformance deep learning library,” in Advances in Neural Information Processing Systems, 2019, pp. 8024–8035.
+[59] D. P. Kingma and J. Ba, “Adam: A method for stochastic
+
+optimization,” in International Conference on Learning
+Representations, 2015.
+
+Tianren Zhang received his B.S. degree from
+the department of automation, Tsinghua University, China, in 2019. He is currently pursuing his
+Ph.D. degree at the department of automation,
+Tsinghua University. His current research interests include generalization in machine learning,
+deep reinforcement learning, and learning theory.
+
+Shangqi Guo received a B.S. degree in mathematics and physics basic science from the University of Electronic Science and Technology of
+China, Chengdu, China, in 2015, and a Ph.D. degree at the Department of Automation, Tsinghua
+University, Beijing, China, in 2021. His current
+research interests include inference in artificial
+intelligence, brain-inspired computing, and reinforcement learning.
+
+Tian Tan Tian Tan received his B.S. degree
+in Telecommunications Engineering from Beijing
+University of Posts and Telecommunications, his
+M.S. degree and Ph.D. degree in Engineering
+and Ph.D. minor in Computer Science from Stanford University. His research interests broadly include topics in machine learning and algorithms,
+such as reinforcement learning, multi-task learning, gradient boosting decision trees, deep learning, and statistical learning theory.
+
+Xiaolin Hu (S’01-M’08-SM’13) received B.E.
+and M.E. degrees in automotive engineering from the Wuhan University of Technology,
+Wuhan, China, in 2001 and 2004, respectively,
+and a Ph.D. degree in automation and computeraided engineering from the Chinese University
+of Hong Kong, Hong Kong, in 2007. He is currently an Associate Professor at the Department
+of Computer Science and Technology, Tsinghua
+University, Beijing, China. His current research
+interests include deep learning and computational neuroscience. At present, he is an Associate Editor of the IEEE
+Transactions on Image Processing. Previously he was an Associate Editor of the IEEE Transactions on Neural Networks and Learning Systems.
+
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+
+Feng Chen (M’06) received B.S. and M.S. degrees in automation from Saint-Petersburg Polytechnic University, Saint Petersburg, Russia, in
+1994 and 1996, respectively, and a Ph.D. degree
+from the Automation Department, Tsinghua University, Beijing, China, in 2000. He is currently a
+Professor at Tsinghua University. His current research interests include computer vision, braininspired computing, and inference in graphical
+models.
+
+1
+
+A PPENDIX A
+P ROOFS OF T HEOREMS
+A.1
+
+Proof of Lemma 1
+
+Proof. Under the assumption that the MDP is deterministic and all states are strongly connected, there exists at
+least one shortest state trajectory from s to g . Without
+loss of generality, we consider one shortest state trajectory τ ∗ = (s0 , s1 , s2 , · · · , sn−1 , sn ), where s0 = s, sn =
+ϕ−1 (g) and dst s, ϕ−1 (g) = n. For all k ∈ N+ and
+k ≤ dst s, ϕ−1 (g) = n, let g̃ = ϕ(sk ), and let τ =
+(s0 , s1 , s2 , · · · , sk ) be the k -step sub-trajectory of τ ∗ from
+s0 to sk . Since s0 and sk is connected by τ in k steps,
+we have that dst s0 , ϕ−1 (g̃) = dst (s0 , sk ) ≤ k , i.e.,
+g̃ ∈ GA (s, k). In the following, we will prove that π ∗ (si , g̃) =
+π ∗ (si , g), ∀ si ∈ τ (i 6= k).
+We first prove that the shortest transition distance dst
+satisfies the triangle inequality, i.e., consider three arbitrary states s1 , s2 , s3 ∈ S , then dst (s1 , s3 ) ≤ dst (s1 , s2 ) +
+∗
+dst (s2 , s3 ): let τ12
+be one shortest state trajectory between s1
+∗
+and s2 and let τ23
+be one shortest state trajectory between
+∗
+∗
+s2 and s3 . We can concatenate τ12
+and τ23
+to form a tra∗
+∗
+jectory τ13 = (τ12
+, τ23
+) that connects s1 and s3 . Then, by
+Definition 1 we have dst (s1 , s3 ) ≤ dst (s1 , s2 ) + dst (s2 , s3 ).
+Using the triangle inequality, we can prove that the subtrajectory τ = (s0 , s1 , s2 , · · · , sk ) is also a shortest trajectory
+from s0 = s to sk : assume that this is not true and there
+exists a shorter trajectory from s0 to sk . Then, by Definition 1
+we have dst (s0 , sk ) < k . Since (sk , sk+1 , · · · , sn ) is a valid
+trajectory from sk to sn , we have dst (sk , sn ) ≤ n − k .
+Applying the triangle inequality, we have dst (s0 , sn ) ≤
+dst (s0 , sk ) + dst (sk , sn ) < k + n − k = n, which is in
+contradiction with dst s, ϕ−1 (g) = dst (s0 , sn ) = n. Thus,
+our original assumption must be false, and the trajectory
+τ = (s0 , s1 , s2 , · · · , sk ) is a shortest trajectory from s0 to sk .
+Finally, let α : S ×S → A be an inverse dynamics model,
+i.e., given state st and the next state st+1 , α(st , st+1 ) outputs
+the action at that is performed at st to reach st+1 . Then,
+employing Equation (4), for i = 0, 1, · · · , k − 1 we have
+π ∗ (si , g) = α(si , si+1 ) given that τ ∗ is a shortest trajectory
+from s0 to ϕ−1 (g), and π ∗ (si , g̃) = α(si , si+1 ) given that τ
+is a shortest trajectory from s0 to ϕ−1 (g̃). This indicates that
+π ∗ (si , g̃) = π ∗ (si , g), ∀ si ∈ τ (i 6= k).
+A.2
+
+Proof of Theorem 1
+
+Proof. For each subgoal gkt , t = 0, 1, · · · , T − 1, if k >
+dst (skt , ϕ−1 (gkt )), then we have that gkt ∈ GA (skt , k) and
+thus directly set g̃kt = gkt ; otherwise, by using Lemma 1,
+we have that for each subgoal gkt , there exists a subgoal
+g̃kt ∈ GA (skt , k) that can induce the same low-level k -step
+action sequence as gkt . This indicates that the agent’s trajech
+tory and the high-level reward rkt
+defined by Equation (1)
+remain the same for all t when replacing gkt with g̃kt . Then,
+using the high-level Bellman optimality equation for the
+optimal state-action value function
+hi
+Q∗ (skt , gkt ) = rkt
++ γ max Q∗ (sk(t+1) , g)
+g∈G
+
+hi
+(25)
+= rkt
++ γQ∗ (sk(t+1) , gk(t+1) ),
+t = 0, 1 · · · , T − 1
+
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+
+2
+
+and Q∗ (skT , g) = 0, ∀ g ∈ G (since skT is the final state in
+the trajectory τ ∗ ), we have Q∗ (skt , g̃kt ) = Q∗ (skt , gkt ), t =
+0, 1, · · · , T − 1.
+
+which is presented as the infinite norm of the difference of
+the probabilistic vectors. Then, for every s ∈ S , we have
+adj
+
+∗
+
+V πhi (s) − V πhi (s)
+*
++
+X
+∗
+∗
+πhi
+=
+πhi (g | s)P (s, g), R(s) + γV
+−
+A.3
+
+g∈G
+
+Proof of Theorem 2
+
+*
+X
+Proof. For ease of exposition, we first introduce some shorthand: given a state s ∈ S , let P (s, g) ∈ [0, 1]|S| with
+∀s ∈ S, g ∈ G, kP (s, g)k1 = 1 denote the probablistic
+distribution of the k -step successor state starting from s
+under the subgoal g ; let re(s) ∈ [0, kRmax ]|S| denote the
+k -step high-level reward vector for every successor state.
+adj
+∗
+We then rewrite the state value function of πhi
+and πhi
+respectively:
+
+adj
+∗
+πhi
+(g | s)PAM (s, g), R(s) + γV πhi
+
++
+
+g∈G
+
+*
+
++
+X
+
+≤
+
+∗
+πhi
+(g | s)P (s, g), R(s)
+
+−
+
+(30)
+
+g∈G
+
+*
+
++
+X
+
+∗
+πhi
+(g | s)PAM (s, g), R(s)
+
+g∈G
+
+*
+X
+
++γ
+
+∗
+∗
+πhi
+(g | s)P (s, g), V πhi
+
++
+
+−
+
+g∈G
+∗
+
+X
+
+V πhi (s) =
+
+∗
+πhi
+(g | s)
+
+X
+
+
+P k (s0 | s, g) Rhi (s, s0 ) +
+
+*
+X
+
+s0 ∈S
+
+g∈G
+
+adj
+∗
+πhi
+(g | s)PAM (s, g), V πhi
+
+(26)
+In the sequel we will bound both terms in the right hand
+side of Inequation (30) respectively. For the first term in the
+right hand side, we have
+
+g∈G
+
+*
+
+V
+
+X
+
+(s) =
+
+g∈GAM
+
+X
+
+∗
+P (g | s, g 0 )πhi
+(g 0 | s)
+
+k
+
+=
+
+R(s) + γV
+
+adj
+πhi
+
+=
+
+g∈G
+
+X
+
+∗
+πhi
+(g | s)PAM (s, g), R(s) + γV
+
+adj
+πhi
+
+X
+
+≤
+
+∗
+πhi
+(g | s)P (s, g) −
+
+∗
+πhi
+(g | s)P (s, g) −
+
+g∈G
+
+,
+(27)
+
+X
+
+P (g 0 | s, g)P (s, g 0 ).
+
+(28)
+
+=
+
+µk kRmax
+,
+2
+
+∗
+πhi
+(g | s)PAM (s, g)
+
+The transition mismatch rate µk (17) can be rewritten as
+
+(29)
+
+·
+1
+
+kRmax
+·1
+2
+∞
+
+(31)
+∗
+we
+leverage P
+the
+fact
+that
+πhi
+(g | s),
+∗
+∗
+g∈G πhi (g | s)P (s, g) and
+g∈G πhi (g | s)PAM (s, g) are all
+probability distributions and thus sum up to 1; 1 ∈ R|S| is
+the all-one vector used to center the range of R(s) around
+the origin.
+The second term in the right hand side can be similarly
+where
+P
+
+s,g
+
+X
+
+≤ max kP (s, g) − PAM (s, g)k∞ R(s) −
+
+g 0 ∈GAM (s,k)
+
+µk = max kP (s, g) − PAM (s, g)k∞ ,
+
+∗
+πhi
+(g | s)PAM (s, g),
+
+g∈G
+
+g∈G
+
+s,g
+
+PAM (s, g) :=
+
+X
+
+kRmax
+R(s) −
+·1
+2
+∞
+
+g∈G
+
+where h· , ·i denotes the inner product of vectors, and
+
+∗
+πhi
+(g | s)PAM (s, g), R(s)
+
++
+kRmax
+·1
+R(s) −
+2
+
++
+
++
+
+X
+g∈G
+
+g∈G
+
+P (g 0 | s, g)P (s, g 0 ),
+
+*
+
+∗
+πhi
+(g | s)P (s, g) −
+
+*
+
+g 0 ∈GAM (s,k)
+
+g∈G
+
+X
+
++
+X
+
+=
+∗
+πhi
+(g | s)
+
+∗
+πhi
+(g | s)PAM (s, g), R(s)
+
+*
+
+s0 ∈S
+
+X
+
++
+X
+
+g∈G
+
+*
+X
+
+−
+
+*
+
+0
+
+
+
+adj
+P k (s0 | s, g 0 ) Rhi (s, s0 ) + γV πhi (s0 )
+
+X
+
+∗
+πhi
+(g | s)P (s, g), R(s)
+
+g∈G
+
+(s,k) g 0 ∈G
+
+s0 ∈S
+X
+X
+∗
+πhi
+(g | s)
+P (g 0 | s, g)
+=
+0
+g∈G
+g ∈GAM (s,k)
+
+=
+
++
+X
+
+
+
+adj
+P (s | s, g) Rhi (s, s0 ) + γV πhi (s0 )
+
+X
+
+.
+
+g∈G
+
+
+∗
+γV πhi (s0 )
+*
++
+X
+∗
+∗
+πhi
+=
+πhi (g | s)P (s, g), R(s) + γV
+;
+
+adj
+πhi
+
++
+
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+
+Since the bound (35) holds for all s ∈ S , we can also take
+the infinite norm on the left hand side, which gives
+
+bounded by
+*
++
+X
+∗
+∗
+πhi
+γ
+πhi (g | s)P (s, g), V
+−
+
+∗
+
+(36)
+adj
+∗
+γµk kRmax
+µk kRmax
++
++ γ V πhi − V πhi
+.
+≤
+∞
+2
+2(1 − γ)
+
++
+
+A simple transformation of the above inequality completes
+the proof.
+
+∗
+πhi
+(g | s)PAM (s, g), V πhi
+
+g∈G
+
+*
+
+∗
+∗
+πhi
+(g | s)P (s, g), V πhi
+
+X
+
+≤γ
+
+−
+
+g∈G
+
+*
+X
+
+adj
+∗
+πhi
+(g | s)P (s, g), V πhi
+
+(32)
+
++
+
+g∈G
+
+*
+
++γ
+
+X
+
+adj
+∗
+πhi
+(g | s)P (s, g), V πhi
+
++
+
+−
+
+g∈G
+
+*
+X
+
+adj
+∗
+πhi
+(g | s)PAM (s, g), V πhi
+
++
+
+,
+
+g∈G
+
+where both terms of the right hand side of Inequality (32)
+can be respectively bounded by
+*
++
+X
+∗
+∗
+πhi
+πhi (g | s)P (s, g), V
+γ
+−
+g∈G
+
+*
+X
+
+adj
+∗
+πhi
+(g | s)P (s, g), V πhi
+
++
+
+(33)
+
+g∈G
+adj
+
+∗
+
+≤ γ V πhi − V πhi
++
+
+*
+
+γ
+
+X
+
+adj
+
+∗
+πhi
+(g | s)P (s, g), V πhi
+
+∞
+
+−
+
+g∈G
+
+*
+X
+
+adj
+∗
+πhi
+(g | s)PAM (s, g), V πhi
+
++
+
+g∈G
+
+*
+X
+
+=γ
+
+g∈G
+adj
+
+kRmax
+·1
+2(1 − γ)
+adj
+
+∗
+
+≤ γ V πhi − V πhi
+X
+
+∞
+
++
+
++
+
+∗
+πhi
+(g | s)P (s, g) −
+
+g∈G
+adj
+
+V πhi −
+∗
+
+∗
+πhi
+(g | s)PAM (s, g),
+
+g∈G
+
+V πhi −
+
+γ
+
+X
+
+∗
+πhi
+(g | s)P (s, g) −
+
+X
+
+∗
+πhi
+(g | s)PAM (s, g)
+
+g∈G
+
+adj
+
+∞
+
+·
+1
+
+kRmax
+·1
+2(1 − γ)
+∞
+
+≤ γ V πhi − V πhi
+
+∞
+
++
+
+adj
+
+X
+
+adj
+
+V πhi − V πhi
+
+g∈G
+
+*
+
+3
+
+A PPENDIX B
+C OMPARISON WITH THE W ORK OF S AVINOV ET AL .
+Savinov et al. [33, 34] also propose a supervised learning
+approach for learning the adjacency between states. The
+main differences between our method and theirs are 1) We
+use trajectories sampled by multiple policies to construct
+training samples, while they only use trajectories sampled
+by one specific policy; 2) We use an adjacency matrix to
+explicitly aggregate the adjacency information and sample
+training pairs based on the adjacency matrix, while they
+directly sample training pairs from trajectories. These differences lead to two advantages of our method: 1) By using
+multiple policies, we achieve a more accurate adjacency
+approximation, as shown by Equation (20); 2) By maintaining an adjacency matrix, we can uniformly sample from
+the set of all explored states and realize a nearly unbiased
+estimation of the expectation in Equation (22), while the estimation by sampling state-pairs from trajectories is biased.
+As an example, consider a simple grid world in Fig. 16(a),
+where states are represented by their (x, y) positions. In
+this environment, states s1 and s2 are non-adjacent since
+they are separated by a wall. However, it is hard for the
+method by Savinov et al. to handle this situation as these
+two states rarely emerge in the same trajectory due to the
+large distance, and thus the loss induced by this state-pair
+is very likely to be dominated by the loss of other nearer
+state-pairs. Meanwhile, our method treats the loss of all
+state pairs equally, and can therefore alleviate this phenomenon. Empirically, we employed a random agent (since
+the random policy is stochastic, it can be viewed as multiple
+deterministic policies, and is enough for adjacency learning
+in this simple environment) to interact with the environment
+for 20, 000 steps, and trained the adjacency network with
+collected samples using both methods. We visualize the LLE
+of state embeddings and two adjacency distance heatmaps
+by both methods respectively in Fig. 16(b) and 16(c). Visualizations validate our analysis, showing that our method
+does learn a better adjacency measure in this scenario.
+
++
+
+A PPENDIX C
+kRmax
+·1
+I MPLEMENTATION D ETAILS
+s,g
+2(1 − γ)
+∞
+C.1 HRAC and Baseline Details
+adj
+∗
+γµk kRmax
+≤ γ V πhi − V πhi
++
+.
+We use PyTorch [58] to implement our method HRAC and
+∞
+2(1 − γ)
+(34) all the baselines.
+Combining the bound in (31) and (32) yields
+HRAC: for discrete control tasks, we adopt a binary
+intrinsic
+reward setting: we set the intrinsic reward to 1
+adj
+∗
+V πhi (s) − V πhi (s)
+when |sx − gx | ≤ 0.5 and |sy − gy | ≤ 0.5, where (sx , sy )
+(35) is the position of the agent and (gx , gy ) is the position
+adj
+∗
+µk kRmax
+γµk kRmax
+≤
++
++ γ V πhi − V πhi
+.
+of the desired subgoal. For continuous control tasks, we
+∞
+2
+2(1 − γ)
+adj
+
+γ max kP (s, g) − PAM (s, g)k∞ V πhi −
+
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+2.0
+
+2.0
+
+0.3
+1.5
+
+1.5
+
+s1
+s2
+
+s1
+
+0.4
+0.2
+
+1.0
+
+1.0
+0.1
+
+0.0
+
+0.5
+
+A
+
+0.5
+
+0.1
+
+0.2
+0.0
+
+0.0
+
+(a)
+
+s2
+0.1
+
+0.0
+
+0.1
+
+0.2
+
+0.1
+
+0.2
+
+(b)
+180.20
+160.15
+140.10
+120.05
+100.00
+s1
+8
+0.05
+6
+4 0.10
+2 0.15
+0 0.20
+
+18
+16
+14
+12
+10
+8
+6
+4
+2
+0
+
+0.2
+
+s2
+
+0.1
+
+0.0
+
+(c)
+Fig. 16. Qualitative comparison of different adjacency learning methods.
+(a) Environment layout. The agent starts from the grid A. (b) Results of
+our method, including the adjacency heatmaps from states s1 , s2 , and
+the LLE visualization of state embeddings. (c) Results of the method
+proposed by Savinov et al., including the adjacency heatmaps from
+states s1 , s2 , and the LLE visualization of state embeddings.
+
+adopt a dense intrinsic reward setting based on the negative
+Euclidean distances −ks − gk2 between states and subgoals.
+HIRO: following Nachum et al. [8], we restrict the output
+of high-level to (±10, ±10), representing the desired shift
+of the agent’s (x, y) position. By limiting the range of
+directional subgoals generated by the high-level, HIRO can
+roughly control the Euclidean distance between the absolute
+subgoal and the current state in the raw goal space rather
+than the learned adjacency space.
+HRL-HER: as HER cannot be applied to the on-policy
+training scheme in a straightforward manner, in discrete
+control tasks where the low-level policy is trained using
+A2C, we modify its implementation so that it can be incorporated into the on-policy setting. For this on-policy variant, during the training phase, we maintain an additional
+episodic state memory. This memory stores states that the
+agent has visited from the beginning of each episode. When
+the high-level generates a new subgoal, the agent randomly
+samples a subgoal mapped from a stored state with a fixed
+probability of 0.2 to substitute the generated subgoal for
+the low-level to reach. This implementation resembles the
+“episode” strategy introduced in the original HER. We still
+use the original HER in continuous control tasks.
+NoAdj: we follow the training pipeline proposed by Savinov et al. [33, 34], where no adjacency matrix is maintained.
+Training pairs are constructed by randomly sampling statepairs (si , sj ) from the stored trajectories. The samples with
+|i − j| ≤ k are labeled as positive with l = 1, and the
+samples with |i − j| ≥ M k are negative ones with l = 0.
+The hyperparameter M is used to create a gap between the
+two types of samples. In practice, we use M = 4.
+NegReward: in this variant, every time the high-level
+generates a subgoal, we use the adjacency network to judge
+whether it is k -step adjacent. If the subgoal is non-adjacent,
+the high-level will be penalized with a negative reward −1.
+C.2
+
+Network Architecture
+
+For the hierarchical policy network, we employ the same
+architecture as HIRO [8] in continuous control tasks, where
+both the high-level and the low-level use TD3 [40] algorithm
+
+4
+
+for training. In discrete control tasks, we use two networks
+consisting of 3 fully-connected layers with ReLU nonlinearities as the low-level actor and critic networks of A2C (our
+preliminary results show that the performances using onpolicy and off-policy methods for the low-level training are
+similar in the discrete control tasks we consider), and use
+the same high-level TD3 network architecture as in the continuous control task. The size of the hidden layers of both
+the low-level actor and the low-level critic is (300, 300). The
+output of the high-level actor is activated using the tanh
+function and scaled to fit the size of the environments.
+For the adjacency network, we use a network consisting
+of 4 fully-connected layers with ReLU nonlinearities in all
+tasks. Each hidden layer of the adjacency network has the
+size of (128, 128). The dimension of the output embedding
+is 32.
+We use Adam [59] as the optimizer for all networks.
+C.3
+
+Hyperparameters
+
+We list all hyperparameters we use in discrete control tasks
+and quadrupedal robot locomotion tasks respectively in
+Table 2 and Table 3, and list the hyperparameters used for
+adjacency network training in Table 1. Hyperparameters
+of the robot arm manipulation tasks are the same as [39],
+with a high-level action frequency of 5 and adjacency loss
+coefficient of 0.01. “Ranges” in the tables show the ranges
+of hyperparameters considered when we performed parameter tuning, and the hyperparameters without ranges were
+not specifically tuned.
+C.4
+
+Evaluation Procedure
+
+We evaluate the performance of the agent every 5000 training steps by the average episodic reward over 5 independent
+evaluation episodes. The performance curves are generated
+using a rolling window with size 20; rewards in the rolling
+window are averaged.
+TABLE 1
+Hyperparameters used in adjacency network training.
+Hyperparameters
+
+Values
+
+Ranges
+
+0.0002
+64
+1.0
+0.2
+50000
+50
+50000
+25
+
+-
+
+Adjacency Network
+Learning rate
+Batch size
+k
+δ
+Steps for pre-training
+Pre-training epochs
+Online training frequency (steps)
+Online training epochs
+
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+
+TABLE 2
+Hyperparameters used in discrete control tasks. “KC” in the table refers
+to “Key-Chest”.
+Hyperparameters
+
+Values
+
+Ranges
+
+0.0001
+0.001
+10000/20000
+for Maze/KC
+64
+0.001
+2
+0.99
+10
+1.0
+Gaussian
+(σ = 3.0/5.0
+for Maze/KC)
+20
+
+-
+
+High-level TD3
+Actor learning rate
+Critic learning rate
+Replay buffer size
+Batch size
+Soft update rate
+Policy update frequency
+Discounting
+High-level action frequency
+Reward scaling
+Exploration strategy
+Adjacency loss coefficient
+
+{10000, 20000}
+
+{1, 2}
+{3.0, 5.0}
+{1, 5, 10, 20}
+
+Low-level A2C
+Actor learning rate
+Critic learning rate
+Entropy weight
+Discounting
+Reward scaling
+
+0.0001
+0.0001
+0.01
+0.99
+1.0
+
+-
+
+TABLE 3
+Hyperparameters used in continuous control tasks. “AM” and “AP” in
+the table refer to “Ant Maze” and “Ant Push” respectively.
+Hyperparameters
+
+Values
+
+Ranges
+
+0.0001
+0.001
+200000
+128
+0.005
+1
+0.99
+10
+0.1/1.0
+for AM, AP/others
+Gaussian
+(σ = 5.0/1.0
+for AP/others)
+20
+
+{1, 2}
+-
+
+High-level TD3
+Actor learning rate
+Critic learning rate
+Replay buffer size
+Batch size
+Soft update rate
+Policy update frequency
+Discounting
+High-level action frequency
+Reward scaling
+Exploration strategy
+Adjacency loss coefficient
+
+{0.05, 0.1, 1.0}
+{1.0, 2.0, 5.0}
+{1, 5, 10, 20}
+
+Low-level TD3
+Actor learning rate
+Critic learning rate
+Replay buffer size
+Batch size
+Soft update rate
+Policy update frequency
+Discounting
+Reward scaling
+Exploration strategy
+
+0.0001
+0.001
+200000
+128
+0.005
+1
+0.95
+1.0
+Gaussian (σ = 1.0)
+
+-
+
+5
+
+

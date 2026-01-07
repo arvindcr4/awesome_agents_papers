@@ -1,5 +1,5 @@
 # HippoRAG Neurobiologically Inspired Long-Term Memory
-- Paper: [HippoRAG_Neurobiologically_Inspired_Long-Term_Memory.pdf](../../../papers/memory-rag/HippoRAG_Neurobiologically_Inspired_Long-Term_Memory.pdf)
+- Paper: [HippoRAG_Neurobiologically_Inspired_Long-Term_Memory.pdf](../../../reinforcement_learning_papers/09_agentic_rl/HippoRAG_Neurobiologically_Inspired_Long-Term_Memory.pdf)
 
 ## Gemini diagrams
 

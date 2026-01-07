@@ -1,5 +1,5 @@
 # Unpacking DPO and PPO
-- Paper: [Unpacking_DPO_and_PPO.pdf](../../../papers/rl-finetuning/Unpacking_DPO_and_PPO.pdf)
+- Paper: [Unpacking_DPO_and_PPO.pdf](../../../reinforcement_learning_papers/02_rlhf_alignment/Unpacking_DPO_and_PPO.pdf)
 
 ## Gemini diagrams
 

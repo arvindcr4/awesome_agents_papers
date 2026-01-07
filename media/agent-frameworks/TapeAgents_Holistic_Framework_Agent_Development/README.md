@@ -1,5 +1,5 @@
 # TapeAgents Holistic Framework Agent Development
-- Paper: [TapeAgents_Holistic_Framework_Agent_Development.pdf](../../../papers/agent-frameworks/TapeAgents_Holistic_Framework_Agent_Development.pdf)
+- Paper: [TapeAgents_Holistic_Framework_Agent_Development.pdf](../../../reinforcement_learning_papers/09_agentic_rl/TapeAgents_Holistic_Framework_Agent_Development.pdf)
 
 ## Gemini diagrams
 

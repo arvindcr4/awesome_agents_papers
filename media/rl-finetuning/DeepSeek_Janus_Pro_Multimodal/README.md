@@ -1,5 +1,5 @@
 # DeepSeek Janus Pro Multimodal
-- Paper: [DeepSeek_Janus_Pro_Multimodal.pdf](../../../papers/rl-finetuning/DeepSeek_Janus_Pro_Multimodal.pdf)
+- Paper: [DeepSeek_Janus_Pro_Multimodal.pdf](../../../reinforcement_learning_papers/02_rlhf_alignment/DeepSeek_Janus_Pro_Multimodal.pdf)
 
 ## Gemini diagrams
 

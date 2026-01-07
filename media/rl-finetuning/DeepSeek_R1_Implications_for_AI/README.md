@@ -1,5 +1,5 @@
 # DeepSeek R1 Implications for AI
-- Paper: [DeepSeek_R1_Implications_for_AI.pdf](../../../papers/rl-finetuning/DeepSeek_R1_Implications_for_AI.pdf)
+- Paper: [DeepSeek_R1_Implications_for_AI.pdf](../../../reinforcement_learning_papers/02_rlhf_alignment/DeepSeek_R1_Implications_for_AI.pdf)
 
 ## Gemini diagrams
 

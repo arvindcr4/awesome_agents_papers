@@ -1,5 +1,5 @@
 # Large Language Models Cannot Self-Correct Reasoning Yet
-- Paper: [Large_Language_Models_Cannot_Self-Correct_Reasoning_Yet.pdf](../../../papers/reasoning/Large_Language_Models_Cannot_Self-Correct_Reasoning_Yet.pdf)
+- Paper: [Large_Language_Models_Cannot_Self-Correct_Reasoning_Yet.pdf](../../../reinforcement_learning_papers/09_agentic_rl/Large_Language_Models_Cannot_Self-Correct_Reasoning_Yet.pdf)
 
 ## Gemini diagrams
 

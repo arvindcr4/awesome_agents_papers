@@ -1,5 +1,5 @@
 # SWE-bench Verified
-- Paper: [SWE-bench_Verified.pdf](../../../papers/benchmarks/SWE-bench_Verified.pdf)
+- Paper: [SWE-bench_Verified.pdf](../../../reinforcement_learning_papers/09_agentic_rl/SWE-bench_Verified.pdf)
 
 ## Gemini diagrams
 

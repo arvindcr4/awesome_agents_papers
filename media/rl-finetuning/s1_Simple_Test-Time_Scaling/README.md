@@ -1,5 +1,5 @@
 # s1 Simple Test-Time Scaling
-- Paper: [s1_Simple_Test-Time_Scaling.pdf](../../../papers/rl-finetuning/s1_Simple_Test-Time_Scaling.pdf)
+- Paper: [s1_Simple_Test-Time_Scaling.pdf](../../../reinforcement_learning_papers/02_rlhf_alignment/s1_Simple_Test-Time_Scaling.pdf)
 
 ## Gemini diagrams
 

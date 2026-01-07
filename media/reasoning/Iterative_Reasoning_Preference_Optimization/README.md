@@ -1,5 +1,5 @@
 # Iterative Reasoning Preference Optimization
-- Paper: [Iterative_Reasoning_Preference_Optimization.pdf](../../../papers/reasoning/Iterative_Reasoning_Preference_Optimization.pdf)
+- Paper: [Iterative_Reasoning_Preference_Optimization.pdf](../../../reinforcement_learning_papers/09_agentic_rl/Iterative_Reasoning_Preference_Optimization.pdf)
 
 ## Gemini diagrams
 

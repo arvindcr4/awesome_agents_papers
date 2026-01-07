@@ -1,5 +1,5 @@
 # OS-Harm Computer Use Safety
-- Paper: [OS-Harm_Computer_Use_Safety.pdf](../../../papers/computer-use/OS-Harm_Computer_Use_Safety.pdf)
+- Paper: [OS-Harm_Computer_Use_Safety.pdf](../../../reinforcement_learning_papers/09_agentic_rl/OS-Harm_Computer_Use_Safety.pdf)
 
 ## Gemini diagrams
 

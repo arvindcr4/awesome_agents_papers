@@ -1,0 +1,3484 @@
+IMPALA: Scalable Distributed Deep-RL with Importance Weighted
+Actor-Learner Architectures
+
+arXiv:1802.01561v3 [cs.LG] 28 Jun 2018
+
+Lasse Espeholt * 1 Hubert Soyer * 1 Remi Munos * 1 Karen Simonyan 1 Volodymyr Mnih 1 Tom Ward 1
+Yotam Doron 1 Vlad Firoiu 1 Tim Harley 1 Iain Dunning 1 Shane Legg 1 Koray Kavukcuoglu 1
+
+Abstract
+In this work we aim to solve a large collection
+of tasks using a single reinforcement learning
+agent with a single set of parameters. A key
+challenge is to handle the increased amount of
+data and extended training time. We have developed a new distributed agent IMPALA (Importance Weighted Actor-Learner Architecture) that
+not only uses resources more efficiently in singlemachine training but also scales to thousands of
+machines without sacrificing data efficiency or
+resource utilisation. We achieve stable learning at
+high throughput by combining decoupled acting
+and learning with a novel off-policy correction
+method called V-trace. We demonstrate the effectiveness of IMPALA for multi-task reinforcement
+learning on DMLab-30 (a set of 30 tasks from
+the DeepMind Lab environment (Beattie et al.,
+2016)) and Atari-57 (all available Atari games in
+Arcade Learning Environment (Bellemare et al.,
+2013a)). Our results show that IMPALA is able to
+achieve better performance than previous agents
+with less data, and crucially exhibits positive transfer between tasks as a result of its multi-task approach. The source code is publicly available at
+github.com/deepmind/scalable agent.
+
+1. Introduction
+Deep reinforcement learning methods have recently mastered a wide variety of domains through trial and error
+learning (Mnih et al., 2015; Silver et al., 2017; 2016; Zoph
+et al., 2017; Lillicrap et al., 2015; Barth-Maron et al., 2018).
+While the improvements on tasks like the game of Go (Silver et al., 2017) and Atari games (Horgan et al., 2018) have
+been dramatic, the progress has been primarily in single
+task performance, where an agent is trained on each task
+*
+
+Equal contribution 1 DeepMind Technologies, London,
+United Kingdom. Correspondence to: Lasse Espeholt <lespeholt@google.com>.
+
+separately. We are interested in developing new methods
+capable of mastering a diverse set of tasks simultaneously as
+well as environments suitable for evaluating such methods.
+One of the main challenges in training a single agent on
+many tasks at once is scalability. Since the current state-ofthe-art methods like A3C (Mnih et al., 2016) or UNREAL
+(Jaderberg et al., 2017b) can require as much as a billion
+frames and multiple days to master a single domain, training
+them on tens of domains at once is too slow to be practical.
+We propose the Importance Weighted Actor-Learner
+Architecture (IMPALA) shown in Figure 1. IMPALA is
+capable of scaling to thousands of machines without sacrificing training stability or data efficiency. Unlike the popular
+A3C-based agents, in which workers communicate gradients with respect to the parameters of the policy to a central
+parameter server, IMPALA actors communicate trajectories
+of experience (sequences of states, actions, and rewards) to a
+centralised learner. Since the learner in IMPALA has access
+to full trajectories of experience we use a GPU to perform
+updates on mini-batches of trajectories while aggressively
+parallelising all time independent operations. This type of
+decoupled architecture can achieve very high throughput.
+However, because the policy used to generate a trajectory
+can lag behind the policy on the learner by several updates at
+the time of gradient calculation, learning becomes off-policy.
+Therefore, we introduce the V-trace off-policy actor-critic
+algorithm to correct for this harmful discrepancy.
+With the scalable architecture and V-trace combined, IMPALA achieves exceptionally high data throughput rates of
+250,000 frames per second, making it over 30 times faster
+than single-machine A3C. Crucially, IMPALA is also more
+data efficient than A3C based agents and more robust to
+hyperparameter values and network architectures, allowing it to make better use of deeper neural networks. We
+demonstrate the effectiveness of IMPALA by training a single agent on multi-task problems using DMLab-30, a new
+challenge set which consists of 30 diverse cognitive tasks
+in the 3D DeepMind Lab (Beattie et al., 2016) environment
+and by training a single agent on all games in the Atari-57
+set of tasks.
+
+IMPALA: Importance Weighted Actor-Learner Architectures
+Environment steps
+
+Observations
+
+Actor
+Parameters
+
+Actor
+
+Observations
+
+Actor
+
+Learner
+
+Parameters
+
+Actor
+Actor
+
+Worker
+Learner
+
+Actor
+
+Gradients
+
+Master
+Learner
+
+Forward pass
+
+4 time steps
+Actor 0
+Actor 1
+Actor 2
+Actor 3
+
+(a) Batched A2C (sync step.)
+
+Backward pass
+
+Actor 0
+Actor 1
+Actor 2
+Actor 3
+Actor 4
+Actor 5
+Actor 6
+Actor 7
+
+...next unroll
+
+…
+
+Actor
+
+Actor
+
+4 time steps
+Actor 0
+Actor 1
+Actor 2
+Actor 3
+
+…
+
+(c) IMPALA
+
+(b) Batched A2C (sync traj.)
+
+Observations
+
+Figure 1. Left: Single Learner. Each actor generates trajectories
+and sends them via a queue to the learner. Before starting the next
+trajectory, actor retrieves the latest policy parameters from learner.
+Right: Multiple Synchronous Learners. Policy parameters are
+distributed across multiple learners that work synchronously.
+
+2. Related Work
+The earliest attempts to scale up deep reinforcement learning relied on distributed asynchronous SGD (Dean et al.,
+2012) with multiple workers. Examples include distributed
+A3C (Mnih et al., 2016) and Gorila (Nair et al., 2015), a
+distributed version of Deep Q-Networks (Mnih et al., 2015).
+Recent alternatives to asynchronous SGD for RL include
+using evolutionary processes (Salimans et al., 2017), distributed BA3C (Adamski et al., 2018) and Ape-X (Horgan
+et al., 2018) which has a distributed replay but a synchronous
+learner.
+There have also been multiple efforts that scale up reinforcement learning by utilising GPUs. One of the simplest of
+such methods is batched A2C (Clemente et al., 2017). At
+every step, batched A2C produces a batch of actions and
+applies them to a batch of environments. Therefore, the
+slowest environment in each batch determines the time it
+takes to perform the entire batch step (see Figure 2a and
+2b). In other words, high variance in environment speed
+can severely limit performance. Batched A2C works particularly well on Atari environments, because rendering and
+game logic are computationally very cheap in comparison to
+the expensive tensor operations performed by reinforcement
+learning agents. However, more visually or physically complex environments can be slower to simulate and can have
+high variance in the time required for each step. Environments may also have variable length (sub)episodes causing
+a slowdown when initialising an episode.
+The most similar architecture to IMPALA is GA3C
+(Babaeizadeh et al., 2016), which also uses asynchronous
+data collection to more effectively utilise GPUs. It decouples the acting/forward pass from the gradient calculation/backward pass by using dynamic batching. The actor/learner asynchrony in GA3C leads to instabilities during
+learning, which (Babaeizadeh et al., 2016) only partially
+mitigates by adding a small constant to action probabilities
+
+Figure 2. Timeline for one unroll with 4 steps using different architectures. Strategies shown in (a) and (b) can lead to low GPU
+utilisation due to rendering time variance within a batch. In (a),
+the actors are synchronised after every step. In (b) after every n
+steps. IMPALA (c) decouples acting from learning.
+
+during the estimation of the policy gradient. In contrast,
+IMPALA uses the more principled V-trace algorithm.
+Related previous work on off-policy RL include (Precup
+et al., 2000; 2001; Wawrzynski, 2009; Geist & Scherrer,
+2014; O’Donoghue et al., 2017) and (Harutyunyan et al.,
+2016). The closest work to ours is the Retrace algorithm
+(Munos et al., 2016) which introduced an off-policy correction for multi-step RL, and has been used in several agent
+architectures (Wang et al., 2017; Gruslys et al., 2018). Retrace requires learning state-action-value functions Q in
+order to make the off-policy correction. However, many
+actor-critic methods such as A3C learn a state-value function V instead of a state-action-value function Q. V-trace is
+based on the state-value function.
+
+3. IMPALA
+IMPALA (Figure 1) uses an actor-critic setup to learn a
+policy π and a baseline function V π . The process of generating experiences is decoupled from learning the parameters
+of π and V π . The architecture consists of a set of actors,
+repeatedly generating trajectories of experience, and one or
+more learners that use the experiences sent from actors to
+learn π off-policy.
+At the beginning of each trajectory, an actor updates its
+own local policy µ to the latest learner policy π and runs
+it for n steps in its environment. After n steps, the actor sends the trajectory of states, actions and rewards
+x1 , a1 , r1 , . . . , xn , an , rn together with the corresponding
+policy distributions µ(at |xt ) and initial LSTM state to the
+learner through a queue. The learner then continuously
+updates its policy π on batches of trajectories, each collected from many actors. This simple architecture enables
+the learner(s) to be accelerated using GPUs and actors to
+be easily distributed across many machines. However, the
+learner policy π is potentially several updates ahead of the
+actor’s policy µ at the time of update, therefore there is a
+policy-lag between the actors and learner(s). V-trace cor-
+
+IMPALA: Importance Weighted Actor-Learner Architectures
+
+rects for this lag to achieve extremely high data throughput
+while maintaining data efficiency. Using an actor-learner architecture, provides fault tolerance like distributed A3C but
+often has lower communication overhead since the actors
+send observations rather than parameters/gradients.
+With the introduction of very deep model architectures, the
+speed of a single GPU is often the limiting factor during
+training. IMPALA can be used with distributed set of learners to train large neural networks efficiently as shown in
+Figure 1. Parameters are distributed across the learners and
+actors retrieve the parameters from all the learners in parallel while only sending observations to a single learner.
+IMPALA use synchronised parameter update which is vital
+to maintain data efficiency when scaling to many machines
+(Chen et al., 2016).
+3.1. Efficiency Optimisations
+GPUs and many-core CPUs benefit greatly from running
+few large, parallelisable operations instead of many small
+operations. Since the learner in IMPALA performs updates
+on entire batches of trajectories, it is able to parallelise more
+of its computations than an online agent like A3C. As an
+example, a typical deep RL agent features a convolutional
+network followed by a Long Short-Term Memory (LSTM)
+(Hochreiter & Schmidhuber, 1997) and a fully connected
+output layer after the LSTM. An IMPALA learner applies
+the convolutional network to all inputs in parallel by folding
+the time dimension into the batch dimension. Similarly, it
+also applies the output layer to all time steps in parallel
+once all LSTM states are computed. This optimisation
+increases the effective batch size to thousands. LSTM-based
+agents also obtain significant speedups on the learner by
+exploiting the network structure dependencies and operation
+fusion (Appleyard et al., 2016).
+Finally, we also make use of several off the shelf optimisations available in TensorFlow (Abadi et al., 2017) such as
+preparing the next batch of data for the learner while still performing computation, compiling parts of the computational
+graph with XLA (a TensorFlow Just-In-Time compiler) and
+optimising the data format to get the maximum performance
+from the cuDNN framework (Chetlur et al., 2014).
+
+Barto, 1998) where the goal is to find a policy π that
+maximises the expected sum of future discounted rewards:
+P
+
+def
+t
+V π (x) = Eπ
+t≥0 γ rt , where γ ∈ [0, 1) is the discount factor, rt = r(xt , at ) is the reward at time t, xt is the
+state at time t (initialised in x0 = x) and at ∼ π(·|xt ) is the
+action generated by following some policy π.
+The goal of an off-policy RL algorithm is to use trajectories
+generated by some policy µ, called the behaviour policy, to
+learn the value function V π of another policy π (possibly
+different from µ), called the target policy.
+4.1. V-trace target
+t=s+n
+
+Consider a trajectory (xt , at , rt )t=s generated by the actor following some policy µ. We define the n-steps V-trace
+target for V (xs ), our value approximation at state xs , as:
+Q
+
+Ps+n−1
+def
+t−1
+vs = V (xs ) + t=s γ t−s
+i=s ci δt V , (1)
+
+def
+where δt V = ρt rt + γV (xt+1 ) − V (xt ) is a temporal
+
+def
+def
+t |xt )
+difference for V , and ρt = min ρ̄, π(a
+µ(at |xt ) and ci =
+
+i |xi )
+min c̄, π(a
+µ(ai |xi ) are truncated importance sampling (IS)
+Qt−1
+weights (we make use of the notation i=s ci = 1 for
+s = t). In addition we assume that the truncation levels are
+such that ρ̄ ≥ c̄.
+Notice that in the on-policy case (when π = µ), and assuming that c̄ ≥ 1, then all ci = 1 and ρt = 1, thus (1)
+rewrites
+
+Ps+n−1
+vs = V (xs ) + t=s γ t−s rt + γV (xt+1 ) − V (xt )
+Ps+n−1
+= t=s γ t−s rt + γ n V (xs+n ),
+(2)
+which is the on-policy n-steps Bellman target. Thus in
+the on-policy case, V-trace reduces to the on-policy n-steps
+Bellman update. This property (which Retrace (Munos et al.,
+2016) does not have) allows one to use the same algorithm
+for off- and on-policy data.
+
+Off-policy learning is important in the decoupled distributed
+actor-learner architecture because of the lag between when
+actions are generated by the actors and when the learner
+estimates the gradient. To this end, we introduce a novel offpolicy actor-critic algorithm for the learner, called V-trace.
+
+Notice that the (truncated) IS weights ci and ρt play different roles. The weight ρt appears in the definition of the
+temporal difference δt V and defines the fixed point of this
+update rule. In a tabular case, where functions can be perfectly represented, the fixed point of this update (i.e., when
+V (xs ) = vs for all states), characterised by δt V being equal
+to zero in expectation (under µ), is the value function V πρ̄
+of some policy πρ̄ , defined by
+
+min ρ̄µ(a|x), π(a|x)
+def
+,
+πρ̄ (a|x) = P
+(3)
+b∈A min ρ̄µ(b|x), π(b|x)
+
+First, let us introduce some notations. We consider the
+problem of discounted infinite-horizon RL in Markov Decision Processes (MDP), see (Puterman, 1994; Sutton &
+
+(see the analysis in Appendix A ). So when ρ̄ is infinite
+(i.e. no truncation of ρt ), then this is the value function V π
+of the target policy. However if we choose a truncation
+
+4. V-trace
+
+IMPALA: Importance Weighted Actor-Learner Architectures
+
+level ρ̄ < ∞, our fixed point is the value function V πρ̄ of
+a policy πρ̄ which is somewhere between µ and π. At the
+limit when ρ̄ is close to zero, we obtain the value function
+of the behaviour policy V µ . In Appendix A we prove the
+contraction of a related V-trace operator and the convergence
+of the corresponding online V-trace algorithm.
+The weights ci are similar to the “trace cutting” coefficients
+in Retrace. Their product cs . . . ct−1 measures how much
+a temporal difference δt V observed at time t impacts the
+update of the value function at a previous time s. The more
+dissimilar π and µ are (the more off-policy we are), the
+larger the variance of this product. We use the truncation
+level c̄ as a variance reduction technique. However notice
+that this truncation does not impact the solution to which
+we converge (which is characterised by ρ̄ only).
+Thus we see that the truncation levels c̄ and ρ̄ represent
+different features of the algorithm: ρ̄ impacts the nature of
+the value function we converge to, whereas c̄ impacts the
+speed at which we converge to this function.
+Remark 1. V-trace targets can be computed recursively:
+
+vs = V (xs ) + δs V + γcs vs+1 − V (xs+1 ) .
+Remark 2. Like in Retrace(λ), we can also consider an
+additional discounting parameter λ ∈ [0, 1] in the definition
+
+i |xi )
+of V-trace by setting ci = λ min c̄, π(a
+µ(ai |xi ) . In the onpolicy case, when n = ∞, V-trace then reduces to TD(λ).
+4.2. Actor-Critic algorithm
+P OLICY GRADIENT
+In the on-policy case, the gradient of the value function
+V µ (x0 ) with respect to some parameter of the policy µ is
+hP
+i
+s
+µ
+∇V µ (x0 ) = Eµ
+γ
+∇
+log
+µ(a
+|x
+)Q
+(x
+,
+a
+)
+,
+s
+s
+s
+s
+s≥0
+P
+
+def
+t−s
+where Qµ (xs , as ) = Eµ
+rt |xs , as is the
+t≥s γ
+state-action value of policy µ at (xs , as ). This is
+usually implemented by a stochastic gradient ascent
+that updates
+in the direction of
+h the policy parameters
+i
+Eas ∼µ(·|xs ) ∇ log µ(as |xs )qs xs , where qs is an estimate
+of Qµ (xs , as ), and averaged over the set of states xs that
+are visited under some behaviour policy µ.
+
+Now in the off-policy setting that we consider, we can use
+an IS weight between the policy being evaluated πρ̄ and the
+behaviour policy µ, to update our policy parameter in the
+direction of
+h π (a |x )
+i
+ρ̄ s s
+Eas ∼µ(·|xs )
+∇ log πρ̄ (as |xs )qs xs
+(4)
+µ(as |xs )
+def
+
+where qs = rs + γvs+1 is an estimate of Qπρ̄ (xs , as )
+built from the V-trace estimate vs+1 at the next state xs+1 .
+
+The reason why we use qs instead of vs as the target for
+our Q-value Qπρ̄ (xs , as ) is that, assuming our value estimate is correct at all states, i.e. V = V πρ̄ , then we have
+E[qs |xs , as ] = Qπρ̄ (xs , as ) (whereas we do not have this
+property if we choose qt = vt ). See Appendix A for analysis and Appendix E.3 for a comparison of different ways to
+estimate qs .
+In order to reduce the variance of the policy gradient estimate (4), we usually subtract from qs a state-dependent
+baseline, such as the current value approximation V (xs ).
+Finally notice that (4) estimates the policy gradient for πρ̄
+which is the policy evaluated by the V-trace algorithm when
+using a truncation level ρ̄. However assuming the bias
+V πρ̄ − V π is small (e.g. if ρ̄ is large enough) then we can
+expect qs to provide us with a good estimate of Qπ (xs , as ).
+Taking into account these remarks, we derive the following
+canonical V-trace actor-critic algorithm.
+V- TRACE ACTOR - CRITIC ALGORITHM
+Consider a parametric representation Vθ of the value function and the current policy πω . Trajectories have been generated by actors following some behaviour policy µ. The
+V-trace targets vs are defined by (1). At training time s, the
+value parameters θ are updated by gradient descent on the
+l2 loss to the target vs , i.e., in the direction of
+
+vs − Vθ (xs ) ∇θ Vθ (xs ),
+and the policy parameters ω in the direction of the policy
+gradient:
+
+ρs ∇ω log πω (as |xs ) rs + γvs+1 − Vθ (xs ) .
+In order to prevent premature convergence we may add an
+entropy bonus, like in A3C, along the direction
+X
+πω (a|xs ) log πω (a|xs ).
+−∇ω
+a
+
+The overall update is obtained by summing these three gradients rescaled by appropriate coefficients, which are hyperparameters of the algorithm.
+
+5. Experiments
+We investigate the performance of IMPALA under multiple
+settings. For data efficiency, computational performance
+and effectiveness of the off-policy correction we look at the
+learning behaviour of IMPALA agents trained on individual
+tasks. For multi-task learning we train agents—each with
+one set of weights for all tasks—on a newly introduced
+collection of 30 DeepMind Lab tasks and on all 57 games of
+the Atari Learning Environment (Bellemare et al., 2013a).
+For all the experiments we have used two different model
+architectures: a shallow model similar to (Mnih et al., 2016)
+
+IMPALA: Importance Weighted Actor-Learner Architectures
+Vt
+
+⇡ (at )
+
+ht 1
+
+LSTM 256
+
+rt 1 a t 1
+
+FC 256
+
+LSTM 256
+
+rt 1 a t 1
+
+FC 256
+
+LSTM 64
+
+ReLU
+
+Embedding 20
+
+ReLU
+
+Vt
+
+⇡ (at )
+
+ht 1
+
+blue ladder
+ReLU
+
+ReLU
+
+Residual Block
+
+LSTM 64
+
+32
+
+Conv. 4 ⇥ 4, stride 2
+ReLU
+
+16
+
+Residual Block
+
+Embedding 20
+blue ladder
+
+⇥3
+
+Conv. 3 ⇥ 3, stride 1
+
+3
+
+/255
+
+3
+
++
+
+ReLU
+
+Conv. 3 ⇥ 3, stride 1
+
+Conv. 8 ⇥ 8, stride 4
+/255
+
+Max 3 ⇥ 3, stride 2
+
+[16, 32, 32] ch.
+
+Conv. 3 ⇥ 3, stride 1
+ReLU
+
+96 ⇥ 72
+
+96 ⇥ 72
+
+Figure 3. Model Architectures. Left: Small architecture, 2 convolutional layers and 1.2 million parameters. Right: Large architecture, 15 convolutional layers and 1.6 million parameters.
+Architecture
+
+CPUs GPUs1
+
+Single-Machine
+A3C 32 workers
+Batched A2C (sync step)
+Batched A2C (sync step)
+Batched A2C (sync traj.)
+Batched A2C (dyn. batch)
+IMPALA 48 actors
+IMPALA (dyn. batch) 48 actors3
+
+FPS2
+Task 1
+
+Task 2
+
+64
+48
+48
+48
+48
+48
+48
+
+0
+0
+1
+0
+1
+0
+1
+
+6.5K 9K
+9K
+5K
+13K 5.5K
+16K 17.5K
+16K 13K
+17K 20.5K
+21K 24K
+
+200
+150
+375
+500
+
+0
+1
+1
+1
+
+46K
+
+Distributed
+A3C
+IMPALA
+IMPALA (optimised)
+IMPALA (optimised) batch 128
+
+50K
+80K
+200K
+250K
+
+1
+
+Nvidia P100 2 In frames/sec (4 times the agent steps due to action repeat). 3 Limited by
+amount of rendering possible on a single machine.
+
+Table 1. Throughput on seekavoid arena 01 (task 1) and
+rooms keys doors puzzle (task 2) with the shallow model
+in Figure 3. The latter has variable length episodes and slow
+restarts. Batched A2C and IMPALA use batch size 32 if not otherwise mentioned.
+
+with an LSTM before the policy and value (shown in Figure 3 (left)) and a deeper residual model (He et al., 2016)
+(shown in Figure 3 (right)). For tasks with a language channel we used an LSTM with text embeddings as input.
+5.1. Computational Performance
+High throughput, computational efficiency and scalability
+are among the main design goals of IMPALA. To demonstrate that IMPALA outperforms current algorithms in these
+metrics we compare A3C (Mnih et al., 2016), batched A2C
+variations and IMPALA variants with various optimisations.
+For single-machine experiments using GPUs, we use dynamic batching in the forward pass to avoid several batch
+size 1 forward passes. Our dynamic batching module is
+implemented by specialised TensorFlow operations but is
+
+conceptually similar to the queues used in GA3C. Table 1
+details the results for single-machine and multi-machine versions with the shallow model from Figure 3. In the singlemachine case, IMPALA achieves the highest performance
+on both tasks, ahead of all batched A2C variants and ahead
+of A3C. However, the distributed, multi-machine setup is
+where IMPALA can really demonstrate its scalability. With
+the optimisations from Section 3.1 to speed up the GPUbased learner, the IMPALA agent achieves a throughput rate
+of 250,000 frames/sec or 21 billion frames/day. Note, to
+reduce the number of actors needed per learner, one can
+use auxiliary losses, data from experience replay or other
+expensive learner-only computation.
+5.2. Single-Task Training
+To investigate IMPALA’s learning dynamics, we employ the
+single-task scenario where we train agents individually on
+5 different DeepMind Lab tasks. The task set consists of a
+planning task, two maze navigation tasks, a laser tag task
+with scripted bots and a simple fruit collection task.
+We perform hyperparameter sweeps over the weighting of
+entropy regularisation, the learning rate and the RMSProp
+epsilon. For each experiment we use an identical set of 24
+pre-sampled hyperparameter combinations from the ranges
+in Appendix D.1 . The other hyperparameters were fixed to
+values specified in Appendix D.3 .
+5.2.1. C ONVERGENCE AND S TABILITY
+Figure 4 shows a comparison between IMPALA, A3C
+and batched A2C with the shallow model in Figure 3.
+In all of the 5 tasks, either batched A2C or IMPALA
+reach the best final average return and in all tasks but
+seekavoid arena 01 they are ahead of A3C throughout the entire course of training. IMPALA outperforms
+the synchronous batched A2C on 2 out of 5 tasks while
+achieving much higher throughput (see Table 1). We hypothesise that this behaviour could stem from the V-trace
+off-policy correction acting similarly to generalised advantage estimation (Schulman et al., 2016) and asynchronous
+data collection yielding more diverse batches of experience.
+In addition to reaching better final performance, IMPALA is
+also more robust to the choice of hyperparameters than A3C.
+Figure 4 compares the final performance of the aforementioned methods across different hyperparameter combinations, sorted by average final return from high to low. Note
+that IMPALA achieves higher scores over a larger number
+of combinations than A3C.
+5.2.2. V- TRACE A NALYSIS
+To analyse V-trace we investigate four different algorithms:
+1. No-correction - No off-policy correction.
+
+IMPALA: Importance Weighted Actor-Learner Architectures
+IMPALA - 1 GPU - 200 actors
+
+Batched A2C - Single Machine - 32 workers
+
+Return
+
+rooms_watermaze
+55
+50
+45
+40
+35
+30
+25
+20
+15
+10
+0.0
+
+rooms_keys_doors_puzzle
+30
+25
+20
+15
+10
+5
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+Environment Frames
+
+1.0
+1e9
+
+0
+0.0
+
+0.2
+
+Final Return
+
+50
+40
+30
+20
+10
+9
+
+13
+
+17
+
+0.8
+
+1.0
+1e9
+
+21
+
+24
+
+Hyperparameter Combination
+
+40
+35
+30
+25
+20
+15
+10
+5
+0
+1
+
+5
+
+9
+
+13
+
+17
+
+21
+
+Hyperparameter Combination
+
+24
+
+seekavoid_arena_01
+
+200
+150
+100
+50
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+Environment Frames
+
+1.0
+1e9
+
+0
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+Environment Frames
+
+1.0
+1e9
+
+300
+
+50
+
+250
+
+40
+
+21
+
+Hyperparameter Combination
+
+24
+
+0
+1
+
+0.8
+
+1.0
+1e9
+
+10
+
+50
+17
+
+0.6
+
+20
+
+100
+
+13
+
+0.4
+
+Environment Frames
+
+30
+
+150
+
+9
+
+0.2
+
+seekavoid_arena_01
+
+200
+
+5
+
+45
+40
+35
+30
+25
+20
+15
+10
+5
+0.0
+
+explore_goal_locations_small
+
+lasertag_three_opponents_small
+40
+35
+30
+25
+20
+15
+10
+5
+0
+−5
+1
+
+A3C - Distributed - 200 workers
+
+explore_goal_locations_small
+250
+
+35
+30
+25
+20
+15
+10
+5
+0
+−5
+0.0
+
+rooms_keys_doors_puzzle
+
+60
+
+5
+
+0.6
+
+Environment Frames
+
+rooms_watermaze
+
+0
+1
+
+0.4
+
+A3C - Single Machine - 32 workers
+
+lasertag_three_opponents_small
+
+5
+
+9
+
+13
+
+17
+
+21
+
+24
+
+Hyperparameter Combination
+
+0
+1
+
+5
+
+9
+
+13
+
+17
+
+21
+
+Hyperparameter Combination
+
+24
+
+Figure 4. Top Row: Single task training on 5 DeepMind Lab tasks. Each curve is the mean of the best 3 runs based on final return.
+IMPALA achieves better performance than A3C. Bottom Row: Stability across hyperparameter combinations sorted by the final
+performance across different hyperparameter combinations. IMPALA is consistently more stable than A3C.
+
+Task 1 Task 2 Task 3
+
+Task 4
+
+Task 5
+
+Without Replay
+V-trace
+1-Step
+ε-correction
+No-correction
+
+46.8
+51.8
+44.2
+40.3
+
+32.9 31.3 229.2 43.8
+35.9 25.4 215.8 43.7
+27.3 4.3 107.7 41.5
+29.1 5.0 94.9 16.1
+
+47.1
+54.7
+30.4
+35.0
+
+35.8 34.5 250.8 46.9
+34.4 26.4 204.8 41.6
+30.2 3.9 101.5 37.6
+21.1 2.8 85.0 11.2
+
+With Replay
+V-trace
+1-Step
+ε-correction
+No-correction
+
+Tasks: rooms watermaze, rooms keys doors puzzle,
+lasertag three opponents small,
+explore goal locations small, seekavoid arena 01
+
+Table 2. Average final return over 3 best hyperparameters for different off-policy correction methods on 5 DeepMind Lab tasks. When
+the lag in policy is negligible both V-trace and 1-step importance
+sampling perform similarly well and better than ε-correction/Nocorrection. However, when the lag increases due to use of experience replay, V-trace performs better than all other methods in 4
+out 5 tasks.
+
+2. ε-correction - Add a small value (ε = 1e-6) during
+gradient calculation to prevent log π(a) from becoming
+very small and leading to numerical instabilities, similar
+to (Babaeizadeh et al., 2016).
+3. 1-step importance sampling - No off-policy correction
+when optimising V (x). For the policy gradient, multiply
+the advantage at each time step by the corresponding importance weight. This variant is similar to V-trace without
+“traces” and is included to investigate the importance of
+“traces” in V-trace.
+4. V-trace as described in Section 4.
+For V-trace and 1-step importance sampling we clip each
+importance weight ρt and ct at 1 (i.e. c̄ = ρ̄ = 1). This
+reduces the variance of the gradient estimate but introduces
+
+a bias. Out of ρ̄ ∈ [1, 10, 100] we found that ρ̄ = 1 worked
+best.
+We evaluate all algorithms on the set of 5 DeepMind Lab
+tasks from the previous section. We also add an experience
+replay buffer on the learner to increase the off-policy gap
+between π and µ. In the experience replay experiments we
+draw 50% of the items in each batch uniformly at random
+from the replay buffer. Table 2 shows the final performance
+for each algorithm with and without replay respectively. In
+the no replay setting, V-trace performs best on 3 out of 5
+tasks, followed by 1-step importance sampling, ε-correction
+and No-correction. Although 1-step importance sampling
+performs similarly to V-trace in the no-replay setting, the
+gap widens on 4 out 5 tasks when using experience replay.
+This suggests that the cruder 1-step importance sampling approximation becomes insufficient as the target and behaviour
+policies deviate from each other more strongly. Also note
+that V-trace is the only variant that consistently benefits
+from adding experience replay. ε-correction improves significantly over No-correction on two tasks but lies far behind
+the importance-sampling based methods, particularly in the
+more off-policy setting with experience replay. Figure E.1
+shows results of a more detailed analysis. Figure E.2 shows
+that the importance-sampling based methods also perform
+better across all hyperparameters and are typically more
+robust.
+5.3. Multi-Task Training
+IMPALA’s high data throughput and data efficiency allow us
+to train not only on one task but on multiple tasks in parallel
+with only a minimal change to the training setup. Instead
+of running the same task on all actors, we allocate a fixed
+number of actors to each task in the multi-task suite. Note,
+the model does not know which task it is being trained or
+evaluated on.
+
+IMPALA: Importance Weighted Actor-Learner Architectures
+Model
+A3C, deep
+IMPALA, shallow
+IMPALA-Experts, deep
+IMPALA, deep
+IMPALA, deep, PBT
+IMPALA, deep, PBT, 8 learners
+
+Test score
+23.8%
+37.1%
+44.5%
+46.5%
+49.4%
+49.1%
+
+Table 3. Mean capped human normalised scores on DMLab-30.
+All models were evaluated on the test tasks with 500 episodes per
+task. The table shows the best score for each architecture.
+
+5.3.1. DML AB -30
+To test IMPALA’s performance in a multi-task setting we use
+DMLab-30, a set of 30 diverse tasks built on DeepMind Lab.
+Among the many task types in the suite are visually complex
+environments with natural-looking terrain, instruction-based
+tasks with grounded language (Hermann et al., 2017), navigation tasks, cognitive (Leibo et al., 2018) and first-person
+tagging tasks featuring scripted bots as opponents. A detailed description of DMLab-30 and the tasks are available
+at github.com/deepmind/lab and deepmind.com/dm-lab-30.
+We compare multiple variants of IMPALA with a distributed
+A3C implementation. Except for agents using populationbased training (PBT) (Jaderberg et al., 2017a), all agents are
+trained with hyperparameter sweeps across the same range
+given in Appendix D.1 . We report mean capped human
+normalised score where the score for each task is capped
+at 100% (see Appendix B ). Using mean capped human
+normalised score emphasises the need to solve multiple
+tasks instead of focusing on becoming super human on
+a single task. For PBT we use the mean capped human
+normalised score as fitness function and tune entropy cost,
+learning rate and RMSProp ε. See Appendix F for the
+specifics of the PBT setup.
+In particular, we compare the following agent variants. A3C,
+deep, a distributed implementation with 210 workers (7
+per task) featuring the deep residual network architecture
+(Figure 3 (Right)). IMPALA, shallow with 210 actors and
+IMPALA, deep with 150 actors both with a single learner.
+IMPALA, deep, PBT, the same as IMPALA, deep, but additionally using the PBT (Jaderberg et al., 2017a) for hyperparameter optimisation. Finally IMPALA, deep, PBT, 8
+learners, which utilises 8 learner GPUs to maximise learning speed. We also train IMPALA agents in an expert setting,
+IMPALA-Experts, deep, where a separate agent is trained
+per task. In this case we did not optimise hyperparameters
+for each task separately but instead across all tasks on which
+the 30 expert agents were trained.
+Table 3 and Figure 5 show all variants of IMPALA performing much better than the deep distributed A3C. Moreover,
+the deep variant of IMPALA performs better than the shal-
+
+low network version not only in terms of final performance
+but throughout the entire training. Note in Table 3 that
+IMPALA, deep, PBT, 8 learners, although providing much
+higher throughput, reaches the same final performance as
+the 1 GPU IMPALA, deep, PBT in the same number of steps.
+Of particular importance is the gap between the IMPALAExperts which were trained on each task individually and
+IMPALA, deep, PBT which was trained on all tasks at once.
+As Figure 5 shows, the multi-task version is outperforms
+IMPALA-Experts throughout training and the breakdown
+into individual scores in Appendix B shows positive transfer
+on tasks such as language tasks and laser tag tasks.
+Comparing A3C to IMPALA with respect to wall clock time
+(Figure 6) further highlights the scalability gap between
+the two approaches. IMPALA with 1 learner takes only
+around 10 hours to reach the same performance that A3C
+approaches after 7.5 days. Using 8 learner GPUs instead of
+1 further speeds up training of the deep model by a factor of
+7 to 210K frames/sec, up from 30K frames/sec.
+5.3.2. ATARI
+The Atari Learning Environment (ALE) (Bellemare et al.,
+2013b) has been the testing ground of most recent deep
+reinforcement agents. Its 57 tasks pose challenging reinforcement learning problems including exploration, planning, reactive play and complex visual input. Most games
+feature very different visuals and game mechanics which
+makes this domain particularly challenging for multi-task
+learning.
+We train IMPALA and A3C agents on each game individually and compare their performance using the deep network
+(without the LSTM) introduced in Section 5. We also provide results using a shallow network that is equivalent to
+the feed forward network used in (Mnih et al., 2016) which
+features three convolutional layers. The network is provided
+with a short term history by stacking the 4 most recent observations at each step. For details on pre-processing and
+hyperparameter setup please refer to Appendix G .
+In addition to individual per-game experts, trained for 200
+million frames with a fixed set of hyperparameters, we train
+an IMPALA Atari-57 agent—one agent, one set of weights—
+on all 57 Atari games at once for 200 million frames per
+game or a total of 11.4 billion frames. For the Atari-57 agent,
+we use population based training with a population size of
+24 to adapt entropy regularisation, learning rate, RMSProp ε
+and the global gradient norm clipping threshold throughout
+training.
+We compare all algorithms in terms of median human normalised score across all 57 Atari games. Evaluation follows
+a standard protocol, each game-score is the mean over 200
+evaluation episodes, each episode was started with a random
+
+IMPALA: Importance Weighted Actor-Learner Architectures
+Figure 5. Performance of best agent in each sweep/population during training on the DMLab-30 task-set wrt. data consumed across
+all environments. IMPALA with multi-task training is not only
+faster, it also converges at higher accuracy with better data efficiency across all 30 tasks. The x-axis is data consumed by one
+agent out of IMPALA,
+a hyperparameter
+sweep/PBTIMPALA,
+population
+of 24 agents,
+deep, PBT - 8 GPUs
+shallow
+total data consumed
+across
+IMPALA, deep,
+PBT the whole population/sweep
+IMPALA-Experts, deepcan be
+deep with the population/sweep
+A3C, deep size.
+obtained by IMPALA,
+multiplying
+
+Human Normalised Return Median
+A3C, shallow, experts
+A3C, deep, experts
+Reactor, experts
+
+Mean
+
+54.9% 285.9%
+117.9% 503.6%
+187%
+
+N/A
+
+IMPALA, shallow, experts
+IMPALA, deep, experts
+
+93.2% 466.4%
+191.8% 957.6%
+
+IMPALA, deep, multi-task
+
+59.7% 176.9%
+
+Mean Capped Normalized Score
+
+60
+
+Table 4. Human normalised scores on Atari-57. Up to 30 no-ops
+at the beginning of each episode. For a level-by-level comparison
+to ACKTR (Wu et al., 2017) and Reactor see Appendix C.1 .
+
+50
+
+40
+
+30
+
+20
+
+10
+
+0
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+1.0
+1e10
+
+Environment Frames
+IMPALA, deep, PBT - 8 GPUs
+IMPALA, deep, PBT
+IMPALA, deep
+
+IMPALA, shallow
+IMPALA-Experts, deep
+A3C, deep
+
+the high diversity in visual appearance and game mechanics
+within the ALE suite, IMPALA multi-task still manages
+to stay competitive to A3C, shallow, experts, commonly
+used as a baseline in related work. ALE is typically considered a hard multi-task environment, often accompanied
+by negative transfer between tasks (Rusu et al., 2016). To
+our knowledge, IMPALA is the first agent to be trained in a
+multi-task setting on all 57 games of ALE that is competitive
+with a standard expert baseline.
+
+Mean Capped Normalized Score
+
+60
+
+6. Conclusion
+
+50
+
+We have introduced a new highly scalable distributed agent,
+IMPALA, and a new off-policy learning algorithm, V-trace.
+With its simple but scalable distributed architecture, IMPALA can make efficient use of available compute at small
+and large scale. This directly translates to very quick
+turnaround for investigating new ideas and opens up unexplored opportunities.
+
+40
+
+30
+
+20
+
+10
+
+0
+
+0
+
+20
+
+40
+
+60
+
+80
+
+100
+
+120
+
+140
+
+160
+
+180
+
+Wall Clock Time (hours)
+
+Figure 6. Performance on DMLab-30 wrt. wall-clock time. All
+models used the deep architecture (Figure 3). The high throughput
+of IMPALA results in orders of magnitude faster learning.
+
+number of no-op actions (uniformly chosen from [1, 30]) to
+combat the determinism of the ALE environment.
+As table 4 shows, IMPALA experts provide both better final
+performance and data efficiency than their A3C counterparts
+in the deep and the shallow configuration. As in our DeepMind Lab experiments, the deep residual network leads
+to higher scores than the shallow network, irrespective of
+the reinforcement learning algorithm used. Note that the
+shallow IMPALA experiment completes training over 200
+million frames in less than one hour.
+We want to particularly emphasise that IMPALA, deep, multitask, a single agent trained on all 57 ALE games at once,
+reaches 59.7% median human normalised score. Despite
+
+V-trace is a general off-policy learning algorithm that is
+more stable and robust compared to other off-policy correction methods for actor critic agents. We have demonstrated
+that IMPALA achieves better performance compared to
+A3C variants in terms of data efficiency, stability and final
+performance. We have further evaluated IMPALA on the
+new DMLab-30 set and the Atari-57 set. To the best of
+our knowledge, IMPALA is the first Deep-RL agent that
+has been successfully tested in such large-scale multi-task
+settings and it has shown superior performance compared
+to A3C based agents (49.4% vs. 23.8% human normalised
+score on DMLab-30). Most importantly, our experiments
+on DMLab-30 show that, in the multi-task setting, positive
+transfer between individual tasks lead IMPALA to achieve
+better performance compared to the expert training setting.
+We believe that IMPALA provides a simple yet scalable and
+robust framework for building better Deep-RL agents and
+has the potential to enable research on new challenges.
+
+IMPALA: Importance Weighted Actor-Learner Architectures
+
+Acknowledgements
+We would like to thank Denis Teplyashin, Ricardo Barreira,
+Manuel Sanchez for their work improving the performance
+on DMLab-30 environments and Matteo Hessel, Jony Hudson, Igor Babuschkin, Max Jaderberg, Ivo Danihelka, Jacob
+Menick and David Silver for their comments and insightful
+discussions.
+
+References
+Abadi, M., Isard, M., and Murray, D. G. A computational
+model for tensorflow: An introduction. In Proceedings
+of the 1st ACM SIGPLAN International Workshop on
+Machine Learning and Programming Languages, MAPL
+2017, 2017. ISBN 978-1-4503-5071-6.
+Adamski, I., Adamski, R., Grel, T., Jedrych, A., Kaczmarek,
+K., and Michalewski, H. Distributed deep reinforcement
+learning: Learn how to play atari games in 21 minutes.
+CoRR, abs/1801.02852, 2018.
+Appleyard, J., Kociský, T., and Blunsom, P. Optimizing
+performance of recurrent neural networks on gpus. CoRR,
+abs/1604.01946, 2016.
+Babaeizadeh, M., Frosio, I., Tyree, S., Clemons, J., and
+Kautz, J. GA3C: GPU-based A3C for deep reinforcement
+learning. NIPS Workshop, 2016.
+Barth-Maron, G., Hoffman, M. W., Budden, D., Dabney,
+W., Horgan, D., Tirumala, D., Muldal, A., Heess, N., and
+Lillicrap, T. Distributional policy gradients. ICLR, 2018.
+
+Clemente, A. V., Martı́nez, H. N. C., and Chandra, A. Efficient parallel methods for deep reinforcement learning.
+CoRR, abs/1705.04862, 2017.
+Dean, J., Corrado, G., Monga, R., Chen, K., Devin, M.,
+Mao, M., Ranzato, M., Senior, A., Tucker, P., Yang, K.,
+Le, Q. V., and Ng, A. Y. Large scale distributed deep
+networks. In Advances in Neural Information Processing
+Systems 25, pp. 1223–1231, 2012.
+Geist, M. and Scherrer, B. Off-policy learning with eligibility traces: A survey. The Journal of Machine Learning
+Research, 15(1):289–333, 2014.
+Gruslys, A., Dabney, W., Azar, M. G., Piot, B., Bellemare, M. G., and Munos, R. The Reactor: A fast and
+sample-efficient actor-critic agent for reinforcement learning. ICLR, 2018.
+Harutyunyan, A., Bellemare, M. G., Stepleton, T., and
+Munos, R. Q(λ) with Off-Policy Corrections, pp. 305–
+320. Springer International Publishing, Cham, 2016.
+He, K., Zhang, X., Ren, S., and Sun, J. Identity mappings
+in deep residual networks. In European Conference on
+Computer Vision, pp. 630–645. Springer, 2016.
+Hermann, K. M., Hill, F., Green, S., Wang, F., Faulkner, R.,
+Soyer, H., Szepesvari, D., Czarnecki, W., Jaderberg, M.,
+Teplyashin, D., et al. Grounded language learning in a
+simulated 3d world. arXiv preprint arXiv:1706.06551,
+2017.
+
+Beattie, C., Leibo, J. Z., Teplyashin, D., Ward, T., Wainwright, M., Kuttler, H., Lefrancq, A., Green, S., Valdes,
+V., Sadik, A., Schrittwieser, J., Anderson, K., York, S.,
+Cant, M., Cain, A., Bolton, A., Gaffney, S., King, H.,
+Hassabis, D., Legg, S., and Petersen, S. Deepmind lab.
+CoRR, abs/1612.03801, 2016.
+
+Hochreiter, S. and Schmidhuber, J. Long short-term memory.
+Neural computation, 9(8):1735–1780, 1997.
+
+Bellemare, M. G., Naddaf, Y., Veness, J., and Bowling, M.
+The Arcade Learning Environment: An evaluation platform for general agents. Journal of Artificial Intelligence
+Research, 47:253–279, June 2013a.
+
+Jaderberg, M., Dalibard, V., Osindero, S., Czarnecki, W. M.,
+Donahue, J., Razavi, A., Vinyals, O., Green, T., Dunning,
+I., Simonyan, K., Fernando, C., and Kavukcuoglu, K.
+Population based training of neural networks. CoRR,
+abs/1711.09846, 2017a.
+
+Bellemare, M. G., Naddaf, Y., Veness, J., and Bowling, M.
+The arcade learning environment: An evaluation platform
+for general agents. J. Artif. Intell. Res.(JAIR), 47:253–279,
+2013b.
+Chen, J., Monga, R., Bengio, S., and Józefowicz,
+R. Revisiting distributed synchronous SGD. CoRR,
+abs/1604.00981, 2016.
+Chetlur, S., Woolley, C., Vandermersch, P., Cohen, J., Tran,
+J., Catanzaro, B., and Shelhamer, E. cudnn: Efficient
+primitives for deep learning. CoRR, abs/1410.0759, 2014.
+
+Horgan, D., Quan, J., Budden, D., Barth-Maron, G., Hessel,
+M., van Hasselt, H., and Silver, D. Distributed prioritized
+experience replay. ICLR, 2018.
+
+Jaderberg, M., Mnih, V., Czarnecki, W. M., Schaul, T.,
+Leibo, J. Z., Silver, D., and Kavukcuoglu, K. Reinforcement learning with unsupervised auxiliary tasks. ICLR,
+2017b.
+Leibo, J. Z., d’Autume, C. d. M., Zoran, D., Amos, D.,
+Beattie, C., Anderson, K., Castañeda, A. G., Sanchez, M.,
+Green, S., Gruslys, A., et al. Psychlab: A psychology
+laboratory for deep reinforcement learning agents. arXiv
+preprint arXiv:1801.08116, 2018.
+
+IMPALA: Importance Weighted Actor-Learner Architectures
+
+Lillicrap, T. P., Hunt, J. J., Pritzel, A., Heess, N., Erez,
+T., Tassa, Y., Silver, D., and Wierstra, D. Continuous
+control with deep reinforcement learning. arXiv preprint
+arXiv:1509.02971, 2015.
+Mnih, V., Kavukcuoglu, K., Silver, D., Rusu, A. A., Veness,
+J., Bellemare, M. G., Graves, A., Riedmiller, M., Fidjeland, A. K., Ostrovski, G., et al. Human-level control
+through deep reinforcement learning. Nature, 518(7540):
+529–533, 2015.
+Mnih, V., Badia, A. P., Mirza, M., Graves, A., Lillicrap, T. P., Harley, T., Silver, D., and Kavukcuoglu, K.
+Asynchronous methods for deep reinforcement learning.
+ICML, 2016.
+Munos, R., Stepleton, T., Harutyunyan, A., and Bellemare,
+M. Safe and efficient off-policy reinforcement learning.
+In Advances in Neural Information Processing Systems,
+pp. 1046–1054, 2016.
+Nair, A., Srinivasan, P., Blackwell, S., Alcicek, C., Fearon,
+R., Maria, A. D., Panneershelvam, V., Suleyman, M.,
+Beattie, C., Petersen, S., Legg, S., Mnih, V., Kavukcuoglu,
+K., and Silver, D. Massively parallel methods for deep
+reinforcement learning. CoRR, abs/1507.04296, 2015.
+O’Donoghue, B., Munos, R., Kavukcuoglu, K., and Mnih,
+V. Combining policy gradient and Q-learning. In ICLR,
+2017.
+Precup, D., Sutton, R. S., and Singh, S. Eligibility traces for
+off-policy policy evaluation. In Proceedings of the Seventeenth International Conference on Machine Learning,
+2000.
+Precup, D., Sutton, R. S., and Dasgupta, S. Off-policy
+temporal-difference learning with function approximation. In Proceedings of the 18th International Conference
+on Machine Laerning, pp. 417–424, 2001.
+Puterman, M. L. Markov Decision Processes: Discrete
+Stochastic Dynamic Programming. John Wiley & Sons,
+Inc., New York, NY, USA, 1st edition, 1994. ISBN
+0471619779.
+Rusu, A. A., Rabinowitz, N. C., Desjardins, G., Soyer, H.,
+Kirkpatrick, J., Kavukcuoglu, K., Pascanu, R., and Hadsell, R. Progressive neural networks. arXiv preprint
+arXiv:1606.04671, 2016.
+Salimans, T., Ho, J., Chen, X., and Sutskever, I. Evolution strategies as a scalable alternative to reinforcement
+learning. arXiv preprint arXiv:1703.03864, 2017.
+Schulman, J., Moritz, P., Levine, S., Jordan, M., and Abbeel,
+P. High-dimensional continuous control using generalized
+advantage estimation. In ICLR, 2016.
+
+Silver, D., Huang, A., Maddison, C. J., Guez, A., Sifre, L.,
+van den Driessche, G., Schrittwieser, J., Antonoglou, I.,
+Panneershelvam, V., Lanctot, M., Dieleman, S., Grewe,
+D., Nham, J., Kalchbrenner, N., Sutskever, I., Lillicrap, T.,
+Leach, M., Kavukcuoglu, K., Graepel, T., and Hassabis,
+D. Mastering the game of go with deep neural networks
+and tree search. Nature, 529:484–503, 2016.
+Silver, D., Schrittwieser, J., Simonyan, K., Antonoglou,
+I., Huang, A., Guez, A., Hubert, T., Baker, L., Lai, M.,
+Bolton, A., Chen, Y., Lillicrap, T., Hui, F., Sifre, L.,
+Driessche, G. v. d., Graepel, T., and Hassabis, D. Mastering the game of go without human knowledge. Nature,
+550(7676):354–359, 10 2017. ISSN 0028-0836. doi:
+10.1038/nature24270.
+Sutton, R. and Barto, A. Reinforcement learning: An introduction, volume 116. Cambridge Univ Press, 1998.
+Wang, Z., Bapst, V., Heess, N., Mnih, V., Munos, R.,
+Kavukcuoglu, K., and de Freitas, N. Sample efficient
+actor-critic with experience replay. In ICLR, 2017.
+Wawrzynski, P. Real-time reinforcement learning by sequential actor-critics and experience replay. Neural Networks,
+22(10):1484–1497, 2009.
+Wu, Y., Mansimov, E., Liao, S., Grosse, R. B., and Ba,
+J. Scalable trust-region method for deep reinforcement
+learning using kronecker-factored approximation. CoRR,
+abs/1708.05144, 2017.
+Zoph, B., Vasudevan, V., Shlens, J., and Le, Q. V. Learning
+transferable architectures for scalable image recognition.
+arXiv preprint arXiv:1707.07012, 2017.
+
+Supplementary Material
+
+A. Analysis of V-trace
+A.1. V-trace operator
+Define the V-trace operator R:
+RV (x)
+
+def
+
+=
+
+V (x) + Eµ
+
+hX
+t≥0
+
+i
+
+
+γ t c0 . . . ct−1 ρt rt + γV (xt+1 ) − V (xt ) x0 = x, µ ,
+
+(5)
+
+where the expectation Eµ is with respect to the policy µ which has generated the trajectory (xt )t≥0 , i.e., x0 = x,
+xt+1 ∼ p(·|xt , at ), at ∼ µ(·|xt ). Here we consider the infinite-horizon operator but very similar results hold for the n-step
+truncated operator.
+
+π(at |xt ) 
+t |xt )
+Theorem 1. Let ρt = min ρ̄, π(a
+µ(at |xt ) and ct = min c̄, µ(at |xt ) be truncated importance sampling weights, with ρ̄ ≥ c̄.
+Assume that there exists β ∈ (0, 1] such that Eµ ρ0 ≥ β. Then the operator R defined by (5) has a unique fixed point V πρ̄ ,
+which is the value function of the policy πρ̄ defined by
+
+min ρ̄µ(a|x), π(a|x)
+def
+,
+πρ̄ (a|x) = P
+(6)
+b∈A min ρ̄µ(b|x), π(b|x)
+Furthermore, R is a η-contraction mapping in sup-norm, with
+def
+
+η = γ −1 − (γ −1 − 1)Eµ
+
+X
+t≥0
+
+γt
+
+t−2
+Y
+i=0
+
+
+
+ci ρt−1 ≤ 1 − (1 − γ)β < 1.
+
+Remark 3. The truncation levels c̄ and ρ̄ play different roles in this operator:
+• ρ̄ impacts the fixed-point of the operator, thus the policy πρ̄ which is evaluated. For ρ̄ = ∞ (untruncated ρt ) we get the
+value function of the target policy V π , whereas for finite ρ̄, we evaluate a policy which is in between µ and π (and
+when ρ is close to 0, then we evaluate V µ ). So the larger ρ̄ the smaller the bias in off-policy learning. The variance
+naturally grows with ρ̄. However notice that we do not take the product of those ρt coefficients (in contrast to the cs
+coefficients) so the variance does not explode with the time horizon.
+• c̄ impacts the contraction modulus η of R (thus the speed at which an online-algorithm like V-trace will converge to its
+fixed point V πρ̄ ). In terms of variance reduction, here is it really important to truncate the importance sampling ratios
+in ct because we take the product of those. Fortunately, our result says that for any level of truncation c̄, the fixed point
+(the value function V πρ̄ we converge to) is the same: it does not depend on c̄ but on ρ̄ only.
+Proof. First notice that we can rewrite R as
+
+
+
+
+X  t−1
+Y 
+RV (x) = (1 − Eµ ρ0 )V (x) + Eµ 
+γt
+cs ρt rt + γ[ρt − ct ρt+1 ]V (xt+1 )  .
+t≥0
+
+s=0
+
+Thus
+
+
+ t−1
+Y 
+X
+
+
+
+
+RV1 (x) − RV2 (x) = (1 − Eµ ρ0 ) V1 (x) − V2 (x) + Eµ 
+γ t+1
+cs [ρt − ct ρt+1 ] V1 (xt+1 ) − V2 (xt+1 )  .
+t≥0
+
+s=0
+
+
+
+ t−2
+
+X
+Y
+
+
+
+= Eµ 
+γt
+cs [ρt−1 − ct−1 ρt ] V1 (xt ) − V2 (xt )  ,
+|
+{z
+}
+t≥0
+
+s=0
+
+αt
+
+IMPALA: Importance Weighted Actor-Learner Architectures
+
+with the notation that c−1 = ρ−1 = 1 and
+expectation. Indeed, since ρ̄ ≥ c̄, we have
+
+Qt−2
+
+s=0 cs = 1 for t = 0 and 1. Now the coefficients (αt )t≥0 are non-negative in
+
+
+
+
+
+Eµ αt = E ρt−1 − ct−1 ρt ≥ Eµ ct−1 (1 − ρt ) ≥ 0,
+ t |xt ) 
+since Eµ ρt ≤ Eµ π(a
+µ(at |xt ) = 1. Thus V1 (x) − V2 (x) is a linear combination of the values V1 − V2 at other states, weighted
+by non-negative coefficients whose sum is
+" t−2
+#
+Y 
+X
+t
+γ Eµ
+cs [ρt−1 − ct−1 ρt ]
+s=0
+
+t≥0
+
+"
+=
+
+X
+
+t
+
+γ Eµ
+
+s=0
+
+t≥0
+
+"
+=
+
+X
+
+γ t Eµ
+
+t≥0
+
+=
+
+≤
+
+≤
+
+<
+
+ t−2
+Y
+ t−2
+Y
+
+#
+
+
+
+cs ρt−1 −
+
+X
+
+t
+
+γ Eµ
+
+" t−1
+Y
+
+
+
+#
+
+cs ρ t
+
+s=0
+
+t≥0
+
+cs ρt−1
+
+
+
+" t−2
+#
+Y 
+X
+− γ −1 
+γ t Eµ
+cs ρt−1 − 1
+
+X
+
+" t−2
+Y
+
+#
+
+
+
+s=0
+
+γ −1 − (γ −1 − 1)
+
+s=0
+
+t≥0
+
+γ t Eµ
+
+t≥0
+
+s=0
+
+|
+
+{z
+
+
+cs ρt−1
+
+≥1+γEµ ρ0
+
+#
+
+}
+
+1 − (1 − γ)Eµ ρ0
+
+1 − (1 − γ)β
+
+1.
+
+We deduce that kRV1 (x) − RV2 (x)k ≤ ηkV1 − V2 k∞ , with η = γ −1 − (γ −1 − 1)
+
+P
+
+t
+t≥0 γ Eµ
+
+h Q
+
+t−2
+s=0 cs
+
+
+
+i
+ρt−1 ≤
+
+1 − (1 − γ)β < 1, so R is a contraction mapping. Thus R possesses a unique fixed point. Let us now prove that this fixed
+point is V πρ̄ . We have:
+
+ i
+Eµ ρt rt + γV πρ̄ (xt+1 ) − V πρ̄ (xt ) xt
+i
+X
+X
+π(a|xt ) h
+=
+µ(a|xt ) min ρ̄,
+r(xt , a) + γ
+p(y|xt , a)V πρ̄ (y) − V πρ̄ (xt )
+µ(a|xt )
+a
+y
+h
+iX
+X
+X
+
+πρ̄
+=
+πρ̄ (a|xt ) r(xt , a) + γ
+p(y|xt , a)V (y) − V πρ̄ (xt )
+min ρ̄µ(b|xt ), π(b|xt )
+a
+
+|
+=
+
+y
+
+b
+
+{z
+
+=0
+
+}
+
+0,
+
+since this is the Bellman equation for V πρ̄ . We deduce that RV πρ̄ = V πρ̄ , thus V πρ̄ is the unique fixed point of R.
+A.2. Online learning
+Theorem 2. Assume a tabular representation, i.e. the state and action spaces are finite. Consider a set of trajectories, with
+the k th trajectory x0 , a0 , r0 , x1 , a1 , r1 , . . . generated by following µ: at ∼ µ(·|xt ). For each state xs along this trajectory,
+update
+X
+
+
+Vk+1 (xs ) = Vk (xs ) + αk (xs )
+γ t−s cs . . . ct−1 ρt rt + γVk (xt+1 ) − Vk (xt ) ,
+(7)
+t≥s
+
+
+i |xi )
+c̄, π(a
+µ(ai |xi ) , ρi = min
+
+
+i |xi )
+with ci = min
+ρ̄, π(a
+(1) all states are visited infinitely often, and (2) the
+µ(ai |xi ) , ρ̄ ≥ c̄. Assume that
+P
+P
+stepsizes obey the usual Robbins-Munro conditions: for each state x, k αk (x) = ∞, k αk2 (x) < ∞. Then Vk → V πρ̄
+
+almost surely.
+
+The proof is a straightforward application of the convergence result for stochastic approximation algorithms to the fixed
+point of a contraction operator, see e.g. Dayan & Sejnowski (1994); Bertsekas & Tsitsiklis (1996); Kushner & Yin (2003).
+
+IMPALA: Importance Weighted Actor-Learner Architectures
+
+A.3. On the choice of qs in policy gradient
+The policy gradient update rule (4) makes use of the coefficient qs = rs + γvs+1 as an estimate of Qπρ̄ (xs , as ) built from the
+V-trace estimate vs+1 at the next state xs+1 . The reason why we use qs instead of vs as target for our Q-value Qπρ̄ (xs , as )
+is to make sure our estimate of the Q-value is as unbiased as possible, and the first requirement is that it is entirely unbiased
+in the case of perfect representation of the V-values. Indeed, assuming our value function is correctly estimated at all states,
+i.e. V = V πρ̄ , then we have E[qs |xs , as ] = Qπρ̄ (xs , as ) (whereas we do not have this property for vt ). Indeed,
+
+
+E[qs |xs , as ] = rs + γE V πρ̄ (xs+1 ) + δs+1 V πρ̄ + γcs+1 δs+2 V πρ̄ + . . .
+
+
+= rs + γE V πρ̄ (xs+1 )
+= Qπρ̄ (xs , as )
+whereas
+
+
+
+E[vs |xs , as ] = V πρ̄ (xs ) + ρs rs + γE V πρ̄ (xs+1 ) − V πρ̄ (xs ) + γcs δs+1 V πρ̄ + . . .
+
+
+
+= V πρ̄ (xs ) + ρs rs + γE V πρ̄ (xs+1 ) − V πρ̄ (xs )
+= V πρ̄ (xs )(1 − ρs ) + ρs Qπρ̄ (xs , as ),
+
+which is different from Qπρ̄ (xs , as ) when V πρ̄ (xs ) 6= Qπρ̄ (xs , as ).
+
+IMPALA: Importance Weighted Actor-Learner Architectures
+
+B. Reference Scores
+Task t
+
+Human h Random r Experts IMPALA
+
+rooms collect good objects test
+rooms exploit deferred effects test
+rooms select nonmatching object
+rooms watermaze
+rooms keys doors puzzle
+language select described object
+language select located object
+language execute random task
+language answer quantitative question
+lasertag one opponent large
+lasertag three oponents large
+lasertag one opponent small
+lasertag three opponents small
+natlab fixed large map
+natlab varying map regrowth
+natlab varying map randomized
+skymaze irreversible path hard
+skymaze irreversible path varied
+pyschlab arbitrary visuomotor mapping
+pyschlab continuous recognition
+pyschlab sequential comparison
+pyschlab visual search
+explore object locations small
+explore object locations large
+explore obstructed goals small
+explore obstructed goals large
+explore goal locations small
+explore goal locations large
+explore object rewards few
+explore object rewards many
+P
+Mean Capped Normalised Score: ( t min [1, (st − rt )/(ht − rt )]) /N
+Table B.1. DMLab-30 test scores.
+
+10.0
+85.7
+65.9
+54.0
+53.8
+389.5
+280.7
+254.1
+184.5
+12.7
+18.6
+18.6
+31.5
+36.9
+24.4
+42.4
+100.0
+100.0
+58.8
+58.3
+39.5
+78.5
+74.5
+65.7
+206.0
+119.5
+267.5
+194.5
+77.7
+106.7
+
+0.1
+8.5
+0.3
+4.1
+4.1
+-0.1
+1.9
+-5.9
+-0.3
+-0.2
+-0.2
+-0.1
+-0.1
+2.2
+3.0
+7.3
+0.1
+14.4
+0.2
+0.2
+0.1
+0.1
+3.6
+4.7
+6.8
+2.6
+7.7
+3.1
+2.1
+2.4
+
+9.0
+15.6
+7.3
+26.9
+28.0
+324.6
+189.0
+-49.9
+219.4
+-0.2
+-0.1
+-0.1
+19.1
+34.7
+20.7
+36.1
+13.6
+45.1
+16.4
+29.9
+0.0
+0.0
+57.8
+37.0
+135.2
+39.5
+209.4
+83.1
+39.8
+58.7
+
+5.8
+11.0
+26.1
+31.1
+24.3
+593.1
+301.7
+66.8
+264.0
+0.3
+4.1
+2.5
+11.3
+12.2
+15.9
+29.0
+30.0
+53.6
+14.3
+29.9
+0.0
+0.0
+62.6
+51.1
+188.8
+71.0
+252.5
+125.3
+43.2
+62.6
+
+100%
+
+0%
+
+44.5%
+
+49.4%
+
+IMPALA: Importance Weighted Actor-Learner Architectures
+
+B.1. Final training scores on DMLab-30
+A3C, deep
+
+IMPALA-Experts, deep
+
+IMPALA, deep, PBT
+
+language_select_described_object
+language_answer_quantitative_question
+language_select_located_object
+explore_goal_locations_small
+rooms_collect_good_objects_train
+explore_obstructed_goals_small
+explore_object_locations_small
+explore_object_locations_large
+natlab_varying_map_randomized
+natlab_varying_map_regrowth
+explore_goal_locations_large
+explore_obstructed_goals_large
+explore_object_rewards_many
+rooms_watermaze
+rooms_select_nonmatching_object
+explore_object_rewards_few
+pyschlab_continuous_recognition
+lasertag_three_opponents_small
+skymaze_irreversible_path_varied
+rooms_keys_doors_puzzle
+natlab_fixed_large_map
+skymaze_irreversible_path_hard
+pyschlab_arbitrary_visuomotor_mapping
+rooms_exploit_deferred_effects_train
+lasertag_three_oponents_large
+language_execute_random_task
+lasertag_one_opponent_small
+lasertag_one_opponent_large
+pyschlab_visual_search
+pyschlab_sequential_comparison
+0
+
+20
+
+40
+
+60
+
+80
+
+100
+
+120
+
+Human Normalised Score
+
+Figure B.1. Human normalised scores across all DMLab-30 tasks.
+
+140
+
+160
+
+IMPALA: Importance Weighted Actor-Learner Architectures
+
+C. Atari Scores
+ACKTR The Reactor IMPALA (deep, multi-task) IMPALA (shallow) IMPALA (deep)
+alien
+3197.10
+amidar
+1059.40
+assault
+10777.70
+asterix
+31583.00
+asteroids
+34171.60
+atlantis
+3433182.00
+1289.70
+bank heist
+battle zone
+8910.00
+13581.40
+beam rider
+berzerk
+927.20
+bowling
+24.30
+boxing
+1.45
+breakout
+735.70
+centipede
+7125.28
+chopper command
+N/A
+crazy climber
+150444.00
+defender
+N/A
+demon attack
+274176.70
+double dunk
+-0.54
+enduro
+0.00
+33.73
+fishing derby
+freeway
+0.00
+frostbite
+N/A
+gopher
+47730.80
+gravitar
+N/A
+hero
+N/A
+-4.20
+ice hockey
+jamesbond
+490.00
+kangaroo
+3150.00
+krull
+9686.90
+kung fu master
+34954.00
+N/A
+montezuma revenge
+ms pacman
+N/A
+N/A
+name this game
+phoenix
+133433.70
+pitfall
+-1.10
+pong
+20.90
+N/A
+private eye
+qbert
+23151.50
+riverraid
+17762.80
+road runner
+53446.00
+robotank
+16.50
+seaquest
+1776.00
+skiing
+N/A
+solaris
+2368.60
+space invaders
+19723.00
+star gunner
+82920.00
+surround
+N/A
+tennis
+N/A
+time pilot
+22286.00
+tutankham
+314.30
+up n down
+436665.80
+venture
+N/A
+video pinball
+100496.60
+wizard of wor
+702.00
+yars revenge
+125169.00
+zaxxon
+17448.00
+
+6482.10
+833
+11013.50
+36238.50
+2780.40
+308258
+988.70
+61220
+8566.50
+1641.40
+75.40
+99.40
+518.40
+3402.80
+37568
+194347
+113128
+100189
+11.40
+2230.10
+23.20
+31.40
+8042.10
+69135.10
+1073.80
+35542.20
+3.40
+7869.20
+10484.50
+9930.80
+59799.50
+2643.50
+2724.30
+9907.20
+40092.20
+-3.50
+20.70
+15177.10
+22956.50
+16608.30
+71168
+68.50
+8425.80
+-10753.40
+2760
+2448.60
+70038
+6.70
+23.30
+19401
+272.60
+64354.20
+1597.50
+469366
+13170.50
+102760
+25215.50
+
+2344.60
+136.82
+2116.32
+2609.00
+2011.05
+460430.50
+55.15
+7705.00
+698.36
+647.80
+31.06
+96.63
+35.67
+4916.84
+5036.00
+115384.00
+16667.50
+10095.20
+-1.92
+971.28
+35.27
+21.41
+2744.15
+913.50
+282.50
+18818.90
+-13.55
+284.00
+8240.50
+10807.80
+41905.00
+0.00
+3415.05
+5719.30
+7486.50
+-1.22
+8.58
+0.00
+10717.38
+2850.15
+24435.50
+9.94
+844.60
+-8988.00
+1160.40
+199.65
+1855.50
+-8.51
+-8.12
+3747.50
+105.22
+82155.30
+1.00
+20125.14
+2106.00
+14739.41
+6497.00
+
+1536.05
+497.62
+12086.86
+29692.50
+3508.10
+773355.50
+1200.35
+13015.00
+8219.92
+888.30
+35.73
+96.30
+640.43
+5528.13
+5012.00
+136211.50
+58718.25
+107264.73
+-0.35
+0.00
+32.08
+0.00
+269.65
+1002.40
+211.50
+33853.15
+-5.25
+440.00
+47.00
+9247.60
+42259.00
+0.00
+6501.71
+6049.55
+33068.15
+-11.14
+20.40
+92.42
+18901.25
+17401.90
+37505.00
+2.30
+1716.90
+-29975.00
+2368.40
+1726.28
+69139.00
+-8.13
+-1.89
+6617.50
+267.82
+273058.10
+0.00
+228642.52
+4203.00
+80530.13
+1148.50
+
+15962.10
+1554.79
+19148.47
+300732.00
+108590.05
+849967.50
+1223.15
+20885.00
+32463.47
+1852.70
+59.92
+99.96
+787.34
+11049.75
+28255.00
+136950.00
+185203.00
+132826.98
+-0.33
+0.00
+44.85
+0.00
+317.75
+66782.30
+359.50
+33730.55
+3.48
+601.50
+1632.00
+8147.40
+43375.50
+0.00
+7342.32
+21537.20
+210996.45
+-1.66
+20.98
+98.50
+351200.12
+29608.05
+57121.00
+12.96
+1753.20
+-10180.38
+2365.00
+43595.78
+200625.00
+7.56
+0.55
+48481.50
+292.11
+332546.75
+0.00
+572898.27
+9157.50
+84231.14
+32935.50
+
+Table C.1. Atari scores after 200M steps environment steps of training. Up to 30 no-ops at the beginning of each episode.
+
+IMPALA: Importance Weighted Actor-Learner Architectures
+
+D. Parameters
+In this section, the specific parameter settings that are used throughout our experiments are given in detail.
+
+Hyperparameter
+
+Range
+
+Distribution
+
+Entropy regularisation
+[5e-5, 1e-2]
+Log uniform
+Learning rate
+[5e-6, 5e-3]
+Log uniform
+RMSProp epsilon (ε) regularisation parameter [1e-1, 1e-3, 1e-5, 1e-7] Categorical
+Table D.1. The ranges used in sampling hyperparameters across all experiments that used a sweep and for the initial hyperparameters for
+PBT. Sweep size and population size are 24. Note, the loss is summed across the batch and time dimensions.
+
+Action
+
+Native DeepMind Lab Action
+
+Forward
+[ 0, 0, 0, 1, 0, 0, 0]
+Backward
+[ 0, 0, 0, -1, 0, 0, 0]
+Strafe Left
+[ 0, 0, -1, 0, 0, 0, 0]
+Strafe Right
+[ 0, 0, 1, 0, 0, 0, 0]
+Look Left
+[-20, 0, 0, 0, 0, 0, 0]
+Look Right
+[ 20, 0, 0, 0, 0, 0, 0]
+Forward + Look Left [-20, 0, 0, 1, 0, 0, 0]
+Forward + Look Right [ 20, 0, 0, 1, 0, 0, 0]
+Fire
+[ 0, 0, 0, 0, 1, 0, 0]
+Table D.2. Action set used in all tasks from the DeepMind Lab environment, including the DMLab-30 experiments.
+
+D.1. Fixed Model Hyperparameters
+In this section, we list all the hyperparameters that were kept fixed across all experiments in the paper which are mostly
+concerned with observations specifications and optimisation. We first show below the reward pre-processing function that is
+used across all experiments using DeepMind Lab, followed by all fixed numerical values.
+
+Clipped Reward
+
+5
+4
+3
+2
+1
+0
+−1
+−10
+
+−5
+
+0
+
+5
+
+10
+
+Reward
+Figure D.1. Optimistic Asymmetric Clipping - 0.3 · min(tanh(reward), 0) + 5.0 · max(tanh(reward), 0)
+
+IMPALA: Importance Weighted Actor-Learner Architectures
+
+Parameter
+
+Value
+
+Image Width
+96
+Image Height
+72
+Action Repetitions
+4
+Unroll Length (n)
+100
+Reward Clipping
+- Single tasks
+[-1, 1]
+- DMLab-30, including experts
+See Figure D.1
+Discount (γ)
+0.99
+Baseline loss scaling
+0.5
+RMSProp momentum
+0.0
+Experience Replay (in Section 5.2.2 )
+- Capacity
+10,000 trajectories
+- Sampling
+Uniform
+- Removal
+First-in-first-out
+Table D.3. Fixed model hyperparameters across all DeepMind Lab experiments.
+
+IMPALA: Importance Weighted Actor-Learner Architectures
+
+E. V-trace Analysis
+
+Return
+
+E.1. Controlled Updates
+Here we show how different algorithms (On-Policy, No-correction, ε-correction, V-trace) behave under varying levels of
+policy-lag between the actors and the learner.
+rooms_watermaze
+²-correction
+
+60
+50
+40
+30
+20
+10
+0
+
+No-correction
+
+V-trace
+0
+1
+10
+100
+500
+
+0
+1
+10
+100
+500
+0.2
+
+0.4
+0.6
+Environment Frames
+
+0.8
+
+0.2
+
+1e9
+
+0.4
+0.6
+Environment Frames
+
+0.8
+
+0
+1
+10
+100
+500
+
+0.2
+
+1e9
+
+0.4
+0.6
+Environment Frames
+
+0.8
+
+1e9
+
+Return
+
+rooms_keys_doors_puzzle
+²-correction
+
+30
+25
+20
+15
+10
+5
+0
+
+0.2
+
+0.4
+0.6
+Environment Frames
+
+No-correction
+
+0
+1
+10
+100
+500
+
+0.8
+
+1
+0
+10
+100
+500
+
+100
+500
+0.2
+
+1e9
+
+V-trace
+
+0
+1
+10
+
+0.4
+0.6
+Environment Frames
+
+0.8
+
+0.2
+
+1e9
+
+0.4
+0.6
+Environment Frames
+
+0.8
+
+1e9
+
+Return
+
+lasertag_three_opponents_small
+35
+30
+25
+20
+15
+10
+5
+0
+5
+
+²-correction
+
+0.2
+
+0.4
+0.6
+Environment Frames
+
+No-correction
+
+0.8
+
+V-trace
+
+0
+
+0
+
+1
+
+1
+
+10
+100
+500
+
+10
+100
+500
+
+0.2
+
+1e9
+
+0.4
+0.6
+Environment Frames
+
+0.8
+
+1e9
+
+0.2
+
+0.4
+0.6
+Environment Frames
+
+10
+1
+100
+0
+500
+
+0.8
+
+1e9
+
+explore_goal_locations_small
+²-correction
+
+Return
+
+250
+
+No-correction
+
+200
+
+0
+
+150
+
+1
+
+100
+
+100
+10
+500
+
+50
+0
+
+0.2
+
+0.4
+0.6
+Environment Frames
+
+0.8
+
+10
+1
+0
+100
+500
+
+10
+100
+500
+0.2
+
+1e9
+
+V-trace
+0
+1
+
+0.4
+0.6
+Environment Frames
+
+0.8
+
+0.2
+
+1e9
+
+0.4
+0.6
+Environment Frames
+
+0.8
+
+1e9
+
+Return
+
+seekavoid_arena_01
+45
+40
+35
+30
+25
+20
+15
+10
+5
+0
+
+²-correction
+
+No-correction
+
+0
+1
+10
+100
+500
+
+0.2
+
+0.4
+0.6
+Environment Frames
+
+0.8
+
+1e9
+
+0.2
+
+0.4
+0.6
+Environment Frames
+
+V-trace
+
+0
+1
+
+0.8
+
+10
+100
+500
+1e9
+
+0.2
+
+0.4
+0.6
+Environment Frames
+
+0
+1
+10
+100
+500
+
+0.8
+
+1e9
+
+Figure E.1. As the policy-lag (the number of update steps the actor policy is behind learner policy) increases, learning with V-trace is
+more robust compared to ε-correction and pure on-policy learning.
+
+IMPALA: Importance Weighted Actor-Learner Architectures
+
+E.2. V-trace Stability Analysis
+V−trace − min(ρ, 1)
+
+rooms_keys_doors_puzzle
+
+Final Return
+
+60
+50
+40
+30
+20
+10
+0
+1
+
+5
+
+9
+
+13
+
+17
+
+ε−correction
+
+1 Step Importance Sampling − min(ρ, 1)
+
+rooms_watermaze
+
+21
+
+24
+
+Hyperparameter Combination
+
+40
+35
+30
+25
+20
+15
+10
+5
+0
+1
+
+5
+
+9
+
+13
+
+17
+
+lasertag_three_opponents_small
+
+21
+
+24
+
+Hyperparameter Combination
+
+35
+30
+25
+20
+15
+10
+5
+0
+−5
+1
+
+No-correction
+
+explore_goal_locations_small
+
+seekavoid_arena_01
+
+300
+
+50
+
+250
+
+40
+
+200
+
+30
+
+150
+
+20
+
+100
+
+10
+
+50
+5
+
+9
+
+13
+
+17
+
+21
+
+24
+
+Hyperparameter Combination
+
+0
+1
+
+5
+
+9
+
+13
+
+17
+
+21
+
+24
+
+Hyperparameter Combination
+
+0
+1
+
+5
+
+9
+
+13
+
+17
+
+21
+
+24
+
+Hyperparameter Combination
+
+Figure E.2. Stability across hyper parameter combinations for different off-policy correction variants using replay. V-trace is much more
+stable across a wide range of parameter combinations compared to ε-correction and pure on-policy learning.
+
+E.3. Estimating the State Action Value for Policy Gradient
+We investigated different ways of estimating the state action value function used to estimate advantages for the policy
+gradient calculation. The variant presented in the main section of the paper uses the V-trace corrected value function vs+1 to
+estimate qs = rs + γvs+1 . Another possibility is to use the actor-critic baseline V (xs+1 ) to estimate qs = rs + γV (xs+1 ).
+Note that the latter variant does not use any information from the current policy rollout to estimate the policy gradient and
+relies on an accurate estimate of the value function. We found the latter variant to perform worse both when comparing the
+top 3 runs and an average over all runs of the hyperparameter sweep as can be see in figures E.3 and E.4.
+
+qs = rs + γ ⋅ V(xs + 1 )
+
+qs = rs + γ ⋅ vs + 1
+
+Return
+
+rooms_watermaze
+50
+45
+40
+35
+30
+25
+20
+15
+10
+5
+0.0
+
+rooms_keys_doors_puzzle
+
+lasertag_three_opponents_small
+
+30
+25
+20
+15
+10
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+Environment Frames
+
+1.0
+1e9
+
+5
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+Environment Frames
+
+1.0
+1e9
+
+35
+30
+25
+20
+15
+10
+5
+0
+−5
+0.0
+
+explore_goal_locations_small
+250
+200
+150
+100
+50
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+Environment Frames
+
+1.0
+1e9
+
+0
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+Environment Frames
+
+1.0
+1e9
+
+seekavoid_arena_01
+45
+40
+35
+30
+25
+20
+15
+10
+5
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+Environment Frames
+
+1.0
+1e9
+
+Figure E.3. Variants for estimation of state action value function - average over top 3 runs.
+
+qs = rs + γ ⋅ V(xs + 1 )
+
+qs = rs + γ ⋅ vs + 1
+rooms_watermaze
+
+rooms_keys_doors_puzzle
+
+35
+
+Return
+
+30
+25
+20
+15
+10
+5
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+Environment Frames
+
+1.0
+1e9
+
+22
+20
+18
+16
+14
+12
+10
+8
+6
+4
+0.0
+
+lasertag_three_opponents_small
+12
+10
+8
+6
+4
+2
+0
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+Environment Frames
+
+1.0
+1e9
+
+−2
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+Environment Frames
+
+1.0
+1e9
+
+explore_goal_locations_small
+160
+140
+120
+100
+80
+60
+40
+20
+0
+0.0
+
+seekavoid_arena_01
+35
+30
+25
+20
+15
+10
+5
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+Environment Frames
+
+1.0
+1e9
+
+0
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+Environment Frames
+
+1.0
+1e9
+
+Figure E.4. Variants for estimation of state action value function - average over all runs.
+
+F. Population Based Training
+For Population Based Training we used a “burn-in” period of 20 million frames where no evolution is done. This is to
+stabilise the process and to avoid very rapid initial adaptation which hinders diversity. After collecting 5,000 episode rewards
+in total, the mean capped human normalised score is calculated and a random instance in the population is selected. If the
+score of the selected instance is more than an absolute 5% higher, then the selected instance weights and parameters are
+copied.
+No matter if a copy happened or not, each parameter (RMSProp epsilon, learning rate and entropy cost) is permuted
+with 33% probability by multiplying with either 1.2 or 1/1.2. This is different from Jaderberg et al. (2017) in that our
+multiplication is unbiased where they use a multiplication of 1.2 or .8. We found that diversity is increased when the
+parameters are permuted even if no copy happened.
+We reconstruct the learning curves of the PBT runs in Figure 5 by backtracking through the ancestry of copied checkpoints
+for selected instances.
+
+IMPALA: Importance Weighted Actor-Learner Architectures
+IMPALA - PBT - 8 GPUs
+
+IMPALA - PBT - 1 GPU
+
+Learning Rate
+0.0007
+0.0006
+0.0005
+0.0004
+0.0003
+0.0002
+0.0001
+0.0000
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+Environment Frames
+
+0.8
+
+1.0
+1e10
+
+Figure F.1. Learning rate schedule that is discovered by the PBT Jaderberg et al. (2017) method compared against the linear annealing
+schedule of the best run from the parameter sweep (red line).
+
+G. Atari Experiments
+All agents trained on Atari are equipped only with a feed forward network and pre-process frames in the same way as
+described in Mnih et al. (2016). When training experts agents, we use the same hyperparameters for each game for
+both IMPALA and A3C. These hyperparameters are the result of tuning A3C with a shallow network on the following
+games: breakout, pong, space invaders, seaquest, beam rider, qbert. Following related work, experts
+use game-specific action sets.
+The multi-task agent was equipped with a feed forward residual network (see Figure 3 ). The learning rate, entropy
+regularisation, RMSProp ε and gradient clipping threshold were adapted through population based training. To be able to
+use the same policy layer on all Atari games in the multi-task setting we train the multi-task agent on the full Atari action set
+consisting of 18 actions.
+Agents were trained using the following set of hyperparameters:
+
+IMPALA: Importance Weighted Actor-Learner Architectures
+
+Parameter
+
+Value
+
+Image Width
+Image Height
+Grayscaling
+Action Repetitions
+Max-pool over last N action repeat frames
+Frame Stacking
+End of episode when life lost
+Reward Clipping
+Unroll Length (n)
+Batch size
+Discount (γ)
+Baseline loss scaling
+Entropy Regularizer
+RMSProp momentum
+RMSProp ε
+Learning rate
+Clip global gradient norm
+Learning rate schedule
+
+84
+84
+Yes
+4
+2
+4
+Yes
+[-1, 1]
+20
+32
+0.99
+0.5
+0.01
+0.0
+0.01
+0.0006
+40.0
+Anneal linearly to 0
+From beginning to end of training.
+
+Population based training (only multi-task agent)
+- Population size
+24
+- Start parameters
+Same as DMLab-30 sweep
+- Fitness
+Mean
+P capped human normalised scores
+( l min [1, (st − rt )/(ht − rt )]) /N
+- Adapted parameters
+Gradient clipping threshold
+Entropy regularisation
+Learning rate
+RMSProp ε
+Table G.1. Hyperparameters for Atari experiments.
+
+References
+Bertsekas, D. P. and Tsitsiklis, J. N. Neuro-Dynamic Programming. Athena Scientific, 1996.
+Dayan, P. and Sejnowski, T. J. TD(λ) converges with probability 1. Machine Learning, 14(1):295–301, 1994. doi:
+10.1023/A:1022657612745.
+Jaderberg, M., Dalibard, V., Osindero, S., Czarnecki, W. M., Donahue, J., Razavi, A., Vinyals, O., Green, T., Dunning, I.,
+Simonyan, K., Fernando, C., and Kavukcuoglu, K. Population based training of neural networks. CoRR, abs/1711.09846,
+2017.
+Kushner, H. and Yin, G. Stochastic Approximation and Recursive Algorithms and Applications. Stochastic Modelling and
+Applied Probability. Springer New York, 2003. ISBN 9780387008943.
+Mnih, V., Badia, A. P., Mirza, M., Graves, A., Lillicrap, T. P., Harley, T., Silver, D., and Kavukcuoglu, K. Asynchronous
+methods for deep reinforcement learning. ICML, 2016.
+
+

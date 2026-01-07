@@ -1,5 +1,5 @@
 # WorkArena Compositional Planning
-- Paper: [WorkArena_Compositional_Planning.pdf](../../../papers/benchmarks/WorkArena_Compositional_Planning.pdf)
+- Paper: [WorkArena_Compositional_Planning.pdf](../../../reinforcement_learning_papers/09_agentic_rl/WorkArena_Compositional_Planning.pdf)
 
 ## Gemini diagrams
 

@@ -1,5 +1,5 @@
 # DigiRL Device Control Agents
-- Paper: [DigiRL_Device_Control_Agents.pdf](../../../papers/computer-use/DigiRL_Device_Control_Agents.pdf)
+- Paper: [DigiRL_Device_Control_Agents.pdf](../../../reinforcement_learning_papers/09_agentic_rl/DigiRL_Device_Control_Agents.pdf)
 
 ## Gemini diagrams
 

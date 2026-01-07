@@ -1,5 +1,5 @@
 # FireAct Language Agent Fine-tuning
-- Paper: [FireAct_Language_Agent_Fine-tuning.pdf](../../../papers/agent-frameworks/FireAct_Language_Agent_Fine-tuning.pdf)
+- Paper: [FireAct_Language_Agent_Fine-tuning.pdf](../../../reinforcement_learning_papers/09_agentic_rl/FireAct_Language_Agent_Fine-tuning.pdf)
 
 ## Gemini diagrams
 

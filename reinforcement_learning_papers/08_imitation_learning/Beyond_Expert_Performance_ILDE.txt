@@ -1,0 +1,3163 @@
+Published as a conference paper at ICLR 2025
+
+B EYOND -E XPERT P ERFORMANCE WITH L IMITED
+D EMONSTRATIONS : E FFICIENT I MITATION L EARNING
+WITH D OUBLE E XPLORATION
+
+arXiv:2506.20307v1 [cs.LG] 25 Jun 2025
+
+Heyang Zhao1∗ , Xingrui Yu23∗ , David M. Bossens23∗ , Ivor W. Tsang23† , Quanquan Gu1†
+1
+Department of Computer Science, University of California, Los Angeles
+2
+IHPC, Agency for Science, Technology and Research, Singapore
+3
+CFAR, Agency for Science, Technology and Research, Singapore
+{hyzhao,qgu}@cs.ucla.edu
+{yu xingrui,david bossens,ivor tsang}@cfar.a-star.edu.sg
+
+A BSTRACT
+Imitation learning is a central problem in reinforcement learning where the goal
+is to learn a policy that mimics the expert’s behavior. In practice, it is often
+challenging to learn the expert policy from a limited number of demonstrations
+accurately due to the complexity of the state space. Moreover, it is essential to
+explore the environment and collect data to achieve beyond-expert performance.
+To overcome these challenges, we propose a novel imitation learning algorithm
+called Imitation Learning with Double Exploration (ILDE), which implements
+exploration in two aspects: (1) optimistic policy optimization via an exploration
+bonus that rewards state-action pairs with high uncertainty to potentially improve
+the convergence to the expert policy, and (2) curiosity-driven exploration of the
+states that deviate from the demonstration trajectories to potentially yield beyondexpert performance. Empirically, we demonstrate that ILDE outperforms the stateof-the-art imitation learning algorithms in terms of sample efficiency and achieves
+beyond-expert performance on Atari and MuJoCo tasks with fewer demonstrations
+than in previous work. We also provide a theoretical justification of ILDE as an
+uncertainty-regularized policy optimization method with optimistic exploration,
+leading to a regret growing sublinearly in the number of episodes.
+
+1
+
+I NTRODUCTION
+
+Imitation learning (IL) is an important subfield of reinforcement learning (RL), in which ground truth
+rewards are not available and the goal is to learn a policy based on expert demonstrations. Often such
+demonstrations are limited, making it challenging to achieve expert-level performance. In practice,
+imitation learning is widely used in various applications such as autonomous vehicle navigation
+(Codevilla et al., 2018), robotic control (Finn et al., 2016; Zhang et al., 2018) and surgical assistance
+(Osa et al., 2014; Li et al., 2022).
+As one of the simplest approaches of imitation learning, behavior cloning (Pomerleau, 1988) learns a
+policy directly from the state-action pairs in the demonstration dataset. More recent approaches to
+imitation learning, such as generative adversarial imitation learning (GAIL) (Ho & Ermon, 2016),
+use a discriminator to guide policy learning rather than directly learning a reward function based on
+demonstration trajectories. Due to matching occupancy based on a limited set of trajectories, it is still
+difficult for such algorithms to achieve better-than-expert performance and solve high-dimensional
+problems with limited demonstration data. Moreover, these techniques are typically unstable since
+the reward function is continually changing as the reward function is updated during the RL training.
+Alternative approaches, based on the curiosity (Yu et al., 2020; Pathak et al., 2017; Burda et al., 2018),
+a form of self-supervised exploration, encourage the agent to explore transitions that are distinct from
+the expert – thereby potentially yielding beyond-expert performance. Another benefit of the approach
+is related to the GIRIL algorithm specifically; that is, it uses a pre-trained auto-encoder, which makes
+the technique more stable (Yu et al., 2020).
+*
+
+Equal technical contribution. † Corresponding author.
+
+1
+
+Published as a conference paper at ICLR 2025
+
+As illustrated in Table 3 in Appendix A, this work seeks to formulate a sample-efficient imitation
+learning algorithm that combines the best of both worlds. That is, we integrate the stability and selfsupervised exploration properties of GIRIL into discriminator-based imitation learning approaches.
+Additionally improving the sample-efficiency with an exploration-bonus, we formulate the framework
+of Imitation Learning with Double Exploration (ILDE).
+In detail, ILDE learns a policy based on an uncertainty-regularized discrepancy. The uncertaintyregularized discrepancy combines the distance to the expert policy, the cumulative uncertainty of
+the policy during exploration, and the cumulative uncertainty of the policy with respect to the
+demonstration dataset. To optimize the uncertainty-regularized discrepancy, ILDE utilizes a GAILbased imitation reward while integrating two distinct forms of exploration. Firstly, through optimistic
+policy optimization, augmented by an exploration bonus, ILDE incentivizes the exploration of stateaction pairs characterized by high uncertainty, thereby facilitating the training of the discriminator
+network, which functions as the reward model. Secondly, leveraging curiosity-driven exploration,
+ILDE targets transitions deviating from demonstration trajectories, paving the way for nuanced policy
+improvements.
+The key contributions of this paper are summarized as follows:
+• In Section 3, we theoretically formulate the problem of solving the aforementioned policy which
+minimizes the uncertainty-regularized discrepancy between the learner trajectories and demonstration trajectories.
+• In Section 4, we present our proposed algorithm, ILDE with natural policy gradient (ILDE-NPG).
+We are then able to demonstrate the regret guarantee of ILDE-NPG in Theorem 4.7, which is the
+first theoretical guarantee for imitation learning in MDPs with nonlinear function approximation.
+• Although ILDE-NPG is computationally expensive, we offer a more flexible version for the practical
+implementation of ILDE in Section 5, focusing on two key exploration strategies: (1) encouraging
+the learner to explore state-action pairs that are ‘far’ from the current rollout dataset, and (2)
+rewarding benign deviations from the demonstration dataset using curiosity-based intrinsic rewards.
+• In Section 6, we present experimental results for a practical implementation of ILDE. Our findings
+demonstrate that ILDE surpasses existing baselines in terms of both average return and sample
+complexity. This underscores the practical advantages of our proposed objective for imitation
+learning.
+
+2
+
+R ELATED W ORK
+
+Imitation learning with limited demonstrations for beyond-expert performance. Learning from
+limited demonstrations in a high-dimensional environment is challenging, and the effectiveness
+of imitation learning methods is hampered (Li et al., 2023). Inverse reinforcement learning (IRL)
+methods (Ziebart et al., 2008; Ziebart, Brian D. and Bagnell, J. Andrew and Dey, Anind K., 2010;
+Boularias et al., 2011) seek a reward function that best explains the demonstration data, which makes
+it hard for them to achieve better-than-expert performance when the data are extremely limited.
+GAIL achieves impressive performance in low-dimensional environments via adversarial learningbased distribution matching. Variational adversarial imitation learning (VAIL) improves GAIL by
+compressing the information flow with a variational discriminator bottleneck (Peng et al., 2019).
+Recent adversarial imitation learning methods include IQ-Learn (Garg et al., 2021), which directly
+infers the Q-value (bypassing the reward function), and HyPE (Ren et al., 2024), which trains the
+policy on a mixture of expert and on-policy data.
+Unfortunately, GAIL and VAIL do not scale well in high-dimensional environments (Brown et al.,
+2019), and still require many episodes of demonstrations. Recent work has focused on reducing the
+number of required demonstration episodes to between 5 and 20 episodes using techniques such as
+MCTS-based RL (Yin et al., 2022), patch rewards (Liu et al., 2023a), and applying demonstration
+augmentation and a prior policy baseline Li et al. (2022). Techniques based on curiosity-driven
+exploration, such as CDIL (Pathak et al., 2017) and GIRIL (Yu et al., 2020), potentially provide
+a more scalable approach to imitation learning. In particular, Yu et al. (2020) propose the GIRIL
+algorithm within a setting with only a so-called one-life demonstration, which is only a partial episode
+of an Atari game. The system demonstrates favorable performance on Atari games when compared
+to GAIL, VAIL, and CDIL. Such techniques with intrinsic motivation have the advantage of allowing
+beyond-expert performance but the disadvantage of potentially optimizing an objective that is not
+2
+
+Published as a conference paper at ICLR 2025
+
+implied by the demonstrations. Our proposed ILDE system seeks to use curiosity-driven exploration
+as one of two sources of exploration to supplement a traditional imitation learning objective. This
+is based on the fact that the curiosity reward has high empirical success and enables agents to learn
+non-trivial skills by exploring hard-to-visit states (Rajaraman et al., 2020).
+Beyond reducing the sheer amount of demonstration data, the problem of varying optimality scores
+and the reliability of demonstrations has also garnered more attention recently. Confidence-Aware
+Imitation Learning (CAIL) extends adversarial inverse reinforcement learning with a bi-level optimization technique to concurrently learn the policy along with confidence scores reflecting the
+optimality of the demonstrations (Zhang et al., 2021). The setting of imbalanced demonstrations
+has been studied from a semi-supervised learning perspective (Fu et al., 2023) as well as within
+multi-modal imitation learning (Gu & Zhu, 2024). We focus on an alternative approach to the problem
+of demonstration reliability which combines curiosity with a traditional imitation reward.
+Reinforcement learning from demonstrations (RLfD). An alternative framework, related to imitation learning, is reinforcement learning from demonstrations (RLfD) (Hester et al., 2018; Christiano
+et al., 2017; Zhu et al., 2022). While potentially offering accelerated policy learning, such techniques
+require ground-truth rewards, which are not available in pure imitation learning settings.
+Exploration bonuses and optimistic RL. Optimism is a long-standing principle in RL, where it
+typically refers to overestimating the value of a particular state or state-action pair in order to make the
+state or state-action pair known more rapidly through increased visitations – essentially, this implies
+that unknown state-action pairs are given a large exploration bonus while known state-action pairs are
+given little to no exploration bonus. Analogous to upper confidence bound (UCB) bandit algorithms
+(Auer et al., 2002), various techniques have been implemented in RL which use confidence bounds
+to upper bound the value in a probabilistic sense. Such techniques traditionally use concentration
+inequalities based on visitation counts for each state-action pair, which gives such techniques a firm
+statistical grounding but which limits them to discrete state-action spaces (Shani et al., 2020; Fruit
+et al., 2018; Jaksch et al., 2010).
+Recent techniques have aimed at making exploration bonuses more scalable. E3B provides an
+approximate approach to visitation counts by maintaining a covariance matrix which implicitly
+captures the relations between visited states (Henaff et al., 2023). State Entropy directly aims to
+maximize the entropy over the states, rewarding states in a batch according to the log of their distance
+to its k-nearest neighbor state (Seo et al., 2021).
+Theoretical guarantees for imitation learning. There is a large body of literature on imitation
+learning for tabular MDPs (Cai et al., 2019; Chen et al., 2019; Zhang et al., 2020; Xu et al., 2020; Shani
+et al., 2022; Chang et al., 2021). Subsequently,
+Liu et al. (2021) studied imitation learning for linear
+√
+e H 4 d3 T ) regret bound, where d is the dimension of the feature
+kernel MDPs and provided an O(
+space, H is the horizon of the MDPs, T is the number of episodes. Viano et al. (2022) considered
+linear MDPs and proposed PPIL, which achieved a sample complexity of O(d2 /(1 − γ)9 ϵ5 ) in
+discounted linear MDPs. Our work considers MDPs with general function approximation, utilizing
+the generalized Eluder dimension (Agarwal et al., 2023; Zhao et al., 2023) to characterize the
+complexity of the function class.
+
+3
+
+P RELIMINARIES
+
+We consider an episodic MDP (S, A, H, P, ρ, r), where S and A are the state and action spaces,
+respectively, H is the length of each episode, Ph is the Markov transition kernel of the h-th step of
+each episode for any h ∈ [H], ρ is the initial state distribution, and r : S × A → [−1, 1] is the reward
+function. We assume without loss of generality that the reward function r is deterministic.
+While performing imitation learning in episodic MDPs, the agent interacts with the environment as
+follows. At the beginning of each episode t ∈ [T ], the agent chooses a policy π t = {πht }h∈[H] ∈
+∆(A|S, H). Then the agent takes an action ath ∼ πht (·|sth ) at the h-th step of the t-th episode and
+transits to the next state sth+1 ∼ Ph (·|sth , ath ). The agent does not receive the true reward r∗ (sth , ath )
+but instead it receives a surrogate reward r(sth , ath ). The episode terminates when the agent reaches
+the state stH+1 . Without loss of generality, we assume that the initial state s1 = x is fixed across
+different episodes. We remark that our algorithms and corresponding analyses readily generalize to
+the setting where the initial state s1 is sampled from a fixed distribution.
+3
+
+Published as a conference paper at ICLR 2025
+
+We now define the value function in episodic MDPs. For any policy π = {πh }h∈[H] and reward
+function r : S × A → [−1, 1], the state value function V and action-value function Q are defined for
+any (s, a, h) ∈ S × A × [H] as follows,
+r
+Vh,π
+(s) = Eπ
+
+H
+hX
+
+H
+i
+hX
+i
+r(si , ai ) | sh = s , Qrh,π (s, a) = Eπ
+r(si , ai ) | sh = s, ah = a , (3.1)
+
+i=h
+
+i=h
+
+where the expectation Eπ [·] is taken with respect to the action ai ∼ πi (·|si ) and the state si+1 ∼
+Pi (·|si , ai ) for any i ∈ {h, h + 1, . . . , H}. With slight abuse of notation, we also denote by Ph the
+operator form of the transition kernel such that (Ph f )(s, a) = Es′ ∼Ph (·|s,a) [f (s′ )] for any f : S → R.
+By the definitions of the value functions in (3.1), for any (s, a, h) ∈ S × A × [H], any policy π, and
+any reward function r, we have
+r
+Vh,π
+(s) = ⟨Qrh,π (s, ·), πh (·, s)⟩A ,
+
+r
+Qrh,π (s, a) = rh (s, a) + Ph Vh+1,π
+(s, a),
+
+r
+VH+1,π
+(s) = 0,
+(3.2)
+where ⟨·, ·⟩A denotes the inner product over the action space A. We further define the expected
+cumulative reward as the value from the initial distribution ρ, i.e.
+r
+J(π, r) = Es∼ρ [V1,π
+(s)].
+
+We assume that there is an unknown expert policy π E = {πhE }h∈[H] ∈ ∆(A|S, H) that achieves
+a high, but potentially suboptimal, expected cumulative reward J(π E , r∗ ) under the unknown
+(j) (j)
+underlying reward function r∗ . Given n demonstration trajectories τ E = {(si , ai )}H
+i=1 for
+j ∈ [n], the goal of imitation learning is to learn a policy π that achieves a potentially high expected
+cumulative reward J(π, r∗ ) under the unknown reward function r∗ based on the expert demonstration.
+As introduced in Chen et al. (2019), we characterize the discrepancy between the expert policy
+π E and the learner policy π by the following Integral Probability Metric (IPM) over the stationary
+distributions of the MDP.
+Definition 3.1 (Definition 2, Chen et al. 2019). Let R denote a class of symmetric reward functions
+r : S × A → [−1, 1], i.e., if r ∈ R, then −r ∈ R. Given two policies π, π ′ ∈ ∆(A|S, H), the
+R-distance is defined as
+dR (π, π ′ ) = sup J(π E , r) − J(π, r) .
+r∈R
+
+Remark 3.2. The IPM distance is a versatile tool for evaluating GAN models. In the context of
+imitation learning, we can choose different classes of reward functions R to measure the discrepancy
+between the expert policy and the learner policy. For instance, we can choose R to be the class of
+symmetric reward functions that are 1-Lipschitz continuous with respect to the state-action pair (s, a),
+which corresponds to the Wasserstein distance. Or we can choose R to be the unit ball in an RKHS,
+which yields kernel maximum mean discrepancy (MMD).
+As proposed in Yu et al. (2020), to encourage the agent to explore the environment and learn a beyondexpert policy, it is essential to incorporate uncertainty-driven (intrinsic-reward-driven) exploration
+into the imitation learning framework. In contrast to GIRIL (Yu et al., 2020) which purely relies on
+the intrinsic reward to explore transitions that are distinct from the expert demonstration, we consider
+learning a policy which mimics the expert policy subject to an intrinsic reward regularisation term.
+To this end, we defined the following objective function:
+
+min
+max J(π E , r) − J(π, r) − λ · Int(π; τ E ) ,
+(3.3)
+π∈∆(S|A,H) r∈R
+
+where Int(π; τ E ) is the expected cumulative intrinsic reward of the policy π under the expert demonstration τ E . More specifically,
+X
+
+H
+E
+Int(π; τ ) := Eπ,bsh+1 ∼bP(·|sh ,ah )
+L(b
+sh+1 , sh+1 ) ,
+(3.4)
+h=1
+
+b is the estimated transition probability that is estimated as follows:
+where P
+
+
+n X
+H
+X
+(j)
+b := argmin
+P
+Esbi+1 ∼P(·|s(j) ,a(j) ) L(b
+si+1 , si+1 )
+i
+
+P∈P model j=1 i=1
+
+4
+
+i
+
+Published as a conference paper at ICLR 2025
+
+is a trained transition model over the demonstration trajectories τ E , and L is a distance metric (e.g.
+(j)
+(j)
+L(b
+si+1 , si+1 ) = ||b
+si+1 − si+1 ||22 ). (Empirically, it is the trained VAE model which samples the next
+state as proposed in Yu et al. (2020) and Pathak et al. (2017).) For simplicity, we denote the intrinsic
+reward as the following form
+
+
+Lτ E ,h (s, a) = Esb′ ∼bPh (·|s,a),s′ ∼Ph (·|s,a) L(b
+s′ , s′ ) .
+(3.5)
+As a shorthand, we define the uncertainty-regularized loss function for a policy π and a reward
+function r based on the intrinsic reward in Eq. 3.4,
+ℓ(π, r) = J(π E , r) − J(π, r) − λ · Int(π; τ E ).
+
+(3.6)
+
+Imitation Learning. As shown in (3.3) and (3.6), our goal is to learn an optimal policy π ∗ which
+minimizes the following worst-case loss:
+π∗ =
+
+argmin max ℓ(π, r).
+
+π∈∆(A|S,H) r∈R
+
+(3.7)
+
+Conjecture. To achieve the optimal policy as defined in (3.7), we hypothesize that a more principled
+exploration technique is needed to adapt to the dynamic rewards during the training process. Additionally, we conjecture that such uncertainty regularization will help the learner attain performance
+beyond the expert level.
+In the previous theoretical formulation of online imitation learning (Chen et al., 2019; Liu et al., 2021),
+the objective is to learn a policy which is close to the expert policy with respect to the R-distance.
+Thus, the optimal policy under their formulation is π E and the loss at the saddle point is zero. By
+contrast, our optimal policy π ∗ is non-trivially different from the expert policy π E .
+In this work, we aim to find π ∗ by proposing a novel theory-guided policy optimization algorithm
+with uncertainty-aware exploration.
+Within the online learning setting, we define the uncertainty regularized regret as follows:
+Regret(T ) = max
+r∈R
+
+T
+X
+
+ℓ(π t , r) − ℓ(π ∗ , r).
+
+t=1
+
+To achieve the objective (3.3) in the online learning regime, we aim to design an imitation learning
+algorithm to achieve a Regret(T ) growing sublinear as a function of T . Then we can show that
+E[ℓ(πout , r)] converges to ℓ(π ∗ , r) as T → ∞ for any r ∈ R, where πout refers to the hybrid policy
+sampled uniformly from {π t }t∈[T ] .
+
+4
+
+I MITATION L EARNING WITH D OUBLE E XPLORATION (ILDE)
+
+We now turn to introducing the ILDE framework theoretically before its implementation in Section 5.
+We analyze ILDE using mirror descent as the policy optimization technique which is more amenable to
+theoretical analysis than scalable techniques such as PPO. The theoretical analysis considers a general
+data collection subroutine of which on-policy data collection used in the practical implementation
+is a special case. The theoretical analysis further considers an IPM-based GAN and a bonus based
+on state-action uncertainty as proposed by (Agarwal et al., 2023). In practice, we apply GAIL and
+state entropy (Seo et al., 2021). Since PPO already applies action entropy in the policy optimization,
+together the state entropy and action entropy help to explore unvisited state action pairs in a similar
+manner.
+4.1
+
+A LGORITHM
+
+This subsection instantiates a theoretical version of ILDE, where we apply Optimistic Natural Policy
+Gradient (Liu et al., 2023b) as a policy optimization module. Since Algorithm 1 is a phasic policy
+optimization algorithm, the number of episodes where the learner interacts with the environment is
+T = K · N/m.
+Imitation reward Module. In Line 4 of Algorithm 1, the learner samples a data set with N
+trajectories. With a carefully chosen N , the expected uncertainty of each state-action pair (s, a) ∈
+5
+
+Published as a conference paper at ICLR 2025
+
+Algorithm 1 ILDE with Natural Policy Gradient
+1: input: number of iterations K, period of collecting fresh data m, batch size N , learning rate η,
+demonstration trajectories τ E , reward function r1 , loss function Lτ E .
+2: initialize: for all (h, s) ∈ [H] × S set πh1 (· | s) = Uniform(A)
+3: for k = 1, . . . , K do
+4:
+if k mod m = 1 then
+′
+i.i.d.
+5:
+Dk ← {N fresh trajectories ∼ π k }, where k ′ is chosen uniformly at random from
+{max(1, k − m + 1), . . . , k − 1, k}.
+6:
+else
+7:
+Dk ← Dk−1 .
+8:
+rk ← rk−1 .
+9:
+end if
+10:
+Update rk by projected gradient descent with estimated −L(π k , rk ).
+11:
+{Qkh }h∈[H] ← OPE(π k , Dk , rk , Lτ E ).
+12:
+for all (h, s) ∈ [H] × S update πhk+1 (· | s) ∝ πhk (· | s) · exp(η · Qkh (s, ·))
+13: end for
+14: output: πout that is sampled uniformly at random from {π k }k∈[K] .
+Algorithm 2 OPE(π, D, r, Lτ E )
+1: Split D evenly into H disjoint sets Dh for h ∈ [H].
+2: Set VH+1 (s) ← 0 for all s ∈ S
+3: for h = H, · · · , 1 do
+P
+4:
+Least-squares regression: fbh ← argminfh ∈Fh (sh ,ah ,sh+1 )∈Dh (fh (sh , ah )−Vh+1 (sh+1 ))2 .
+for (s, a) ∈ S × A do
+Compute exploration bonus bh (s, a) as in (4.4).
+
+Qh (s, a) ← clip[−H,H] fbh (s, a) + reh (s, a) + bh (s, a) ,
+where reh (s, a) ← r(s, a) + λLτ E ,h (s, a).
+8:
+Vh (s) ← Ea∼πh (·|s) [Qh (s, a)].
+9:
+end for
+10: end for
+11: output {Qh }H
+h=1
+5:
+6:
+7:
+
+√
+e
+S × A is upper bounded by O(1/
+N ), where we omit the dependency of H and generalized Eluder
+dimension.
+After updating the on-policy dataset, in Line 10, the agent can optimize the reward function according
+to the following loss function:
+L(π, r) = J(π E , r) − J(π, r).
+
+(4.1)
+
+While L is unknown for the learner, in Line 10 of Algorithm 1, we compute an empirical estimate of
+L:
+"H
+#
+n X
+H
+H
+X
+Y π k (ah | sh )
+X X
+1
+1
+(j)
+(j)
+(τ ) (τ )
+k
+h
+b
+L(π , r) = ·
+r(sh , ah ) −
+·
+·
+r(sh , ah ), (4.2)
+tk
+n j=1
+N
+π
+(a
+|
+s
+)
+h
+h
+h=1
+h=1 h
+τ ∈D k h=1
+where tk is the index of the last policy which is used to collect fresh data at iteration k.
+Assumption 4.1 (Convexity and Lipschitz Continuity of the reward function). We assume that the
+reward function r is parameterized by a set of parameters θ ∈ Θ ⊂ Rd and the estimated loss
+b is convex with respect to θ. For any θ1 , θ2 ∈ Θ, ∥θ1 − θ2 ∥2 = O(1), and for any θ ∈ Θ,
+function L
+s, a ∈ S × A, ∥∇θ rθ (s, a)∥2 = O(1).
+As a result, in Line 10, we essentially update the reward function rk by the following projected
+gradient descent:
+
+b k , rk )] .
+θ k+1 = projΘ θ k − ηθ · ∇θ [−L(π
+(4.3)
+6
+
+Published as a conference paper at ICLR 2025
+
+b can potentially approximate L accurately, we also require the following assumption
+To ensure that L
+on the quality of the demonstration trajectories.
+Assumption 4.2 (Quality of the demonstration trajectories). The demonstration data τ E satisfies the
+following property for any reward function r ∈ R:
+n
+
+H
+
+1 XX
+(j) (j)
+r(sh , ah ) − J(π E , r) ≤ ϵE
+n j=1
+h=1
+
+for some ϵE > 0.
+Note that the assumption is weak since the error can be bounded by Azuma-Hoeffding inequality.
+Policy optimization module. The algorithm is a phasic policy optimization algorithm built on Liu
+et al. (2023b). In Line 12, the policy πhk+1 is obtained by taking a mirror descent step from πhk ,
+maximizing the following KL-regularized return:
+πhk+1 = arg max η⟨Qkh (s, ·), πh (·|s)⟩ − λED dKL (πh |πhk ),
+πh
+
+where λED ≥ 0 is a regularization parameter, dKL is the Kullbach-Leibler divergence, and Qkh is
+computed by an optimistic policy evaluation (OPE) subroutine to guide the direction of policy
+updates.
+Double Exploration in Algorithm 2. While algorithms widely used in empirical studies, such as
+PPO, directly use empirical returns to guide the policy updating procedure, we employ Algorithm 2
+to estimate the expected return from all state-action pairs.
+In OPE (Algorithm 2), we set an exploration bonus according to Lemma C.3,
+p
+bh (s, a) = 8H 2 log(H · NF (ϵF )/δ) + 4ϵF N + γ · DFh ((s, a); Dh ),
+
+(4.4)
+
+where DFh is defined in Definition 4.3 as an exploration bonus to encourage the policy to explore the
+state-action pairs whose expected return values are hard to predict given the on-policy dataset Dk .
+Additionally, we utilize a pretrained uncertainty evaluation function Lτ E to explore states beyond the
+demonstration trajectories. Then, in lines 3-10, we use value iteration to compute the value function
+considering the sum of the imitation reward rk , the exploration bonus bkh , and the uncertainty L.
+4.2
+
+T HEORETICAL A NALYSIS
+
+With the ILDE framework introduced in Section 4, we provide a thorough regret analysis for
+Algorithm 1.
+Our analysis addresses a broad category of MDPs, specifically those whose value functions can be
+effectively approximated and generalized across various state-action pairs. These are referred to as
+MDPs with bounded generalized Eluder dimension (Agarwal et al., 2023).
+Definition 4.3 (Generalized Eluder dimension, Agarwal et al. 2023). Let λED ≥ 0, and let Z =
+{zi }i∈[T ] ∈ (S × A)⊗T be a sequence of state-action pairs . Then the generalized Eluder dimension
+of a value function class F : S × A → [−H, H] with respect to λED is defined by dimT (F) :=
+supZ:|Z|=T dim(F, Z),
+dim(F, Z) :=
+
+T
+X
+
+
+2
+min 1, DF
+(zi ; z[i−1] ) ,
+
+i=1
+2
+where DF
+(z; z[t−1] ) :=
+−1
+
+sup
+f1 ,f2 ∈F
+
+P
+
+P
+
+(f1 (z) − f2 (z))2
+.
+2
+s∈[t−1] (f1 (zs ) − f2 (zs )) + λED
+
+We write dimT (F) := H · h∈[H] dimT (Fh ) for short when F is a collection of function classes
+F = {Fh }H
+h=1 in the context.
+Remark 4.4. The concept of generalized Eluder dimension was first introduced in Agarwal et al.
+(2023), where a value-based algorithm was proposed to achieve a nearly optimal regret bound in the
+online RL setting. Notably, our definition of the function class is somewhat broader, as we apply
+an unweighted definition of the DF distance. Consequently, the definition of generalized Eluder
+dimension does not require taking the supremum over weights, allowing for a wider class of MDPs.
+7
+
+Published as a conference paper at ICLR 2025
+
+The analyzed policy optimization method needs a policy evaluation subroutine as introduced in
+Algorithm 2. To make such a policy evaluation tractable, we make the following realizability
+assumption.
+Assumption 4.5 (Strong realizability of state-action value function class). For all h ∈ H and
+Vh+1 : S → [−H, H], there exists a function fh ∈ Fh such that for all s ∈ S, a ∈ A, we have
+fh (s, a) = Ph Vh+1 (s, a).
+Definition 4.6 (Covering numbers of function classes). For each h ∈ [H], there exists an ϵF cover C(Fh , ϵF ) ⊆ Fh with size |C(Fh , ϵF )| ≤ N (Fh , ϵF ), such that for any f ∈ F, there exists
+f ′ ∈ C(Fh , ϵF ), such that ∥f − f ′ ∥∞ ≤ ϵF . For any ϵF > 0, we define the uniform covering number
+of F with respect to ϵF as NF (ϵF ) := maxh∈[H] N (Fh , ϵF ).
+Theorem 4.7 (Regret bound for
+1). Suppose
+4.5, 4.1 and 4.2
+√ hold. if we
+pAlgorithm√
+p
+√ Assumptions
+2
+set γ = H , ϵF = 1/N , η = log |A|/H K, m = K/H log |A|, ηθ = O(1/ H 2 K), and
+2/3
+
+p
+N = KH dimT (F) log NϵF (F)/ log |A|, where K = H 2 dimT (FT) log Nϵ (F )
+, then with
+F
+probability at least 1 − δ, Algorithm 1 yields a regret of
+
+
+
+e H 8/3 dimT (F) log Nϵ (F) 1/3 T 2/3 + ϵE T .
+O
+(4.5)
+F
+Remark 4.8. This is the first theoretical guarantee for imitation learning in MDPs with nonlinear
+function approximation. As shown in Zhao et al. (2023), the considered setting captures MDPs with
+bounded Eluder dimension (Russo & Van Roy, 2013) and thus also captures linear MDPs (Jin et al.,
+2020) as special cases. If we select a policy from {π k }K
+k=1 uniformly at random, the expected loss
+e 8 dimT (F) log Nϵ (F)/ϵ3 ), which provides a sample
+for that policy is O(ϵ + ϵE ) when T = Θ(H
+F
+complexity bound for Algorthm 1.
+
+5
+
+P RACTICAL I MPLEMENTATION OF ILDE
+
+Algorithm 3 Imitation Learning with Double Exploration (ILDE)
+1: input: number of episodes T , period of collecting fresh data m, batch size N , learning rate η,
+demonstration trajectories τ E , reward function r1 , pretrained loss function LτE .
+2: for t = 1, . . . , T do
+3:
+Sample trajectories Dt from π t .
+4:
+Update the imitation reward rt by minimizing the loss of the discriminator trained to distinguish
+between the demonstration trajectories and Dt (e.g. (5.1)).
+5:
+Compute the aggregated reward ret (s, a) = rt (s, a) + λLτE (s, a) for all state-action pairs
+(s, a) in Dt .
+Update the current policy π t via policy optimization method (e.g., PPO) with reward ret (s, a) +
+6:
+b(s, a) where b(s, a) is the exploration bonus and obtain π t+1 .
+7: end for
+While Algorithm 1 provides a solid sample-complexity guarantee, it lacks computational efficiency
+and is challenging to implement at scale. In this section, we focus on the crucial elements of Algorithm
+1 and introduce the proposed Imitation Learning with Double Exploration (ILDE) framework. The
+algorithm, summarized in pseudocode in Algorithm 3, includes the following key modules:
+• Imitation reward module: This module minimizes the loss of a discriminator which distinguishes
+between demonstration data τ E and data obtained during policy optimization Dt . Theoretically,
+the imitation reward function is progressively optimized according to the gap between the average
+return of demonstration trajectories and that of current trajectories. In practice, to implement the
+module, we maintain a discriminator Dθ which continue minimizing the following loss:
+
+
+
+
+
+
+E(s,a)∼τ E log Dθ (s, a) + E(s,a)∼πt log(1 − Dθ (s, a)) + βEs∼πt dKL (E ′ (z|s)|rt ) − Ic ,
+
+(5.1)
+
+where encoder E ′ is introduced to incorporate a variational discriminator bottleneck (Peng et al.,
+2019) to improve GAIL, β is the scaling weight, and Ic is the information constraint. Further
+details can be found in Appendix B.2.1.
+• Pretrained uncertainty evaluation module: To implement this module, we make use of GIRIL. That
+b over the demonstration trajectories
+is, we pretrain a VAE model to estimate the transition kernel P
+8
+
+Published as a conference paper at ICLR 2025
+
+τ E and compute the intrinsic reward Lτ E ,h (s, a) (3.5) for all (s, a) in Dt . Further details can be
+found in Appendix B.2.2.
+• Exploration bonus b: To analyze the ILDE framework theoretically in Section 4, we choose the
+DF -uncertainty of state-action pairs as the exploration bonus, which reflects the uncertainty of a
+state-action pair after collecting enough data using the current policy. To efficiently implement the
+exploration bonus in practice, we utilize state entropy (Seo et al., 2021) in a representation space of
+a feature extractor f . We utilize a k-nearest neighbor entropy estimator to calculate the exploration
+bonus as b(s, a) = log(||y − y k−NN ||2 + 1), where y = f (s) is a state representation from f and
+y k−NN is the k-nearest neighbor of y within a set of N representations {y1 , y2 , · · · , yN }, where
+N is the batch size. The state-dependency rather than state-action dependency of the bonus is
+motivated by the technique of entropy regularisation in the policy optimization already encouraging
+spread over the action space. Further details can be found in Appendix B.2.3.
+• Policy optimization module: While the above modules provide the design of the reward, the policy
+optimization module optimises the policy for the objective. For policy optimization, we use an
+actor-critic variant of proximal policy optimization (PPO) (Schulman et al., 2017) with generalized
+advantage updating.
+
+6
+
+E XPERIMENTS
+
+We now conduct experiments based on four key hypotheses. First, we hypothesize that pure imitation
+learning methods such as VAIL will fail with limited demonstrations. Second, we hypothesize that
+a pre-trained model-based exploration reward such as GIRIL alone provides a stable improvement
+but may not reach a wide set of states due to the curiosity bias preferring certain states. Third,
+the state entropy reward bonus provides an exploration reward which provides a high reachability
+across a wide variety of states, thereby improving sample efficiency and overall performance. Fourth,
+VAIL’s imitation reward can provide additional performance gains compared to pure exploration (i.e.
+exploration bonus and/or curiosity reward) when the imitation reward is reliable while there is no
+effect when the imitation reward is unreliable.
+6.1
+
+ATARI GAMES
+
+To test these hypotheses, we compare our proposed ILDE to VAIL, GIRIL, and ablations on six
+Atari games within OpenAI Gym (Brockman et al., 2016) in a challenging setting where the agent
+receives even less demonstration data than in so-called one-life demonstration data (Yu et al., 2020).
+The imitation learning agents are trained according to the design of the imitation reward and/or any
+potential bonuses but are evaluated based on their actual scores on the Atari games. We summarize
+more experimental details in the Appendix B.
+Demonstrations. Our setting is very challenging compared to existing work because the demonstration data are very sparse, since they are based on partial one-life demonstrations. A one-life
+demonstration only contains the states and actions performed by an expert player until they die for
+the first time in a game. We generate the one-life demonstrations using a PPO agent trained with
+ground-truth rewards for 10 million simulation steps. Table 4 in the Appendix B.1 shows that a
+one-life demonstration contains much less data than a full-episode demonstration. To make the
+problem even more challenging, the imitation learning agents receive demonstrations which comprise
+only 10% of a full one-life demonstration.
+Baselines. We compare our ILDE with the following baselines: (1) VAIL (Peng et al., 2019), an
+improved GAIL variant using variation discriminator bottleneck, which updates the policy based
+on rk only; (2) GIRIL (Yu et al., 2020), the generative intrinsic reward-driven imitation learning
+method; (3) ILDE w/o b, an ablation of ILDE without the exploration bonus b; and (4) ILDE w/o rk ,
+an ablation of IDLE without the imitation reward rk .
+Results. Table 1 compares the performance of our ILDE and other baselines. ILDE outperforms the
+other baselines in terms of achieving higher average returns and outperforming experts in more games.
+Notably, ILDE achieves an average performance that is 5.33 times that of the expert demonstrator
+across the 6 Atari games. More specifically, ILDE outperforms the expert in all of the 6 Atari games
+and outperforms GIRIL in 4 games. The ablation study in Table 1 indicates the significance of each
+reward component. ILDE achieves much higher sample efficiency improvements than GIRIL, as
+shown in Table 10 and 11 of Appendix B.2.5. Further, we also show in Appendix B.2.7 that ILDE
+9
+
+Published as a conference paper at ICLR 2025
+
+Table 1: Average return of Expert demonstrator, VAIL, GIRIL, ILDE w/o λLτE , ILDE w/o b, ILDE
+w/o rk and ILDE with 10% of one-life demonstration data on six Atari games. The results are
+reported in the format of mean ± std over 10 random seeds with better-than-GIRIL performance in
+bold. “#Games>Expert” denotes the number and ratio of games that an imitation learning method
+outperforms the expert. “Improve vs Expert” denotes the average performance improvements of IL
+methods versus the expert across 6 Atari games.
+Atari Games
+
+Expert
+
+VAIL (rk )
+
+GIRIL
+
+ILDE w/o λLτE
+
+ILDE w/o b
+
+ILDE w/o rk
+
+ILDE
+
+BeamRider
+DemonAttack
+BattleZone
+Qbert
+Krull
+StarGunner
+
+1,918±645
+8,820±2,893
+22,410±5,839
+6,246±2,964
+6,520±941
+22,495±11,516
+
+91±116
+979±863
+5,081±4,971
+3,754±4,460
+7,937±8,183
+219±182
+
+8,524±1,085
+72,381±19,851
+25,203±22,868
+76,491±81,265
+20,935±23,796
+542±188
+
+3,233±3,340
+143±120
+5,412±1,816
+10,849±5,018
+857±916
+764±455
+
+8,521±1,234
+78,513±11,553
+18,179±21,181
+26,900±52,146
+16,715±23,153
+478±239
+
+11,453±2,416
+60,931±10,376
+43,708±22,733
+54,169±68,305
+27,495±28,773
+16,526±32,946
+
+11,453±2,319
+64,498±13,294
+59,109±25,575
+70,566±75,310
+23,716±16,790
+25,361±38,557
+
+#Games>Expert
+
+0 / 0%
+
+1 / 16.7%
+
+5 / 83.3%
+
+2 / 33.3%
+
+4 / 66.7%
+
+5 / 83.3%
+
+6 / 100%
+
+Improve vs Expert
+
+1.0
+
+0.37
+
+4.87
+
+0.64
+
+3.50
+
+4.71
+
+5.33
+
+is robust to noise in the demonstrations. Last, we note that the limited demonstration setting is
+challenging for IQ-Learn (see Table 12 in Appendix B.2.6).
+6.2
+
+C ONTINUOUS CONTROL TASKS
+
+Additionally, we also conduct experiments on the MuJoCo environments. Table 2 compares the
+performance of ILDE and other baselines. ILDE consistently outperforms other baselines in the four
+continuous control tasks by achieving higher average returns over 10 random seeds. We summarized
+more experimental details for MuJoCo experiments in Appendix B.2.8. Based on our current
+experiments, we observed that ILDE performs exceptionally well in games, while its improvement
+on MuJoCo is less significant. This may suggest that the current design of the intrinsic reward
+is better suited for taskswhere the extrinsic reward is more aligned with the objective of “seeking
+novelty”.This may also indicate that our algorithm does not (only) extrapolate the intention in the
+partial demonstration. Additional experiments (see Table 13 in Appendix B.2.6) show the potential
+of ILDE to generalize to other adversarial IL methods.
+Table 2: Average return of VAIL, GIRIL, and ILDE on the MuJoCo tasks. The average returns are
+calculated on the last 4 evaluation points. The results are reported in the format of mean ± std over
+10 random seeds with the best performance in bold.
+
+7
+
+Tasks
+
+VAIL (rk )
+
+GIRIL
+
+ILDE
+
+Reacher
+Hopper
+Walker2d
+HumanoidStandup
+
+-499±183
+1,264±783
+879±825
+52,635±6,370
+
+-60±24
+1,447±273
+997±575
+76,134±10,826
+
+-51±15
+1,878±690
+998±694
+77,887±6,123
+
+C ONCLUSION
+
+Achieving beyond-expert performance and improving sample complexity in complicated tasks are
+two crucial challenges in imitation learning. To address these difficulties, we propose Imitation
+Learning with Double Exploration (ILDE), which optimizes an uncertainty-regularized discrepancy
+that combines the distance to the expert policy with cumulative uncertainty during exploration. Theoretically, we propose ILDE-NPG with a theoretical regret guarantee, a first for imitation learning in
+MDPs with nonlinear function approximation. Empirically, we introduce a flexible ILDE framework
+with efficient exploration strategies and demonstrate ILDE’s outstanding performance over existing
+baselines in average return and sample complexity. It is also worth noting that our analysis cannot be
+directly applied to the practical version implemented in experiments.
+Limitation of our work. Our method assumes that the target task to be imitated is aligned with the
+concept of seeking novelty or curiosity. Its ability to achieve performance beyond the demonstration
+is not only due to the algorithm’s capacity to understand and extrapolate the intention behind the
+partial demonstration but also due to an alignment between the extrinsic reward and seeking novelty.
+
+10
+
+Published as a conference paper at ICLR 2025
+
+ACKNOWLEDGMENTS
+We thank the anonymous reviewers and area chair for their helpful comments. HZ and QG are
+supported in part by the NSF grants CPS-2312094, IIS-2403400 and Sloan Research Fellowship. HZ
+is also supported by UCLA-Amazon Science Hub Fellowship. The views and conclusions contained
+in this paper are those of the authors and should not be interpreted as representing any funding
+agencies. XY, DB, and IWT are supported by CFAR, Agency for Science, Technology and Research,
+Singapore. This project is supported by the National Research Foundation, Singapore and Infocomm
+Media Development Authority under its Trust Tech Funding Initiative. Any opinions, findings and
+conclusions or recommendations expressed in this material are those of the authors and do not reflect
+the views of National Research Foundation, Singapore and Infocomm Media Development Authority.
+
+R EFERENCES
+Alekh Agarwal, Yujia Jin, and Tong Zhang. VO Q L: Towards Optimal Regret in Model-free RL
+with Nonlinear Function Approximation. In Annual Conference on Learning Theory (COLT 2023),
+pp. 987–1063, 2023.
+Peter Auer, Nicolo Cesa-Bianchi, and Paul Fischer. Finite-time analysis of the multiarmed bandit
+problem. Machine learning, 47:235–256, 2002.
+Abdeslam Boularias, Jens Kober, and Jan Peters. Relative entropy inverse reinforcement learning. In
+International Conference on Artificial Intelligence and Statistics (AISTATS 2011), pp. 182–189,
+2011.
+Greg Brockman, Vicki Cheung, Ludwig Pettersson, Jonas Schneider, John Schulman, Jie Tang, and
+Wojciech Zaremba. OpenAI Gym. arXiv preprint arXiv:1606.01540, 2016.
+Daniel Brown, Wonjoon Goo, Prabhat Nagarajan, and Scott Niekum. Extrapolating beyond suboptimal demonstrations via inverse reinforcement learning from observations. In International
+Conference on Machine Learning (ICML 2019), pp. 783–792, 2019.
+Yuri Burda, Harri Edwards, Deepak Pathak, Amos Storkey, Trevor Darrell, and Alexei A Efros.
+Large-scale study of curiosity-driven learning. arXiv preprint arXiv:1808.04355, 2018.
+Qi Cai, Mingyi Hong, Yongxin Chen, and Zhaoran Wang. On the global convergence of imitation
+learning: A case for linear quadratic regulator. arXiv preprint arXiv:1901.03674, 2019.
+Jonathan D Chang, Masatoshi Uehara, Dhruv Sreenivas, Rahul Kidambi, and Wen Sun. Mitigating
+covariate shift in imitation learning via offline data without great coverage. arXiv preprint
+arXiv:2106.03207, 2021.
+Minshuo Chen, Yizhou Wang, Tianyi Liu, Zhuoran Yang, Xingguo Li, Zhaoran Wang, and Tuo Zhao.
+On Computation and Generalization of Generative Adversarial Imitation Learning. In International
+Conference on Learning Representations (ICLR 2019), 2019.
+Paul F Christiano, Jan Leike, Tom Brown, Miljan Martic, Shane Legg, and Dario Amodei. Deep
+reinforcement learning from human preferences. In Advances in neural information processing
+systems (NeurIPS 2017), pp. 4302–4310, 2017.
+Felipe Codevilla, Matthias Müller, Antonio López, Vladlen Koltun, and Alexey Dosovitskiy. End-toend driving via conditional imitation learning. In IEEE International Conference on Robotics and
+Automation (ICRA 2018), pp. 4693–4700, 2018.
+Chelsea Finn, Sergey Levine, and Pieter Abbeel. Guided cost learning: Deep inverse optimal control
+via policy optimization. In International Conference on Machine Learning (ICML 2016), pp.
+49–58. PMLR, 2016.
+Ronan Fruit, Matteo Pirotta, Alessandro Lazaric, and Ronald Ortner. Efficient Bias-Span-Constrained
+Exploration-Exploitation in Reinforcement Learning. In International Conference on Machine
+Learning (ICML 2018), pp. 1578–1586, 2018.
+11
+
+Published as a conference paper at ICLR 2025
+
+Huiqiao Fu, Kaiqiang Tang, Yuanyang Lu, Yiming Qi, Guizhou Deng, and Chunlin Chen. EssInfoGAIL: Semi-supervised Imitation Learning from Imbalanced Demonstrations. In Advances in
+Neural Information Processing Systems (NeurIPS 2023), pp. 60048–60059, 2023.
+Divyansh Garg, Shuvam Chakraborty, Chris Cundy, Jiaming Song, and Stefano Ermon. IQ-Learn:
+Inverse soft-Q Learning for Imitation. In Advances in Neural Information Processing Systems
+(NeurIPS 2021), pp. 4028–4039, 2021.
+Ian Goodfellow, Jean Pouget-Abadie, Mehdi Mirza, Bing Xu, David Warde-Farley, Sherjil Ozair,
+Aaron Courville, and Yoshua Bengio. Generative adversarial networks. Communications of the
+ACM, 63(11):139–144, 2020.
+Sijia Gu and Fei Zhu. BAGAIL: Multi-modal imitation learning from imbalanced demonstrations.
+Neural Networks, 174:106251, 2024.
+Mikael Henaff, Roberta Raileanu, Minqi Jiang, and Tim Rocktäschel. Exploration via Elliptical
+Episodic Bonuses. arXiv preprint arXiv:2210.05805, 2023.
+Todd Hester, Matej Vecerik, Olivier Pietquin, Marc Lanctot, Tom Schaul, Bilal Piot, Dan Horgan,
+John Quan, Andrew Sendonaris, Ian Osband, et al. Deep Q-learning from Demonstrations. In
+Proceedings of the AAAI conference on artificial intelligence (AAAI 2018), pp. 3223–3230, 2018.
+Jonathan Ho and Stefano Ermon. Generative adversarial imitation learning. In Advances in Neural
+Information Processing Systems (NeurIPS 2016), pp. 4572–4580, 2016.
+Thomas Jaksch, Ronald Ortner, and Peter Auer. Near-optimal regret bounds for reinforcement
+learning. Journal of Machine Learning Research, 11:1563–1600, 2010.
+Chi Jin, Zhuoran Yang, Zhaoran Wang, and Michael I Jordan. Provably efficient reinforcement
+learning with linear function approximation. In Conference on learning theory (COLT 2020), pp.
+2137–2143. PMLR, 2020.
+Ilya Kostrikov. PyTorch Implementations of Reinforcement Learning Algorithms. https://
+github.com/ikostrikov/pytorch-a2c-ppo-acktr-gail, 2018.
+Bin Li, Ruofeng Wei, Jiaqi Xu, Bo Lu, Chi Hang Yee, Chi Fai Ng, Pheng Ann Heng, Qi Dou,
+and Yun Hui Liu. 3D Perception based Imitation Learning under Limited Demonstration for
+Laparoscope Control in Robotic Surgery. In IEEE International Conference on Robotics and
+Automation (ICRA 2022), pp. 7664–7670, 2022.
+Ziniu Li, Tian Xu, Zeyu Qin, Yang Yu, and Zhi-Quan Luo. Imitation Learning from Imperfection:
+Theoretical Justifications and Algorithms. In Advances in Neural Information Processing Systems
+(NeurIPS 2023), pp. 18404–18443, 2023.
+Minghuan Liu, Tairan He, Weinan Zhang, Shuicheng Yan, and Zhongwen Xu. Visual imitation
+learning with patch rewards. In International Conference on Learning Representations (ICLR
+2023), 2023a.
+Qinghua Liu, Gellért Weisz, András György, Chi Jin, and Csaba Szepesvári. Optimistic natural policy
+gradient: a simple efficient policy optimization framework for online RL. In Advances in Neural
+Information Processing Systems (NeurIPS 2023), pp. 3560–3577, 2023b.
+Zhihan Liu, Yufeng Zhang, Zuyue Fu, Zhuoran Yang, and Zhaoran Wang. Learning from Demonstration: Provably Efficient Adversarial Policy Imitation with Linear Function Approximation. In
+International Conference on Machine Learning (ICML 2021), pp. 14094–14138, 2021.
+Francesco Orabona. A modern introduction to online learning. arXiv preprint arXiv:1912.13213,
+2019.
+Takayuki Osa, Naohiko Sugita, and Mamoru Mitsuishi. Online Trajectory Planning in Dynamic
+Environments for Surgical Task Automation. In Robotics: Science and Systems (RSS 2014), pp.
+1–9, 2014.
+12
+
+Published as a conference paper at ICLR 2025
+
+Deepak Pathak, Pulkit Agrawal, Alexei A Efros, and Trevor Darrell. Curiosity-driven exploration by
+self-supervised prediction. In International Conference on Machine Learning (ICML 2017), pp.
+2778–2787, 2017.
+Xue Bin Peng, Angjoo Kanazawa, Sam Toyer, Pieter Abbeel, and Sergey Levine. Variational
+discriminator bottleneck: Improving imitation learning, inverse RL, and GANs by constraining
+information flow. In International Conference on Learning Representations (ICLR 2019), pp. 1–27,
+2019.
+Dean A Pomerleau. Alvinn: An autonomous land vehicle in a neural network. In Advances in Neural
+Information Processing Systems (NeurIPS 1998), pp. 305–313, 1988.
+Nived Rajaraman, Lin Yang, Jiantao Jiao, and Kannan Ramchandran. Toward the fundamental limits
+of imitation learning. In Advances in Neural Information Processing Systems (NeurIPS 2020), pp.
+2914–2924, 2020.
+Juntao Ren, Gokul Swamy, Zhiwei Steven Wu, J Andrew Bagnell, and Sanjiban Choudhury. Hybrid
+inverse reinforcement learning. arXiv preprint arXiv:2402.08848, 2024.
+Daniel Russo and Benjamin Van Roy. Eluder dimension and the sample complexity of optimistic exploration. In Advances in Neural Information Processing Systems (NeurIPS 2013), pp. 2256–2264,
+2013.
+John Schulman, Filip Wolski, Prafulla Dhariwal, Alec Radford, and Oleg Klimov. Proximal policy
+optimization algorithms. arXiv preprint arXiv:1707.06347, 2017.
+Younggyo Seo, Lili Chen, Jinwoo Shin, Honglak Lee, Pieter Abbeel, and Kimin Lee. State entropy
+maximization with random encoders for efficient exploration. In International Conference on
+Machine Learning (ICML 2021), pp. 9443–9454, 2021.
+Lior Shani, Yonathan Efroni, Aviv Rosenberg, and Shie Mannor. Optimistic policy optimization with
+bandit feedback. In International Conference on Machine Learning (ICML 2020), pp. 8604–8613,
+2020.
+Lior Shani, Tom Zahavy, and Shie Mannor. Online apprenticeship learning. In Proceedings of the
+AAAI Conference on Artificial Intelligence (AAAI 2022), pp. 8240–8248, 2022.
+Harshinder Singh, Neeraj Misra, Vladimir Hnizdo, Adam Fedorowicz, and Eugene Demchuk. Nearest
+neighbor estimates of entropy. American Journal of Mathematical and Management Sciences, 23
+(3-4):301–321, 2003.
+Kihyuk Sohn, Honglak Lee, and Xinchen Yan. Learning structured output representation using deep
+conditional generative models. In Advances in Neural Information Processing Systems (NeurIPS
+2015), pp. 3483–3491, 2015.
+Emanuel Todorov, Tom Erez, and Yuval Tassa. Mujoco: A physics engine for model-based control.
+In 2012 IEEE/RSJ international conference on intelligent robots and systems (IROS 2012), pp.
+5026–5033. IEEE, 2012.
+Luca Viano, Angeliki Kamoutsi, Gergely Neu, Igor Krawczuk, and Volkan Cevher. Proximal point
+imitation learning. In Advances in Neural Information Processing Systems (NeurIPS 2022), pp.
+24309–24326, 2022.
+Tian Xu, Ziniu Li, and Yang Yu. Error bounds of imitating policies and environments. In Advances
+in Neural Information Processing Systems (NeurIPS 2020), pp. 15737–15749, 2020.
+Zhao-Heng Yin, Weirui Ye, Qifeng Chen, and Yang Gao. Planning for sample efficient imitation
+learning. In Advances in Neural Information Processing Systems (NeurIPS 2022), pp. 2577–2589,
+2022.
+Xingrui Yu, Yueming Lyu, and Ivor Tsang. Intrinsic reward driven imitation learning via generative
+model. In International Conference on Machine Learning (ICML 2020), pp. 10925–10935, 2020.
+13
+
+Published as a conference paper at ICLR 2025
+
+Songyuan Zhang, Zhangjie Cao, Dorsa Sadigh, and Yanan Sui. Confidence-Aware Imitation Learning
+from Demonstrations with Varying Optimality. In Advances in Neural Information Processing
+Systems (NeurIPS 2021), pp. 12340–12350, 2021.
+Tianhao Zhang, Zoe McCarthy, Owen Jow, Dennis Lee, Xi Chen, Ken Goldberg, and Pieter Abbeel.
+Deep imitation learning for complex manipulation tasks from virtual reality teleoperation. In IEEE
+International Conference on Robotics and Automation (ICRA 2018), pp. 5628–5635, 2018.
+Yufeng Zhang, Qi Cai, Zhuoran Yang, and Zhaoran Wang. Generative adversarial imitation learning
+with neural network parameterization: Global optimality and convergence rate. In International
+Conference on Machine Learning (ICML 2020), pp. 11044–11054, 2020.
+Heyang Zhao, Jiafan He, and Quanquan Gu. A Nearly Optimal and Low-Switching Algorithm for
+Reinforcement Learning with General Function Approximation. arXiv preprint arXiv:2311.15238,
+2023.
+Zhuangdi Zhu, Kaixiang Lin, Bo Dai, and Jiayu Zhou. Self-adaptive imitation learning: Learning tasks
+with delayed rewards from sub-optimal demonstrations. In Proceedings of the AAAI conference on
+artificial intelligence (AAAI 2022), pp. 9269–9277, 2022.
+Brian D Ziebart, Andrew L Maas, J Andrew Bagnell, Anind K Dey, et al. Maximum entropy inverse
+reinforcement learning. In AAAI Conference on Artificial Intelligence (AAAI 2008), pp. 1433–1438,
+2008.
+Ziebart, Brian D. and Bagnell, J. Andrew and Dey, Anind K. Modeling interaction via the principle
+of maximum causal entropy. In International Conference on Machine Learning (ICML 2010), pp.
+1255–1262, 2010.
+
+A
+
+M OTIVATION TABLE
+
+Table 3 illustrates the strengths of each component in ILDE, which helps to explain the motivation of
+ILDE.
+Table 3: Comparison of three reward components with three attributes.
+Stability
+
+Exploration
+
+Imitation
+
+GIRIL reward
+
+++
+
++
+
++
+
+Bonus b
+
++
+
+++
+
+-
+
+k
+
+-
+
+-
+
+++
+
+VAIL r
+
+B
+
+AUXILIARY E XPERIMENTAL D ETAILS
+
+B.1
+
+D EMONSTRATION L ENGTHS IN THE ATARI ENVIRONMENT
+
+Table 4 compares the lengths of one-life demonstrations and full-episode demonstrations in Atari
+games. In the experiments, we only use 10% of the one-life demonstrations for imitation learning,
+which is more challenging than previous work in learning with limited demonstrations (Yu et al.,
+2020).
+B.2
+
+E XPERIMENTAL S ETUP AND A DDITIONAL R ESULTS
+
+This subsection presents details of VAIL, GIRIL, state entropy bonus, experimental setup, and
+additional results.
+B.2.1
+
+D ETAILS OF THE VARIATIONAL ADVERSARIAL IMITATION LEARNING (VAIL)
+
+Generative adversarial imitation learning (GAIL) (Ho & Ermon, 2016) regards imitation learning as a
+distribution matching problem, and updates policy using adversarial learning (Goodfellow et al., 2020).
+14
+
+Published as a conference paper at ICLR 2025
+
+Table 4: Demonstration lengths in the Atari environment.
+Atari Games
+Beam Rider
+Demon Attack
+Battle Zone
+Q*bert
+Krull
+Star Gunner
+
+One-life Demo.
+
+Full-episode Demo.
+
+Length
+
+# Life
+
+Length
+
+# Life
+
+702
+2,004
+260
+787
+662
+118
+
+1
+1
+1
+1
+1
+1
+
+1,412
+11,335
+1,738
+1,881
+1,105
+2,117
+
+3
+4
+5
+4
+3
+5
+
+Previous work has demonstrated that GAIL does not work well in high-dimensional environments
+such as Atari games (Brown et al., 2019). Variational adversarial imitation learning (VAIL) (Peng
+et al., 2019) improves GAIL by compressing the information via a variational information bottleneck
+(VDB). VDB constrains the information flow in the discriminator using an information bottleneck.
+By enforcing a constraint on the mutual information between the observations and the discriminator’s
+internal representation, VAIL significantly outperforms GAIL by optimizing the following objective:
+h
+h
+
+i
+
+i
+min′ maxE(s,a)∼τ E Ez∼E ′ (z|s) log(−Dθ (z)) + E(s,a)∼πk Ez∼E ′ (z|s) − log(1 − Dθ (z))
+Dθ ,E β≥0
+
+
++ βEs∼eπ dKL (E ′ (z|s)|rk ) − Ic ,
+(B.1)
+where π
+e = 12 π E + 21 π k represents a mixture of the expert policy and the agent’s policy, E ′ is the
+encoder for VDB, β is the scaling weight, and Ic is the information
+ constraint. The reward for π is
+then specified by the discriminator rt = − log 1 − Dθ (µE ′ (s)) .
+B.2.2
+
+D ETAILS OF THE GENERATIVE INTRINSIC REWARD DRIVEN IMITATION LEARNING
+(GIRIL)
+
+Previous inverse reinforcement learning (IRL) methods usually fail to achieve expert-level performance when learning with limited demonstrations in high-dimensional environments. To address this
+challenge, Yu et al. (2020) proposed generative intrinsic reward-driven imitation learning (GIRIL) to
+empower the agent with the demonstrator’s intrinsic intention and better exploration ability. This
+was achieved by training a novel reward model to generate intrinsic reward signals via a generative
+model. Specifically, GIRIL leverages a conditional VAE (Sohn et al., 2015) to combine a backward
+action encoding model and a forward dynamics model into a single generative model. The module
+is composed of several neural networks, including recognition network qϕ (z|st , st+1 ), a generative
+network pθ (st+1 |z, st ), and prior network pθ (z|st ). GIRIL refers to the recognition network (i.e. the
+probabilistic encoder) as a backward action encoding model, and the generative network (i.e. the
+probabilistic decoder) as a forward dynamics model. Maximizing the following objective to optimize
+the module:
+J(pθ , qϕ ) = Eqϕ (z|st ,st+1 ) [log pθ (st+1 |z, st )] − dKL (qϕ (z|st , st+1 )∥pθ (z|st ))
+− αdKL (qϕ (b
+at |st , st+1 )|πE (at |st )]
+
+(B.2)
+
+where z is the latent variable, πE (at |st ) is the expert policy distribution, b
+at = Softmax(z) is the
+transformed latent variable, α is a positive scaling weight. The reward model will be pre-trained
+on the demonstration data and used for inferring intrinsic rewards for the policy data. The intrinsic
+reward is calculated as the reconstruction error between sbt+1 and st+1 :
+rt = ∥b
+st+1 − st+1 ∥22
+
+(B.3)
+
+where ∥ · ∥2 denotes the L2 norm, and sbt+1 = decoder(at , st ).
+B.2.3
+
+D ETAILS OF STATE ENTROPY BONUS
+
+State entropy maximization has been demonstrated to be a simple and compute-efficient method
+for exploration (Seo et al., 2021). The key idea for this method to work in a high-dimensional
+environment is to utilize a k-nearest neighbor state entropy estimator in the state representation space.
+15
+
+Published as a conference paper at ICLR 2025
+
+k-nearest neighbor entropy estimator. Let X be a random variable with a probability density
+function p whose support is a set X ⊂ Rd . Then its differential entropy is given by
+Z
+H(X) = −
+p(x) log p(x)dx.
+X
+
+Since estimating p is not tractable for high-dimensional data, a particle-based k-nearest neighbors
+(k-NN) entropy estimator (Singh et al., 2003) can be used:
+N
+
+H(X) ≈
+
+d
+
+1 X
+N · ∥xi − xk−NN
+∥d2 · π
+b2
+i
+log
++ Ck
+d
+N i=1
+k · Γ( 2 + 1)
+N
+
+∝
+
+1 X
+log ∥xi − xk−NN
+∥2 ,
+i
+N i=1
+
+(B.4)
+
+where xk−NN
+is the k-nearest neighbor of xi within a set of N representations {x1 , x2 , · · · , xN },
+i
+Γ is the gamma function, π
+b refers to an estimate of the number π (as opposed to the policy), and
+log(k − ψ) where ψ is the digamma function.
+State entropy estimate as bonus. Following Seo et al. (2021), we define the bonus to be proportional
+to the state entropy estimate in (B.4),
+b(si ) := log(∥yi − yik−NN ∥2 + 1),
+
+(B.5)
+
+where yi = f (si ) is a fixed representation from a state feature extractor f and yik−NN is the k-nearest
+neighbor of yi within a set of N representations {y1 , y2 , · · · , yN }. The use of a fixed representation
+space produces a more stable intrinsic reward since the distance between a given pair of states does
+not change during training (Seo et al., 2021). In our implementation, we use the identity function as
+the feature extractor f .
+B.2.4
+
+E XPERIMENTAL SETUP
+
+For the GIRIL and ILDEs, our first step was to train a reward model for each game using the 10% of
+a one-life demonstration. The training was conducted with the Adam optimizer at a learning rate of
+3e-4 and a mini-batch size of 32 for 1,000 epochs. In each training epoch, we sampled a mini-batch
+of data every four states. To evaluate the quality of our learned reward, we used the trained reward
+learning module to produce intrinsic rewards for policy data and trained a policy to maximize the
+inferred intrinsic rewards via PPO. For VAIL, we trained the discriminator using the Adam optimizer
+with a learning rate of 3e-4. The discriminator was updated at every policy step. We trained the PPO
+policy for all imitation learning methods for 50 million steps. We compare ILDE with baselines in
+the measurement of average return and sample efficiency. The average return was measured using the
+true rewards in the environment. We measured the sample efficiency based on the step after which an
+imitation learning method can continuously outperform the expert until the training ends. All the
+experiments are executed in an NVIDIA A100 GPU with 40 GB memory.
+Network architectures. We implement our ILDE and all baselines in the feature space of a state
+feature extractor f with 3 convolutional layers. The dimension of the state feature is 5184. In the
+state feature space, we use 3-layer MLPs to implement the discriminator for VAIL and the encoder
+and decoder for GIRIL. For a fair comparison, we used an identical policy network for all methods.
+We used the actor-critic approach for training PPO policy for all imitation learning methods. Table
+5 shows the architecture details of the state feature extractor and the actor-critic network. Table 6
+shows the MLP architectures, i.e., GIRIL’s encoder and decoder and VAIL’s discriminator.
+Hyperparameter settings. We implement all imitation learning methods and experiments based on
+the GitHub repository by Kostrikov (2018). Additional parameter settings are explained in Table 7.
+Note that λ, which controls the curiosity bonus was set without tuning to λ = 10 in our experiments.
+We use the same hyperparameter setting for the different experiments within a domain (Atari vs
+MuJoCo), apart from a multiplicative constant based on the range of the curiosity. However, to further
+explore its effect, we perform a parametric study with λ ranging in {20, 10, 5, 2}. The results in
+Table 8 show that ILDE’s performance slightly increases with decreasing λ.
+16
+
+Published as a conference paper at ICLR 2025
+
+Table 5: Architectures of state feature extractor and actor-critic network for Atari games.
+State feature extractor
+4 × 84 × 84 States
+3 × 3 conv, 32 LeakyReLU
+3 × 3 conv, 32 LeakyReLU
+3 × 3 conv, 64 LeakyReLU
+
+Actor-Critic network
+4 × 84 × 84 States
+8 × 8 conv, 32, stride 4, ReLU
+4 × 4 conv, 64, stride 2, ReLU
+3 × 3 conv, 32, stride 1, ReLU
+
+flatten 64 × 9 × 9 → 5184
+
+dense 32 × 7 × 7 → 512
+Categorical Distribution
+
+dense 32 × 7 × 7 → 1
+
+State features
+
+Actions
+
+Values
+
+Table 6: Architectures of MLP-based GIRIL’s encoder and decoder, and VAIL’s discriminator.
+GIRIL
+
+VAIL
+
+encoder
+
+decoder
+
+discriminator
+
+5184 State features and next-state features
+
+Actions and 5184 State features
+
+Actions and 5184 State features
+
+dense 5184×2 → 1024, LeakyReLU
+dense 1024 → 1024, LeakyReLU
+dense 1024 → µ, dense 1024 → σ
+reparameterization → #Actions
+
+dense 5182+#Actions → 1024, LeakyReLU
+dense 1024 → 1024, LeakyReLU
+dense 1024 → 5184
+
+dense 5182 → 1024, LeakyReLU
+dense 1024 → 1024, LeakyReLU
+split 1024 into 512, 512
+dense 512 → µE ′ , dense 512 → σE ′
+reparameterization → 1
+
+Latent variables
+
+5184 Predicted next state features
+
+µE ′ , σE ′ , discrimination
+
+Table 7: Hyperparameter settings for Atari games.
+Parameter
+
+Setting
+
+Actor-critic learning rate
+PPO clipping
+Reward model learning rate
+Discount factor
+GAE Lambda
+Critic loss coefficient
+Entropy regularisation
+Epochs per batch
+Batch size
+Mini batch size
+Evaluation frequency
+
+2.5e-4, linear decay
+0.1
+3e-4
+0.99
+0.95
+0.5
+0.01
+4
+32 × 128 (parallel workers × time steps)
+32
+every 200 policy updates
+
+GIRIL objective α
+Mini batch size for training the reward model
+Total training epoch of reward model
+
+100.0
+32
+1, 000
+
+VAIL’s bottleneck loss weight β
+Information constraint Ic
+
+1.0
+0.2
+
+λ in Algorithm 3
+
+10.0
+
+Table 8: The effect of λ on ILDE performance in the BeamRider task.
+
+B.2.5
+
+20
+
+10
+
+5
+
+2
+
+8,973 ± 1,315
+
+11,453 ± 2,319
+
+11,947 ± 1,228
+
+12,600 ± 1,351
+
+A DDITIONAL RESULTS
+
+To better illustrate the significance of the improvement of ILDE against the expert demonstrator, we
+normalize the results by stating that the expert was 1.0. The normalized results are summarized in
+Table 9. On average, VAIL is worse than the expert, only outperforming the expert in Krull. GIRIL
+17
+
+Published as a conference paper at ICLR 2025
+
+archives a performance that is 4.87 times the expert, performing the best in Q*bert. ILDE is the
+best, achieving a performance that is 5.33 times the expert. Figure 1 illustrates the learning curves of
+imitation learning methods in the 6 Atari games over 10 random seeds.
+Table 9: Average performance improvements of imitation learning methods versus the expert demon-
+
+0.04 strator. The expert performance is regarded as 1.0. “Improve vs Expert” denotes the average
+improvements of IL methods versus the expert across 6 Atari games.
+
+0.02
+
+Atari Games
+
+Expert
+
+VAIL (rk )
+
+GIRIL
+
+ILDE w/o b
+
+ILDE w/o rk
+
+ILDE
+
+BeamRider
+DemonAttack
+BattleZone
+Q*bert
+Krull
+StarGunner
+
+1.0
+1.0
+1.0
+1.0
+1.0
+1.0
+
+0.05
+0.11
+0.23
+0.60
+1.22
+0.01
+
+4.44
+8.21
+1.12
+12.25
+3.21
+0.02
+
+4.44
+8.90
+0.81
+4.31
+2.56
+0.02
+
+5.97
+6.91
+1.95
+8.67
+4.22
+0.73
+
+5.97
+7.31
+2.64
+11.30
+3.64
+1.13
+
+Improve vs Expert
+
+1.0
+
+0.37
+
+4.87
+
+3.50
+
+4.71
+
+5.33
+
+0.00
+0.02
+0.04
+
+VAIL (rk)
+
+0.04
+
+0.02
+
+0.00 100000 0.02
+Average Return
+
+10000
+7500
+5000
+2500
+0
+
+0
+
+1
+
+2
+
+3
+
+Time steps
+
+4
+
+80000
+60000
+40000
+20000
+0
+
+5
+1e7
+
+0
+
+1
+
+2
+
+3
+
+Time steps
+
+4
+
+5
+1e7
+
+80000
+60000
+40000
+20000
+1
+
+2
+
+3
+
+Time steps
+
+(d) Q*bert.
+
+0
+
+4
+
+5
+1e7
+
+2
+
+3
+
+Time steps
+
+4
+
+5
+1e7
+
+4
+
+5
+1e7
+
+40000
+
+40000
+30000
+20000
+10000
+0
+
+1
+
+ILDE
+
+(c) BattleZone.
+
+50000
+
+100000
+
+0
+
+120000
+100000
+80000
+60000
+40000
+20000
+0
+
+(b) DemonAttack.
+
+Average Return
+
+Average Return
+
+(a) BeamRider.
+
+0
+
+0.04
+
+Average Return
+
+Average Return
+
+12500
+
+ILDE w/o rk
+
+ILDE w/o b
+
+GIRIL
+
+Average Return
+
+Expert
+
+0
+
+1
+
+2
+
+3
+
+Time steps
+
+(e) Krull.
+
+4
+
+5
+1e7
+
+30000
+20000
+10000
+0
+
+0
+
+1
+
+2
+
+3
+
+Time steps
+
+(f) StarGunner.
+
+Figure 1: Average return vs. number of simulation steps on Atari games. The solid lines show the
+mean performance over 10 random seeds. The shaded area represents the standard deviation from the
+mean. The blue dotted line denotes the average return of the expert demonstrator. The area above the
+blue dotted line means performance beyond the expert.
+Additionally, we summarize the sample efficiency improvements of VAIL and ILDE methods versus
+GIRIL in Table 11. The sample efficiency of VAIL in outperforming experts is much worse than
+GIRIL and ILDE variants. ILDE shows impressive sample efficiency improvements across several
+games, and especially so in BattleZone, where the improvement over GIRIL is 90.06%.
+B.2.6
+
+E XPERIMENTS WITH IQ-L EARN AND H Y PE
+
+As additional baseline comparisons, we include IQ-Learn (Garg et al., 2021) and HyPE (Ren et al.,
+2024).
+First, we compare IQ-Learn on our Atari task setting (with 10% of a one-life demonstration). The
+results in Table 12 show that IQ-Learn does not perform well on Atari tasks, likely because the
+18
+
+Published as a conference paper at ICLR 2025
+
+Table 10: The sample efficiency of imitation learning methods. The metric for sample efficiency
+is based on the ratio t/T , where t is the first time step such that the agent achieves at least expert
+performance continuously within the interval [t, T ]. In Atari, T is 50 million time steps.
+Atari Games
+
+VAIL (rk )
+
+GIRIL
+
+ILDE w/o b
+
+ILDE w/o rk
+
+ILDE
+
+BeamRider
+DemonAttack
+BattleZone
+Qbert
+Krull
+StarGunner
+
+96.67%
+-
+
+9.84%
+13.12%
+98.31%
+9.84%
+85.20%
+-
+
+8.20%
+9.84%
+21.31%
+91.76%
+-
+
+9.84%
+11.48%
+11.48%
+6.56%
+72.10%
+-
+
+11.48%
+8.20%
+9.84%
+8.20%
+83.57%
+93.40%
+
+Table 11: Sample efficiency improvements of VAIL and ILDE methods versus the GIRIL, defined
+X
+as tGt−t
+, where tG is the time for GIRIL to reach expert-level and tX is the time for the method
+G
+of comparison to reach expert-level (continuously until time T ). “Improve vs GIRIL” denotes the
+average improvements of IL methods versus the GIRIL across 6 Atari games. To make the scores
+feasible, we limit the maximum of tX to T .
+Atari Games
+
+VAIL (rk )
+
+GIRIL
+
+ILDE w/o b
+
+ILDE w/o rk
+
+ILDE
+
+BeamRider
+DemonAttack
+BattleZone
+Q*bert
+Krull
+StarGunner
+
+-916.26%
+-662.21%
+-1.71%
+-916.26%
+-13.46%
+0%
+
+0%
+0%
+0%
+0%
+0%
+0%
+
+16.67%
+25%
+-1.72%
+-116.57%
+-7.69%
+0%
+
+0%
+12.5%
+88.32%
+33.33%
+15.37%
+0%
+
+-16.67%
+37.5%
+90.06%
+16.67%
+1.91%
+6.6%
+
+Average
+
+-418.32%
+
+0%
+
+-14.05%
+
+24.92%
+
+22.68%
+
+demonstration data are extremely limited. We do not include HyPE in the Atari tasks because the
+HyPE implementation does not support Atari environments.
+Table 12: Performance of IQ-Learn on Atari benchmarks.
+Atari Game
+
+IQ-Learn performance
+
+BeamRider
+DemonAttack
+BattleZone
+Qbert
+Krull
+StarGunner
+
+0.0 ± 0.0
+88.5 ± 92
+3,800± 870
+225± 125
+4,500± 2,030
+200± 100
+
+Second, we compare HyPE and HyPE-ILDE, a variant of our framework implemented with HyPE,
+on two MuJoCo tasks based on only a single demonstration (which is significantly more challenging
+than the 64 demonstrations as in Ren et al. (2024)). The results in Table 13 show that HyPE-ILDE
+clearly outperforms HyPE.
+Table 13: Comparison of HyPE and HyPE-ILDE on MuJoCo tasks.
+MuJoCo Tasks
+
+HyPE
+
+HyPE-ILDE
+
+Ant-v3
+Hopper-v3
+
+785.8 ± 528.6
+2,995.0± 745.4
+
+813.8 ± 833.0
+3,372.6± 359.4
+
+19
+
+Published as a conference paper at ICLR 2025
+
+B.2.7
+
+ILDE FOR NOISY DEMONSTRATIONS
+
+To test the robustness of ILDE, we generate noisy demonstrations by injecting noise into the environment in the following manner: with probability ptremble , a random action is executed instead of the one
+chosen by the policy (Ren et al., 2024). Due to the limited time and computational resources, we test
+the robustness of ILDE for noisy demonstrations on BeamRider without tuning any hyperparameters.
+The results in Table 14 show that ILDE consistently outperforms the expert (1,918,645) and GIRIL
+(8,5241,085) on the noisy demonstrations with noise rate of ptremble ∈ {0.01, 0.05, 0.1, 0.3, 0.5},
+providing insights into ILDE’s robustness in real-world settings.
+Table 14: The effect of noise rate (ptremble ) on ILDE performance for noisy demonstrations on the
+BeamRider task.
+0.0
+
+0.01
+
+0.05
+
+0.1
+
+0.3
+
+0.5
+
+11,453 ± 2,319
+
+12,353 ± 2,753
+
+8,893 ± 951
+
+9,935 ± 1,952
+
+9,728 ± 1,847
+
+10,735 ± 1,198
+
+B.2.8
+
+C ONTINUOUS CONTROL TASKS
+
+Except for the above evaluation on the Atari games with high-dimensional state space and discrete
+action space, we also evaluated our method on continuous control tasks where the state space is
+low-dimensional and the action space is continuous. The continuous control tasks were from MuJoCo
+(Todorov et al., 2012).
+Demonstrations. We use the demonstrations from the open-source repository “pytorch-a2c-ppo-acktrgail” (Kostrikov, 2018). We compare ILDE with VAIL and GIRIL on the continuous control tasks
+(i.e., Reacher, Hopper, Walker2d, and HumanoidStandup) with 4 trajectories in the demonstration for
+each task.
+Experimental setups. Similar to the setups in Atari games, we need to pretrain a reward model for
+GIRIL and ILDE using the demonstrations. The training is conducted with the Adam optimizer at
+a learning rate of 3e-4 and a mini-batch size of 32 for 10,000 epochs. In each training epoch, we
+sample a mini-batch of data every 20 states. To evaluate the quality of our learned reward, we use
+the trained reward learning module to produce intrinsic rewards for policy data and trained a policy
+to maximize the inferred intrinsic rewards via PPO. For VAIL, we train the discriminator using the
+Adam optimizer with a learning rate of 3e-4. The discriminator is updated at every policy step. We
+train the PPO policy for all imitation learning methods for 10 million steps. We compare ILDE
+with baselines in the measurement of average return. The average return is measured using the true
+rewards in the environment. All the experiments are executed in an NVIDIA A100 GPU with 40 GB
+memory.
+Network architectures. We use 3-layer MLPs to implement the discriminator for VAI, and the
+encoder and the decoder for GIRIL and ILDE. For a fair comparison, we used an identical policy
+network for all methods. We used the actor-critic approach for training PPO policy for all the imitation
+learning methods. The number of hidden layers in each MLP is 100. Table 15 shows the architecture
+details of the actor-critic network for MuJoCo tasks. Table 16 shows the MLP architectures, i.e.,
+GIRIL’s encoder and decoder and VAIL’s discriminator.
+Table 15: Architectures of the actor-critic network for MuJoCo tasks. dim(S) and dim(A) represent
+the state dimension and action dimension, respectively.
+Actor-Critic network
+1 × dim(S) States
+dense dim(S) → 100, Tanh
+dense 100 → 100, Tanh
+dense 100 → dim(A)
+Gaussian Distribution
+
+dense 100 → 1
+
+Actions
+
+Values
+
+Hyperparameter settings. Table 17 summarized the parameter settings for MuJoCo tasks.
+20
+
+Published as a conference paper at ICLR 2025
+
+Table 16: Architectures of MLP-based GIRIL’s encoder and decoder, and VAIL’s discriminator.
+GIRIL
+
+VAIL
+
+encoder
+
+decoder
+
+discriminator
+
+1 × dim(S) States and Next State
+
+1 × dim(A) Actions and 1 × dim(S) States
+
+1 × dim(A) Actions and 1 × dim(S) States
+
+dense dim(S) × 2 → 100, Tanh
+dense 100 → 100, Tanh
+dense 100 → µ, dense 100 → σ
+reparameterization → dim(A)
+
+dense dim(S)+dim(A) → 100, Tanh
+dense 100 → 100, Tanh
+dense 100 → dim(S)
+
+dense dim(S) → 100, Tanh
+dense 100 → 100, Tanh
+split 100 into 50, 50
+dense 50 → µE ′ , dense 50 → σE ′
+reparameterization → 1
+
+Latent variables
+
+dim(S) Predicted next states
+
+µE ′ , σE ′ , discrimination
+
+Table 17: Hyperparameter settings for MuJoCo tasks.
+Parameter
+
+Setting
+
+Actor-critic learning rate
+PPO clipping
+Reward model learning rate
+Discount factor
+GAE Lambda
+Critic loss coefficient
+Entropy regularisation
+Epochs per batch
+Batch size
+Mini batch size
+Evaluation frequency
+
+3e-4, linear decay
+0.1
+3e-4
+0.99
+0.95
+0.5
+0.0
+10
+32 × 2048 (parallel workers × time steps)
+32
+every 6 policy updates
+
+GIRIL objective α
+Mini batch size for training the reward model
+Total training epoch of reward model
+
+0.01
+32
+10, 000
+
+VAIL’s bottleneck loss weight β
+Information constraint Ic
+
+1.0
+0.2
+
+λ in Algorithm 3
+
+10.0
+
+Results. Figure 2 illustrates the curves of VAIL, GIRIL, and ILDE in the four continuous control
+tasks. The ablation study results for MuJoCo are illustrated in Figure 3.
+
+C
+
+P ROOF OF T HEOREM 4.7
+
+Our proof structure for Theorem 4.7 largely adapts from the proofs in Liu et al. (2023b). However,
+our analysis different from theirs in three aspects: (1) we consider imitation learning, where the
+reward is time-varying, (2) we consider MDPs with generalized Eluder dimension, which is slightly
+more general than Eluder dimension (Russo & Van Roy, 2013) as shown in Zhao et al. (2023), and
+(3) the analysis leads to a sublinear batch-regret, which is stronger than a sample complexity bound.
+First, we have the following extended value difference lemma.
+k H
+Lemma C.1 (Value difference lemma). For any policy π, the value functions {Vhk }H
+h=1 and {Qh }h=1
+returned by OPE(π, D, re) satisfy the following equation,
+
+r
+e
+V1,π
+(s1 ) − V1k (s1 ) =
+
+H
+X
+
+
+
+Esh ∼π ⟨Qkh (sh , ·), πh (·|sh ) − πhk (·|sh )⟩
+
+h=1
+
+−
+
+H
+X
+
+
+
+k
+E(sh ,ah )∼π Qkh (sh , ah ) − re(sh , ah ) − Ph Vh+1
+(sh , ah ) .
+
+h=1
+
+21
+
+0
+100
+200
+300
+400
+500
+600
+
+2000
+
+Average Return
+
+Average Return
+
+Published as a conference paper at ICLR 2025
+
+VAIL (rk)
+GIRIL
+ILDE
+
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+Time steps
+
+0.8
+
+1500
+1000
+500
+0
+
+1.0
+1e7
+
+0.0
+
+0.2
+
+(a) Reacher.
+
+0.8
+
+1.0
+1e7
+
+0.6
+
+0.8
+
+1.0
+1e7
+
+80000
+
+Average Return
+
+Average Return
+
+0.6
+
+(b) Hopper.
+
+1250
+1000
+750
+500
+250
+0
+
+0.4
+
+Time steps
+
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+Time steps
+
+0.8
+
+70000
+60000
+50000
+
+1.0
+1e7
+
+0.0
+
+(c) Walker2d.
+
+0.2
+
+0.4
+
+Time steps
+
+(d) HumanoidStandup.
+
+Figure 2: Average return vs. the number of simulation steps on MuJoCo tasks. The solid lines show
+the mean performance over 10 random seeds. The shaded area represents the standard deviation from
+the mean.
+Proof. For any h ∈ [H], s ∈ S, we have
+r
+e
+e
+Vh,π
+(s) − Vhk (s) = ⟨Qrh,π
+(s, ·), πh (·|s)⟩ − ⟨Qkh (s, ·), πhk (·|s)⟩
+e
+= ⟨Qrh,π
+(s, ·) − Qkh (s, ·), πh (·|s)⟩ − ⟨Qkh (s, ·), πhk (·|s) − πh (·|s)⟩
+r
+e
+k
+= ⟨Ph Vh+1,π
+(s, ·) − Ph Vh+1
+(s, ·), πh (·|s)⟩ − ⟨Qkh (s, ·), πhk (·|s) − πh (·|s)⟩
+k
+− ⟨Qkh (s, ·) − re(s, ·) − Ph Vh+1
+(s, ·), πh (·|s)⟩,
+
+(C.1)
+
+where the first equality follows from the definition of the value functions Vhk and Qkh , the last equality
+follows from the Bellman equation for the state-action value function Qh,π in (3.2). From (C.1) we
+further obtain that for any h ∈ [H], policy π,
+ re
+
+ re
+
+k
+Esh ∼π Vh,π
+(sh ) − Vhk (sh ) − Esh ∼π Vh+1,π
+(sh+1 ) − Vh+1
+(sh+1 )
+
+
+
+
+k
+= Esh ∼π ⟨Qkh (sh , ·), πh (·|sh ) − πhk (·|sh )⟩ − Esh ∼π ⟨Qkh (sh , ·) − re(sh , ·) − Ph Vh+1
+(sh , ·), πh (·|sh )⟩ .
+Taking the sum over h ∈ [H] yields the following result,
+r
+e
+V1,π
+(s1 ) − V1k (s1 )
+
+=
+
+H
+X
+
+
+
+Esh ∼π ⟨Qkh (sh , ·), πh (·|sh ) − πhk (·|sh )⟩
+
+h=1
+
+−
+
+H
+X
+
+
+
+k
+Esh ∼π ⟨Qkh (sh , ·) − re(sh , ·) − Ph Vh+1
+(sh , ·), πh (·|sh )⟩
+
+h=1
+
+=
+
+H
+X
+h=1
+
+H
+ X
+
+
+
+k
+Esh ∼π ⟨Qkh (sh , ·), πh (·|sh ) − πhk (·|sh )⟩ −
+E(sh ,ah )∼π Qkh (sh , ah ) − re(sh , ah ) − Ph Vh+1
+(sh , ah ) .
+h=1
+
+22
+
+GIRIL
+ILDE w/o b
+ILDE w/o rk
+ILDE
+
+40
+
+2000
+
+Average Return
+
+Average Return
+
+Published as a conference paper at ICLR 2025
+
+50
+60
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+Time steps
+
+0.8
+
+1500
+1000
+500
+0
+
+1.0
+1e7
+
+0.0
+
+0.2
+
+1250
+1000
+750
+500
+250
+0
+
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+1.0
+1e7
+
+0.6
+
+0.8
+
+1.0
+1e7
+
+(b) Hopper.
+
+Average Return
+
+Average Return
+
+(a) Reacher.
+
+0.4
+
+Time steps
+
+0.6
+
+Time steps
+
+0.8
+
+80000
+75000
+70000
+65000
+60000
+55000
+
+1.0
+1e7
+
+(c) Walker2d.
+
+0.0
+
+0.2
+
+0.4
+
+Time steps
+
+(d) HumanoidStandup.
+
+Figure 3: Ablations on MuJoCo tasks. Average return vs. the number of simulation steps on MuJoCo
+tasks. The solid lines show the mean performance over 10 random seeds. The shaded area represents
+the standard deviation from the mean.
+
+Lemma C.2 (Lemma 17, Shani et al. 2020). For any policy π, s ∈ S, h ∈ [H], we have
+K
+X
+ k
+
+⟨Qh (s, ·), πh (·|s) − πhk (·|s)⟩ ≤ log |A|/η + ηH 2 K/2.
+k=1
+
+Lemma C.3. Suppose Assumption 4.5 holds. Then with probability at least 1 − δ, for all h ∈ [H],
+s ∈ S, a ∈ A, we have
+p
+fbk,h (s, a) − Ph Vk,h+1 (s, a) ≤ 8H 2 log(H · NF (ϵF )/δ) + 4ϵF N + γ · DFh ((s, a); Dh ).
+Proof. We have
+2
+fbk,h (sh , ah ) − Ph Vk,h+1 (sh , ah )
+
+X
+k
+(sh ,ah )∈Dh
+
+X
+
++2
+
+
+
+fbk,h (sh , ah ) − Ph Vk,h+1 (sh , ah ) · Vk,h+1 (sh+1 ) − Ph Vk,h+1 (sh , ah )
+
+k
+(sh ,ah )∈Dh
+
+=
+
+X
+k
+(sh ,ah )∈Dh
+
+2
+fbk,h (sh , ah ) − Vk,h+1 (sh+1 ) −
+
+X
+
+2
+Vk,h+1 (sh+1 ) − Ph Vk,h+1 (sh , ah ) ≤ 0,
+
+k
+(sh ,ah )∈Dh
+
+where the last inequality follows from the definition of fbk,h in Algorithm 2.
+23
+
+Published as a conference paper at ICLR 2025
+
+Then it follows that for all h ∈ [H],
+2
+fbk,h (sh , ah ) − Ph Vk,h+1 (sh , ah )
+
+X
+k
+(sh ,ah )∈Dh
+
+X
+
+≤2
+
+
+
+fbk,h (sh , ah ) − Ph Vk,h+1 (sh , ah ) · Ph Vk,h+1 (sh , ah ) − Vk,h+1 (sh+1 ) .
+
+(C.2)
+
+k
+(sh ,ah )∈Dh
+
+Note that Vk,h+1 is a function only depends on data in Dh+1 , Dh+2 , · · · , DH . Hence the right-hand
+side of the above inequality is a martingale difference sequence.
+Consider a function f ∈ C(Fh , ϵF ) ⊆ Fh . By Lemma D.2, we have with probability at least
+1 − δ/(H · NF (ϵF )),
+X
+
+
+f (sh , ah ) − Ph Vk,h+1 (sh , ah ) · Ph Vk,h+1 (sh , ah ) − Vk,h+1 (sh+1 )
+k
+(sh ,ah )∈Dh
+
+≤
+
+1
+4
+
+2
+f (sh , ah ) − Ph Vk,h+1 (sh , ah ) + 2H 2 log(H · NF (ϵF )/δ).
+
+X
+
+(C.3)
+
+k
+(sh ,ah )∈Dh
+
+Combining (C.2) and (C.3) and from the definition of ϵF -net C(Fh , ϵF ), we have with probability at
+least 1 − δ/H,
+X
+2
+fbk,h (sh , ah ) − Ph Vk,h+1 (sh , ah ) ≤ 8H 2 log(H · NF (ϵF )/δ) + 4ϵF H · N/H.
+k
+(sh ,ah )∈Dh
+
+2
+By the definition of DF
+, we have with probability at least 1 − δ/H,
+h
+p
+fbk,h (s, a) − Ph Vk,h+1 (s, a) ≤ 8H 2 log(H · NF (ϵF )/δ) + 4ϵF N + γ · DFh ((s, a); Dh ),
+
+from which we can complete the proof by applying the union bound over h ∈ [H].
+(i)
+
+(i)
+
+Lemma C.4. For any policy π, suppose we sample N trajectories D = {sh , ah }h∈[H],i∈[N ] . Then,
+with probability at least 1 − δ, we have
+s
+!
+
+
+1 H2 + γ
+Ezh ∼π DFh (zh ; D) = O
+·
+dimN (Fh ) log(1/δ) .
+N
+γ
+Proof. It follows from the definition of dimN (Fh ) that
+dimN (Fh ) ≥
+
+N
+X
+
+
+
+(i) [i−1]
+2
+min 1, DF
+(z
+;
+z
+)
+.
+h
+h
+h
+
+(C.4)
+
+i=1
+
+From Definition 4.3, we further have the following upper bound for cumulative uncertainty,
+N
+X
+
+(i)
+
+[i−1]
+
+2
+(zh ; zh
+DF
+h
+
+)≤
+
+i=1
+
+≤
+
+N
+N
+
+
+ X
+H2 X
+(i) [i−1]
+(i) [i−1]
+2
+2
+1 DF
+(z
+;
+z
+)
+>
+1
++
+min 1, DF
+(zh ; zh )
+h
+h
+h
+h
+γ i=1
+i=1
+
+
+H2
++ 1 · dimN (Fh ).
+γ
+
+(C.5)
+
+Thus,
+N
+X
+
+s
+(i) [i−1]
+DFh (zh ; zh ) ≤
+
+N·
+
+i=1
+
+by AM-GM inequality.
+24
+
+
+H2
++ 1 · dimN (Fh )
+γ
+
+(C.6)
+
+Published as a conference paper at ICLR 2025
+
+On the other hand, from Azuma-Hoeffding inequality (Lemma D.1), we have with probability at least
+1 − δ,
+
+
+N
+N
+X
+X
+
+H p
+(i) [i−1]
+[i−1] 
+DFh (zh ; zh ) ≥
+Ezh ∼π DFh (zh ; zh ) − O √
+N log(1/δ)
+γ
+i=1
+i=1
+
+
+
+
+H p
+≥ N · Ezh ∼π DFh (zh ; D) − O √
+N log(1/δ)
+(C.7)
+γ
+Substituting (C.6) into (C.7) yields:
+s
+
+
+Ezh ∼π DFh (zh ; D) = O
+
+!
+1 H2 + γ
+·
+dimN (Fh ) log(1/δ) .
+N
+γ
+
+(C.8)
+
+Lemma C.5 (Lemma 3, Liu et al. 2023b). Let tk be the index of the last policy which is used to
+collect fresh data at iteration k. Suppose we choose η and m such that ηm ≤ 1/H 2 , then for any
+k ∈ N+ and any function g : S × A → R+ :
+Eπk [g(sh , ah )] = Θ (Eπtk [g(sh , ah )]) .
+Lemma C.6 (Bounding batched regret (I1 + I3 )). Let rek be defined in (7) and update the policy as
+in Algorithm 1. Suppose that Assumption 4.5 holds. Then with probability at least 1 − 2δ,
+K
+X
+
+
+J(π ∗ , rek ) − J(π, rek ) ≤ H log |A|/η + ηH 3 K/2
+k=1
+
+s
++ 2HK ·
+
+p
+
+8H 2 log(H · NF (ϵF )/δ) + 4ϵF N + γ · O
+
+!
+H H2 + γ
+·
+dimN (Fh ) log(1/δ) .
+N
+γ
+
+Proof. Suppose that the high-probability events in Lemma C.3 and Lemma C.5 hold.
+K
+X
+
+
+K 
+K 
+
+ X
+ X
+r
+ek
+k
+r
+ek
+∗ (s1 ) − V1 (s1 )
+V1k (s1 ) − V1,π
++
+J(π ∗ , rek ) − J(π, rek ) =
+V1,π
+k (s1 )
+
+k=1
+
+k=1
+
+k=1
+
+≤
+
+K X
+H
+X
+
+
+
+Esh ∼π∗ ⟨Qkh (sh , ·), πh (·|sh ) − πhk (·|sh )⟩
+
+k=1 h=1
+
++
+
+K X
+H
+X
+
+
+
+k
+E(sh ,ah )∼πk Qkh (sh , ah ) − re(sh , ah ) − Ph Vh+1
+(sh , ah )
+
+k=1 h=1
+
+p
+≤ H log |A|/η + ηH 3 K/2 + 2HK · 8H 2 log(H · NF (ϵF )/δ) + 4ϵF N + γ
+s
+!
+H H2 + γ
+·O
+·
+dimN (F) log(1/δ)
+N
+γ
+
+where the first inequality is obtained by applying the value difference lemma C.1 to both terms and
+then applying Lemma C.3.
+√
+Lemma C.7 (Upper bound for I2 ). If we choose ηθ = O(1/ H 2 K) in Algorithm 1 and update the
+reward function as shown in (4.3), then with probability 1 − δ,
+K
+√
+
+X
+
+
+e
+L(π k , r) − L(π k , rk ) ≤ O
+H 2 K + ϵE K
+k=1
+
+Proof. From Lemma D.3, we have for any r ∈ R,
+K
+X
+
+
+b k , r) − L(π
+b k , rk ) ≤ O(1/ηθ + ηθ H 2 K/2).
+L(π
+k=1
+
+25
+
+(C.9)
+
+Published as a conference paper at ICLR 2025
+
+From Lemmas D.1 and D.4, with probability at least 1 − δ,
+K
+X
+
+
+L(π k , r) − L(π k , rk )
+k=1
+
+≤ O(1/ηθ + ηθ H 2 K/2) + O
+
+p
+
+
+H 2 K log(1/δ) + O(ϵE K),
+
+(C.10)
+
+from which we can complete the proof by substituting the value of ηθ into (C.10).
+Theorem C.8 (Restatement of
+4.5, 4.1 and 4.2
+√hold. If we
+pTheorem 4.7).
+p
+√ Suppose
+√ Assumptions
+set γ = H 2 , ϵF = 1/N , η = log |A|/H K, m = ⌊ K/H log |A|⌋, ηθ = O(1/ H 2 K),
+and
+
+2/3 
+p
+T
+N = ⌈KH dimT (F) log NϵF (F)/ log |A|⌉, where K =
+, then
+H 2 dimT (F ) log Nϵ (F )
+F
+
+with probability at least 1 − δ, Algorithm 1 yields a regret of
+
+
+
+e H 8/3 dimT (F) log Nϵ (F) 1/3 T 2/3 + ϵE T .
+O
+F
+Proof for Theorem 4.7. Throughout the proof, we suppose the events in Lemma C.6 and Lemma C.7
+hold simultaneously.
+From the definition of Regret,
+Regret(T ) ≤ (N/m) · max
+r∈R
+
+K
+X
+
+E[ℓ(π tk , r)] − ℓ(π ∗ , r)
+
+k=1
+
+≤ (N/m) · O max
+r∈R
+
+K
+X
+
+!
+∗
+
+k
+
+ℓ(π , r) − ℓ(π , r) ,
+
+(C.11)
+
+k=1
+
+where the last inequality follows from the definition of tk .
+Then we consider the following decomposition for the regret term,
+max
+r∈R
+
+K
+X
+
+ℓ(π k , r) − ℓ(π ∗ , r) ≤
+
+k=1
+
+K
+X
+
+
+J(π ∗ , rk ) − J(π k , rk )
+
+k=1
+
+|
++ sup
+r∈R
+
+
+
+K
+X
+
+
+{z
+
+}
+
+I1
+
+K
+X
+
+
+
+L(π k , r) − L(π k , rk ) +λ
+Int(π ∗ ; τ E ) − Int(π k ; τ E ) ,
+
+k=1
+
+(C.12)
+
+k=1
+
+|
+
+{z
+
+|
+
+}
+
+I2
+
+{z
+I3
+
+}
+
+where I1 + I3 can be controlled by the classic analysis for optimistic policy optimization, I2 is the
+regret of an online learning algorithm for the reward function.
+From Lemma C.6,
+r
+e
+e H 2K
+I1 + I3 ≤ O(H
+log |A|/η + ηH 3 K/2) + O
+
+!
+H
+log(NF (ϵF ) dimT (F)
+N
+
+ p
+
+e H 2 K log |A| ,
+≤O
+
+(C.13)
+
+where the last inequality holds due to the value of η, N we are choosing.
+From Lemma C.7,
+e
+I2 ≤ O
+
+√
+
+
+H 2 K + ϵE K .
+
+Substituting (C.13) and (C.14) into (C.11),
+max
+r∈R
+
+K
+X
+
+ p
+
+e H 2 K log |A| + ϵE K .
+ℓ(π k , r) − ℓ(π ∗ , r) ≤ O
+
+k=1
+
+26
+
+(C.14)
+
+Published as a conference paper at ICLR 2025
+
+After we further substitute the value of hyperparameters into (C.11), we obtain
+
+
+
+e H 8/3 dimT (F) log Nϵ (F) 1/3 T 2/3 + ϵE T .
+Regret(T ) ≤ O
+F
+
+D
+
+AUXILIARY L EMMAS
+
+Lemma D.1 (Azuma-Hoeffding inequality). Let {xi }ni=1 be a martingale difference sequence with
+respect to a filtration {Gi } satisfying |xi | ≤ M for some constant M , xi is Gi+1 -measurable,
+E[xi |Gi ] = 0. Then for any 0 < δ < 1, with probability at least 1 − δ, we have
+n
+X
+
+xi ≤ M
+
+p
+
+2n log(1/δ).
+
+i=1
+
+Lemma D.2 (Self-normalized bound for scalar-valued martingales). Consider random variables
+(vn |n ∈ N) adapted to the filtration (Hn : n = 0, 1, ...). Let {ηi }∞
+i=1 be a sequence of real-valued
+random variables which is Hi+1 -measurable and is conditionally σ-sub-Gaussian. Then for an
+arbitrarily chosen λ > 0, for any δ > 0, with probability at least 1 − δ, it holds that
+n
+X
+i=1
+
+ϵ i vi ≤
+
+n
+λσ 2 X 2
+v + log(1/δ)/λ
+·
+2 i=1 i
+
+∀n ∈ N.
+
+Lemma D.3 (Regret bound of online gradient descent, Orabona 2019). Let V ⊆ Rd a non-empty
+closed convex set with diameter D, i.e., maxx,y∈V ∥x − y∥2 ≤ D. Let ℓ1 , · · · , ℓT an arbitrary
+sequence of convex functions ℓt : V → R differentiable in open sets containing V . Pick any x1 ∈ V
+and assume ηt+1 ≤ ηt , t = 1, . . . , T . Then, ∀u ∈ V , the following regret bound holds:
+T
+T
+X
+X
+D2
+ηt
+(ℓt (xt ) − ℓt (u)) ≤
++
+∥gt ∥22 .
+2η
+2
+T
+t=1
+t=1
+
+Moreover, if ηt is constant, i.e., ηt = η ∀t = 1, · · · , T , we have
+T
+X
+t=1
+
+(ℓt (xt ) − ℓt (u)) ≤
+
+T
+∥u − x1 ∥22
+ηX
+∥gt ∥22 .
++
+2η
+2 t=1
+
+Lemma D.4 (Lemma 9, Liu et al. 2023b). There exists an absolute constant c > 0 such that for any
+pair of policies π, π
+b satisfying π
+bh (a | s) ∝ πh (a | s) × exp(Lh (s, a)), where {Lh (s, a)}h∈[H] is a
+set of functions from S × A to [−1/H, 1/H], it holds that for any τH := (s1 , a1 , . . . , sH , aH ) ∈
+(S × A)H :
+Pπb (τH ) ≤ c × Pπ (τH ).
+
+27
+
+

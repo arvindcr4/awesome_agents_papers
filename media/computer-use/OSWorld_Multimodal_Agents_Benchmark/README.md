@@ -1,5 +1,5 @@
 # OSWorld Multimodal Agents Benchmark
-- Paper: [OSWorld_Multimodal_Agents_Benchmark.pdf](../../../papers/computer-use/OSWorld_Multimodal_Agents_Benchmark.pdf)
+- Paper: [OSWorld_Multimodal_Agents_Benchmark.pdf](../../../reinforcement_learning_papers/09_agentic_rl/OSWorld_Multimodal_Agents_Benchmark.pdf)
 
 ## Gemini diagrams
 

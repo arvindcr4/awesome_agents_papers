@@ -1,5 +1,5 @@
 # Dualformer Controllable Fast and Slow Thinking
-- Paper: [Dualformer_Controllable_Fast_and_Slow_Thinking.pdf](../../../papers/reasoning/Dualformer_Controllable_Fast_and_Slow_Thinking.pdf)
+- Paper: [Dualformer_Controllable_Fast_and_Slow_Thinking.pdf](../../../reinforcement_learning_papers/09_agentic_rl/Dualformer_Controllable_Fast_and_Slow_Thinking.pdf)
 
 ## Gemini diagrams
 

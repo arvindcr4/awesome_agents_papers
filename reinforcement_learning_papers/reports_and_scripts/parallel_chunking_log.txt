@@ -1,0 +1,228 @@
+process_paper () {
+	local txt="$1" 
+	local base=$(basename "$txt" .txt) 
+	if find "$OUTPUT_DIR" -name "${base}_summary.txt" -type f 2> /dev/null | grep -q .
+	then
+		return 0
+	fi
+	echo "Processing: $base" >&2
+	local size=$(wc -c < "$txt" 2>/dev/null | tr -d ' ') 
+	local size_kb=$((size / 1024)) 
+	if [ $size_kb -lt 100 ]
+	then
+		if output=$($AICHAT -m "$MODEL" --prompt "$CHUNK_PROMPT" -f "$txt" --no-stream 2>&1) 
+		then
+			cat=$(echo "$output" | sed -n 's/.*research.*method[^[:alnum:]]*\([0-9][0-9]_[^[:space:]]*\).*/\1/ip' | head -1 | tr -d '\r\n') 
+			if [[ "$cat" =~ ^0[1-8]_.* ]]
+			then
+				echo "$output" > "$OUTPUT_DIR/${cat}/${base}_summary.txt"
+				echo "✓ $base ($cat)" >&2
+				return 0
+			fi
+		fi
+		echo "✗ $base" >&2
+		return 1
+	fi
+	local total_lines=$(wc -l < "$txt" 2>/dev/null | tr -d ' ') 
+	local chunk_size=3000 
+	local num_chunks=$(( (total_lines + chunk_size - 1) / chunk_size )) 
+	local chunk_dir="/tmp/${base}_chunks_$$" 
+	rm -rf "$chunk_dir"
+	mkdir -p "$chunk_dir"
+	split -l $chunk_size "$txt" "$chunk_dir/chunk_"
+	local cat="" 
+	local title="Unknown" 
+	local arxiv_id="Unknown" 
+	local chunk_num=1 
+	for chunk in "$chunk_dir"/chunk_*
+	do
+		if output=$($AICHAT -m "$MODEL" --prompt "$CHUNK_PROMPT" -f "$chunk" --no-stream 2>&1) 
+		then
+			if [ $chunk_num -eq 1 ]
+			then
+				title=$(echo "$output" | grep -i "TITLE:" | head -1 | sed 's/.*TITLE:[[:space:]]*//' | sed 's/\*\*//g' | tr -d '\r\n') 
+				arxiv_id=$(echo "$output" | grep -i "ARXIV_ID:" | head -1 | sed 's/.*ARXIV_ID:[[:space:]]*//' | sed 's/\*\*//g' | tr -d '\r\n') 
+			fi
+			cat=$(echo "$output" | sed -n 's/.*research.*method[^[:alnum:]]*\([0-9][0-9]_[^[:space:]]*\).*/\1/ip' | head -1 | tr -d '\r\n') 
+			[[ "$cat" =~ ^0[1-8]_.* ]] && break
+		fi
+		((chunk_num++))
+	done
+	rm -rf "$chunk_dir"
+	if [[ "$cat" =~ ^0[1-8]_.* ]]
+	then
+		cat > "$OUTPUT_DIR/${cat}/${base}_summary.txt" <<SUMMARY
+PAPER: ${base}.pdf
+TITLE: ${title}
+ARXIV_ID: ${arxiv_id}
+RESEARCH_METHOD: $cat
+METHOD_DESCRIPTION: Extracted from chunked analysis due to large file size ($size_kb KB, $num_chunks chunks).
+KEY_CONTRIBUTIONS:
+- Paper processed using chunking strategy due to size constraints
+- Analyzed across $num_chunks sections to determine category
+- Full detailed analysis requires manual review
+SUMMARY
+		echo "✓ $base ($cat - chunked)" >&2
+		return 0
+	fi
+	echo "✗ $base (no category extracted)" >&2
+	return 1
+}
+=== Parallel Chunking Strategy ===
+
+Papers to process:
+  Small (<100KB): 21
+  Medium (100-150KB): 25
+  Large (>150KB): 19
+
+Processing small files (6 parallel)...
+Processing: 
+process_paper:10: no such file or directory: 
+Processing: 1901_09207
+Processing: 1802_05438
+Processing: 2109_04024
+Processing: 2108_02731
+Processing: 2109_11251
+✗ 
+✗ 2109_11251
+✗ 2109_04024
+✗ 1901_09207
+✗ 1802_05438
+✗ 2108_02731
+Processing: 2210_12712
+Processing: 2110_14555
+Processing: 2405_11778
+Processing: 2305_04819
+Processing: 2111_00213
+Processing: 2301_06889
+✗ 2110_14555
+✗ 2301_06889
+✗ 2305_04819
+✗ 2210_12712
+✗ 2111_00213
+✓ 2405_11778 (07_model_based_rl)
+Processing: 2406_09068
+Processing: 2409_03052
+Processing: 2405_19811
+Processing: 2406_13992
+Processing: 2410_07553
+Processing: 2502_07635
+✗ 2410_07553
+✗ 2409_03052
+✗ 2406_13992
+✗ 2502_07635
+✗ 2405_19811
+✓ 2406_09068 (02_rlhf_alignment)
+Processing: 2507_14850
+Processing: 2510_15414
+Processing: 2502_14496
+✗ 2502_14496
+✗ 2510_15414
+✗ 2507_14850
+Processing medium files (4 parallel)...
+Processing: 
+Processing: 2003_08839
+Processing: 2306_17052
+process_paper:10: no such file or directory: 
+Processing: 2309_04615
+✗ 
+✗ 2306_17052 (no category extracted)
+✗ 2309_04615 (no category extracted)
+✗ 2003_08839 (no category extracted)
+Processing: 2311_01753
+Processing: 2312_11084
+Processing: 2402_05757
+Processing: 2312_05162
+✗ 2312_05162 (no category extracted)
+✗ 2312_11084 (no category extracted)
+✗ 2402_05757 (no category extracted)
+✓ 2311_01753 (02_rlhf_alignment - chunked)
+Processing: 2403_11345
+Processing: 2405_00282
+Processing: 2407_10031
+Processing: 2408_01072
+✗ 2407_10031 (no category extracted)
+✓ 2405_00282 (01_core_methods - chunked)
+✓ 2408_01072 (03_multi_agent_rl - chunked)
+✓ 2403_11345 (02_rlhf_alignment - chunked)
+Processing: 2410_01954
+Processing: 2411_17636
+Processing: 2502_04773
+Processing: 2412_04233
+✗ 2411_17636 (no category extracted)
+✓ 2412_04233 (03_multi_agent_rl - chunked)
+✓ 2502_04773 (01_core_methods - chunked)
+✓ 2410_01954 (02_rlhf_alignment - chunked)
+Processing: 2504_15425
+Processing: 2504_16129
+Processing: 2502_10148
+Processing: 2504_21048
+✗ 2504_21048 (no category extracted)
+✓ 2502_10148 (07_model_based_rl - chunked)
+✓ 2504_16129 (03_multi_agent_rl - chunked)
+✓ 2504_15425 (05_safe_constrained_rl - chunked)
+Processing: 2507_10142
+Processing: 2505_10484
+Processing: 2508_20315
+Processing: 2509_03682
+✗ 2507_10142 (no category extracted)
+✗ 2508_20315 (no category extracted)
+✗ 2505_10484 (no category extracted)
+✗ 2509_03682 (no category extracted)
+Processing: 2509_23863
+✓ 2509_23863 (07_model_based_rl - chunked)
+Processing large files (2 parallel)...
+Processing: 1810_05587
+Processing: 
+process_paper:10: no such file or directory: 
+✗ 
+✗ 1810_05587 (no category extracted)
+Processing: 2011_00583
+Processing: 1911_10635
+✗ 1911_10635 (no category extracted)
+✓ 2011_00583 (02_rlhf_alignment - chunked)
+Processing: 2209_03859
+Processing: 2203_08975
+✗ 2209_03859 (no category extracted)
+✗ 2203_08975 (no category extracted)
+Processing: 2304_09870
+Processing: 2305_00684
+✓ 2305_00684 (02_rlhf_alignment - chunked)
+✓ 2304_09870 (03_multi_agent_rl - chunked)
+Processing: 2305_10091
+Processing: 2308_08705
+✗ 2305_10091 (no category extracted)
+✓ 2308_08705 (07_model_based_rl - chunked)
+Processing: 2312_01058
+Processing: 2312_10256
+✗ 2312_10256 (no category extracted)
+✗ 2312_01058 (no category extracted)
+Processing: 2405_06161
+Processing: 2404_10728
+✓ 2404_10728 (07_model_based_rl - chunked)
+✓ 2405_06161 (03_multi_agent_rl - chunked)
+Processing: 2408_09675
+Processing: 2408_14597
+✓ 2408_14597 (07_model_based_rl - chunked)
+✓ 2408_09675 (02_rlhf_alignment - chunked)
+Processing: 2412_00661
+Processing: 2503_13415
+✗ 2503_13415 (no category extracted)
+✓ 2412_00661 (02_rlhf_alignment - chunked)
+Processing: 2507_06278
+✓ 2507_06278 (02_rlhf_alignment - chunked)
+
+=== Complete ===
+Total processed: 235
+
+Category breakdown:
+  01_core_methods: 4
+  02_rlhf_alignment: 62
+  03_multi_agent_rl: 128
+  04_hierarchical_rl: 6
+  05_safe_constrained_rl: 3
+/Users/arvind/reinforcement_learning_papers/process_parallel_chunked_fixed.sh:182: no matches found: /Users/arvind/reinforcement_learning_papers/categorized/06_curiosity_exploration/*_summary.txt
+  06_curiosity_exploration: 0
+  07_model_based_rl: 32
+/Users/arvind/reinforcement_learning_papers/process_parallel_chunked_fixed.sh:182: no matches found: /Users/arvind/reinforcement_learning_papers/categorized/08_imitation_learning/*_summary.txt
+  08_imitation_learning: 0

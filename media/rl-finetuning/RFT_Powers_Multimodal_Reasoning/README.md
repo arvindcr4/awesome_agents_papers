@@ -1,5 +1,5 @@
 # RFT Powers Multimodal Reasoning
-- Paper: [RFT_Powers_Multimodal_Reasoning.pdf](../../../papers/rl-finetuning/RFT_Powers_Multimodal_Reasoning.pdf)
+- Paper: [RFT_Powers_Multimodal_Reasoning.pdf](../../../reinforcement_learning_papers/02_rlhf_alignment/RFT_Powers_Multimodal_Reasoning.pdf)
 
 ## Gemini diagrams
 

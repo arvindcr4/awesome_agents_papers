@@ -1,5 +1,5 @@
 # Premise Order Matters in Reasoning with Large Language Models
-- Paper: [Premise_Order_Matters_in_Reasoning_with_Large_Language_Models.pdf](../../../papers/reasoning/Premise_Order_Matters_in_Reasoning_with_Large_Language_Models.pdf)
+- Paper: [Premise_Order_Matters_in_Reasoning_with_Large_Language_Models.pdf](../../../reinforcement_learning_papers/09_agentic_rl/Premise_Order_Matters_in_Reasoning_with_Large_Language_Models.pdf)
 
 ## Gemini diagrams
 

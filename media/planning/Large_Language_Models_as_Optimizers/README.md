@@ -1,5 +1,5 @@
 # Large Language Models as Optimizers
-- Paper: [Large_Language_Models_as_Optimizers.pdf](../../../papers/planning/Large_Language_Models_as_Optimizers.pdf)
+- Paper: [Large_Language_Models_as_Optimizers.pdf](../../../reinforcement_learning_papers/09_agentic_rl/Large_Language_Models_as_Optimizers.pdf)
 
 ## Gemini diagrams
 

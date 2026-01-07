@@ -1,5 +1,5 @@
 # DeepSeek R1 Reasoning Models Faithful
-- Paper: [DeepSeek_R1_Reasoning_Models_Faithful.pdf](../../../papers/rl-finetuning/DeepSeek_R1_Reasoning_Models_Faithful.pdf)
+- Paper: [DeepSeek_R1_Reasoning_Models_Faithful.pdf](../../../reinforcement_learning_papers/02_rlhf_alignment/DeepSeek_R1_Reasoning_Models_Faithful.pdf)
 
 ## Gemini diagrams
 

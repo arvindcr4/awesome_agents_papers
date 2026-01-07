@@ -1,5 +1,5 @@
 # Grokked Transformers are Implicit Reasoners
-- Paper: [Grokked_Transformers_are_Implicit_Reasoners.pdf](../../../papers/reasoning/Grokked_Transformers_are_Implicit_Reasoners.pdf)
+- Paper: [Grokked_Transformers_are_Implicit_Reasoners.pdf](../../../reinforcement_learning_papers/09_agentic_rl/Grokked_Transformers_are_Implicit_Reasoners.pdf)
 
 ## Gemini diagrams
 

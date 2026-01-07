@@ -1,0 +1,5662 @@
+Deep Policy Gradient Methods Without Batch Updates,
+Target Networks, or Replay Buffers
+
+arXiv:2411.15370v2 [cs.LG] 21 May 2025
+
+Gautham Vasan12
+Fahim Shariar12
+1
+
+Mohamed Elsayed12
+Colin Bellinger3
+
+Alireza Azimi∗12
+
+Martha White124
+
+Jiamin He∗12
+
+A. Rupam Mahmood124
+
+University of Alberta 2 Amii 3 National Research Council of Canada 4 CIFAR Canada AI Chair
+{vasan, mohamedelsayed, sazimi, jiamin12, fshahri1}@ualberta.ca
+colin.bellinger@nrc-cnrc.gc.ca {whitem, armahmood}@ualberta.ca
+
+Abstract
+Modern deep policy gradient methods achieve effective performance on simulated
+robotic tasks, but they all require large replay buffers or expensive batch updates, or
+both, making them incompatible for real systems with resource-limited computers.
+We show that these methods fail catastrophically when limited to small replay
+buffers or during incremental learning, where updates only use the most recent
+sample without batch updates or a replay buffer. We propose a novel incremental deep policy gradient method — Action Value Gradient (AVG) and a set of
+normalization and scaling techniques to address the challenges of instability in
+incremental learning. On robotic simulation benchmarks, we show that AVG is the
+only incremental method that learns effectively, often achieving final performance
+comparable to batch policy gradient methods. This advancement enabled us to
+show for the first time effective deep reinforcement learning with real robots using
+only incremental updates, employing a robotic manipulator and a mobile robot.1
+
+1
+
+Introduction
+
+Real-time or online learning is essential for intelligent agents to adapt to unforeseen changes in
+dynamic environments. However, real-time learning faces substantial challenges in many real-world
+systems, such as robots, due to limited onboard computational resources and storage capacity (Hayes
+and Kanan 2022, Wang et al. 2023, Michieli and Ozay 2023). The system must process observations,
+compute and execute actions, and learn from experience, all while adhering to strict computational and
+time constraints (Yuan and Mahmood 2022). For example, the Mars rover faces stringent limitations
+on its computational capabilities and storage capacity (Verma et al. 2023), constraining the system’s
+ability to run computationally intensive algorithms onboard.
+Deep policy gradient methods have risen to prominence for their effectiveness in real-world control
+tasks, such as dexterous manipulation of a Rubik’s cube (Akkaya et al. 2019), quadruped dribbling of
+a soccer ball (Ji et al. 2023), and magnetic control of tokamak plasmas (Degrave et al. 2022). These
+methods are typically used offline, such as in simulations, as they have steep resource requirements due
+to their use of large storage of past experience in a replay buffer, target networks and computationally
+intensive batch updates for learning. As a result, these methods are ill-suited for on-device learning
+and generally challenging to use for real-time learning. To make these methods applicable to resourcelimited computers such as edge devices, a natural approach is to reduce the replay buffer size,
+eliminate target networks, and use smaller batch updates that meet the resource constraints.
+In Figure 1, we demonstrate using four MuJoCo tasks (Todorov et al. 2012) that the learning
+performance of batch policy gradient methods degrades substantially when the replay buffer size is
+1
+
+Code: https://github.com/gauthamvasan/avg
+Video: https://youtu.be/cwwuN6Hyew0
+
+∗
+
+Equal Contributions.
+
+38th Conference on Neural Information Processing Systems (NeurIPS 2024).
+
+Average Episodic Return
+
+6000
+
+Ant-v4
+
+HalfCheetah-v4
+
+3000
+
+Hopper-v4
+
+7500
+
+4000
+
+10000
+
+2000
+
+5000
+
+2000
+
+5000
+
+1000
+
+2500
+
+0
+
+0
+100 101 102 103 104 105 106
+
+Replay Buffer Size
+
+0
+
+100 101 102 103 104 105 106
+
+Replay Buffer Size
+SAC
+TD3
+
+PPO
+
+100 101 102 103 104 105 106
+
+Replay Buffer Size
+IAC
+AVG
+
+0
+
+Humanoid-v4
+
+100 101 102 103 104 105 106
+
+Replay Buffer Size
+
+Figure 1: Impact of reducing replay buffer size on SAC, PPO, and TD3: Decreasing the replay buffer
+size adversely affects learning. In contrast, AVG succeeds despite learning without a replay buffer, as
+shown by a “buffer size” of 1 in the plots. Each data point represents the mean episodic return over
+the final 100K steps, averaged across 30 runs. All methods were trained for 10M timesteps.
+reduced from their large default values. Specifically, Proximal Policy Optimization (PPO, Schulman
+et al., 2017), Soft Actor-Critic (SAC, Haarnoja et al., 2018), and Twin Delayed Deep Deterministic
+Policy Gradient (TD3, Fujimoto et al., 2018) fail catastrophically when their buffer size is reduced to
+1. This case corresponds to incremental learning, also known as streaming learning, where learning
+relies solely on the most recent sample, thus precluding the use of a replay buffer or batch updates.
+Incremental learning methods (Vijayakumar et al. 2005, Mahmood 2017) are computationally cheap
+and commonly used for real-time learning with linear function approximation (Degris et al. 2012,
+Modayil et al. 2014, Vasan and Pilarski 2017). However, incremental policy gradient methods, such
+as the incremental one-step actor-critic (IAC, Sutton and Barto 2018), are rarely used in applications
+of deep reinforcement learning (RL), except for a few works (e.g., Young and Tian 2019) that work
+in limited settings. The results in Fig. 1 indicate that their absence is due to their difficulty in learning
+effectively when used with deep neural networks. A robust incremental method that can leverage
+deep neural networks for learning in real-time remains an important open challenge.
+Incremental policy gradient methods, such as IAC, employ the likelihood ratio gradient (LG) estimator
+to estimate the gradient. An alternative approach to estimating the gradient, the reparameterization
+gradient (RG) estimator or the pathwise gradient estimator, has been observed to demonstrate lower
+variance in practice and can effectively handle continuous state and action spaces (Greensmith et al.
+2004, Fan et al. 2015, Lan et al. 2022). RG estimators have recently gained interest in RL due to their
+use in deep policy gradient methods such as TD3 and SAC. However, we currently lack incremental
+policy gradient methods that use the RG estimator.
+We present a novel incremental algorithm, called Action Value Gradient (AVG), which leverages
+deep neural networks and utilizes the RG estimator. While batch updates, replay buffers, and target
+networks are required to stabilize deep RL (D’Oro et al. 2022, Schwarzer et al. 2023), AVG instead
+incorporates normalization and scaling techniques to learn stably in the incremental setting (see Sec.
+3). In Sec. 4, we demonstrate that AVG achieves strong results across a wide range of benchmarks,
+being the only incremental algorithm to avoid catastrophic failure and learn effectively. In Sec. 5, we
+highlight the key challenges of incremental learning stemming from the large and noisy gradients
+inherent to the process. Through an ablation study, we discuss how normalization and scaling
+techniques help mitigate these issues for AVG and how they may salvage the performance of other
+methods, including IAC and an incremental variant of SAC. We also show that target networks hinder
+the learning performance of AVG in the incremental setting, with only aggressive updates of the
+target network towards the critic achieving results comparable to AVG, while their removal reduces
+memory demands and simplifies our algorithm. Finally, we apply AVG to real-time robot learning
+tasks, showcasing the first successful demonstration of an incremental deep RL method on real robots.
+
+2
+
+Background
+
+We consider the reinforcement learning setting where an agent-environment interaction is modeled
+as a continuous state and action space Markov Decision Process (MDP) (Sutton and Barto 2018).
+The state, action, and reward at timestep t ∈ (0, 1, 2, . . . ) is denoted by St ∈ S, At ∈ A and
+Rt+1 ∈ R respectively. We focus on the episodic setting where the goal of the agent is to maximize
+PT −t−1
+the discounted return Gt = k=0 γ k Rt+k+1 , where γ ∈ [0, 1] is a discount factor and T is
+the episode horizon. The agent selects an action At according to a policy π(·|St ) where π(a|s)
+2
+
+gives the probability of sampling an action a in state s.
+hPValue functions are defined
+i to be expected
+T −t−1 k
+total discounted rewards from timestep t: vπ (s) = Eπ
+γ Rt+k+1 |St = s and qπ (s, a) =
+k=0
+hP
+i
+T −t−1 k
+Eπ
+γ Rt+k+1 |St = s, At = a . Our goal is to find the weights θ of a parameterized policy
+k=0
+.
+πθ such that it maximizes the expected return starting from initial states: J(θ) = ES∼d0 [vπθ (S)].
+Parameterized policies are typically learned based on the gradients of J(θ). Since the true gradients
+∇θ J(θ) are typically not available, sample-based methods are commonly used for gradient estimation
+(Greensmith et al. 2004). Two existing theorems, known as policy gradient theorem and reparameterization gradient theorem provide ways of computing unbiased estimates of the gradient based on
+likelihood gradient (LG) estimators and reparameterization gradient (RG) estimators, respectively.
+LG estimators use the log-derivative technique to provide an unbiased gradient estimate (Glynn
+1990, Williams and Peng 1991): ∇θ Epθ [ϕ(X)] = EX∼pθ [ϕ(X)∇θ log pθ (X)], where pθ (x) is the
+probability density of x with parameters θ, and ϕ(x) is a scalar-valued function. In the context of the
+policy gradient theorem (Sutton et al. 1999), the LG estimator is utilized to adjust the parameters
+θ of a policy π, in expectation, in the direction of the gradient of the expected return: ∇θ J(θ) ∝
+ES∼dπ,γ ,A∼πθ [∇θ log πθ (A|S)qπθ (S, A)], where dπ,γ is the discounted stationary state distribution
+(Tosatto et al. 2022, Che et al. 2023). Many algorithms, including incremental ones like one-step
+actor-critic (IAC) and batch methods like A2C (Mnih et al. 2016), ACER (Wang et al. 2017) and
+PPO, are based on the policy gradient theorem and use the LG estimator.
+RG estimators, also known as pathwise gradient estimators (Greensmith et al. 2004, Parmas and
+Sugiyama 2021), leverage the knowledge of the underlying density pθ (x) by introducing a simpler, equivalent sampling procedure: X ∼ pθ (·) = fθ (ξ), ξ ∼ g(·), where ξ is sampled from
+a base distribution g(ξ) independent of θ, and fθ is a function that maps ξ to X. RG estimation can be written as ∇θ Epθ [ϕ(X)] = Eξ∼g [∇θ ϕ(fθ (ξ))]. RG estimators form the foundation
+of several batch RL algorithms, including Reward Policy Gradient (Lan et al. 2022), SAC and
+TD3. Lan et al. (2022) showed how RG estimation can be used to provide an alternative approach to unbiased estimation
+ of the policy gradient through the reparametrization gradient theorem:
+∇θ J(θ) ∝ ES∼dπ,γ ,A∼πθ ∇θ fθ (ξ; S)|ξ=hθ (A;S) ∇A qπθ (S, A) , where h is a inverse function of f .
+Deep reinforcement learning (RL) methods that use LG or RG estimators can often converge prematurely to sub-optimal policies (Mnih et al. 2016, Garg et al. 2022) or settle on a single output
+choice when multiple options could maximize the expected return (Williams and Peng 1991). This
+issue can be mitigated through entropy regularization, which promotes exploration and smoothens
+the optimization landscape under certain scenarios (Ahmed et al. 2019). This is accomplished by
+augmenting the reward function with an entropy term (i.e., E[− log pθ (X)]), encouraging the policy
+to maintain randomness in action selection. In
+hPthis approach, the value functions are redefined
+i
+T −t−1 k
+Ent
+as follows (Ziebart et al. 2010): vπ (s) = Eπ
+γ (Rt+k+1 + ηH(π(·|St+k ))) |St = s ,
+k=0
+
+
+and qπEnt (s, a) = Eπ Rt+1 + γvπEnt (St+1 )|St = s, At = a , where η is the entropy coefficient and
+R
+entropy H(π(·|s)) = − A π(a|s) log π(a|s)da.
+
+3
+
+The Action Value Gradient Method
+
+In this section, we introduce a novel algorithm called Action Value Gradient (AVG, see Alg. 1)2 ,
+outlining its key components and functionality and briefly discussing its theoretical foundations. We
+also discuss additional design choices that are crucial for robust and effective policy learning. AVG
+uses RG estimation, extended to incorporate entropy-augmented value functions:
+
+
+∇θ J(θ) ∝ ES∼dπ,γ ,A∼πθ ∇θ fθ (ξ; S)|ξ=hθ (A;S) ∇A (qπθ (S, A) − η log (πθ (A|S)) .
+(1)
+A brief derivation of this statement is provided in Appendix A.
+The AVG algorithm maintains a parameterized policy or actor πθ (A|S) to sample actions from
+a continuous distribution and critic Qϕ (S, A) that estimates the entropy-augmented action-value
+function. Both networks are parameterized using deep neural networks. AVG samples actions using
+the reparameterization technique (Kingma and Welling 2013), which allows the gradient to flow
+2
+
+We also share a quick and easy-to-use implementation in the form of a python notebook on Google Colab
+
+3
+
+through the sampled action Aθ to the critic Algorithm 1 Action Value Gradient (AVG)
+Qϕ (S, Aθ ), enabling the policy parameters
+Initialize γ, η, απ , αQ
+θ to be updated smoothly based on the critic.
+θ, ϕ with penultimate normalization
+We use the same action Aθ to update both
+n ← 0, µ ← 0, µ ← 0
+the actor and critic networks. First, the critic
+nδ ← [0, 0, 0], µδ ← [0, 0, 0], µδ ← [0, 0, 0]
+weights ϕ are updated using the temporal
+difference error; αQ > 0 is its step size.
+for however many episodes do
+This step also involves sampling another acInitialize S (first state of the episode)
+tion A′ that is used to estimate the bootstrap
+S, n, µ, µ, _ ← Normalize(S, n, µ, µ)
+target. Then, the actor updates its weights θ
+G←0
+based on Qϕ (S, Aθ ) and the sample entropy
+while S is not terminal do
+− log (πθ (Aθ |S)); απ > 0 is the step size
+of the actor, and η ≥ 0 is used to weight the
+Aθ = fθ (ϵ; S) where ϵ ∼ N (0, 1)
+sample entropy term.
+Take action Aθ , observe S ′ , R
+S ′ , n, µ, µ, _ ← Normalize(S ′ , n, µ, µ)
+A careful reader may notice the similarity
+between the learning updates of SAC and
+σδ , nδ , µδ , µδ ←
+AVG. However, SAC is an off-policy batch
+ScaleTDError(R, γ, ∅, nδ , µδ , µδ )
+method, while AVG is an incremental onG←G+R
+policy method. SAC samples actions and
+A′ ∼ πθ (·|S ′ )
+stores them in a replay buffer. Unlike AVG,
+δ ← R + γ(Qϕ (S ′ , A′ ) − η log πθ (A′ |S ′ ))
+SAC does not reuse the same action to backpropagate gradients for the actor. Addition−Qϕ (S, Aθ )
+ally, AVG is simpler than SAC, as it avoids
+δ ← δ/σδ
+the use of double Q-learning or target Qϕ ← ϕ + αQ δ ∇ϕ Qϕ (S, a)|a=Aθ
+networks (Van Hasselt et al. 2016) for staθ ← θ + απ ∇θ (Qϕ (S, Aθ ) − η log πθ (Aθ |S))
+bility. For comparison, we provide the pseuS ← S′
+docode of an incremental variant of SAC,
+termed SAC-1 (Alg. 5).
+end while
+σδ , nδ , µδ , µδ ←
+We also use orthogonal initialization (Saxe
+et al. 2013), entropy regularization, a
+ScaleTDError(R, 0, G, nδ , µδ , µδ )
+squashed normal policy, as is standard in
+end for
+off-policy actor-critic methods like DDPG,
+TD3, and SAC. To enforce action bounds,
+a squashed normal policy passes the sampled action from a normal distribution through the tanh
+function to obtain actions in the range [−1, 1]: Aθ = fθ (ξ; S) = tanh(µθ (S) + ξσθ (S)) where
+ξ ∼ N (0, 1). This parameterization is particularly useful for entropy-regularized RL objectives. In
+an unbounded normal policy, the standard deviation σ has a monotonic relationship with entropy,
+such that maximizing the entropy often drives σ to large values, approximating a uniform random
+policy. Conversely, for a squashed univariate normal distribution, entropy increases with σ only up to
+a certain threshold, beyond which it begins to decrease (see Fig. 2).
+
+Entropy
+
+Incremental methods can be particularly prone to issues stemming
+2
+from large and noisy gradients. While off-policy batch methods
+such as SAC and TD3 benefit from many compute-intensive gradient
+1
+updates, which effectively smooth out noisy gradients, incremen0
+tal methods require alternative strategies to manage large gradient
+updates. Hence, we focus on additional incremental normalization
+1
+and scaling methods that help stabilize the learning process. These
+0
+1
+2
+3
+Standard Deviation ( )
+techniques can be seamlessly incorporated into our algorithm with
+Normal
+Squashed Normal
+minimal computational overhead. Sec. 5 provides an in-depth discussion that motivates and comprehensively analyzes the impact of the
+normalization and scaling techniques used in our proposed algorithm. Figure 2: Effect of σ on entropy of normal and squashed
+Stable learning in AVG is achieved by normalizing inputs and hid- normal distribution
+den unit activations, as well as scaling the temporal difference error.
+Below, we outline three normalization and scaling techniques used in AVG (more details in Sec. 5).
+Observation normalization We normalize the observation, which is a commonly used technique
+in on-policy RL algorithms such as PPO to attain good learning performance. We use an online
+
+4
+
+algorithm to estimate the sample mean and variance
+Algorithm 2 Normalize (Welford 1962)
+(Welford 1962, See Alg. 2). Sample running mean and
+variance are effective for stationary and transient distri- Require: Input X, n, µ, µ
+butions, enabling continuous updates that adapt to timen←n+1
+varying characteristics efficiently. In contrast, weighted
+δ ←X −µ
+means emphasize recent observations, making them ideal
+µ ← µ + δ/n
+when recent data points hold greater importance. We use
+δ2 ← X − µ
+the sample running mean since standard continuous conµ
+← µ + δ · δ2
+trol benchmarks exhibit transient distributions for policies.
+σ ← µ/n
+Penultimate Normalization Bjorck et al. (2022) suggest
+Xnorm ← δ2 /σ
+normalizing features (ψθ (S)) of the penultimate layer of
+return Xnorm , n, µ, µ, σ
+a neural network. These features are normalized into a
+unit vector ψ̂θ (S) = ψθ (S)/∥ψθ (S)∥2 , with gradients
+computed through the feature normalization. Unlike layer normalization (Ba et al. 2016), no mean
+subtraction is performed.
+Scaling Temporal Difference Errors Algorithm 3 ScaleTDError
+Schaul et al. (2021) proposed replacing
+raw temporal difference (TD) errors δt Require: Input R, γ, G, nδ , µδ , µδ
+by a scaled version: δ̄t := δt /σδ where
+nR , nγ , nG ← nδ ; µR , µγ , µG ← µδ
+σδ2 := V[R] + V[γ]E[G2 ]. This technique
+µR , µγ , µG ← µδ
+▷ µG : Sample mean of G2
+can handle varying episodic return scales
+_, nR , µR , µR , σR ← Normalize(R, nR , µR , µR )
+across domains, tasks, and stages of learn_, nγ , µγ , µγ , σγ ← Normalize(γ, nγ , µγ , µγ )
+ing. It is also algorithm-agnostic and does
+if G is not ∅ then
+not require access to the internal states of
+an agent. In batch RL methods with a re_, nG , µG , µG , _ ← Normalize(G2 , nG , µG , µG )
+play buffer, σδ can be computed offline
+end if
+by aggregating the discounted return from
+if nG > 1qthen
+each state across stored episodes. However,
+2 + µ σ2
+σδ ← σR
+G γ
+in the incremental setting, where past data
+cannot be reused, this approach is infeaelse
+sible. Consequently, we only use the cuσδ ← 1
+mulative return starting from the episode’s
+end if
+initial state (See Alg. 3). We also use samnδ ← [nR , nγ , nG ]; µδ ← [µR , µγ , µG ]
+2
+ple mean and variance of R, γ and G to
+µδ ← [µR , µγ , µG ]
+calculate σδ .
+return σδ , nδ , µδ , µδ
+On the Theory of AVG In Appendix I,
+we provide a convergence analysis for the
+reparameterization gradient estimator, which the AVG estimator (1) builds upon. The analysis fixes
+errors in the convergence result for deterministic policies from Xiong et al. (2022) and extends it to the
+general case of reparameterized policies. To the best of our knowledge, this is the first convergence
+result for model-free methods that use the reparameterization gradient estimator. Furthermore, a
+detailed discussion of related theoretical results is also included in Appendix A.
+
+4
+
+AVG on Simulated Benchmark Tasks
+
+In this section, we demonstrate the superior performance of AVG compared to existing incremental
+learning methods. Specifically, we compare AVG against an existing incremental method — IAC,
+which has demonstrated strong performance with linear function approximation in real-time learning
+across both simulated and real-world robot tasks (Degris et al. 2012, Vasan 2017, Vasan and Pilarski
+2018). The implementation details can be found in Appendix E. Additionally, we evaluate AVG
+against incremental adaptations of SAC and TD3, both of which, like AVG, use RG estimation.
+SAC and TD3 rely on large replay buffers to store and replay past experiences, a crucial feature
+for tackling challenging benchmark tasks. To adapt these batch-based methods to an incremental
+setting, we set the minibatch and replay buffer size to 1, allowing them to process each experience
+as it is encountered. We refer to these incremental variants as SAC-1 and TD3-1, respectively. We
+use off-the-shelf implementations of TD3 and SAC provided by CleanRL (Huang et al. 2022b). The
+choice of hyper-parameters and full learning curves can be found in the Appendix F.
+5
+
+Average Episodic Return
+
+Ant-v4
+3000
+
+8000
+
+2000
+
+2000
+
+6000
+
+1500
+
+1000
+
+4000
+
+1000
+
+0
+
+2000
+
+500
+
+1000
+
+0
+2M
+
+4M
+
+6M
+
+Timesteps
+
+8M
+
+10M
+
+0
+0
+
+2M
+
+Humanoid-v4
+
+5000
+
+6M
+
+Timesteps
+
+8M
+
+10M
+
+Walker2d-v4
+
+0
+
+3000
+
+400
+
+500
+
+200
+
+0
+
+0
+4M
+
+6M
+
+Timesteps
+
+8M
+
+0
+
+2M
+
+dog_stand
+
+4M
+
+6M
+
+Timesteps
+
+8M
+
+10M
+
+dog_trot
+
+0
+0
+
+2M
+
+4M
+
+6M
+
+Timesteps
+
+8M
+
+10M
+
+AVG
+
+60
+
+300
+
+40
+
+200
+
+20
+
+100
+
+0
+
+2M
+
+4M
+
+6M
+
+Timesteps
+
+8M
+
+10M
+
+8M
+
+10M
+
+dog_walk
+
+400
+
+80
+
+200
+
+0
+
+500
+
+100
+
+400
+
+10M
+
+finger_spin
+
+600
+
+120
+
+600
+
+8M
+
+0
+
+10M
+
+800
+
+6M
+
+Timesteps
+
+600
+
+1000
+2M
+
+4M
+
+800
+
+1000
+
+2000
+
+2M
+
+1000
+
+1500
+
+0
+
+Average Episodic Return
+
+4M
+
+2000
+
+4000
+
+Hopper-v4
+
+2500
+
+10000
+
+0
+
+Average Episodic Return
+
+HalfCheetah-v4
+
+4000
+
+0
+0
+
+2M
+
+4M
+
+6M
+
+Timesteps
+
+SAC-1
+
+IAC
+
+8M
+
+10M
+
+0
+
+2M
+
+SAC
+
+4M
+
+6M
+
+Timesteps
+
+TD3-1
+
+Figure 3: AVG on Gymnasium and DeepMind Control Suite tasks. Each solid learning curve is
+an average of 30 independent runs. The shaded regions represent a 95% confidence interval of
+the bootstrap distribution. Note that SAC refers to SAC with a replay buffer size of 1M . The
+corresponding dashed line represents the mean performance over the final 10K steps of training.
+In Figure 3, we present the learning performance of AVG in comparison to IAC, SAC-1, and TD3-1.
+For reference, we also include the final performance of SAC with large replay buffers and default
+parameters, trained for 1M timesteps, indicated by the gray dashed line (referred to as SAC). Notably,
+AVG is the only incremental algorithm that learns effectively, achieving performance comparable
+to SAC in Gymnasium (Towers et al. 2023) environments and surpassing it in the Dog benchmarks
+from DeepMind Control Suite (Tassa et al. 2018). Nauman et al. (2024) suggests that non-default
+regularization, such as layer normalization is essential for SAC to perform well in the Dog domain.
+
+Sparse reward environments can present additional challenges, often
+increasing both the difficulty and the time required for learning
+(Vasan et al. 2024). Hence, we also evaluate our algorithms on
+sparse reward environments from the DeepMind Control Suite. We
+use one unique hyper-parameter configuration per algorithm across
+four environments: finger_spin, dog_stand, dog_walk, dog_trot (see
+Fig. 3). Further details are provided in Appendix F.4.
+
+Average Episodic Return
+
+To optimize the hyperparameters for each method—AVG, IAC, SAC-1, and TD3-1, we conducted a
+random search, which is more efficient for high-dimensional search spaces than grid search (Bergstra
+and Bengio 2012). We evaluated 300 different hyperparameter configurations, each trained with
+10 random seeds for 2M timesteps on five challenging continuous control environments: Ant-v4,
+Hopper-v4, HalfCheetah-v4, Humanoid-v4 and Walker2d-v4. Each configuration was ranked based
+on its average undiscounted return per run, with the top-performing configuration selected for each
+environment. Using the best configuration, we then conducted longer training runs of 10 million
+timesteps with 30 random seeds.
+−100
+
+−200
+
+−300
+
+−400
+
+−500
+IAC
+AVG
+−600
+
+0
+
+100000
+
+200000
+
+300000
+
+400000
+
+500000
+
+600000
+
+700000
+
+Time Steps
+
+Learning From Pixels We use the visual reacher task to ensure that Figure 4: AVG and IAC on the
+AVG can be used with visual RL. In this task, the agent uses vision Visual Reacher task
+and proprioception to reach a goal. As shown in Fig. 4, AVG consistently outperforms IAC, which
+exhibits high variance and struggles to learn. Task details are provided in Appendix B.3.
+6
+
+5
+
+Stabilizing Incremental Policy Gradient Methods
+
+In this section, we first highlight some issues with incremental policy gradient methods, which arise
+from the large and noisy gradients inherent to the setting. We perform a comprehensive ablation study
+to assess the effects of observation normalization, penultimate normalization, and TD error scaling—
+individually and in combination—on the performance of AVG. Additionally, we demonstrate how
+other incremental methods, such as IAC and SAC-1, may also benefit from normalization and scaling.
+5.1
+
+Instability Without Normalization
+
+Humanoid-v4
+
+4000
+3000
+2000
+1000
+0
+0
+
+200K
+
+400K
+
+600K
+
+Timesteps
+
+800K
+
+1M
+
+Critic Gradient Norm
+
+Humanoid-v4
+
+5000
+
+Actor Gradient Norm
+
+Average Episodic Return
+
+Deep RL can suffer from instability, often manifesting as high variance (Bjorck et al. 2022), reduced
+expressivity of neural networks over time (Nikishin et al. 2022, Sokar et al. 2023), or even a gradual
+drop in performance (Dohare et al. 2023, 2024, Elsayed and Mahmood 2024, Elsayed et al. 2024a),
+primarily due to the non-stationarity of data streams. Recently, Lyle et al. (2024) identified another
+common challenge that may induce difficulty in learning: large regression target scales. For instance,
+while training on Humanoid-v4, bootstrapped targets can range from −20 to 8000. Consequently, the
+critic faces the difficult task of accurately representing values that fluctuate widely across different
+stages of training. This can lead to excessively large TD errors, destabilizing the learning process.
+
+103
+102
+101
+100
+0
+
+AVG
+
+200K
+
+400K
+
+600K
+
+Timesteps
+
+AVG
+
+800K
+
+1M
+
+Humanoid-v4
+
+1012
+1010
+108
+106
+104
+102
+100
+10 2
+0
+
+200K
+
+400K
+
+600K
+
+Timesteps
+
+800K
+
+1M
+
+SAC
+
+Figure 5: The gradient norm of the critic and actor networks for AVG and SAC, along with their
+average episodic returns. AVG− denotes AVG without any normalization or scaling applied. The
+solid lines represent the average, whereas the light lines represent the values for the individual runs.
+Note that the y-axis in the plots for actor and critic gradient norms is displayed on a logarithmic scale.
+Figure 5 illustrates a failure condition that can arise due to large regression target scale, high variance,
+and reduced expressivity — challenges that are particularly problematic for incremental methods.
+Here, we compare a successful SAC training run to a failed AVG run without normalization or scaling
+techniques (termed AV G− ). While batch RL methods like SAC manage large, noisy gradients
+by smoothing them out through batch updates and improving stability with target Q-networks,
+incremental methods like AVG are more susceptible to numerically unstable updates, which can lead
+to failure or divergence in learning. AVG− exemplifies this issue by demonstrating excessively large
+gradient norms, particularly in the critic network, resulting in erratic gradients that hinder learning.
+Building on these insights, we hypothesize that stable learning in AVG can be achieved by balancing
+update magnitudes across time steps and episodes, reducing the influence of outlier experiences.
+This can be partly accomplished by centering and scaling the inputs, normalizing the hidden unit
+activations, and scaling the TD errors. Andrychowicz et al. (2021) show that appropriately scaling
+the observations can help improve performance, likely since it helps improve learning dynamics
+(Sutton 1988, Schraudolph 2002, LeCun et al. 2002). Scaling both the targets (e.g., by scaling the
+rewards, Engstrom et al. 2019) and the observations (e.g., normalization, Andrychowicz et al. 2021) is
+a well-established strategy that has shown success in widely used algorithms such as PPO (Schulman
+et al. 2017), helping improve its performance and stability (Rao et al. 2020, Huang et al. 2022a).
+5.2
+
+Disentangling the Effects of Normalization and Scaling
+
+A combination of three techniques consistently achieves good performance for AVG: 1) TD error
+scaling (Schaul et al. 2021) to resolve the issue of large bootstrapped target scale (termed scaled_td, 2)
+observation normalization to maintain good learning dynamics (termed norm_obs, and 3) penultimate
+normalization to reduce instability and improve plasticity (termed pnorm, Bjorck et al. 2022), similar
+7
+
+Average Episodic Return
+
+Ant-v4
+3000
+2000
+1000
+
+2M
+
+4M
+
+6M
+
+Timesteps
+
+8M
+
+4000
+
+1500
+
+3000
+
+1000
+
+2000
+
+500
+
+1000
+
+none
+pnorm
+
+0
+
+10M
+
+0
+
+2M
+
+norm_obs
+scaled_td
+
+4M
+
+6M
+
+Timesteps
+
+Humanoid-v4
+
+5000
+
+2000
+
+0
+0
+
+Hopper-v4
+
+2500
+
+4000
+
+8M
+
+10M
+
+0
+
+0
+
+norm_obs + pnorm
+norm_obs + scaled_td
+
+2M
+
+4M
+
+6M
+
+Timesteps
+
+8M
+
+10M
+
+pnorm + scaled_td
+AVG
+
+Figure 6: Ablation study of normalization and scaling techniques used with AVG. We plot the learning
+curves of the best hyperparameter configurations for each task variant. Each solid learning curve is
+an average of 30 independent runs. The shaded regions represent a 95% confidence interval.
+to layer normalization (Lyle et al. 2023). We selected Welford’s online algorithm for normalizing
+observations due to its unbiased nature and its ability to maintain statistics across the entire data
+stream. In preliminary experiments, weighted methods that favored more recent samples did not
+perform well. Schaul et al. (2021) illustrate the risks associated with clipping or normalizing rewards,
+which led us to adopt their straightforward approach of scaling the temporal difference error with a
+multiplicative factor. Additionally, we favored pnorm over layer normalization since it performed
+better empirically in our experiments (see Fig. 13, App. B.2). It is worth noting that alternative
+normalization techniques could potentially achieve similar, if not superior, outcomes. Our focus here
+is to emphasize the importance of normalization and scaling issues and propose easy-to-use solutions.
+
+Average Episodic Return
+
+We conduct an ablation study to evaluate the impact of the three techniques—norm_obs, pnorm
+and scaled_td—on the performance of AVG. We assess these techniques both individually and in
+combination, resulting in a total of 8 variants. The learning curves for the best seed obtained via our
+random search procedure (detailed in App. F.4) for each variant are shown in Fig. 6. The combination
+of all three techniques achieves the best overall performance.
+Ant-v4
+
+5000
+
+8000
+
+2000
+
+3000
+
+6000
+
+1500
+
+2000
+
+4000
+
+1000
+
+1000
+
+2000
+
+500
+
+0
+
+0
+
+Average Episodic Return
+
+2M
+
+4M
+
+6M
+
+Timesteps
+
+8M
+
+10M
+
+0
+0
+
+2M
+
+Humanoid-v4
+
+5000
+
+4M
+
+6M
+
+Timesteps
+
+8M
+
+10M
+
+Walker2d-v4
+
+400
+
+1000
+
+500
+
+200
+
+0
+
+0
+0
+
+2M
+
+4M
+
+6M
+
+Timesteps
+
+8M
+
+dog_stand
+
+0
+
+2M
+
+4M
+
+6M
+
+Timesteps
+
+8M
+
+10M
+
+400
+300
+100
+
+0
+
+0
+0
+
+2M
+
+4M
+
+6M
+
+Timesteps
+
+8M
+
+AVG
+
+10M
+
+0
+
+2M
+
+4M
+
+6M
+
+Timesteps
+
+8M
+
+10M
+
+8M
+
+10M
+
+dog_run
+
+200
+
+200
+
+10M
+
+175
+150
+125
+100
+75
+50
+25
+0
+
+500
+
+400
+
+8M
+
+finger_spin
+
+dog_walk
+
+600
+
+600
+
+6M
+
+Timesteps
+
+0
+
+10M
+
+800
+
+4M
+
+600
+
+1000
+
+2000
+
+2M
+
+800
+
+1500
+
+3000
+
+0
+1000
+
+2000
+
+4000
+
+Hopper-v4
+
+2500
+
+4000
+
+0
+
+Average Episodic Return
+
+HalfCheetah-v4
+
+10000
+
+0
+
+IAC +
+
+2M
+
+4M
+
+6M
+
+Timesteps
+
+SAC-1 +
+
+8M
+
+10M
+
+SAC
+
+0
+
+2M
+
+4M
+
+6M
+
+Timesteps
+
+TD3-1 +
+
+Figure 7: Impact of normalization and scaling on IAC, SAC-1 and TD3-1. Suffix “+” denotes each
+algorithm plus normalization and scaling.
+8
+
+In Fig. 7, we assess the impact of our proposed normalization and scaling techniques on IAC, SAC-1
+and TD3-1. While IAC+ performs in a mostly comparable manner to AVG, SAC-1+ shows inconsistent performance, performing well in only two tasks but failing or even diverging in environments
+such as Hopper-v4 and Walker2d-v4. TD3-1+ fails to learn in all environments.
+5.3
+
+AVG with Target Q-Networks
+
+Average Episodic Return
+
+Ant-v4
+
+Hopper-v4
+
+2500
+
+4000
+
+Humanoid-v4
+5000
+
+2000
+
+3000
+
+4000
+
+1500
+
+3000
+
+2000
+
+1000
+
+2000
+
+1000
+
+500
+
+1000
+
+0
+
+0
+0
+
+2M
+
+4M
+
+6M
+
+Timesteps
+
+8M
+
+0
+
+10M
+
+0
+0
+
+0.005
+
+2M
+
+4M
+
+6M
+
+Timesteps
+
+0.1
+
+0.5
+
+8M
+
+10M
+
+0
+
+2M
+
+0.9
+
+1 (AVG)
+
+4M
+
+6M
+
+Timesteps
+
+8M
+
+10M
+
+Figure 8: Impact of target Q network on AVG for different values of τ , which represents the Polyak
+averaging coefficient. Here, τ = 0 corresponds to a fixed target network, and τ = 1 indicates that the
+current Q-network and the target network are identical, that is, not using a target network.
+Target networks are commonly used in off-policy batch methods to stabilize learning (Mnih et al.
+2015). By using a separate network that is updated less frequently, target networks introduce a delay
+in the propagation of value estimates. This delay can be advantageous in batch methods with large
+replay buffers, as it helps maintain a more stable target (Lillicrap et al. 2016, Fujimoto et al. 2018).
+However, this delayed update can slow down learning in online RL (Kim et al. 2019).
+In Figure 8, we evaluate the impact of using target Q-networks with AVG. Similar to SAC, we
+use Polyak averaging to update the target Q-network: ϕtarget = (1 − τ ) · ϕtarget + τ · ϕ. We run an
+experiment varying τ between [0, 1], where τ = 0 denotes a fixed target network and τ = 1 implies
+the target network is identical to the current Q-network. We detail the pseudocode in Appendix C (see
+Alg. 4). The results show no benefit to using target networks, with only large values of τ performing
+comparably to AVG. Additionally, removing target networks reduces memory usage and simplifies
+the implementation of our algorithm.
+
+6
+
+AVG with Resource-Constrained Robot Learning
+
+On-device learning enables mobile
+robots to continuously improve, adapt
+to new data, and handle unforeseen situations, which is crucial for tasks like
+autonomous navigation and object recognition. Commercial robots, such as the
+iRobot Roomba, often use onboard devices with limited memory, ranging from
+microcontrollers with kilobytes of memory to more powerful edge devices like
+the Jetson Nano 4GB. Leveraging these
+(a) UR-Reacher-2
+(b) Create-Mover
+onboard edge devices can reduce the
+Figure 9: Robot Tasks
+need for constant server communication,
+enhancing reliability in areas with limited
+connectivity. Storing large replay buffers on these devices is infeasible, necessitating computationally
+efficient, incremental algorithms.
+To demonstrate the effectiveness of our proposed AVG algorithm for on-device incremental deep
+RL, we utilize the UR-Reacher-2 and Create-Mover tasks, as developed by Mahmood et al. (2018).
+We use two robots: UR5 robotic arm and iRobot Create 2, a hobbyist version of Roomba. In the
+UR-Reacher-2 task, the agent aims to reach arbitrary target positions on a 2D plane (Fig. 9a). This
+9
+
+task is a real-world adaptation of the Mujoco Reacher task. In the Create-Mover task, the agent’s
+goal is to move the robot forward as fast as possible within an enclosed arena. A representative
+image of the desired behavior is shown in Fig. 9b. Each run requires slightly over two hours of robot
+experience time on both robots. In our learning curves (see Fig. 10), the dark lines represent the
+average over five runs for AVG, whereas the light lines represent the values for the individual runs.
+Details of the setup can be found in Appendix H.
+The performance of AVG and resource-constrained SAC on URReacher-2 is shown in Fig. 10 (top). We term the resourceconstrained variants of SAC as SAC-1 and SAC-100, where the
+suffix indicates both the replay buffer capacity and mini-batch
+size used during training. Note that SAC-1 is incremental, but
+SAC-100 is still a batch method with limited memory resources.
+In these experiments, both SAC-100 and SAC-1 struggle significantly, failing to learn under the imposed memory limitations.
+In contrast, AVG demonstrates robust performance, efficiently
+utilizing limited memory to achieve fast and superior learning.
+On the mobile robot task Create-Mover, the learning system
+is limited to onboard computation using a Jetson Nano 4GB.
+This introduces additional compute constraints in terms of action
+sampling time and learning update time. Our implementation
+requires 5ms to sample an action for both AVG and SAC-1. On
+the other hand, for learning updates, AVG requires only about
+37ms per update, compared to SAC-1’s 67ms. A batch update
+for SAC would exceed the action cycle time (150ms) for CreateMover. Hence, we compare AVG only against SAC-1. The
+learning curves on the Create-Mover task in Fig. 10 (bottom)
+Figure 10: Learning curves on
+clearly show AVG’s superior performance, while SAC-1 fails to
+Real Robot Tasks
+learn any meaningful policy. This highlights AVG’s efficiency
+and suitability for real-time learning in resource-constrained environments. Our work demonstrates
+for the first time effective real-robot learning with incremental deep reinforcement learning methods3 .
+
+7
+
+Conclusion
+
+This work revives incremental policy gradient methods for deep RL and offers significant computational advantages over standard batch methods for onboard robotic applications. We introduced
+a novel incremental algorithm called Action Value Gradient (AVG) and demonstrated its ability to
+consistently outperform other incremental and resource-constrained batch methods across a range of
+benchmark tasks. Crucially, we showed how normalization and scaling techniques enable AVG to
+achieve robust learning performance even on challenging high-dimensional control problems. Finally,
+we presented the first successful application of an incremental deep RL method learning control
+policies from scratch directly on physical robots—a robotic manipulator and a mobile robot. Overall,
+our proposed AVG algorithm opens up new possibilities for deploying deep RL with limited onboard
+computational resources of robots, enabling lifelong learning and adaptation in the real world.
+Limitations and Future Work The main limitation of our approach is low sample efficiency
+compared to batch methods. Developing AVG with eligibility traces (Singh and Sutton 1996, van
+Hasselt et al. 2021) is a natural future direction to generalize our one-step AVG and possibly improve
+its sample efficiency. We also find that AVG can be sensitive to the choice of hyper-parameters. A
+valuable extension would be stabilizing the algorithm to perform well across environments using the
+same hyper-parameters. Our work is limited to continuous action space, but it can also be extended to
+discrete action spaces following Jang et al. (2017), which we leave to future work. Additionally, AVG
+omits discounting in the state distribution, which is common and further biases the update but can be
+addressed with the correction proposed by Che et al. (2023). Finally, we acknowledge a concurrent
+work by Elsayed et al. (2024b), which stabilizes existing incremental methods like AC(λ) and Q(λ),
+except for reparameterization policy gradient methods. The robustness of AVG may potentially
+improve by replacing Adam with an optimizer for adaptive step sizes proposed in that work.
+3
+
+Video Demo: https://youtu.be/cwwuN6Hyew0
+
+10
+
+Societal Impact Our paper presents academic findings, but the proposed algorithm offers new opportunities for deploying deep reinforcement learning on robots with limited computational resources.
+This enables lifelong learning and real-world adaptation, advancing the development of more capable
+autonomous agents. While our contributions themselves do not cause negative societal effects, we
+advise the community to reflect on possible consequences as they expand upon our research.
+Acknowledgements We thank all reviewers for their insightful comments and suggested experiments,
+which strengthened both the content and presentation of our paper. We would also like to thank
+Shibhansh Dohare, Kris De Asis, Homayoon Farrahi, Varshini Prakash, and Shivam Garg for their
+helpful discussions. We are also appreciative of the computing resources provided by the Digital
+Research Alliance of Canada and the financial support from the CCAI Chairs program, the RLAI
+laboratory, Amii, and NSERC of Canada.
+
+References
+Ahmed, Z., Le Roux, N., Norouzi, M., and Schuurmans, D. (2019). Understanding the impact of
+entropy on policy optimization. In International conference on machine learning, pages 151–160.
+PMLR.
+Akkaya, I., Andrychowicz, M., Chociej, M., Litwin, M., McGrew, B., Petron, A., Paino, A., Plappert,
+M., Powell, G., Ribas, R., et al. (2019). Solving rubik’s cube with a robot hand. arXiv preprint
+arXiv:1910.07113.
+Andrychowicz, M., Raichuk, A., Stańczyk, P., Orsini, M., Girgin, S., Marinier, R., Hussenot, L.,
+Geist, M., Pietquin, O., Michalski, M., et al. (2021). What matters in on-policy reinforcement
+learning? a large-scale empirical study. In International Conference on Learning Representations.
+Ba, J. L., Kiros, J. R., and Hinton, G. E. (2016).
+arXiv:1607.06450.
+
+Layer normalization.
+
+arXiv preprint
+
+Bergstra, J. and Bengio, Y. (2012). Random search for hyper-parameter optimization. Journal of
+machine learning research, 13(2).
+Bhandari, J., Russo, D., and Singal, R. (2018). A finite time analysis of temporal difference learning
+with linear function approximation. In Conference on Learning Theory (COLT).
+Bhatnagar, S., Ghavamzadeh, M., Lee, M., and Sutton, R. S. (2007). Incremental natural actor-critic
+algorithms. Advances in neural information processing systems, 20.
+Bjorck, J., Gomes, C. P., and Weinberger, K. Q. (2022). Is high variance unavoidable in rl? a case
+study in continuous control. International Conference on Learning Representations.
+Cen, S., Cheng, C., Chen, Y., Wei, Y., and Chi, Y. (2022). Fast global convergence of natural policy
+gradient methods with entropy regularization. Operations Research, 70(4):2563–2578.
+Che, F., Vasan, G., and Mahmood, A. R. (2023). Correcting discount-factor mismatch in on-policy
+policy gradient methods. In International Conference on Machine Learning, pages 4218–4240.
+PMLR.
+Degrave, J., Felici, F., Buchli, J., Neunert, M., Tracey, B., Carpanese, F., Ewalds, T., Hafner, R.,
+Abdolmaleki, A., de Las Casas, D., et al. (2022). Magnetic control of tokamak plasmas through
+deep reinforcement learning. Nature, 602(7897):414–419.
+Degris, T., Pilarski, P. M., and Sutton, R. S. (2012). Model-free reinforcement learning with
+continuous action in practice. In 2012 American control conference (ACC), pages 2177–2182.
+IEEE.
+Ding, Y., Zhang, J., and Lavaei, J. (2021). Beyond exact gradients: Convergence of stochastic
+soft-max policy gradient methods with entropy regularization. arXiv preprint arXiv:2110.10117.
+Dohare, S., Hernandez-Garcia, J. F., Lan, Q., Rahman, P., Mahmood, A. R., and Sutton, R. S. (2024).
+Loss of plasticity in deep continual learning. Nature, 632(8026):768–774.
+11
+
+Dohare, S., Lan, Q., and Mahmood, A. R. (2023). Overcoming policy collapse in deep reinforcement
+learning. In Sixteenth European Workshop on Reinforcement Learning.
+D’Oro, P., Schwarzer, M., Nikishin, E., Bacon, P.-L., Bellemare, M. G., and Courville, A. (2022).
+Sample-efficient reinforcement learning by breaking the replay ratio barrier. In Deep Reinforcement
+Learning Workshop NeurIPS 2022.
+Elsayed, M., Lan, Q., Lyle, C., and Mahmood, A. R. (2024a). Weight clipping for deep continual and
+reinforcement learning. Reinforcement Learning Journal, 5:2198–2217.
+Elsayed, M. and Mahmood, A. R. (2024). Addressing loss of plasticity and catastrophic forgetting in
+continual learning. In International Conference on Learning Representations.
+Elsayed, M., Vasan, G., and Mahmood, A. R. (2024b). Streaming deep reinforcement learning finally
+works. arXiv preprint arXiv:2410.14606.
+Engstrom, L., Ilyas, A., Santurkar, S., Tsipras, D., Janoos, F., Rudolph, L., and Madry, A. (2019).
+Implementation matters in deep rl: A case study on ppo and trpo. In International conference on
+learning representations.
+Fan, K., Wang, Z., Beck, J., Kwok, J., and Heller, K. A. (2015). Fast second order stochastic
+backpropagation for variational inference. Advances in Neural Information Processing Systems,
+28.
+Fujimoto, S., Hoof, H., and Meger, D. (2018). Addressing function approximation error in actor-critic
+methods. In International conference on machine learning, pages 1587–1596. PMLR.
+Garg, S., Tosatto, S., Pan, Y., White, M., and Mahmood, R. (2022). An alternate policy gradient
+estimator for softmax policies. In International Conference on Artificial Intelligence and Statistics,
+pages 6630–6689. PMLR.
+Glynn, P. W. (1990). Likelihood ratio gradient estimation for stochastic systems. Communications of
+the ACM, 33(10):75–84.
+Greensmith, E., Bartlett, P. L., and Baxter, J. (2004). Variance reduction techniques for gradient
+estimates in reinforcement learning. Journal of Machine Learning Research, 5(9).
+Haarnoja, T., Zhou, A., Abbeel, P., and Levine, S. (2018). Soft actor-critic: Off-policy maximum
+entropy deep reinforcement learning with a stochastic actor. In International conference on
+machine learning, pages 1861–1870. PMLR.
+Hayes, T. L. and Kanan, C. (2022). Online continual learning for embedded devices. In Conference
+on Lifelong Learning Agents, pages 744–766. PMLR.
+Huang, S., Dossa, R. F. J., Raffin, A., Kanervisto, A., and Wang, W. (2022a). The 37 implementation
+details of proximal policy optimization. The ICLR Blog Track 2023.
+Huang, S., Dossa, R. F. J., Ye, C., Braga, J., Chakraborty, D., Mehta, K., and AraÃšjo, J. G. (2022b).
+Cleanrl: High-quality single-file implementations of deep reinforcement learning algorithms.
+Journal of Machine Learning Research, 23(274):1–18.
+Jang, E., Gu, S., and Poole, B. (2017). Categorical reparameterization with gumbel-softmax. In
+International Conference on Learning Representations.
+Ji, Y., Margolis, G. B., and Agrawal, P. (2023). Dribblebot: Dynamic legged manipulation in the wild.
+In 2023 IEEE International Conference on Robotics and Automation (ICRA), pages 5155–5162.
+IEEE.
+Kim, S., Asadi, K., Littman, M., and Konidaris, G. (2019). Deepmellow: removing the need for
+a target network in deep q-learning. In Proceedings of the twenty eighth international joint
+conference on artificial intelligence.
+Kingma, D. P. and Welling, M. (2013).
+arXiv:1312.6114.
+
+Auto-encoding variational bayes.
+
+12
+
+arXiv preprint
+
+Lan, Q., Pan, Y., Luo, J., and Mahmood, A. R. (2023). Memory-efficient reinforcement learning with
+value-based knowledge consolidation. In Transactions on Machine Learning Research.
+Lan, Q., Tosatto, S., Farrahi, H., and Mahmood, A. R. (2022). Model-free policy learning with
+reward gradients. In Proceedings of The 25th International Conference on Artificial Intelligence
+and Statistics (AISTATS).
+LeCun, Y., Bottou, L., Orr, G. B., and Müller, K.-R. (2002). Efficient backprop. In Neural networks:
+Tricks of the trade, pages 9–50. Springer.
+Levine, S., Finn, C., Darrell, T., and Abbeel, P. (2016). End-to-end training of deep visuomotor
+policies. Journal of Machine Learning Research, 17(39):1–40.
+Lillicrap, T. P., Hunt, J. J., Pritzel, A., Heess, N., Erez, T., Tassa, Y., Silver, D., and Wierstra,
+D. (2016). Continuous control with deep reinforcement learning. International Conference on
+Learning Representations.
+Lyle, C., Zheng, Z., Khetarpal, K., van Hasselt, H., Pascanu, R., Martens, J., and Dabney, W. (2024).
+Disentangling the causes of plasticity loss in neural networks. arXiv preprint arXiv:2402.18762.
+Lyle, C., Zheng, Z., Nikishin, E., Pires, B. A., Pascanu, R., and Dabney, W. (2023). Understanding
+plasticity in neural networks. In International Conference on Machine Learning, pages 23190–
+23211. PMLR.
+Mahmood, A. (2017). Incremental Off-policy Reinforcement Learning Algorithms. PhD thesis,
+University of Alberta.
+Mahmood, A. R., Korenkevych, D., Vasan, G., Ma, W., and Bergstra, J. (2018). Benchmarking
+reinforcement learning algorithms on real-world robots. In Conference on robot learning, pages
+561–591. PMLR.
+Mei, J., Xiao, C., Szepesvari, C., and Schuurmans, D. (2020). On the global convergence rates
+of softmax policy gradient methods. In International conference on machine learning, pages
+6820–6829. PMLR.
+Michieli, U. and Ozay, M. (2023). Online continual learning for robust indoor object recognition.
+In 2023 IEEE/RSJ International Conference on Intelligent Robots and Systems (IROS), pages
+3849–3856. IEEE.
+Mitrophanov, A. Y. (2005). Sensitivity and convergence of uniformly ergodic Markov chains. Journal
+of Applied Probability, 42(4):1003–1014.
+Mnih, V., Badia, A. P., Mirza, M., Graves, A., Lillicrap, T., Harley, T., Silver, D., and Kavukcuoglu,
+K. (2016). Asynchronous methods for deep reinforcement learning. In International conference
+on machine learning, pages 1928–1937. PMLR.
+Mnih, V., Kavukcuoglu, K., Silver, D., Rusu, A. A., Veness, J., Bellemare, M. G., Graves, A.,
+Riedmiller, M., Fidjeland, A. K., Ostrovski, G., et al. (2015). Human-level control through deep
+reinforcement learning. nature, 518(7540):529–533.
+Modayil, J., White, A., and Sutton, R. S. (2014). Multi-timescale nexting in a reinforcement learning
+robot. Adaptive Behavior, 22(2):146–160.
+Nauman, M., Bortkiewicz, M., Miłoś, P., Trzcinski, T., Ostaszewski, M., and Cygan, M. (2024).
+Overestimation, overfitting, and plasticity in actor-critic: the bitter lesson of reinforcement learning.
+In Forty-first International Conference on Machine Learning.
+Nikishin, E., Schwarzer, M., D’Oro, P., Bacon, P.-L., and Courville, A. (2022). The primacy bias in
+deep reinforcement learning. In International conference on machine learning, pages 16828–16847.
+PMLR.
+Nota, C. and Thomas, P. S. (2020). Is the policy gradient a gradient? In Proceedings of the 19th
+International Conference on Autonomous Agents and MultiAgent Systems, pages 939–947.
+13
+
+Parmas, P. and Sugiyama, M. (2021). A unified view of likelihood ratio and reparameterization
+gradients. In International Conference on Artificial Intelligence and Statistics, pages 4078–4086.
+PMLR.
+Rao, N., Aljalbout, E., Sauer, A., and Haddadin, S. (2020). How to make deep rl work in practice.
+arXiv preprint arXiv:2010.13083.
+Saxe, A. M., McClelland, J. L., and Ganguli, S. (2013). Exact solutions to the nonlinear dynamics of
+learning in deep linear neural networks. arXiv preprint arXiv:1312.6120.
+Schaul, T., Ostrovski, G., Kemaev, I., and Borsa, D. (2021). Return-based scaling: Yet another
+normalisation trick for deep rl. arXiv preprint arXiv:2105.05347.
+Schraudolph, N. N. (2002). Centering neural network gradient factors. In Neural Networks: Tricks of
+the Trade, pages 207–226. Springer.
+Schulman, J., Wolski, F., Dhariwal, P., Radford, A., and Klimov, O. (2017). Proximal policy
+optimization algorithms. arXiv preprint arXiv:1707.06347.
+Schwarzer, M., Ceron, J. S. O., Courville, A., Bellemare, M. G., Agarwal, R., and Castro, P. S. (2023).
+Bigger, better, faster: Human-level atari with human-level efficiency. In International Conference
+on Machine Learning, pages 30365–30380. PMLR.
+Seyde, T., Gilitschenski, I., Schwarting, W., Stellato, B., Riedmiller, M., Wulfmeier, M., and Rus,
+D. (2021). Is bang-bang control all you need? solving continuous control with bernoulli policies.
+Advances in Neural Information Processing Systems, 34:27209–27221.
+Silver, D., Lever, G., Heess, N., Degris, T., Wierstra, D., and Riedmiller, M. (2014). Deterministic
+policy gradient algorithms. In International conference on machine learning, pages 387–395. Pmlr.
+Singh, S. P. and Sutton, R. S. (1996). Reinforcement learning with replacing eligibility traces.
+Machine learning, 22(1):123–158.
+Sokar, G., Agarwal, R., Castro, P. S., and Evci, U. (2023). The dormant neuron phenomenon in deep
+reinforcement learning. In International Conference on Machine Learning, pages 32145–32168.
+PMLR.
+Sutton, R. (1988). Nadaline: A normalized adaptive linear element that learns efficiently. GTE
+TR88-509.4), GTE Laboratories Incorporated.
+Sutton, R. S. and Barto, A. G. (2018). Reinforcement learning: An introduction. MIT press.
+Sutton, R. S., McAllester, D., Singh, S., and Mansour, Y. (1999). Policy gradient methods for
+reinforcement learning with function approximation. Advances in neural information processing
+systems, 12.
+Tassa, Y., Doron, Y., Muldal, A., Erez, T., Li, Y., Casas, D. d. L., Budden, D., Abdolmaleki, A.,
+Merel, J., Lefrancq, A., et al. (2018). Deepmind control suite. arXiv preprint arXiv:1801.00690.
+Todorov, E., Erez, T., and Tassa, Y. (2012). Mujoco: A physics engine for model-based control.
+In 2012 IEEE/RSJ international conference on intelligent robots and systems, pages 5026–5033.
+IEEE.
+Tosatto, S., Patterson, A., White, M., and Mahmood, R. (2022). A temporal-difference approach to
+policy gradient estimation. In International Conference on Machine Learning, pages 21609–21632.
+PMLR.
+Towers, M., Terry, J. K., Kwiatkowski, A., Balis, J. U., Cola, G. d., Deleu, T., Goulão, M., Kallinteris,
+A., KG, A., Krimmel, M., Perez-Vicente, R., Pierré, A., Schulhoff, S., Tai, J. J., Shen, A. T. J., and
+Younis, O. G. (2023). Gymnasium.
+Tsitsiklis, J. N. and Van Roy, B. (1997). An analysis of temporal-diffference learning with function
+approximation. IEEE Transactions on Automatic Control, 42(5):674 – 690.
+14
+
+Tu, S. and Recht, B. (2019). The gap between model-based and model-free methods on the linear
+quadratic regulator: An asymptotic viewpoint. In Conference on Learning Theory (COLT), pages
+3036–3083.
+Van Hasselt, H., Guez, A., and Silver, D. (2016). Deep reinforcement learning with double q-learning.
+In Proceedings of the AAAI Conference on Artificial Intelligence, volume 30. AAAI Press.
+van Hasselt, H., Madjiheurem, S., Hessel, M., Silver, D., Barreto, A., and Borsa, D. (2021). Expected
+eligibility traces. In Proceedings of the AAAI Conference on Artificial Intelligence, volume 35,
+pages 9997–10005.
+Vasan, G. (2017). Teaching a powered prosthetic arm with an intact arm using reinforcement learning.
+MSc Thesis, University of Alberta.
+Vasan, G. and Pilarski, P. M. (2017). Learning from demonstration: Teaching a myoelectric prosthesis
+with an intact limb via reinforcement learning. In 2017 International Conference on Rehabilitation
+Robotics (ICORR), pages 1457–1464. IEEE.
+Vasan, G. and Pilarski, P. M. (2018). Context-aware learning from demonstration: Using camera data
+to support the synergistic control of a multi-joint prosthetic arm. In 2018 7th IEEE International
+Conference on Biomedical Robotics and Biomechatronics (Biorob), pages 199–206. IEEE.
+Vasan, G., Wang, Y., Shahriar, F., Bergstra, J., Jägersand, M., and Mahmood, A. R. (2024). Revisiting
+sparse rewards for goal-reaching reinforcement learning. Reinforcement Learning Journal, 4:1841–
+1854.
+Verma, V., Maimone, M. W., Gaines, D. M., Francis, R., Estlin, T. A., Kuhn, S. R., Rabideau,
+G. R., Chien, S. A., McHenry, M. M., Graser, E. J., et al. (2023). Autonomous robotics is driving
+Perseverance rover’s progress on Mars. Science Robotics, 8(80):eadi3099.
+Vijayakumar, S., D’souza, A., and Schaal, S. (2005). Incremental online learning in high dimensions.
+Neural computation, 17(12):2602–2634.
+Wang, Y., Vasan, G., and Mahmood, A. R. (2023). Real-time reinforcement learning for vision-based
+robotics utilizing local and remote computers. In 2023 IEEE International Conference on Robotics
+and Automation (ICRA), pages 9435–9441. IEEE.
+Wang, Z., Bapst, V., Heess, N., Mnih, V., Munos, R., Kavukcuoglu, K., and De Freitas, N. (2017).
+Sample efficient actor-critic with experience replay. International Conference on Learning Representations.
+Welford, B. (1962). Note on a method for calculating corrected sums of squares and products.
+Technometrics, 4(3):419–420.
+Williams, R. J. and Peng, J. (1991). Function optimization using connectionist reinforcement learning
+algorithms. Connection Science, 3(3):241–268.
+Xiong, H., Xu, T., Liang, Y., and Zhang, W. (2021). Non-asymptotic convergence of adam-type reinforcement learning algorithms under markovian sampling. In Proceedings of the AAAI Conference
+on Artificial Intelligence, volume 35, pages 10460–10468.
+Xiong, H., Xu, T., Zhao, L., Liang, Y., and Zhang, W. (2022). Deterministic policy gradient:
+Convergence analysis. In Uncertainty in Artificial Intelligence, pages 2159–2169. PMLR.
+Young, K. and Tian, T. (2019). Minatar: An atari-inspired testbed for thorough and reproducible
+reinforcement learning experiments. arXiv preprint arXiv:1903.03176.
+Yuan, Y. and Mahmood, A. R. (2022). Asynchronous reinforcement learning for real-time control
+of physical robots. In 2022 International Conference on Robotics and Automation (ICRA), pages
+5546–5552. IEEE.
+Zhang, B. and Sennrich, R. (2019). Root mean square layer normalization. Advances in Neural
+Information Processing Systems, 32.
+Ziebart, B. D., Bagnell, J. A., and Dey, A. K. (2010). Modeling interaction via the principle of
+maximum causal entropy. In International conference on machine learning. PMLR.
+15
+
+A
+
+Theoretical Foundations
+
+A.1
+
+Reparameterization Policy Gradient Theorem
+
+Please refer to the Theorems and Proofs section of Lan et al. (2022) for detailed proofs. We only
+provide a short proof sketch for reference.
+Theorem
+1 (Reparameterization Policy Gradient Theorem). Given an MDP and a policy objective
+. R
+J(θ) = d0 (s)vπθ (s)ds. The reparameterization policy gradient is given as
+
+
+∇θ J(θ) = ES∼dπ,γ ,A∼πθ ∇θ fθ (ξ; S)|ξ=hθ (A;S) ∇A qπθ (S, A) .
+Proof.
+Z
+∇θ J(θ) = ∇θ
+
+d0 (s)vπθ (s)ds
+Z
+
+Z
+= ∇θ d0 (s)
+dπ,γ (s)πθ (a|s)qπθ (s, a)da ds ds
+Z
+
+Z
+= ∇θ d0 (s)
+dπ,γ (s)p(ξ)qπθ (s, fθ (ξ; s))dξ ds ds
+(by reparameterization)
+Z
+
+Z
+= d0 (s)
+dπ,γ (s)p(ξ)∇θ qπθ (s, fθ (ξ; s))dξ ds ds
+Z
+
+Z
+= d0 (s)
+dπ,γ (s)p(ξ)∇θ fθ (ξ; s)∇a qπθ (s, a)|a=fθ (ξ;s) dξ ds ds (using chain rule)
+Z
+∝ dπ,γ (s)p(ξ)∇θ fθ (ξ; s)∇a qπθ (s, a)|a=fθ (ξ;s) dξ ds
+Z
+= dπ,γ (s)πθ (a|s)∇θ fθ (ξ; s)|ξ=hθ (a;s) ∇a qπθ (s, a)da ds
+(by back substitution)
+
+
+= ES∼dπ,γ ,A∼πθ ∇θ fθ (ξ; S)|ξ=hθ (A;S) ∇A qπθ (S, A) .
+
+A.2
+
+Action Value Gradient Theorem
+
+Theorem
+2 (Action Value Gradient Theorem). Given an MDP and a policy objective
+. R
+J(θ) = d0 (s)vπEnt
+(s)ds. The action value gradient is given as
+θ
+
+
+∇θ J(θ) = ES∼dπ,γ ,A∼πθ ∇θ fθ (ξ; S)|ξ=hθ (A;S) ∇A (qπθ (S, A) − η log πθ (A|S)) .
+Proof.
+Z
+
+d0 (s)vπEnt
+(s)ds
+θ
+Z
+
+Z
+= ∇θ d0 (s)
+dπ,γ (s)πθ (a|s)(qπθ (s, a) − ηH(·|s))da ds ds
+Z
+
+Z
+= ∇θ d0 (s)
+dπ,γ (s)πθ (a|s)(qπθ (s, a) − η log π(a|s))da ds ds
+Z
+
+Z
+= ∇θ d0 (s)
+dπ,γ (s)p(ξ)(qπθ (s, fθ (ξ; s)) − η log π(fθ (ξ; s)|s))dξ ds ds
+Z
+
+Z
+= d0 (s)
+dπ,γ (s)p(ξ)∇θ (qπθ (s, fθ (ξ; s)) − η log π(fθ (ξ; s)|s)) dξ ds ds
+Z
+
+Z
+= d0 (s)
+dπ,γ (s)p(ξ)∇θ fθ (ξ; s)∇a (qπθ (s, a) − η log π(fθ (ξ; s)|s))|a=fθ (ξ;s) dξ ds ds
+Z
+∝ dπ,γ (s)p(ξ)∇θ fθ (ξ; s)∇a (qπθ (s, a) − η log π(fθ (ξ; s)|s))|a=fθ (ξ;s) dξ ds
+
+∇θ J(θ) = ∇θ
+
+16
+
+Z
+dπ,γ (s)πθ (a|s)(∇θ fθ (ξ; s)|ξ=hθ (a;s) ∇a (qπθ (s, a) − η log π(a|s))da ds
+
+
+= ES∼dπ,γ ,A∼πθ ∇θ fθ (ξ; S)|ξ=hθ (A;S) ∇A (qπθ (S, A) − η log π(A|S)) .
+
+=
+
+We get the third line since ∀s, the term log π(A|s) is unbiased estimate of H(·|s) so we can write
+H(·|s) = E[log π(A|s)], ∀s.
+
+A.3
+
+Related Theoretical Works
+
+We review relevant theoretical works on the convergence of actor-critic algorithms. To the best of
+our knowledge, there is no existing proof for the exact action value gradient (AVG) algorithm used
+in our paper. However, there are studies of algorithms similar to ours that provide some theoretical
+justification.
+We begin by considering the case without entropy regularization. Xiong et al. (2022) examine the
+convergence of deterministic policy gradient (DPG; Silver et al. 2014) algorithms. Their online
+version of DPG employs i.i.d. samples of states from the stationary distribution, which differs
+from the single stream of experience examined in our study. In addition, DPG uses a deterministic
+policy with a fixed exploration noise distribution, whereas AVG also learns the exploration parameter.
+Nevertheless, this work is one of the closest to ours, as it uses the reparameterized gradient estimator
+in the update. Besides, Bhatnagar et al. (2007) provide convergence guarantees for incremental
+actor-critic algorithms. However, their results are based on the likelihood-ratio estimator, and thus
+applicable to incremental actor critic but not AVG.
+When considering the entropy-regularized objective, most studies assume the presence of the true
+gradient (Mei et al. 2020, Cen et al. 2022), with the exception of Ding et al. (2021), which provides an
+asymptotic convergence guarantee to stationary points for entropy-regularized actor-critic algorithms.
+However, their algorithm differs from AVG in two aspects: First, the samples used in their update
+are from the discounted stationary distribution; second, they also use the likelihood-ratio estimator.
+Nonetheless, their work offers valuable insights into the theoretical underpinnings of the entropyregularized objective.
+Despite these differences, it is reasonable to hypothesize that our algorithm converges, given the
+convergence guarantees for algorithms closely related to ours. The techniques from these works
+may be useful for demonstrating the convergence of our algorithm. For example, we can extend
+the convergence analysis for deterministic policies in Xiong et al. (2022) to the general case of
+reparameterized policies, as shown in Appendix I.
+
+17
+
+B
+
+AVG Design Choices
+
+Orthogonal Initialization helps improve the training stability and convergence speed of neural
+networks by ensuring that the weight matrix has orthogonal properties, thereby preserving the
+variance of the input through the layers (Saxe et al. 2013).
+
+Entropy Regularization Given that batch methods such as SAC
+benefit from entropy regularization, we consider variants of AVG with
+and without entropy regularization. There are two types of entropy
+terms that can be added to the actor, and critic updates: 1) distribution
+entropy: H(π(·|S)), and 2) sample entropy: − log(π(A|S)). We
+use sample entropy as our final choice in Algorithm 1, which utilizes
+sample entropy for the regularization of both the actor and Q-network.
+
+Density
+
+Squashed Normal Policy SAC utilizes a squashed Normal, where the unbounded samples from a
+Normal distribution are passed through the tanh function to obtain bounded actions in the range
+[−1, 1] : Aθ = fθ (ϵ; S) = tanh(µθ (S) + σθ (S)ϵ) where ϵ ∼ N (0, 1). This parameterization is
+useful for entropy-regularized RL objectives, which maximizes the return based on the maximumentropy formulation. With an unbounded Normal policy, the standard deviation σ has a linear
+relationship with entropy. Hence, learning to maximize entropy can often result in very large values
+of σ, potentially leading to behavior resembling a uniform random policy. In contrast, for a univariate
+squashed Normal with zero mean, increasing σ does not continuously maximize the entropy; it
+decreases after a certain threshold.
+4.0
+3.5
+3.0
+2.5
+2.0
+1.5
+1.0
+0.5
+0.0
+
+Estimated PDF of
+Squashed Normal Distribution
+0.1
+0.5
+1
+1.5
+
+1.00 0.75 0.50 0.25 0.00 0.25 0.50 0.75 1.00
+
+Value
+
+Simply increasing σ does not maximize the entropy of a univariate
+squashed Normal with zero mean (see Fig. 2). Increasing σ results in Figure 11: Squashed Normal
+the probability density function (PDF) of a squashed Normal concen- Distribution PDF
+trating at the edges (Fig. 11), resembling bang-bang control (Seyde
+et al. 2021).
+B.1
+
+Relative Performance of Different Hyperparameter Configurations in Random Search
+
+Area Under the Curve
+(n=10)
+
+Ant-v4
+
+Hopper-v4
+
+1600
+1400
+1200
+1000
+800
+600
+400
+
+Humanoid-v4
+1800
+1600
+1400
+1200
+1000
+800
+600
+400
+
+1000
+800
+600
+400
+0
+
+5
+10
+15
+20
+Hyper-parameter configurations
+
+none
+pnorm
+
+25
+
+0
+
+norm_obs
+scaled_td
+
+5
+
+10
+15
+20
+Hyper-parameter configurations
+
+25
+
+norm_obs + pnorm
+norm_obs + scaled_td
+
+0
+
+5
+
+10
+15
+20
+Hyper-parameter configurations
+
+25
+
+pnorm + scaled_td
+AVG
+
+Figure 12: Hyperparameter Evaluation via Random Search. Scatter plot of the performance of the
+best 25 out of 300 unique hyper-parameter configurations. Note that the y-axis represents the area
+under the curve for 2M timesteps, not an evaluation of the final policy for 10M timesteps.
+We conduct an ablation study to evaluate the impact of these techniques on the performance of AVG.
+We assess these techniques both individually and in combination, resulting in a total of 8 variants.
+AVG, without any normalization or scaling techniques, serves as the baseline. We test 300 unique
+hyper-parameter configurations for each variant, trained for 2M timesteps with 10 random seeds on
+the Ant-v4, Hopper-v4 and Humanoid-v4 environments. We then calculate the average undiscounted
+return for each run (i.e., the area under the curve [AUC]) and average the AUC across all 10 seeds.
+We plot the top 30 hyper-parameter configurations in Fig. 12 as a scatter plot, ranked in descending
+order from highest to lowest mean AUC. Each plot point represents the mean AUC, and the thin lines
+denote the standard error. Note that a point for a hyper-parameter configuration is plotted only if the
+configuration runs without diverging on all 10 random seeds. These plots can be indicative of which
+variant would obtain the highest average episodic return when trained for longer and the robustness
+of the variants to the choice of hyper-parameters.
+18
+
+The Effect of Other Network Normalization Techniques
+
+Average Episodic Return
+
+Ant-v4
+
+Hopper-v4
+
+2500
+
+4000
+
+Humanoid-v4
+Average Episodic Return
+
+B.2
+
+2000
+
+3000
+
+1500
+
+2000
+
+1000
+
+1000
+
+500
+
+0
+0
+
+2M
+
+4M
+
+6M
+
+Timesteps
+
+AVG
+layer norm
+
+8M
+
+10M
+
+0
+
+2M
+
+4M
+
+6M
+
+Timesteps
+
+8M
+
+10M
+
+5000
+4000
+3000
+2000
+1000
+0
+
+norm_obs + layer norm + scaled_td
+norm_obs + RMS norm + scaled_td
+
+0
+
+2M
+
+4M
+
+6M
+
+Timesteps
+
+8M
+
+10M
+
+RMS norm
+
+Figure 13: Comparing different neural network feature normalizations — penultimate normalization
+(pnorm) against layer normalization (layer norm) and RMS normalization (RMS norm)
+When comparing different neural network feature normalizations, penultimate normalization (pnorm),
+layer normalization (layer norm), and RMS normalization (RMS norm) each offer unique advantages
+depending on the architecture and task. Layer normalization (Ba et al. 2016) is widely used for
+stabilizing hidden layer pre-activations by normalizing across features within each layer, which helps
+models converge consistently across a variety of tasks. Root mean square layer normalization, on the
+other hand, normalizes based on the root mean square of pre-activations, providing stability without
+fully normalizing the mean, which can be beneficial in reducing variance across diverse input patterns
+(Zhang and Sennrich 2019). Penultimate normlazation focuses on the penultimate layer activations,
+normalizing just before the final layer, which allows it to maintain high-quality feature representations
+critical for downstream performance (Bjorck et al. 2022).
+Figure 13 indicates that AVG, which uses penultimate normalization, consistently outperform those
+with other normalizations. We use the random search procedure described earlier to identify the
+hyperparameter configuration for each variant.
+
+B.3
+
+Vision-Based Learning using AVG
+
+This task involves moving a two-degree-of-freedom (DoF) planar arm’s fingertip to a random spherical
+target on a 2D plane. It includes two sub-tasks (easy, hard), that vary in target and fingertip sizes. It is
+an adaptation of the dm_control reacher Tassa et al. (2018).
+For the non-visual task, observations include the fingertip’s position, speed, and the fingertip-to-target
+vector. For the visual task, the fingertip-to-target vector is removed, and the agent receives three
+consecutive stacked images of size 84 × 84 × 3.
+The action space consists of torques applied to the two joints, scaled from [−1, −1] to [1, 1]. The
+reward function is modified to give −1 per step, encouraging shorter episodes. After each timeout,
+the fingertip is reset to a random location while the target remains unchanged. Episodes terminate
+when the fingertip reaches the target within its size, and upon termination, the agent is reset and a
+new target is randomly generated for the next episode.
+Convolutional Neural Network Architecture Our convolutional neural network (CNN) architecture
+comprises four convolutional layers, followed by a combination of a Spatial Softmax layer and
+proprioception information. The convolutional layers have 32 output channels and 3x3 kernels, with
+stride of two for the first three layers and one for the last layer. After these convolutional layers, we
+use spatial-softmax (Levine et al. 2016) to convert the encoding vector into soft coordinates to track
+the target more precisely. Additionally, proprioception information is concatenated with the spatial
+softmax features. The exact number of parameters depends on the input data size and task-specific
+requirements. The two MLP layers have 512 hidden units each. All the layers except the final output
+layer use ReLU activation.
+19
+
+C
+
+AVG with Target Q Networks
+
+Algorithm 4 Action Value Gradient With Target Q-Networks
+Initialize γ, η, απ , αQ , τ
+θ, ϕ with penultimate normalization
+n ← 0, µ ← 0, µ ← 0
+nδ ← [0, 0, 0], µδ ← [0, 0, 0], µδ ← [0, 0, 0]
+ϕ̄ ← ϕ (target Q-network)
+for however many episodes do
+Initialize S (first state of the episode)
+S, n, µ, µ, _ ← Normalize(S, n, µ, µ)
+G←0
+while S is not terminal do
+Aθ = fθ (ϵ; S) where ϵ ∼ N (0, 1)
+Take action Aθ , observe S ′ , R
+S ′ , n, µ, µ, _ ← Normalize(S ′ , n, µ, µ)
+σδ , nδ , µδ , µδ ← ScaleTDError(R, γ, ∅, nδ , µδ , µδ )
+G←G+R
+A′ ∼ πθ (·|S ′ )
+δ ← R + γ(Qϕ̄ (S ′ , A′ ) − η log πθ (A′ |S ′ )) − Qϕ (S, Aθ )
+δ ← δ/σδ
+ϕ ← ϕ + αQ δ ∇ϕ Qϕ (S, a)|a=Aθ
+θ ← θ + απ ∇θ (Qϕ (S, Aθ ) − η log πθ (Aθ |S))
+ϕ̄ ← (1 − τ )ϕ̄ + τ ϕ
+S ← S′
+end while
+σδ , nδ , µδ , µδ ← ScaleTDError(R, 0, G, nδ , µδ , µδ )
+end for
+
+Is there a trade-off between not storing experiences in a replay buffer or target networks and
+maintaining robustness?
+A large replay buffer can place a heavy memory burden, especially for onboard and edge devices
+with limited memory. Therefore, we need computationally efficient alternatives to replay buffers
+that can help consolidate learned experiences over time. Lan et al. (2023) explore this trade-off
+by introducing memory-efficient reinforcement learning algorithms based on the deep Q-network
+(DQN) algorithm. Their approach can reduce forgetting and maintain high sample efficiency by
+consolidating knowledge from the target Q-network to the current Q-network while only using small
+replay buffers.
+In Fig. 8, our results indicate no advantage to using target networks in the conventional manner
+for AVG. However, drawing inspiration from Lan et al. (2023), it may be worthwhile to explore a
+trade-off by eliminating replay buffers while still consolidating knowledge in a target Q-network.
+This remains an intriguing and open area for future research.
+
+20
+
+D
+
+Incremental Soft Actor Critic (SAC-1)
+
+Algorithm 5 Incremental SAC (SAC-1)
+1: Initialize policy parameters θ, Q-function parameters ϕ1 , ϕ2 , discount factor γ, polyak averaging
+
+coefficient ρ and learnable entropy coefficient αη
+2: Initialize target Q-network parameters ϕ̄1 ← ϕ1 , ϕ̄2 ← ϕ2
+3: for however many episodes do
+
+Initialize S (first state of the episode)
+5:
+while S is not terminal do
+6:
+Sample action A ∼ πθ (·|S)
+7:
+Execute action A in the environment
+8:
+Observe next state S ′ , reward R
+9:
+A′ ∼ πθ (·|S ′ )
+10:
+for i ∈ {1, 2} do
+11:
+δ ← R + γ(Qϕ̄i (S ′ , A′ ) − η log πθ (A′ |S ′ )) − Qϕi (S, A)
+12:
+ϕ ← ϕ + αQ δ ∇ϕ Qϕ (S, A)
+13:
+end for
+14:
+Xθ ∼ fθ (ξ; S) where ξ ∼ N (0, 1)
+15:
+θ ← θ + ∇θ (mini=1,2 Qϕi (S, Xθ ) − α log πθ (Xθ |S)) |α=αη
+16:
+η ← η − ∇η αη (− log πθ (X|S) − target_entropy)|X=Xθ
+17:
+for i ∈ {1, 2} do
+18:
+ϕ̄i ← ρϕi + (1 − ρ)ϕ̄i
+19:
+end for
+20:
+S ← S′
+21:
+end while
+22: end for
+4:
+
+▷ Critic update
+
+▷ Actor update
+
+▷ Update target networks
+
+We outline the components of AVG and SAC for clarity:
+SAC
+1 actor
+2 Q networks (i.e., double Q-learning)
+2 target Q networks
+Learned entropy coefficient η
+Replay buffer B
+
+AVG
+1 actor
+1 Q network
+0 target networks
+Fixed entropy coefficient η
+No buffers
+
+Table 1: Comparison of SAC and AVG algorithms
+In addition, SAC is off-policy, whereas AVG is on-policy. SAC samples an action and stores it in the
+buffer. Unlike AVG, SAC’s action is not reused to update the actor.
+
+21
+
+E
+
+Incremental Actor Critic
+
+We consider the one-step actor-critic by Algorithm 6 Incremental Actor Critic (IAC)
+Sutton and Barto (2018), where the actor
+Initialize θ, ϕ, γ, η, απ , αV
+(i.e., policy) and critic (i.e., value function) are updated incrementally, as new
+for however many episodes do
+transitions are observed, rather than waitInitialize S (first state of the episode)
+ing for complete episodes or batches of
+while S is not terminal do
+data. We also drop the discount correcA ∼ πθ (·|S)
+tion term in actor updates since it often
+leads to poor performance empirically
+Take action A, observe S ′ , R
+(Nota and Thomas 2020).
+δ ← R + γVϕ (S ′ ) − Vϕ (S)
+We also consider an entropy regularizaϕ ← ϕ + αV δ ∇ϕ Vϕ (S)
+tion term in the actor and critic objectives
+θ ← θ + απ ∇θ (log (πθ (A|S)) δ + ηH(πθ (·|S))
+to encourage exploration and discourage
+S ← S′
+premature convergence to a deterministic
+end while
+policy (Williams and Peng 1991, Mnih
+et al. 2016). In the following subsection,
+end for
+we examine both distribution entropy and
+sample entropy, finding that distribution
+entropy performs better empirically. The
+pseudocode for our implementation of IAC is detailed in Alg. 6.
+E.1
+
+Ablation Study of IAC: Distribution against Sample Entropy
+
+Figure 14: Performance of IAC Variants. Learning curves of the best hyper-parameter configurations
+found via random search for each task variant. Each solid curve is averaged over 30 independent runs.
+The shaded regions represent a 95% confidence interval.
+
+Figure 15: Performance of Incremental Actor Critic (IAC) Variants. Each solid learning curve is an
+average of 30 independent runs. The shaded regions represent a 95% confidence interval.
+
+22
+
+E.2
+
+Impact of Normalization & Scaling on IAC
+
+Figure 16: Ablation study of normalization and scaling techniques used with IAC (Algo. 6). We
+plot the learning curves of the best hyper-parameter configurations for each task variant. Each solid
+learning curve is an average of 3 independent runs. The shaded regions represent a 95% confidence
+interval.
+
+Figure 17: Hyperparameter Evaluation via Random Search. Scatter plot of the performance of the
+best 30 out of 300 unique hyper-parameter configurations. Note that the y-axis represents the area
+under the curve, not an evaluation of the final policy.
+Our results show that IAC also benefits from normalization and scaling techniques used in AVG
+(see Fig. 16). The hyperparameter evaluation via random search (Fig. 17) highlights the top 30
+configurations out of 300, with the y-axis representing area under the curve rather than final policy
+performance.
+
+23
+
+F
+
+Hyper-parameter Settings in Simulation
+
+F.1
+
+Choice of Hyper-parameters for PPO
+
+Proximal Policy Optimization (PPO) Schulman et al. (2017) introduced PPO, an on-policy policy gradient method. It incorporates proximal optimization ideas to prevent large policy updates, improving
+stability through its carefully designed surrogate objective.
+We use an off-the-shelf implementation of PPO from CleanRL that can be found here: https:
+//github.com/vwxyzjn/cleanrl/blob/8cbca61360ef98660f149e3d76762350ce613323/
+cleanrl/ppo_continuous_action.py
+Parameter
+
+Default Value
+
+Update Every
+Minibatch Size
+GAE Lambda (λ)
+Discount factor (γ)
+Num. Optimizer Epochs
+Entropy Coefficient
+Learning Rate
+Clip Coefficient (ϵ)
+Value Loss Coefficient
+Max Grad Norm
+
+2048
+32
+0.95
+0.99
+10
+0
+3 × 10−4
+0.1
+0.5
+0.5
+
+Table 2: Default parameters for CleanRL PPO implementation.
+
+F.2
+
+Choice of Hyper-parameters for TD3
+
+Twin Delayed Deep Deterministic Policy Gradient (TD3) Fujimoto et al. (2018) introduced an offpolicy algorithm that builds upon DDPG (Lillicrap et al. 2016) known as TD3. Both DDPG and
+TD3 utilize the reparameterization gradient, albeit for deterministic policies. They made three key
+modifications that resulted in better performance: (1) using two deep Q-networks to address overestimation bias, (2) delaying updates of the actor-network to reduce per-update error accumulation, and
+(3) adding noise to the target action used for computing the critic target values.
+We use an off-the-shelf implementation of TD3 from CleanRL that can be found here: https:
+//github.com/vwxyzjn/cleanrl/blob/8cbca61360ef98660f149e3d76762350ce613323/
+cleanrl/td3_continuous_action.py
+Parameter
+
+Default Value
+
+Replay Buffer Size
+Minibatch Size
+Discount factor (γ)
+Policy Noise
+Exploration Noise
+Learning Rate
+Update Every
+Noise Clip
+Learning Starts
+Target Smoothing Coefficient (τ )
+
+1000000
+256
+0.99
+0.2
+0.1
+3 × 10−4
+2
+0.5
+25000
+0.005
+
+Table 3: Default parameters for CleanRL TD3 implementation.
+
+24
+
+F.3
+
+Choice of Hyper-parameters for SAC
+
+Soft Actor-Critic (SAC) SAC is an off-policy algorithm which uses the reparametrization gradient
+along with entropy-augmented rewards (Haarnoja et al. 2018). While TD3 learns a deterministic
+policy, SAC learns a stochastic policy. TD3 adds noise to the target policy for exploration, whereas
+SAC’s stochastic policy inherently explores by sampling actions from a distribution. We use an
+adaptation of Vasan et al. (2024) as our baseline SAC implementation.
+Parameter
+
+Default Value
+
+Replay Buffer Size
+Minibatch Size
+Discount factor (γ)
+Learning Rate
+Update Actor Every
+Update Critic Every
+Update Critic Target Every
+Learning Starts
+Target Smoothing Coefficient (τ )
+Target Entropy
+
+1000000
+256
+0.99
+3 × 10−4
+1
+1
+1
+100
+0.005
+|A|
+
+Table 4: Default parameters for SAC implementation.
+
+F.4
+
+Hyper-Parameter Optimization Using Random Search
+
+Our random search procedure for hyper-parameter optimization first involves initializing a random
+number generator (RNG) using unique seed values to ensure reproducibility. Then we use the
+RNG to sample learning rates for the actor and critic networks, parameters for the Adam optimizer,
+entropy coefficient, discount factor (γ) and polyak averaging constant (if applicable). The ranges of
+hyper-parameter values we use in this experiment are listed in Table 5.
+Hyperparameter
+
+Range
+
+actor_lr
+
+10[−2,−6]
+
+critic_lr
+
+10[−2,−6]
+
+Optimizer
+
+Adam
+
+beta1
+
+{0, 0.9}
+
+beta2
+
+0.999
+
+alpha_lr
+
+10[−5,0]
+
+gamma
+
+{0.95, 0.97, 0.99, 0.995, 1.0}
+
+critic_tau
+
+0.005 if algo ∈ {SAC, TD3}
+
+NN Activation
+
+Leaky ReLU
+
+Num.
+
+2
+
+hidden layers
+
+Num hidden units
+
+256
+
+Weight initialization
+
+Orthogonal
+
+Table 5: Random Search Procedure for Hyperparameters
+
+25
+
+F.5
+
+AVG Hyperparameters Across Tasks
+
+Envs
+
+actor_lr
+
+critic_lr
+
+Adam betas
+
+alpha_lr
+
+gamma
+
+Hopper-v4, Walker2d-v4
+
+1.1e-05
+
+7.7e-05
+
+[0.0, 0.999]
+
+0.3
+
+0.99
+
+Ant-v4, HalfCheetah-v4, Humanoid-v4
+
+0.0063
+
+0.0087
+
+[0.0, 0.999]
+
+0.07
+
+0.99
+
+reacher_hard
+
+3e-06
+
+0.0049
+
+[0.0, 0.999]
+
+0.05
+
+0.97
+
+dog_walk, dog_trot, dog_stand
+
+6e-06
+
+8e-05
+
+[0.0, 0.999]
+
+0.009
+
+0.95
+
+finger_spin
+
+0.00038
+
+8.7e-05
+
+[0.9, 0.999]
+
+0.006
+
+0.95
+
+dog_run
+
+1.8e-05
+
+4.8e-05
+
+[0.0, 0.999]
+
+0.007
+
+0.97
+
+Table 6: Best hyperparameter settings for different tasks after random search.
+
+26
+
+G
+
+Additional Results
+
+G.1
+
+Impact of Replay Buffer Size on Learning Performance
+
+The following figures show the impact of reducing replay buffer size of three state-of-the art deep RL
+algorithms — SAC, PPO and TD3; Reducing the size of the replay buffer has detrimental impact on
+learning performance. Each solid learning curve is an average of 30 independent runs. The shaded
+regions represent a 95% confidence interval. These learning curves were also used to generate Fig. 1.
+Ant-v4
+6000
+5000
+4000
+3000
+2000
+1000
+0
+0
+
+2M
+
+4M
+
+6M
+
+Timesteps
+
+8M
+
+10M
+
+1
+
+14000
+12000
+10000
+8000
+6000
+4000
+2000
+0
+
+HalfCheetah-v4
+
+Hopper-v4
+
+Humanoid-v4
+
+3000
+
+7000
+6000
+5000
+4000
+3000
+2000
+1000
+0
+
+2500
+2000
+1500
+1000
+500
+0
+
+2M
+
+4M
+
+6M
+
+8M
+
+Timesteps
+
+10
+
+0
+
+10M
+
+100
+
+0
+
+2M
+
+1K
+
+4M
+
+6M
+
+Timesteps
+
+8M
+
+10K
+
+10M
+
+0
+
+2M
+
+100K
+
+4M
+
+6M
+
+Timesteps
+
+8M
+
+10M
+
+8M
+
+10M
+
+8M
+
+10M
+
+1M
+
+Figure 18: SAC
+
+750
+500
+250
+0
+250
+500
+750
+1000
+1250
+
+Ant-v4
+
+HalfCheetah-v4
+
+4000
+
+Hopper-v4
+
+3000
+
+800
+
+1500
+
+2000
+
+4M
+
+6M
+
+Timesteps
+
+8M
+
+10M
+
+200
+
+0
+
+1000
+2M
+
+400
+
+500
+
+0
+0
+
+600
+
+1000
+
+1000
+
+Humanoid-v4
+
+1000
+
+2000
+
+0
+
+1
+
+2M
+
+4M
+
+6M
+
+8M
+
+Timesteps
+
+10
+
+10M
+
+0
+
+100
+
+2M
+
+4M
+
+6M
+
+Timesteps
+
+1K
+
+8M
+
+10M
+
+0
+
+2.0K
+
+2M
+
+4M
+
+6M
+
+Timesteps
+
+10K
+
+Figure 19: PPO
+Ant-v4
+
+6000
+4000
+3000
+2000
+1000
+0
+0
+
+2M
+
+4M
+
+6M
+
+Timesteps
+
+HalfCheetah-v4
+
+14000
+12000
+10000
+8000
+6000
+4000
+2000
+0
+
+5000
+
+8M
+
+1
+
+10M
+
+0
+
+10
+
+2M
+
+4M
+
+6M
+
+Timesteps
+
+100
+
+Hopper-v4
+
+3500
+3000
+2500
+2000
+1500
+1000
+500
+0
+8M
+
+10M
+
+5000
+4000
+3000
+2000
+1000
+0
+0
+
+2M
+
+1K
+Figure 20: TD3
+
+27
+
+Humanoid-v4
+
+6000
+
+4M
+
+6M
+
+Timesteps
+
+10K
+
+8M
+
+10M
+
+100K
+
+0
+
+2M
+
+4M
+
+6M
+
+Timesteps
+
+1M
+
+H
+
+Real-Robot Experiment Description
+
+UR-Reacher-2D We utilize the UR-Reacher-2 task, as developed by Mahmood et al. (2018), which
+involves the Reacher task using a UR5 robot. The agent aims to reach arbitrary target positions on a
+2D plane. We control the second and third joints from the base by sending angular speeds within
+the range of [−0.3, +0.3]rad/s. The observation vector includes joint angles, joint velocities, the
+previous action, and the vector difference between the target and the fingertip coordinates. The
+workstation for UR5-VisualReacher has an AMD Ryzen Threadripper 2950 processor, an NVidia
+2080Ti GPU, and 128G memory.
+Create-Mover We utilize the Create-Mover task, as developed by Mahmood et al. (2018), where
+the agent needs to move the robot forward as fast as possible within an enclosed arena. Compared to
+the original paper, we have a 3.92f t × 4.33f t arena. The action space is [−150mm/s, 150mm/s]2
+for actuating the two wheels with speed control. The observation vector is composed of 6 wallsensors values and the previous action. For the wall sensors, we always take the latest values received
+within the action cycle and use Equation 1 by (Benet et al. 2002) to convert the incoming signals to
+approximate distances. The reward function is the summation of the directed distance values over
+10 most recent sensory packets. An episode is 90 seconds long but ends earlier if the agent triggers
+one of its bump sensors. When an episode terminates, the position of the robot is reset by moving
+backward to avoid bumping into the wall immediately.
+Parameter
+
+AVG
+
+SAC
+
+Replay Buffer Size
+
+1
+
+1
+
+Minibatch Size
+
+1
+
+1
+
+Discount factor (γ)
+
+0.95
+
+0.99
+
+Actor Learning Rate
+
+−4
+
+3 × 10
+
+3 × 10−4
+
+Critic Learning Rate
+
+0.00087
+
+3 × 10−4
+
+Update Actor Every
+
+1
+
+1
+
+Update Critic Every
+
+1
+
+1
+
+Update Critic Target Every
+
+N/A
+
+1
+
+Target Smoothing Coefficient (τ )
+
+N/A
+
+0.005
+
+Target Entropy
+
+N/A
+
+−|A|
+
+Entropy coefficient (η)
+
+0.05
+
+Learnable parameter
+
+Optimizer
+
+Adam
+
+Adam
+
+Table 7: Default parameters for Robot Tasks.
+
+Figure 21: Learning curves on Robots. Comparison of AVG with full PPO & SAC. Note that running
+SAC and SAC-100 onboard for the Create-Mover task is computationally infeasible.
+
+28
+
+I
+
+Convergence Analysis for Reparameterization Gradient
+
+In this section, we present a convergence analysis for reparameterization policy gradient (RPG) in (2),
+which is one of the main components in our proposed AVG. We analyze a slightly different variant of
+AVG, that we call RPG-TD, shown in Algorithm 7. We extend the convergence result from Xiong
+et al. (2022) for deterministic policies to the general case of reparameterized policies.
+Like AVG, RPG-TD uses the reparameterization gradient and updates one sample at a time, but it
+differs in that it does not have entropy regularization and normalizations. We also make a few typical
+theoretical assumptions, like i.i.d. sampling of transition tuples, that do not perfectly match the real
+setting for AVG. Following Xiong etR al. (2022) and for analytical convenience, we use the stationary
+PT
+state distribution dθ (s) = limT →∞ s0 T1 t=0 d0 (s0 )p(s0 → s, t, fθ ) ds0 for the critic update, and
+R P∞ t
+the discounted state visitation νθ (s) = s0 t=0 γ d0 (s0 )p(s0 → s, t, fθ ) ds0 for the actor update.
+Here, fθ (s, ϵ) denotes the reparameterized policy, and p(s0 → s, t, fθ ) represents the density of state
+s after t steps from state s0 following policy fθ . Note that we follow the notations and language from
+Xiong et al. (2022) while avoiding changes as much as possible for easy comparison with the original
+result.
+Z Z
+∇J(θ) =
+νθ (s)p(ϵ)∇θ fθ (s, ϵ)∇a Qfθ (s, a)|a=fθ (s,ϵ) dϵds
+s ϵ
+
+
+= Eνθ ,p ∇θ fθ (s, ϵ)∇a Qfθ (s, a)|a=fθ (s,ϵ) .
+(2)
+We will present the assumptions and the convergence result for RPG-TD in Appendix I.1. The
+proofs of the convergence result and the intermediate results are provided in Appendix I.2. To
+highlight the differences between our extended analysis and that of Xiong et al. (2022), we use blue
+to indicate modifications specific to reparameterized policies. These modifications include replacing
+the deterministic policy µθ (s) with the reparameterized policy f θ (s, ϵ) and properly handling of the
+expectation over the prior random variable ϵ ∼ p. In addition, we fixed a few errors in the original
+analysis and result, which are shown in red.
+Algorithm 7 RPG-TD
+1: Input: αw , αθ , w0 , θ0 , batch size M .
+2: for t = 0, 1, . . . , T do
+3:
+for j = 0, 1, . . . , M − 1 do
+4:
+Sample st,j ∼ dθt , ϵt,j ∼ p.
+5:
+Generate at,j = f θt (st,j , ϵt,j ).
+6:
+Sample st+1,j ∼ P (·|st,j , at,j ), ϵt+1,j ∼ p, and rt,j .
+7:
+Generate at+1,j = f θt (st+1,j , ϵt+1,j ).
+8:
+Denote xt,j = (st,j , at,j ).
+9:
+δt,j = rt,j + γϕ(xt+1,j )T wt − ϕ(xt,j )T wt .
+10:
+end for
+PM −1
+11:
+wt+1 = wt + αMw j=0 δt,j ϕ(xt,j ).
+12:
+for j = 0, 1, . . . , M − 1 do
+13:
+Sample s′t,j ∼ νθt , ϵ′t,j ∼ p.
+14:
+end for
+PM −1
+15:
+θt+1 = θt + αMθ j=0 ∇θ f θt (s′t,j , ϵ′t,j )∇θ f θt (s′t,j , ϵ′t,j )T wt .
+16: end for
+
+I.1
+
+Convergence Result
+
+We present the full set of assumptions below and refer interested reader to Xiong et al. (2022) for
+detailed discussions about these assumptions.
+Assumption 3. For any θ1 , θ2 , θ ∈ Rd , there exist positive constants Lf , Lϕ and λΦ , such that
+(1) f θ1 (s, ϵ) − f θ2 (s, ϵ) ≤ Lf ∥θ1 − θ2 ∥ , ∀s ∈ S, ϵ ∈h R; (2) ∇θ f θ1 (s, ϵ) − i∇θ f θ2 (s, ϵ) ≤
+T
+
+Lψ ∥θ1 − θ2 ∥ , ∀s ∈ S, ϵ ∈ R; (3) the matrix Ψθ := Eνθ ,p ∇θ f θ (s, ϵ)∇θ f θ (s, ϵ)
+
+with the minimal eigenvalue uniformly lower-bounded as σmin (Ψθ ) ≥ λΨ .
+29
+
+is non-singular
+
+Assumption 4. For any a1 , a2 ∈ A, there exist positive constants LP , Lr , such that (1) the transition
+kernel satisfies |P (s′ |s, a1 ) − P (s′ |s, a2 )| ≤ LP ∥a1 − a2 ∥ , ∀s, s′ ∈ S; (2) the reward function
+satisfies |r(s, a1 ) − r(s, a2 )| ≤ Lr ∥a1 − a2 ∥ , ∀s, s′ ∈ S.
+Assumption 5. For any a1 , a2 ∈ A, there exists a positive constant LQ , such that
+∇a Qf θ (s, a1 )−∇a Qf θ (s, a2 ) ≤ LQ ∥a1 − a2 ∥ , ∀θ ∈ Rd , s ∈ S.
+Assumption 6. The feature function ϕ : S × A → Rd is uniformly bounded, i.e., ∥ϕ(·, ·)∥ ≤
+ Cϕ
+′
+T
+for some positive
+constant
+C
+.
+In
+addition,
+we
+define
+A
+=
+E
+ϕ(x)(γϕ(x
+)
+−
+ϕ(x))
+and
+ϕ
+d
+θ
+
+
+D = Edθ ϕ(x)ϕ(x)T , and assume that A and D are non-singular. We further assume that the
+absolute value of the eigenvalues of A are uniformly lower bounded, i.e., |σ(A)| ≥ λA for some
+positive constant λA .
+Proposition 7 (Compatible function approximation). A function
+estimator Qw (s, a) is compatible
+
+
+with a reparameterized policy f θ , i.e., ∇J(θ) = Eνθ ,p ∇θ f θ (s, ϵ)∇a Qw (s, a)|a=f θ (s,ϵ) , if it
+satisfies the following two conditions:
+1. ∇a Qw (s, a)|a=f θ (s,ϵ) = ∇θ f θ (s, ϵ)T w;
+
+
+2. w = wξ∗θ minimizes the mean square error Eνθ ,p ξ(s, ϵ; θ, w)T ξ(s, ϵ; θ, w) , where
+ξ(s, ϵ; θ, w) = ∇a Qw (s, a)|a=f θ (s,ϵ) −∇a Qf θ (s, a)|a=f θ (s,ϵ) .
+Given the above assumption, one can show that the reparameterization gradient is smooth (Lemma 8),
+and that Algorithm 7 converges (Theorem 9), the proofs of which are presented in Appendix I.2.
+Lemma 8. Suppose Assumptions 3-5 hold. Then the reparameterization gradient ∇J(θ) defined in
+(2) is Lipschitz continuous with the parameter LJ , i.e., ∀θ1 , θ2 ∈ Rd ,
+∥∇J(θ1 ) − ∇J(θ2 )∥ ≤ LJ ∥θ1 − θ2 ∥ ,
+(3)
+
+
+
+
+
+Lf
+γLP Lr Lf
+Lψ
+γRmax LP
+γ 2
+1
+2
+Lr + 1−γ
++ 1−γ LQ Lf + 2 LP Rmax Lf Cν + 1−γ
+where LJ = 2 LP Lf Lν Cν + 1−γ
+.
+48α C 2
+
+w A
+Theorem 9. Suppose that Assumptions 3-6 hold. Let αw ≤ 2Cλ2 ; M ≥
+; αθ ≤
+λ
+A
+n
+o
+λα
+1
+w
+min 4LJ , 24√6L L . Then the output of RPG-TD in Algorithm 7 satisfies
+h w
+c1
+c2
+2
+min E ∥∇J(θt )∥ ≤
++
++ c3 κ2 ,
+T
+M
+t∈[T ]
+
+
+2
+96L2w L4f Cw
+α2
+144L2h
+144L2h
+ξ θ
+2
+2 2
+2
+∗ 2
+max
++
+C
+)
++
+C
+(C
+,
+c
+=
+48α
+w
+−
+w
+where c1 = α8R
++
+·
+2
+0
+w
+w
+A
+b
+θ
+(1−γ)
+λα
+λα
+λαw +
+0
+w
+w
+θ
+h 2 2 2
+i
+24Lw Lh αθ
+144L2
+24
+2
+72L4f Cw
+, c3 = 18L2h +
++ λα
+· λαwh with CA = 2Cϕ2 , Cb = Rmax Cϕ , Cw =
+λαw
+ξ
+w
+
+
+2Lf Lψ
+Rmax Cϕ
+Lf CQ
+Lf CQ
+LJ
+2
+L
+L
++
++
+, Lh = L2f , CQ = Lr + LP ·
+,
+C
+=
+,
+L
+=
+2
+ν
+w
+w
+ξ
+f
+λA
+λΨ (1−γ)
+λΨ
+1−γ
+λ (1−γ)
+Ψ
+
+γRmax
+1
+1−γ , Lν = 2 Cν LP Lf , and LJ defined in Lemma 8, and we define
+κ := max wθ∗ − wξ∗θ .
+θ
+
+(4)
+
+Comparison with Theorem 9 and Theorem 1 of Xiong et al. (2022). The differences between
+the reparameterization gradient and the deterministic policy gradient results are minimal. Aside from
+correcting the errors (highlighted in red; see Appendix I.2 for details), the most notable distinction is
+the replacement of Lµ in Xiong et al. (2022) with Lf , which may be different. Additionally, constants
+related to the critic, such as LQ and κ, may also differ, as they are now defined for a more general
+policy class. While this theoretical comparison shows little divergence, practical performance could
+vary significantly.
+I.2
+I.2.1
+
+Proofs
+Supporting Lemmas for Proving Lemma 8
+
+Lemma 10. Suppose Assumptions 3 and 4 hold. We define the total variation norm between two state
+visitation
+distributions respectively corresponding to two policies f θ1 , f θ2 as ∥νθ1 (·) − νθ2 (·)∥T V =
+R
+|ν
+(ds)
+− νθ2 (ds)|. Then there exists some constant Lν > 0, such that
+θ
+1
+s
+∥νθ1 (·) − νθ2 (·)∥T V ≤ Lν ∥θ1 − θ2 ∥ .
+30
+
+Proof. Since we consider ergodic Markov chains, Theorem 3.1 of Mitrophanov (2005) shows that
+there exists some constant Cν > 1, such that
+∥νθ1 (·) − νθ2 (·)∥T V ≤ Cν ∥Pθ1 − Pθ2 ∥op ,
+
+(5)
+
+where Pθ denotes the state transition kernel corresponding to a policy f θ , and the operator norm
+∥·∥op is given by ∥P ∥op = sup∥q∥T V =1 ∥qP ∥T V . Then we have
+Z
+∥Pθ1 − Pθ2 ∥op = sup
+(Pθ1 − Pθ2 )(s, ·)q(ds)
+∥q∥T V =1
+
+s
+
+1
+=
+sup
+2 ∥q∥T V =1
+
+Z
+
+≤
+
+1
+sup
+2 ∥q∥T V =1
+
+TV
+
+Z
+
+s′
+
+(Pθ1 (s, ds′ ) − Pθ2 (s, ds′ )) q(ds)
+
+s
+
+Z Z
+s′
+
+|Pθ1 (s, ds′ ) − Pθ2 (s, ds′ )| q(ds)
+
+s
+
+1
+=
+sup
+2 ∥q∥T V =1
+
+Z Z Z
+
+1
+sup
+2 ∥q∥T V =1
+
+Z Z Z
+
+≤
+
+ϵ
+
+s
+
+s′
+
+s
+
+ϵ
+
+P (ds′ |s, f θ1 (s, ϵ)) − P (ds′ |s, f θ1 (s, ϵ)) p(dϵ)q(ds)
+
+Z Z
+
+(i) 1
+
+≤
+
+s′
+
+
+P (ds′ |s, f θ1 (s, ϵ)) − P (ds′ |s, f θ1 (s, ϵ)) p(dϵ) q(ds)
+
+sup
+2 ∥q∥T V =1
+
+s
+
+ϵ
+
+LP f θ1 (s, ϵ) − f θ2 (s, ϵ) p(dϵ)q(ds)
+
+(ii) 1
+
+≤
+
+LP Lf ∥θ1 − θ2 ∥ ,
+2
+where (i) follows form Assumption 4, and (ii) follows from Assumption 3. Then, combining the
+above bound together with (5) completes the proof.
+Lemma 11. Suppose Assumptions 3 and 4 hold. The value function is Lipschitz continuous w.r.t. the
+policies. That is, for any θ1 , θ2 ∈ Rd , s ∈ S, we have
+V f θ1 (s) − V f θ2 (s) ≤ LV ∥θ1 − θ2 ∥ ,
+L L
+
+r f
+where LV = Rmax Lν + 1−γ
+.
+
+R R
+Proof. By definition, we have V f θ (s0 ) = s ϵ r(s, f θ (s, ϵ))p(dϵ)νfs0θ (ds), where νfs0θ (·) is the
+P∞
+discounted state visitation measure given the initial state, i.e., νfsθ0 (s) = t=0 γ t p(s0 → s, t, fθ ).
+We then derive
+V f θ1 (s0 ) − V f θ2 (s0 )
+Z Z
+Z Z
+=
+r(s, f θ1 (s, ϵ))p(dϵ)νfs0θ (ds) −
+r(s, f θ2 (s, ϵ))p(dϵ)νfs0θ (ds)
+1
+2
+s ϵ
+s ϵ
+Z Z
+Z
+≤
+r(s, f θ1 (s, ϵ))νfs0θ (ds) − r(s, f θ2 (s, ϵ))νfs0θ (ds) p(dϵ)
+1
+2
+ϵ
+s
+s
+Z Z
+Z
+≤
+r(s, f θ1 (s, ϵ))νfs0θ (ds) − r(s, f θ1 (s, ϵ))νfs0θ (ds) p(dϵ)
+1
+2
+ϵ
+s
+s
+Z Z
+Z
++
+r(s, f θ1 (s, ϵ))νfs0θ (ds) − r(s, f θ2 (s, ϵ))νfs0θ (ds) p(dϵ)
+2
+2
+ϵ
+s
+s
+Z Z
+≤
+r(s, f θ1 (s, ϵ)) · νfs0θ (ds) − νfs0θ (ds) p(dϵ)
+1
+2
+ϵ s
+Z Z
++
+r(s, f θ1 (s, ϵ)) − r(s, f θ2 (s, ϵ)) νfs0θ (ds)p(dϵ)
+2
+ϵ s
+Z Z
+(i)
+≤ Rmax νfs0θ (·) − νfs0θ (·)
++ Lr
+f θ1 (s, ϵ) − f θ2 (s, ϵ) νfs0θ (ds)p(dϵ)
+1
+
+2
+
+TV
+
+ϵ
+
+31
+
+s
+
+2
+
+Z Z
+
+(ii)
+
+≤ Rmax Lν ∥θ1 − θ2 ∥ + Lr Lf ∥θ1 − θ2 ∥
+
+
+Lr Lf
+= Rmax Lν +
+∥θ1 − θ2 ∥ ,
+1−γ
+
+ϵ
+
+s
+
+νfs0θ (ds)p(dϵ)
+2
+
+where (i) follows from Assumption 4, and (ii) follows from Lemma 10 and Assumption 3.
+Lemma 12. Suppose Assumptions 3-5 hold. The gradient of Q-function w.r.t. action is uniformly
+bounded. That is, for any (s, a) ∈ S × A, θ ∈ Rd ,
+∇a Qf θ (s, a) ≤ CQ ,
+fθ
+max
+where CQ = Lr + LP · γR
+1−γ . Furthermore, ∇a Q (s, aθ ) is Lipschitz continuous w.r.t. θ, that is,
+for any θ1 , θ2 ∈ Rd , we have
+
+∇a Qf θ1 (s, f θ1 (s, ϵ)) − ∇a Qf θ2 (s, f θ2 (s, ϵ)) ≤ L′Q ∥θ1 − θ2 ∥ ,
+where L′Q = LQ Lf + γLP LV .
+Proof. For the boundedness property, we have
+Z
+
+∇a Qf θ (s, a) = ∇a
+r(s, a) + γP (s′ |s, a)V f θ (s′ ) ds′
+s
+Z
+≤ ∥∇a r(s, a)∥ + γ ∥∇a P (s′ |s, a)∥ · V f θ (s′ ) ds′
+s
+
+γRmax
+,
+≤ Lr + LP ·
+1−γ
+max
+.
+where the last inequality follows from Assumptions 3, 4 and the fact that V f θ (s′ ) ≤ R1−γ
+
+We next show the Lipschitz property as follows.
+∇a Qf θ1 (s, f θ1 (s, ϵ)) − ∇a Qf θ2 (s, f θ2 (s, ϵ))
+≤ ∇a Qf θ1 (s, f θ1 (s, ϵ)) − ∇a Qf θ1 (s, f θ2 (s, ϵ))
++ ∇a Qf θ1 (s, f θ2 (s, ϵ)) − ∇a Qf θ2 (s, f θ2 (s, ϵ))
+(i)
+
+≤ LQ f θ1 (s, ϵ) − f θ2 (s, ϵ) + ∇a Qf θ1 (s, f θ2 (s, ϵ)) − ∇a Qf θ2 (s, f θ2 (s, ϵ))
+Z
+
+
+(ii)
+≤ LQ Lf ∥θ1 − θ2 ∥ +
+γ∇a P (s′ |s, a) V f θ1 (s′ ) − V f θ2 (s′ ) ds′
+Zs
+≤ LQ Lf ∥θ1 − θ2 ∥ + γ ∥∇a P (s′ |s, a)∥ · V f θ1 (s′ ) − V f θ2 (s′ ) ds′
+s
+(iii)
+
+≤ (LQ Lf + γLP LV ) ∥θ1 − θ2 ∥ ,
+
+where (i) follows from Assumption 5, (ii) follows from Assumption 3 and (iii) follows from Assumption 4 and Lemma 11.
+I.2.2
+
+Proof of Lemma 8
+
+To simplify the notation, we define ψθ (s, ϵ) := ∇θ f θ (s, ϵ), aθ = f θ (s, ϵ) and ∇a Qf θ (s, aθ ) =
+∇a Qf θ (s, a)|a=f θ (s,ϵ) in the following proof.
+We start from the form of the off-policy deterministic policy gradient given in (2), and have
+∥∇J(θ1 ) − ∇J(θ2 )∥
+Z Z
+Z Z
+=
+ψθ1 (s, ϵ)∇a Qf θ1 (s, aθ1 )p(dϵ)νθ1 (ds) −
+ψθ2 (s, ϵ)∇a Qf θ2 (s, aθ2 )p(dϵ)νθ2 (ds)
+s
+
+ϵ
+
+s
+
+32
+
+ϵ
+
+Z
+
+Z
+
+ϵ
+
+s
+
+≤
+Now,
+Z
+
+ψθ1 (s, ϵ)∇a Qf θ1 (s, aθ1 )νθ1 (ds) −
+
+Z
+
+ψθ2 (s, ϵ)∇a Qf θ2 (s, aθ2 )νθ2 (ds) p(dϵ).
+
+(6)
+
+s
+
+f θ1
+
+Z
+
+ψθ1 (s, ϵ)∇a Q (s, aθ1 )νθ1 (ds) − ψθ2 (s, ϵ)∇a Qf θ2 (s, aθ2 )νθ2 (ds)
+s
+Z
+Z
+f θ1
+ψθ1 (s, ϵ)∇a Q (s, aθ1 )νθ1 (ds) − ψθ1 (s, ϵ)∇a Qf θ1 (s, aθ1 )νθ2 (ds)
+=
+s
+Z
+Zs
+f θ1
++ ψθ1 (s, ϵ)∇a Q (s, aθ1 )νθ2 (ds) − ψθ1 (s, ϵ)∇a Qf θ2 (s, aθ2 )νθ2 (ds)
+Zs
+Zs
+f θ2
++ ψθ1 (s, ϵ)∇a Q (s, aθ2 )νθ2 (ds) − ψθ2 (s, ϵ)∇a Qf θ2 (s, aθ2 )νθ2 (ds)
+s
+s
+Z
+Z
+f θ1
+ψθ1 (s, ϵ)∇a Q (s, aθ1 )νθ1 (ds) − ψθ1 (s, ϵ)∇a Qf θ1 (s, aθ1 )νθ2 (ds)
+≤
+s
+s
+Z
+Z
+f θ1
+ψθ1 (s, ϵ)∇a Q (s, aθ1 )νθ2 (ds) − ψθ1 (s, ϵ)∇a Qf θ2 (s, aθ2 )νθ2 (ds)
++
+s
+s
+Z
+Z
+ψθ1 (s, ϵ)∇a Qf θ2 (s, aθ2 )νθ2 (ds) − ψθ2 (s, ϵ)∇a Qf θ2 (s, aθ2 )νθ2 (ds)
++
+s
+s
+Z
+≤ ∥ψθ1 (s, ϵ)∥ · ∇a Qf θ1 (s, aθ1 ) |νθ1 (ds) − νθ2 (ds)|
+s
+Z
++ ∥ψθ1 (s, ϵ)∥ · ∇a Qf θ1 (s, aθ1 ) − ∇a Qf θ2 (s, aθ2 ) νθ2 (ds)
+Zs
++ ∥ψθ1 (s, ϵ) − ψθ2 (s, ϵ)∥ · ∇a Qf θ2 (s, aθ2 ) νθ2 (ds)
+s
+Z
+(i)
+≤ Lf CQ ∥νθ1 (·) − νθ2 (·)∥T V + Lf
+∇a Qf θ1 (s, aθ1 ) − ∇a Qf θ2 (s, aθ2 ) νθ2 (ds)
+s
+Z
++ CQ ∥ψθ1 (s, ϵ) − ψθ2 (s, ϵ)∥ νθ2 (ds)
+s
+Z
+Z
+(ii)
+′
+≤ Lf CQ ∥νθ1 (·) − νθ2 (·)∥T V + Lf LQ ∥θ1 − θ2 ∥ νθ2 (ds) + CQ Lψ ∥θ1 − θ2 ∥ νθ2 (ds)
+
+s
+
+s
+
+s
+
+Lf L′Q
+CQ Lψ
+∥θ1 − θ2 ∥ +
+∥θ1 − θ2 ∥
+= Lf CQ ∥νθ1 (·) − νθ2 (·)∥T V +
+1−γ
+1−γ
+
+
+(iv)
+Lf L′Q
+CQ Lψ
+≤ Lf CQ Lν +
+∥θ1 − θ2 ∥
++
+1−γ
+1−γ
+:= LJ ∥θ1 − θ2 ∥ ,
+(iii)
+
+(7)
+
+fθ
+where (i) follows because ∥ψθ (s, ϵ)∥ ≤ Lf as indicated by Assumption 3 and ∇a Q
+Q
+R (s, a) ≤ C
+1
+by Lemma 12, (ii) follows from Assumption 3 and Lemma 12, (iii) follows because s νθ (ds) = 1−γ
+,
+and (iv) follows from Lemma 10. Plugging (7) to (6), we finish the proof.
+
+I.2.3
+
+Supporting Lemmas for Proving Theorem 9
+
+Lemma 13. The following two properties hold.
+1. Let Ŷ , Ȳ ∈ Rd1 ×d2 be matrices satisfying Ŷ
+
+F
+
+≤ CY , Ȳ
+
+estimator of Ȳ and {Ŷj }j are i.i.d. estimators, then we have
+M −1
+
+1 X
+E
+Ŷj − Ȳ
+M j=0
+33
+
+2
+
+≤
+F
+
+4CY2
+.
+M
+
+F
+
+≤ CY . If Ŷ is an unbiased
+
+2. Let ŷ, ȳ ∈ Rd be vectors satisfying ∥ŷ∥ ≤ Cy , ∥ȳ∥ ≤ Cy . If ŷ is an unbiased estimator of ȳ
+and {yj }j are i.i.d. estimators, then we have
+M −1
+
+2
+
+1 X
+ŷj − ȳ
+E
+M j=0
+
+≤
+
+4Cy2
+.
+M
+
+Proof. See the proof of Lemma 4 of Xiong et al. (2022).
+Lemma 14. Let wξ∗θ be defined in Proposition 7. Suppose Assumptions 3-5 hold. Then we have
+wξ∗θ ≤ Cwξ ,
+L C
+
+f Q
+where Cwξ = λΨ (1−γ)
+. Furthermore, for any θ1 , θ2 , we have
+
+wξ∗θ − wξ∗θ
+1
+
+L C
+
+
+
+f Q
+where Lw = λLΨJ + λ2 (1−γ)
+L2f Lν +
+Ψ
+
+≤ Lw ∥θ1 − θ2 ∥ ,
+
+2
+
+2Lf Lψ
+1−γ
+
+
+
+.
+
+Proof. We first show the boundedness of ∥∇J(θ)∥.
+Z Z
+∇θ f θ (s, ϵ)∇a Qf θ (s, a)|a=f θ (s,ϵ) p(dϵ)νθ (ds)
+∥∇J(θ)∥ =
+s ϵ
+Z Z
+≤
+∥∇θ f θ (s, ϵ)∥ ∇a Qf θ (s, a)|a=f θ (s,ϵ) p(dϵ)νθ (ds)
+s ϵ
+Z Z
+(i)
+Lf CQ
+≤ Lf CQ
+νθ (ds)p(dϵ) =
+,
+(1
+− γ)
+s ϵ
+
+(8)
+
+where (i) follows from Assumption 3 and Lemma 12.
+
+
+Recall we define Ψθ = Eνf θ ∇θ f θ (s, ϵ)∇θ f θ (s, ϵ)T . Assumption 3 implies that Ψθ is nonsingular. Then by definition, we have
+1
+Lf CQ
+.
+∥∇J(θ)∥ ≤
+λΨ
+λΨ (1 − γ)
+
+wξ∗θ = Ψ−1
+θ ∇J(θ) ≤
+Next, we show the Lipschitz continuity property.
+wξ∗θ − wξ∗θ
+1
+
+2
+
+−1
+= Ψ−1
+θ1 ∇J(θ1 ) − Ψθ2 ∇J(θ2 )
+−1
+−1
+−1
+= Ψ−1
+θ1 ∇J(θ1 ) − Ψθ1 ∇J(θ2 ) + Ψθ1 ∇J(θ2 ) − Ψθ2 ∇J(θ2 )
+
+−1
+≤ Ψ−1
+Ψ−1
+θ1 (∇J(θ1 ) − ∇J(θ2 )) +
+θ1 − Ψθ2 ∇J(θ2 )
+(i) LJ
+
+−1
+∥θ1 − θ2 ∥ + Ψ−1
+≤
+θ1 − Ψθ2 ∇J(θ2 )
+λΨ
+
+LJ
+−1
+−1
+−1
+=
+∥θ1 − θ2 ∥ + Ψ−1
+θ1 Ψθ2 Ψθ2 − Ψθ1 Ψθ1 Ψθ2 ∇J(θ2 )
+λΨ
+LJ
+−1
+∥θ1 − θ2 ∥ + Ψ−1
+=
+θ1 (Ψθ2 − Ψθ1 ) Ψθ2 ∇J(θ2 )
+λΨ
+LJ
+1
+≤
+∥θ1 − θ2 ∥ + 2 ∥Ψθ2 − Ψθ1 ∥ ∥∇J(θ2 )∥
+λΨ
+λΨ
+LJ
+Lf CQ
+≤
+∥θ1 − θ2 ∥ + 2
+∥Ψθ2 − Ψθ1 ∥ ,
+λΨ
+λΨ (1 − γ)
+
+where (i) follows from Lemma 8 and Assumption 3.
+34
+
+Observe that
+∥Ψθ2 − Ψθ1 ∥
+Z Z
+Z Z
+∇θ f θ1 (s, ϵ)∇θ f θ1 (s, ϵ)T p(dϵ)νθ1 (ds)
+∇θ f θ2 (s, ϵ)∇θ f θ2 (s, ϵ)T p(dϵ)νθ2 (ds) −
+=
+s ϵ
+s ϵ
+
+Z Z
+Z
+T
+T
+∇θ f θ2 (s, ϵ)∇θ f θ2 (s, ϵ) νθ2 (ds) − ∇θ f θ1 (s, ϵ)∇θ f θ1 (s, ϵ) νθ1 (ds) p(dϵ)
+=
+ϵ
+s
+s
+Z
+Z Z
+(9)
+≤
+∇θ f θ2 (s, ϵ)∇θ f θ2 (s, ϵ)T νθ2 (ds) − ∇θ f θ1 (s, ϵ)∇θ f θ1 (s, ϵ)T νθ1 (ds) p(dϵ).
+ϵ
+
+s
+
+s
+
+Now,
+Z
+
+Z
+
+∇θ f θ2 (s, ϵ)∇θ f θ2 (s, ϵ) νθ2 (ds) − ∇θ f θ1 (s, ϵ)∇θ f θ1 (s, ϵ)T νθ1 (ds)
+s
+Z
+Z
+T
+∇θ f θ2 (s, ϵ)∇θ f θ2 (s, ϵ) νθ2 (ds) − ∇θ f θ2 (s, ϵ)∇θ f θ2 (s, ϵ)T νθ1 (ds)
+≤
+s
+s
+Z
+Z
+T
+∇θ f θ2 (s, ϵ)∇θ f θ2 (s, ϵ) νθ1 (ds) − ∇θ f θ2 (s, ϵ)∇θ f θ1 (s, ϵ)T νθ1 (ds)
++
+s
+s
+Z
+Z
+∇θ f θ2 (s, ϵ)∇θ f θ1 (s, ϵ)T νθ1 (ds) − ∇θ f θ1 (s, ϵ)∇θ f θ1 (s, ϵ)T νθ1 (ds)
++
+s
+s
+Z
+(i)
+≤ L2f ∥νθ1 (·) − νθ2 (·)∥T V + 2Lf
+∇θ f θ2 (s, ϵ) − ∇θ f θ1 (s, ϵ) νθ1 (ds)
+T
+
+s
+
+s
+
+2Lf Lψ
+≤ L2f ∥νθ1 (·) − νθ2 (·)∥T V +
+∥θ1 − θ2 ∥
+1−γ
+
+
+(iii)
+2Lf Lψ
+≤ L2f Lν +
+∥θ1 − θ2 ∥ ,
+1−γ
+(ii)
+
+(10)
+
+where both (i) and (ii) follow from Assumption 3, and (iii) follows from Lemma 10. Plugging (9) to
+(10), we get
+
+
+2Lf Lψ
+∥Ψθ2 − Ψθ1 ∥ ≤ L2f Lν +
+∥θ1 − θ2 ∥ .
+1−γ
+Thus, we have
+wξ∗θ − wξ∗θ
+1
+
+2
+
+Lf CQ
+LJ
+∥θ1 − θ2 ∥ + 2
+∥Ψθ2 − Ψθ1 ∥
+≤
+λΨ
+λΨ (1 − γ)
+
+
+
+Lf CQ
+2Lf Lψ
+LJ
+2
++ 2
+Lf Lν +
+∥θ1 − θ2 ∥ .
+≤
+λΨ
+λΨ (1 − γ)
+1−γ
+
+For the clarity of the presentation, we will use the following notation for the gradient estimate for
+J(θt ):
+M −1
+
+hθt (wt , Bt ) =
+
+1 X
+∇θ f θt (s′t,j , ϵ′t,j )∇θ f θt (s′t,j , ϵ′t,j )T wt .
+M j=0
+
+Lemma 15. Suppose Assumptions 3-5. Then we have
+2
+
+E ∥hθt (wt , Bt ) − ∇J(θt )∥ ≤ 3L2h E wt − wθ∗t
+where Lh = L2f and κ is defined in (4).
+35
+
+2
+
++ 3L2h κ2 +
+
+2
+12L4f Cw
+ξ
+
+M
+
+,
+
+Proof. By definition, we have
+E ∥hθt (wt , Bt ) − ∇J(θt )∥
+
+2
+
+= E hθt (wt , Bt ) − hθt (wθ∗t , Bt ) + hθt (wθ∗t , Bt ) − hθt (wξ∗θt , Bt ) + hθt (wξ∗θt , Bt ) − ∇J(θt )
+2
+
+≤ 3E hθt (wt , Bt ) − hθt (wθ∗t , Bt )
++ 3E hθt (wξ∗θt , Bt ) − ∇J(θt )
+
++ 3E hθt (wθ∗t , Bt ) − hθt (wξ∗θt , Bt )
+
+2
+
+2
+
+2
+
+≤ 3L2h E wt − wθ∗t
+
+(i)
+
+2
+
++ 3L2h E wθ∗t − wξ∗θt
+
+(ii)
+
+≤ 3L2h E wt − wθ∗t
+
+2
+
++ 3L2h κ2 + 3E hθt (wξ∗θt , Bt ) − ∇J(θt )
+
+(iii)
+
+2
+
++ 3L2h κ2 +
+
+≤ 3L2h E wt − wθ∗t
+
+2
+
+2
+12L4f Cw
+ξ
+
+M
+
+2
+
++ 3E hθt (wξ∗θt , Bt ) − ∇J(θt )
+2
+
+,
+
+where (i) follows because for any w1 , w2 , θ ∈ Rd , we have
+M −1
+
+∥hθ (w1 , Bt ) − hθ (w2 , Bt )∥ =
+
+1 X
+∇θ f θt (s′t,j , ϵ′t,j )∇θ f θt (s′t,j , ϵ′t,j )T (w1 − w2 )
+M j=0
+
+≤ L2f ∥w1 − w2 ∥ := Lh ∥w1 − w2 ∥ ,
+(ii) follows from (4), and (iii) holds due to the fact that
+E hθt (wξ∗θt , Bt ) − ∇J(θt )
+
+2
+
+2
+
+M −1
+
+1 X
+∇θ f θt (s′t,j , ϵ′t,j )∇θ f θt (s′t,j , ϵ′t,j )T wξ∗θt − ∇J(θt )
+=E
+M j=0
+M −1 M −1
+1 X X
+= 2
+E⟨∇θ f θt (s′t,i , ϵ′t,i )∇θ f θt (s′t,i , ϵ′t,i )T wξ∗θt − ∇J(θt ),
+M i=0 j=0
+
+∇θ f θt (s′t,j , ϵ′t,j )∇θ f θt (s′t,j , ϵ′t,j )T wξ∗θt − ∇J(θt )⟩
+=
+(i)
+
+≤
+
+M −1
+2
+1 X
+E ∇θ f θt (s′t,j , ϵ′t,j )∇θ f θt (s′t,j , ϵ′t,j )T wξ∗θt − ∇J(θt )
+2
+M j=0
+M −1
+2
+4L4f Cw
+1 X
+ξ
+4 2
+4L
+C
+,
+=
+f wξ
+M 2 j=0
+M
+
+where (i) follows from Assumption 3, Lemma 13 and Lemma 14.4 Here, to apply Lemma 13, we
+need to upper-bound the norms of both the unbiased estimators and their expectation. For the former,
+we have
+∇θ fθt (s′t,j , ϵ′t,j )∇θ fθt (s′t,j , ϵ′t,j )T wξ∗θt ≤ L2f Cwξ ,
+while for the latter, we have
+∥∇J(θt )∥ ≤
+
+Lf CQ
+= λΨ Cwξ ≤ L2f Cwξ ,
+(1 − γ)
+
+where we use the bound of ∇J(θt ) derived in (8), the definition of Cwξ in Lemma 14, and that
+λΨ ≤
+
+
+ 2
+1
+trace(Ψ) = Eνθ ,p ∇θ fθt (s, ϵ)∇θ fθt (s, ϵ)T
+≤ L2f .
+n
+
+4
+
+In Xiong et al. (2022), the constant of the last equation is 2, without derivation. Here, we correct this
+constant to 4 following our detailed derivation.
+
+36
+
+Then, by Lemma 13, we have
+E ∇θ fθt (s′t,j , ϵ′t,j )∇θ fθt (s′t,j , ϵ′t,j )T wξ∗θt − ∇J(θt )
+
+I.2.4
+
+2
+
+2
+≤ 4L4f Cw
+.
+ξ
+
+Proof of Theorem 9
+
+We use the following notations for the clarity of the presentation:
+gθt (wt , Bt ) =
+
+M −1
+M −1
+1 X
+1 X
+δt,j ϕ(xt,j ) =
+(At,j wt + bt,j ) := Ât wt + b̂t ;
+M j=0
+M j=0
+
+ḡθt (wt ) = Edθt [δt ϕ(xt )] = Āt wt + b̄t ;
+ḡθt (wθ∗t ) = Āt wθ∗t + b̄t = 0.
+Step I: Characterizing dynamics of critic’s error via coupling with actor.
+In the first step, we characterize the propagation of the dynamics of critic’s dynamic tracking
+error based on its coupling with actor’s updates. That is, we develop the relationship between
+wt+1 − wθ∗t+1
+
+2
+
+and wt − wθ∗t
+
+2
+
+by their coupling with actor’s updates.
+
+We first use the dynamics of the critic to obtain
+wt+1 − wθ∗t
+
+2
+
+= wt + αw gθt (wt , Bt ) − wθ∗t
+
+2
+
+= wt − wθ∗t
+
+2
+
+2
++ 2αw ⟨wt − wθ∗t , gθt (wt , Bt )⟩ + αw
+∥gθt (wt , Bt )∥
+
+= wt − wθ∗t
+
+2
+
++ 2αw ⟨wt − wθ∗t , ḡθt (wt )⟩ + 2αw ⟨wt − wθ∗t , gθt (wt , Bt ) − ḡθt (wt )⟩
+
+2
+
+2
+
+2
++ αw
+∥gθt (wt , Bt )∥
+
+= wt − wθ∗t
+
+2
+
++ 2αw (wt − wθ∗t )T Āt (wt − wθ∗t ) + 2αw ⟨wt − wθ∗t , gθt (wt , Bt ) − ḡθt (wt )⟩
+2
+
+2
++ αw
+∥gθt (wt , Bt )∥
+
+≤ (1 − 2αw λ) wt − wθ∗t
+
+(i)
+
+2
+
+2
++ 2αw ⟨wt − wθ∗t , gθt (wt , Bt ) − ḡθt (wt )⟩ + αw
+∥gθt (wt , Bt )∥
+
+≤ (1 − 2αw λ) wt − wθ∗t
+
+2
+
++ 2αw ⟨wt − wθ∗t , gθt (wt , Bt ) − ḡθt (wt )⟩
+
+2
+
+2
+
+2
+2
++ 2αw
+∥gθt (wt , Bt ) − ḡθt (wt )∥ + 2αw
+∥ḡθt (wt )∥
+
+= (1 − 2αw λ) wt − wθ∗t
+
+2
+
+2
+
++ 2αw ⟨wt − wθ∗t , gθt (wt , Bt ) − ḡθt (wt )⟩
+2
+
+2
+
+2
+2
++ 2αw
+∥gθt (wt , Bt ) − ḡθt (wt )∥ + 2αw
+ḡθt (wt ) − ḡθt (wθ∗t )
+
+= (1 − 2αw λ) wt − wθ∗t
+
+2
+
++ 2αw ⟨wt − wθ∗t , gθt (wt , Bt ) − ḡθt (wt )⟩
+2
+
+2
+2
++ 2αw
+∥gθt (wt , Bt ) − ḡθt (wt )∥ + 2αw
+Āt (wt − wθ∗t )
+
+≤ (1 − 2αw λ) wt − wθ∗t
+
+2
+
+2
+
++ 2αw ⟨wt − wθ∗t , gθt (wt , Bt ) − ḡθt (wt )⟩
+2
+
+2
+2
++ 2αw
+∥gθt (wt , Bt ) − ḡθt (wt )∥ + 2αw
+Āt
+(ii)
+
+2 2
+≤ (1 − 2αw λ + 2αw
+CA ) wt − wθ∗t
+
+2
+
+2
+
+(wt − wθ∗t )
+
+2
+
++ 2αw ⟨wt − wθ∗t , gθt (wt , Bt ) − ḡθt (wt )⟩
+
+2
+
+2
++ 2αw
+∥gθt (wt , Bt ) − ḡθt (wt )∥ ,
+2
+
+where (i) follows from the property (wt − wθ∗t )T Āt (wt − wθ∗t ) ≤ −λ wt − wθ∗t with some
+constant λ > 0 for any policy, which has been proved in Tsitsiklis and Van Roy (1997), Bhandari et al.
+2
+(2018), Tu and Recht (2019), Xiong et al. (2021), and (ii) follows because ∥A∥ ≤ 2(1 + γ 2 )Cϕ4 ≤
+2
+4Cϕ4 := CA
+.
+37
+
+Taking the expectation over the actor and the critic parameters on both sides yields
+E wt+1 − wθ∗t
+
+2
+
+2 2
+≤ (1 − 2αw λ + 2αw
+CA )E wt − wθ∗t
+2
++ 2αw
+E ∥gθt (wt , Bt ) − ḡθt (wt )∥
+
+2
+
++ 2αw E⟨wt − wθ∗t , gθt (wt , Bt ) − ḡθt (wt )⟩
+
+2
+
+2
++ 2αw
+E ∥gθt (wt , Bt ) − ḡθt (wt )∥ .
+
+2
+
+2 2
+= (1 − 2αw λ + 2αw
+CA )E wt − wθ∗t
+
+2
+
+(11)
+
+Observe that
+2
+
+E ∥gθt (wt , Bt ) − ḡθt (wt )∥
+
+2
+
+= E Ât wt + b̂t − Āt wt − b̄t
+(i)
+
+≤ 3E (Ât − Āt )(wt − wθ∗t )
+2
+
+≤ 3E Ât − Āt
+
+F
+
+2
+
+wt − wθ∗t
+
++ 3E (Ât − Āt )wθ∗t
+
+2
+
+2
+
++ 3E Ât − Āt
+
+F
+
+2
+
+2
+
++ 3E b̂t − b̄t
+wθ∗t
+
+2
+
+2
+
++ 3E b̂t − b̄t
+
+2
+
+2
+E wθ∗t + Cb2 )
+12(CA
+2
+≤
+E wt − wθ∗t +
+M
+M
+2 2
+2
+(iii) 12C 2
+12(C
+C
+2
+A
+A w + Cb )
+≤
+E wt − wθ∗t +
+,
+M
+M
+(ii) 12C 2
+A
+
+where (i) follows because (x + y + z)2 ≤ 3x2 + 3y 2 + 3z 2 , (ii) follows from Lemma 13 and Cb :=
+2
+2
+Rmax Cϕ ≥ ∥b∥, and (iii) follows because wθ∗t = Ā−1
+≤ Cb /λA = Rmax Cϕ /λA := Cw
+t b̄t
+by Assumption 6.
+Substituting the above bound into (11), we have
+E wt+1 − wθ∗t
+
+2
+2
+
+2
+
+2 2
+2
+≤ (1 − 2αw λ + 2αw
+CA )E wt − wθ∗t + 2αw
+E ∥gθt (wt , Bt ) − ḡθt (wt )∥
+
+
+2 2
+2
+2 2
+24αw CA
+24αw
+(CA
+Cw + Cb2 )
+2
+2 2
+≤ 1 − 2αw λ + 2αw
+CA +
+.
+E wt − wθ∗t +
+M
+M
+
+Since αw ≤ 2Cλ2 ; M ≥
+A
+
+2
+48αw CA
+, we further obtain
+λ
+
+2
+
+E wt+1 − wθ∗t
+
+
+2 2
+2
+2 2
+24αw
+CA
+24αw
+(CA
+Cw + Cb2 )
+2
+2 2
+≤ 1 − 2αw λ + 2αw CA +
+E wt − wθ∗t +
+M
+M
+
+
+2
+2 2
+2
+αw λ
+24αw (CA Cw + Cb )
+2
+≤ 1−
+E wt − wθ∗t +
+.
+2
+M
+
+(12)
+
+Next, we use Young’s inequality, and obtain
+2
+
+E wt+1 − wθ∗t+1
+
+
+2
+1
+2
+E wt+1 − wθ∗t + (1 + 2(2/λαw − 1)) E wθ∗t − wθ∗t+1
+≤ 1+
+2(2/λαw − 1)
+
+
+2
+2 2
+2
+(i)
+4 − λαw 24αw
+(CA
+Cw + Cb2 )
+4
+λαw
+2
+≤ 1−
+E wt − wθ∗t +
+·
++
+E wθ∗t − wθ∗t+1
+4
+4 − 2λαw
+M
+λαw
+
+
+2
+2 2
+2
+(ii)
+λαw
+4
+−
+λα
+24α
+(C
+C
++
+C
+)
+12L2w
+24κ2
+2
+w
+2
+w
+A w
+b
+≤ 1−
+E wt − wθ∗t +
+·
++
+E ∥θt+1 − θt ∥ +
+,
+4
+4 − 2λαw
+M
+λαw
+λαw
+(13)
+38
+
+where (i) follows from the bound derived in (12), and (ii) holds due to the fact that5
+E wθ∗t − wθ∗t+1
+
+2
+
+≤ 3E wθ∗t − wξ∗θt
+
+2
+
++ 3E wξ∗θt − wξ∗θ
+2
+
+(i)
+
+≤ 3κ2 + 3E wξ∗θt − wξ∗θ
+(ii)
+
+t+1
+
+2
+t+1
+
++ 3E wξ∗θ
+
+t+1
+
+− wθ∗t+1
+
+2
+
++ 3κ2
+
+2
+
+≤ 6κ2 + 3L2w E ∥θt+1 − θt ∥ ,
+
+where (i) follows from the definition of κ in (4), and (ii) follows from Lemma 14.
+Step II: Bounding cumulative tracking error via compatibility theorem for DPG.
+In this step, we bound the cumulative tracking error based on the dynamics of the tracking error
+from the last step. To this end, we need to first bound the difference between two consecutive actor
+parameters.
+PM −1
+Observe that θt+1 − θt = αMθ j=0 ∇θ f θt (s′t,j , ϵ′t,j )∇θ f θt (s′t,j , ϵ′t,j )T wt = αθ hθt (wt , Bt ) and
+2
+2
+2
+E ∥hθt (wt , Bt )∥ ≤ 2E ∥∇J(θt )∥ + 2E ∥hθt (wt , Bt ) − ∇J(θt )∥ . We proceed to bound (13) as
+follows
+2
+
+E wt+1 − wθ∗t+1
+
+
+2
+2 2
+λαw
+(CA
+Cw + Cb2 ) 12L2w
+24κ2
+4 − λαw 24αw
+2
+2
+≤ 1−
+E wt − wθ∗t +
++
+·
+E ∥θt+1 − θt ∥ +
+4
+4 − 2λαw
+M
+λαw
+λαw
+
+
+2 2
+2
+2 2
+2
+λαw
+24L
+α
+48α
+(C
+C
++
+C
+)
+2
+2
+w θ
+w
+A w
+b
+≤ 1−
++
+E wt − wθ∗t +
+E ∥∇J(θt )∥
+4
+M
+λαw
+24L2w αθ2
+24κ2
+2
++
+E ∥hθt (wt , Bt ) − ∇J(θt )∥ +
+λαw
+λαw
+
+
+2
+2 2
+(i)
+λαw
+72L2h L2w αθ2
+48αw
+(CA
+Cw + Cb2 ) 24L2w αθ2
+2
+2
+≤ 1−
++
++
+E ∥∇J(θt )∥
+E wt − wθ∗t +
+4
+λαw
+M
+λαw
+!
+4 2
+C
+12L
+24κ2
+24L2w αθ2
+w
+f
+ξ
++
++
+3L2h κ2 +
+λαw
+M
+λαw
+
+
+2 2
+2
+(ii)
+24L2w αθ2
+Cw + Cb2 )
+λαw
+(CA
+48αw
+2
+2
+≤ 1−
+E wt − wθ∗t +
+E ∥∇J(θt )∥ +
+8
+λαw
+M
+!
+4
+2
+12Lf Cwξ
+24L2w αθ2
+24κ2
++
+3L2h κ2 +
++
+,
+(14)
+λαw
+M
+λαw
+λαw
+where (i) follows from Lemma 15, and (ii) follows because αθ ≤ 24L
+.
+h Lw
+
+We further take the summation over all iterations on both sides of (14) and have
+T
+−1
+X
+
+E wt − wθ∗t
+
+2
+
+t=0
+
+≤
+
+T
+−1 
+X
+
+t−1−i
+T −1 t−1 
+24L2w αθ2 X X
+λαw
+2
+1−
+E ∥∇J(θt )∥
+λα
+8
+w
+t=0
+t=0 i=0
+"
+!
+# T −1 t−1 
+t−1−i
+2
+2
+2 2
+2
+2 2
+12L4f Cw
+48αw (CA Cw + Cb ) 24Lw αθ
+24κ2 X X
+λαw
+ξ
+2 2
++
+3Lh κ +
++
+1−
++
+M
+λαw
+M
+λαw t=0 i=0
+8
+5
+
+1−
+
+λαw
+8
+
+t
+
+w0 − wθ∗0
+
+2
+
++
+
+In Xiong et al. (2022), they directly use E wθ∗t − wθ∗t+1
+
+2
+
+is different from the inequality from Lemma 14: E wξ∗θ − wξ∗θ
+t
+
+triangle inequality to give a bound for E wθ∗t − wθ∗t+1
+
+39
+
+2
+
+.
+
+≤ Lw E ∥θt+1 − θt ∥2 , which is not proven and
+2
+t+1
+
+≤ Lw E ∥θt+1 − θt ∥2 . Here, we use the
+
+8 w0 − wθ∗0
+≤
+λαw
++
+
+2
+
+"
+
+2
+2 2
+48αw
+(CA
+Cw + Cb2 ) 24L2w αθ2
++
++
+M
+λαw
+
+3L2h κ2 +
+
+2
+12L4f Cw
+ξ
+
+!
+
+M
+
+#
+24κ2
+8T
++
+·
+λαw
+λαw
+
+T −1
+192L2w αθ2 X
+2
+E ∥∇J(θt )∥ .
+2
+λ2 αw
+t=0
+
+(15)
+
+Step III: Overall convergence by canceling tracking error via actor’s positive progress.
+In this step, we establish the overall convergence to a stationary policy by novel cancellation of the
+above cumulative tracking error via actor’s update progress.
+Based on Lemma 8, we have
+E[J(θt+1 )] − E[J(θt )]
+LJ
+2
+E ∥θt+1 − θt ∥
+2
+LJ αθ2
+2
+= αθ E⟨∇J(θt ), hθt (wt , Bt )⟩ −
+E ∥hθt (wt , Bt )∥
+2
+
+≥ E⟨∇J(θt ), θt+1 − θt ⟩ −
+
+2
+
+= αθ E ∥∇J(θt )∥ + αθ E⟨∇J(θt ), hθt (wt , Bt ) − ∇J(θt )⟩ −
+(i) αθ
+
+≥
+
+2
+
+2
+
+E ∥∇J(θt )∥ −
+
+LJ αθ2
+2
+E ∥hθt (wt , Bt )∥
+2
+
+αθ
+2
+E ∥hθt (wt , Bt ) − ∇J(θt )∥
+2
+
+LJ αθ2
+2
+−
+E ∥hθt (wt , Bt ) − ∇J(θt ) + ∇J(θt )∥
+2
+α
+
+α
+
+θ
+θ
+2
+2
+≥
+− LJ αθ2 E ∥∇J(θt )∥ −
++ LJ αθ2 E ∥hθt (wt , Bt ) − ∇J(θt )∥
+2
+2
+!
+2
+
+α
+
+(ii)  αθ
+12L4f Cw
+θ
+2
+ξ
+2
+2
+2
+∗ 2
+2 2
+≥
+− LJ αθ E ∥∇J(θt )∥ −
++ LJ αθ
+3Lh E wt − wθt + 3Lh κ +
+2
+2
+M
+!
+2
+(iii) αθ
+12L4f Cw
+3αθ
+2
+2
+ξ
+E ∥∇J(θt )∥ −
+3L2h E wt − wθ∗t + 3L2h κ2 +
+,
+(16)
+≥
+4
+4
+M
+where (i) follows because xT y ≥ − 12 x2 − 12 y 2 , (ii) follows from Lemma 15, and (iii) follows from
+the condition αθ ≤ 4L1 J .6
+We next take the summation over all iterations on both sides of the above bound and obtain
+T −1
+αθ X
+2
+E ∥∇J(θt )∥
+4 t=0
+!
+T −1
+2
+12L4f Cw
+3αθ
+9αθ L2h X
+2
+ξ
+2 2
+≤ E[J(θT +1 )] − E[J(θ0 )] +
+3Lh κ +
+·T +
+E wt − wθ∗t
+4
+M
+4
+t=0
+!
+T
+−1
+4 2
+2
+X
+12Lf Cwξ
+3αθ
+9αθ Lh
+Rmax
+2
++
+3L2h κ2 +
+·T +
+E wt − wθ∗t .
+≤
+(17)
+1−γ
+4
+M
+4
+t=0
+Substituting the cumulative tracking error bound derived in (15) into (17) yields
+T −1
+
+αθ X
+2
+E ∥∇J(θt )∥
+8 t=0
+
+ T −1
+(i)
+αθ
+432L2h L2w αθ3 X
+2
+≤
+−
+E ∥∇J(θt )∥
+2
+4
+λ2 αw
+t=0
+!
+2
+12L4f Cw
+Rmax
+3αθ
+18αθ L2h
+2
+ξ
+2 2
+≤
++
+3Lh κ +
+·T +
+w0 − wθ∗0
+1−γ
+4
+M
+λαw
+6
+
+Here, we highlight this condition on αθ , which is missing from Theorem 1 of Xiong et al. (2022).
+
+40
+
+"
+
+2
+2 2
+48αw
+(CA
+Cw + Cb2 ) 8L2w αθ2
++
++
+M
+λαw
+
+3L2h κ2 +
+
+2
+12L4f Cw
+ξ
+
+M
+
+!
+
+#
+24κ2
+18αθ L2h T
++
+·
+,
+λαw
+λαw
+
+w
+.
+where (i) follows from the condition αθ ≤ 24√λα
+6L L
+h
+
+w
+
+Finally, we have
+T −1
+
+2
+
+1 X
+2
+E ∥∇J(θt )∥
+T t=0
+!
+
+
+2
+12L4f Cw
+8Rmax
+1
+144L2h
+ξ
+∗ 2
+2 2
+≤
+· + 6 3Lh κ +
+w0 − wθ0
++
+αθ (1 − γ)
+λαw
+T
+M
+"
+!
+#
+2
+2
+2 2
+12L4f Cw
+48αw
+(CA
+Cw + Cb2 ) 8L2w αθ2
+24κ2
+144L2h
+ξ
+2 2
++
++
+3Lh κ +
++
+·
+M
+λαw
+M
+λαw
+λαw
+c2
+c1
++
++ c3 κ2 ,
+=
+T
+M
+
+min E ∥∇J(θt )∥ ≤
+
+t∈[T ]
+
+where7
+c1 =
+
+8Rmax
+144L2h
+2
++
+w0 − wθ∗0 ,
+αθ (1 − γ)
+λαw
+"
+
+2
+c2 = 72L4f Cw
++
+ξ
+
+c3 = 18L2h +
+
+7
+
+
+
+2
+2 2
+48αw
+(CA
+Cw + Cb2 ) +
+
+(18)
+2
+α2
+96L2w L4f Cw
+ξ θ
+
+
+24L2w L2h αθ2
+24
+144L2h
++
+·
+.
+λαw
+λαw
+λαw
+
+In Xiong et al. (2022), c3 = 18L2h +
+
+λαw
+
+#
+·
+
+144L2h
+,
+λαw
+
+(19)
+(20)
+
+2 2
+24L2
+w L h αθ
+. Here, we fix this constant by adding the missing factor
+λαw
+
+144L2
+24
+h
+and the extra term λα
+required in (13).
+λαw
+w
+
+41
+
+NeurIPS Paper Checklist
+1. Claims
+Question: Do the main claims made in the abstract and introduction accurately reflect the
+paper’s contributions and scope?
+Answer: [Yes]
+Justification: All our claims are verified by extensive experimental results and ablation
+studies in simulation and also tested on robots.
+Guidelines:
+• The answer NA means that the abstract and introduction do not include the claims
+made in the paper.
+• The abstract and/or introduction should clearly state the claims made, including the
+contributions made in the paper and important assumptions and limitations. A No or
+NA answer to this question will not be perceived well by the reviewers.
+• The claims made should match theoretical and experimental results, and reflect how
+much the results can be expected to generalize to other settings.
+• It is fine to include aspirational goals as motivation as long as it is clear that these goals
+are not attained by the paper.
+2. Limitations
+Question: Does the paper discuss the limitations of the work performed by the authors?
+Answer: [Yes]
+Justification: We discuss the limitations of our work in the main paper.
+Guidelines:
+• The answer NA means that the paper has no limitation while the answer No means that
+the paper has limitations, but those are not discussed in the paper.
+• The authors are encouraged to create a separate "Limitations" section in their paper.
+• The paper should point out any strong assumptions and how robust the results are to
+violations of these assumptions (e.g., independence assumptions, noiseless settings,
+model well-specification, asymptotic approximations only holding locally). The authors
+should reflect on how these assumptions might be violated in practice and what the
+implications would be.
+• The authors should reflect on the scope of the claims made, e.g., if the approach was
+only tested on a few datasets or with a few runs. In general, empirical results often
+depend on implicit assumptions, which should be articulated.
+• The authors should reflect on the factors that influence the performance of the approach.
+For example, a facial recognition algorithm may perform poorly when image resolution
+is low or images are taken in low lighting. Or a speech-to-text system might not be
+used reliably to provide closed captions for online lectures because it fails to handle
+technical jargon.
+• The authors should discuss the computational efficiency of the proposed algorithms
+and how they scale with dataset size.
+• If applicable, the authors should discuss possible limitations of their approach to
+address problems of privacy and fairness.
+• While the authors might fear that complete honesty about limitations might be used by
+reviewers as grounds for rejection, a worse outcome might be that reviewers discover
+limitations that aren’t acknowledged in the paper. The authors should use their best
+judgment and recognize that individual actions in favor of transparency play an important role in developing norms that preserve the integrity of the community. Reviewers
+will be specifically instructed to not penalize honesty concerning limitations.
+3. Theory Assumptions and Proofs
+Question: For each theoretical result, does the paper provide the full set of assumptions and
+a complete (and correct) proof?
+Answer: [Yes]
+42
+
+Justification: We discuss the relevant theory and convergence proofs of the reparametrization
+gradient estimator in Appendix A and Appendix I respectively.
+Guidelines:
+• The answer NA means that the paper does not include theoretical results.
+• All the theorems, formulas, and proofs in the paper should be numbered and crossreferenced.
+• All assumptions should be clearly stated or referenced in the statement of any theorems.
+• The proofs can either appear in the main paper or the supplemental material, but if
+they appear in the supplemental material, the authors are encouraged to provide a short
+proof sketch to provide intuition.
+• Inversely, any informal proof provided in the core of the paper should be complemented
+by formal proofs provided in appendix or supplemental material.
+• Theorems and Lemmas that the proof relies upon should be properly referenced.
+4. Experimental Result Reproducibility
+Question: Does the paper fully disclose all the information needed to reproduce the main experimental results of the paper to the extent that it affects the main claims and/or conclusions
+of the paper (regardless of whether the code and data are provided or not)?
+Answer: [Yes]
+Justification: We propose a novel incremental policy gradient algorithm. We provide pseudocode and implementation details which are easy to follow and reproduce. Our code is also
+available publicly on GitHub and Google Colab.
+Guidelines:
+• The answer NA means that the paper does not include experiments.
+• If the paper includes experiments, a No answer to this question will not be perceived
+well by the reviewers: Making the paper reproducible is important, regardless of
+whether the code and data are provided or not.
+• If the contribution is a dataset and/or model, the authors should describe the steps taken
+to make their results reproducible or verifiable.
+• Depending on the contribution, reproducibility can be accomplished in various ways.
+For example, if the contribution is a novel architecture, describing the architecture fully
+might suffice, or if the contribution is a specific model and empirical evaluation, it may
+be necessary to either make it possible for others to replicate the model with the same
+dataset, or provide access to the model. In general. releasing code and data is often
+one good way to accomplish this, but reproducibility can also be provided via detailed
+instructions for how to replicate the results, access to a hosted model (e.g., in the case
+of a large language model), releasing of a model checkpoint, or other means that are
+appropriate to the research performed.
+• While NeurIPS does not require releasing code, the conference does require all submissions to provide some reasonable avenue for reproducibility, which may depend on the
+nature of the contribution. For example
+(a) If the contribution is primarily a new algorithm, the paper should make it clear how
+to reproduce that algorithm.
+(b) If the contribution is primarily a new model architecture, the paper should describe
+the architecture clearly and fully.
+(c) If the contribution is a new model (e.g., a large language model), then there should
+either be a way to access this model for reproducing the results or a way to reproduce
+the model (e.g., with an open-source dataset or instructions for how to construct
+the dataset).
+(d) We recognize that reproducibility may be tricky in some cases, in which case
+authors are welcome to describe the particular way they provide for reproducibility.
+In the case of closed-source models, it may be that access to the model is limited in
+some way (e.g., to registered users), but it should be possible for other researchers
+to have some path to reproducing or verifying the results.
+5. Open access to data and code
+43
+
+Question: Does the paper provide open access to the data and code, with sufficient instructions to faithfully reproduce the main experimental results, as described in supplemental
+material?
+Answer: [Yes]
+Justification: We share the relevant code. All data can be generated during training.
+Guidelines:
+• The answer NA means that paper does not include experiments requiring code.
+• Please see the NeurIPS code and data submission guidelines (https://nips.cc/
+public/guides/CodeSubmissionPolicy) for more details.
+• While we encourage the release of code and data, we understand that this might not be
+possible, so “No” is an acceptable answer. Papers cannot be rejected simply for not
+including code, unless this is central to the contribution (e.g., for a new open-source
+benchmark).
+• The instructions should contain the exact command and environment needed to run to
+reproduce the results. See the NeurIPS code and data submission guidelines (https:
+//nips.cc/public/guides/CodeSubmissionPolicy) for more details.
+• The authors should provide instructions on data access and preparation, including how
+to access the raw data, preprocessed data, intermediate data, and generated data, etc.
+• The authors should provide scripts to reproduce all experimental results for the new
+proposed method and baselines. If only a subset of experiments are reproducible, they
+should state which ones are omitted from the script and why.
+• At submission time, to preserve anonymity, the authors should release anonymized
+versions (if applicable).
+• Providing as much information as possible in supplemental material (appended to the
+paper) is recommended, but including URLs to data and code is permitted.
+6. Experimental Setting/Details
+Question: Does the paper specify all the training and test details (e.g., data splits, hyperparameters, how they were chosen, type of optimizer, etc.) necessary to understand the
+results?
+Answer: [Yes]
+Justification: We provide descriptions of our experimental setup in the main paper. We also
+list important hyper-parameters, neural network architectures, and other training details in
+the appendix.
+Guidelines:
+• The answer NA means that the paper does not include experiments.
+• The experimental setting should be presented in the core of the paper to a level of detail
+that is necessary to appreciate the results and make sense of them.
+• The full details can be provided either with the code, in appendix, or as supplemental
+material.
+7. Experiment Statistical Significance
+Question: Does the paper report error bars suitably and correctly defined or other appropriate
+information about the statistical significance of the experiments?
+Answer: [Yes]
+Justification: We assume normally distributed errors. All results are averaged over 30 runs
+and reported with 95% confidence interval.
+Guidelines:
+• The answer NA means that the paper does not include experiments.
+• The authors should answer "Yes" if the results are accompanied by error bars, confidence intervals, or statistical significance tests, at least for the experiments that support
+the main claims of the paper.
+44
+
+• The factors of variability that the error bars are capturing should be clearly stated (for
+example, train/test split, initialization, random drawing of some parameter, or overall
+run with given experimental conditions).
+• The method for calculating the error bars should be explained (closed form formula,
+call to a library function, bootstrap, etc.)
+• The assumptions made should be given (e.g., Normally distributed errors).
+• It should be clear whether the error bar is the standard deviation or the standard error
+of the mean.
+• It is OK to report 1-sigma error bars, but one should state it. The authors should
+preferably report a 2-sigma error bar than state that they have a 96% CI, if the hypothesis
+of Normality of errors is not verified.
+• For asymmetric distributions, the authors should be careful not to show in tables or
+figures symmetric error bars that would yield results that are out of range (e.g. negative
+error rates).
+• If error bars are reported in tables or plots, The authors should explain in the text how
+they were calculated and reference the corresponding figures or tables in the text.
+8. Experiments Compute Resources
+Question: For each experiment, does the paper provide sufficient information on the computer resources (type of compute workers, memory, time of execution) needed to reproduce
+the experiments?
+Answer: [Yes]
+Justification: It is listed in the appendix.
+Guidelines:
+• The answer NA means that the paper does not include experiments.
+• The paper should indicate the type of compute workers CPU or GPU, internal cluster,
+or cloud provider, including relevant memory and storage.
+• The paper should provide the amount of compute required for each of the individual
+experimental runs as well as estimate the total compute.
+• The paper should disclose whether the full research project required more compute
+than the experiments reported in the paper (e.g., preliminary or failed experiments that
+didn’t make it into the paper).
+9. Code Of Ethics
+Question: Does the research conducted in the paper conform, in every respect, with the
+NeurIPS Code of Ethics https://neurips.cc/public/EthicsGuidelines?
+Answer: [Yes]
+Justification: Our paper conforms to the NeurIPS Code of Ethics
+Guidelines:
+• The answer NA means that the authors have not reviewed the NeurIPS Code of Ethics.
+• If the authors answer No, they should explain the special circumstances that require a
+deviation from the Code of Ethics.
+• The authors should make sure to preserve anonymity (e.g., if there is a special consideration due to laws or regulations in their jurisdiction).
+10. Broader Impacts
+Question: Does the paper discuss both potential positive societal impacts and negative
+societal impacts of the work performed?
+Answer: [Yes]
+Justification: We discuss this in the main paper under the paragraph title Societal Impact.
+Guidelines:
+• The answer NA means that there is no societal impact of the work performed.
+• If the authors answer NA or No, they should explain why their work has no societal
+impact or why the paper does not address societal impact.
+45
+
+• Examples of negative societal impacts include potential malicious or unintended uses
+(e.g., disinformation, generating fake profiles, surveillance), fairness considerations
+(e.g., deployment of technologies that could make decisions that unfairly impact specific
+groups), privacy considerations, and security considerations.
+• The conference expects that many papers will be foundational research and not tied
+to particular applications, let alone deployments. However, if there is a direct path to
+any negative applications, the authors should point it out. For example, it is legitimate
+to point out that an improvement in the quality of generative models could be used to
+generate deepfakes for disinformation. On the other hand, it is not needed to point out
+that a generic algorithm for optimizing neural networks could enable people to train
+models that generate Deepfakes faster.
+• The authors should consider possible harms that could arise when the technology is
+being used as intended and functioning correctly, harms that could arise when the
+technology is being used as intended but gives incorrect results, and harms following
+from (intentional or unintentional) misuse of the technology.
+• If there are negative societal impacts, the authors could also discuss possible mitigation
+strategies (e.g., gated release of models, providing defenses in addition to attacks,
+mechanisms for monitoring misuse, mechanisms to monitor how a system learns from
+feedback over time, improving the efficiency and accessibility of ML).
+11. Safeguards
+Question: Does the paper describe safeguards that have been put in place for responsible
+release of data or models that have a high risk for misuse (e.g., pretrained language models,
+image generators, or scraped datasets)?
+Answer: [NA]
+Justification: This paper does not pose such risks
+Guidelines:
+• The answer NA means that the paper poses no such risks.
+• Released models that have a high risk for misuse or dual-use should be released with
+necessary safeguards to allow for controlled use of the model, for example by requiring
+that users adhere to usage guidelines or restrictions to access the model or implementing
+safety filters.
+• Datasets that have been scraped from the Internet could pose safety risks. The authors
+should describe how they avoided releasing unsafe images.
+• We recognize that providing effective safeguards is challenging, and many papers do
+not require this, but we encourage authors to take this into account and make a best
+faith effort.
+12. Licenses for existing assets
+Question: Are the creators or original owners of assets (e.g., code, data, models), used in
+the paper, properly credited and are the license and terms of use explicitly mentioned and
+properly respected?
+Answer: [Yes]
+Justification: We implemented most of our algorithms from scratch and use popular benchmarks and cite them as and when necessary. All our results are generated during training.
+Guidelines:
+• The answer NA means that the paper does not use existing assets.
+• The authors should cite the original paper that produced the code package or dataset.
+• The authors should state which version of the asset is used and, if possible, include a
+URL.
+• The name of the license (e.g., CC-BY 4.0) should be included for each asset.
+• For scraped data from a particular source (e.g., website), the copyright and terms of
+service of that source should be provided.
+46
+
+• If assets are released, the license, copyright information, and terms of use in the
+package should be provided. For popular datasets, paperswithcode.com/datasets
+has curated licenses for some datasets. Their licensing guide can help determine the
+license of a dataset.
+• For existing datasets that are re-packaged, both the original license and the license of
+the derived asset (if it has changed) should be provided.
+• If this information is not available online, the authors are encouraged to reach out to
+the asset’s creators.
+13. New Assets
+Question: Are new assets introduced in the paper well documented and is the documentation
+provided alongside the assets?
+Answer: [Yes]
+Justification: We provide our code and a Readme file to run experiments
+Guidelines:
+• The answer NA means that the paper does not release new assets.
+• Researchers should communicate the details of the dataset/code/model as part of their
+submissions via structured templates. This includes details about training, license,
+limitations, etc.
+• The paper should discuss whether and how consent was obtained from people whose
+asset is used.
+• At submission time, remember to anonymize your assets (if applicable). You can either
+create an anonymized URL or include an anonymized zip file.
+14. Crowdsourcing and Research with Human Subjects
+Question: For crowdsourcing experiments and research with human subjects, does the paper
+include the full text of instructions given to participants and screenshots, if applicable, as
+well as details about compensation (if any)?
+Answer: [NA]
+Justification: his paper does not involve crowdsourcing nor research with human subjects.
+Guidelines:
+• The answer NA means that the paper does not involve crowdsourcing nor research with
+human subjects.
+• Including this information in the supplemental material is fine, but if the main contribution of the paper involves human subjects, then as much detail as possible should be
+included in the main paper.
+• According to the NeurIPS Code of Ethics, workers involved in data collection, curation,
+or other labor should be paid at least the minimum wage in the country of the data
+collector.
+15. Institutional Review Board (IRB) Approvals or Equivalent for Research with Human
+Subjects
+Question: Does the paper describe potential risks incurred by study participants, whether
+such risks were disclosed to the subjects, and whether Institutional Review Board (IRB)
+approvals (or an equivalent approval/review based on the requirements of your country or
+institution) were obtained?
+Answer: [NA]
+Justification: This paper does not involve crowdsourcing nor research with human subjects.
+Guidelines:
+• The answer NA means that the paper does not involve crowdsourcing nor research with
+human subjects.
+• Depending on the country in which research is conducted, IRB approval (or equivalent)
+may be required for any human subjects research. If you obtained IRB approval, you
+should clearly state this in the paper.
+47
+
+• We recognize that the procedures for this may vary significantly between institutions
+and locations, and we expect authors to adhere to the NeurIPS Code of Ethics and the
+guidelines for their institution.
+• For initial submissions, do not include any information that would break anonymity (if
+applicable), such as the institution conducting the review.
+
+48
+
+

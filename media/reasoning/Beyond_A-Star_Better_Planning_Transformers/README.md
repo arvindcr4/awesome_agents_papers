@@ -1,5 +1,5 @@
 # Beyond A-Star Better Planning Transformers
-- Paper: [Beyond_A-Star_Better_Planning_Transformers.pdf](../../../papers/reasoning/Beyond_A-Star_Better_Planning_Transformers.pdf)
+- Paper: [Beyond_A-Star_Better_Planning_Transformers.pdf](../../../reinforcement_learning_papers/09_agentic_rl/Beyond_A-Star_Better_Planning_Transformers.pdf)
 
 ## Gemini diagrams
 

@@ -1,0 +1,3517 @@
+ProSh: Probabilistic Shielding
+for Model-free Reinforcement Learning
+Edwin Hamel-De le Court∗
+
+Imperial College
+London, United Kingdom
+e.hamel-de-le-court@imperial.ac.uk
+
+Gaspard Ohlmann∗
+
+Mulhouse, France
+gaspard.ohlmann@outlook.com
+
+arXiv:2510.15720v2 [cs.LG] 21 Oct 2025
+
+ABSTRACT
+Safety is a major concern in reinforcement learning (RL): we aim at
+developing RL systems that not only perform optimally, but are also
+safe to deploy by providing formal guarantees about their safety.
+To this end, we introduce Probabilistic Shielding via Risk Augmentation (ProSh), a model-free algorithm for safe reinforcement
+learning under cost constraints. ProSh augments the Constrained
+MDP state space with a risk budget and enforces safety by applying a shield to the agent’s policy distribution using a learned cost
+critic. The shield ensures that all sampled actions remain safe in
+expectation. We also show that optimality is preserved when the
+environment is deterministic. Since ProSh is model-free, safety
+during training depends on the knowledge we have acquired about
+the environment. We provide a tight upper-bound on the cost in
+expectation, depending only on the backup-critic accuracy, that is
+always satisfied during training. Under mild, practically achievable
+assumptions, ProSh guarantees safety even at training time, as
+shown in the experiments.
+
+KEYWORDS
+Safe Reinforcement Learning, Formal Methods, Shielding, Probabilistic Temporal Logic, Stochastic Systems
+∗ These authors contributed equally to this work.
+
+1
+
+INTRODUCTION
+
+A key challenge in AI is designing agents that learn to act optimally
+in unknown environments [37]. Reinforcement Learning (RL) –
+particularly when combined with deep neural networks – has made
+impressive strides in domains such as games [27], robotics [23], and
+autonomous driving [22]. However, ensuring safety during both
+training and deployment remains a critical barrier to real-world
+adoption. This has led to a growing interest in Safe RL, where agents
+must optimize rewards under constraints, e.g., budgeted costs or
+formal safety requirements. This paper focuses on safe learning in
+Constrained Markov Decision Processes (CMDPs), where agents
+maximize expected discounted reward, while keeping cumulative
+expected cost below a given threshold. Traditional methods, such
+as Lagrangian approaches [2, 30, 36], allow to converge toward a
+safe policy, but do not provide formal guarantees on safety, neither
+during training nor on the provided policy.
+To tackle this problem, we introduce ProSh: a novel probabilistic shielding method that ensures safety also at training time, in
+model-free RL. Unlike classic shielding methods that restrict unsafe
+actions based on a model of the environment, ProSh operates on
+distributions, augments the CMDP with a risk budget, and uses a
+learned cost critic to guide safe exploration. Crucially, ProSh does
+
+Francesco Belardinelli
+
+Imperial College
+London, United Kingdom
+francesco.belardinelli@imperial.ac.uk
+
+not assume access to a simulator or environment abstraction, and
+is compatible with continuous environments.
+We also show that optimizing over shielded policies in the augmented space is sufficient for constrained optimality in the base
+CMDP in the deterministic setting. We implement ProSh as an
+off-policy deep RL algorithm and evaluate it on standard Safe RL
+benchmarks. Notably, ProSh turns out to be safe during training
+in the experiments. To summarize, the contributions of the paper
+are as follows.
+(1) We introduce ProSh, a shielding method for CMDP that
+assumes no knowledge of the environment’s dynamics.
+(2) We provide formal safety guaranties during training, depending only on the accuracy of the learned cost critic.
+(3) We show that optimizing across shielded policies in the RiskAugmented MDP suffices for constrained optimality (in the
+deterministic case).
+(4) We implement ProSh as a DRL algorithm and evaluate its
+optimality and safety on relevant benchmarks. In particular,
+ProSh leads to significantly less cost violations in expectation, even in early training.
+Due to space restrictions, the proofs of all the results appear in
+the supplementary material, which also includes the code for the
+experiments.
+Related Work. We refer to [16] for a survey on Safe Reinforcement Learning, while here we focus on the works most closely
+related to our contribution. Policy-based methods are arguably the
+most popular approaches to Safe RL. They usually consist of extending known RL algorithms (e.g., PPO [33], TRPO [32], or SAC
+[17]) with safety constraints, either by using a Lagrangian approach
+[2, 36], changing the objective function [26], or by modifying the update process [46]. Several of these algorithms have become widely
+used for benchmarking against newer Safe RL methods, and are
+implemented in state-of-the-art Safe RL frameworks [2, 20, 21].
+Shielding restricts the agent’s actions during training and deployment to ensure safety [4, 12, 19, 44]. Introduced in [4] using
+LTL safety formulas, shielding has been extended to probabilistic
+settings in [19], although without formal guaranties. Formal safety
+under probabilistic constraints has been proved in [24]. More recent
+work allows shielding without prior models: [35] uses a learned
+safety critic to restrict actions, while [15] combines shielding with a
+learned dynamics model. A survey on shielding methods is given in
+[29]. Compared to prior approaches, we focus on the general case of
+model-free, continuous environments with probabilistic constraints,
+while prior approaches typically make further assumptions.
+Lagrangian approaches [2, 30, 36] convert CMDPs into unconstrained problems by introducing a dual variable to penalize
+
+cost violations in the reward objective. These methods are effective
+in both discrete and continuous action spaces and are compatible
+with policy gradient algorithms (e.g. TRPO [32], PPO [33]). Given
+enough iterations and tuning, they provide good tradeoffs between
+cost violations and reward, but cannot guaranty safety at any time,
+which limits their use in safety-critical scenarios.
+State augmentation techniques with parameters representing
+how far the agent is from being unsafe have also been studied. In [9],
+the MDP is state-augmented with Lagrange multipliers. In Saute-RL
+[34], the states are augmented with the remaining safety budget,
+which is used to reshape the objective. We also use an augmentation
+approach, but we not only augment states but actions too, allowing
+agents more freedom in the future probabilistic repartition of the
+remaining safety budget.
+Q-learning is a key model-free RL algorithm for discrete environments [42], known to converge in the tabular case under
+mild assumptions. However, extending it to function approximation —especially with neural networks—introduces challenges [28].
+Stabilization techniques such as double Q-learning [40], dueling
+networks [41], and distributional methods [7] help address instability. Classic Q-learning is prone to overestimation bias [39, 40]. To
+mitigate these issues, we adopt a TD3-like method [13]. Throughout, we assume the backup 𝑄-value approximates a fixed point of
+the Bellman operator—an assumption we discuss in the paper.
+Trust-region approaches such as CPO [2], FOCOPS [45], and
+Safe Policy Iteration [31] are On-policy algorithms that rely on
+providing local safety bounds that hold within a small neighborhood
+of the current policy. This is useful to bound constraint violations of
+the next policy updates if the trust region is small, but the accuracy
+of the bound depends heavily on the size of the trust region. In
+addition, these methods do not provide a formal guaranty that the
+policy update step is safe, even late in the training.
+Lyapunov-based methods rely on enforcing constraint satisfaction by projecting updates to satisfy a Lyapunov decrease condition defined relative to a fixed safe baseline policy [10, 11]. The
+guarantees provided in [10, 11] depend on accurate safety critics,
+local linearizations around the current policy, and a well-behaved
+backup policy. We rely on restricting the agent’s actions to enforce
+safety, but we use a state-augmentation technique rather than a
+fixed Lyapunov function, which yields explicit, model-free trainingtime bounds that depend only on the backup critic’s approximation
+error. Furthermore, our backup policy is learned jointly with the
+main actor and used as a fallback within the shield, rather than as
+a fixed reference that defines the feasible set of actions.
+
+2.1
+
+Key Concepts
+
+A Markov Decision Processes (MDP) is a tuple M = ⟨𝑆, 𝐴, 𝑃, 𝑠𝑖 , 𝑟 ⟩,
+where 𝑆 is a set of states, with 𝑠𝑖 as initial state1 ; 𝐴 is a mapping
+that associates every state 𝑠 ∈ 𝑆 to a nonempty finite set 𝐴(𝑠)
+of actions; for SA = {(𝑠, 𝑎), 𝑎 ∈ 𝐴(𝑠)}, 𝑃 : SA → D(𝑆) is a
+transition probability function that maps every state-action pair
+(𝑠, 𝑎) ∈ SA to a probability distribution over 𝑆; and 𝑟 : SA ↦→ R
+is the reward function. An MDP is finite if the sets of states and
+actions are finite. Finally, a Constrained MDP (CMDP) is an MDP
+additionally equipped with a cost function 𝑐 : SA → R+ .
+Paths. A finite (resp. infinite) path is a finite (resp. infinite) word
+𝜁 = 𝑠 0𝑎 0 . . . 𝑠𝑛−1𝑎𝑛−1𝑠𝑛 (resp. 𝜁 = 𝑠 0𝑎 0 . . . 𝑠𝑛 𝑎𝑛 . . .), such that for
+every 𝑘 ≤ 𝑛 (resp. for every 𝑘), 𝑠𝑘 − is a state in 𝑆, 𝑎𝑘 −1 is an action
+in 𝐴(𝑠𝑘 −1 ), and 𝑠𝑘 is in the support of 𝑃 (𝑠𝑘 −1, 𝑎𝑘 −1 ).
+Policies. A policy 𝜋 is a mapping that associates every finite
+path 𝜁 to an action of the probability distribution D(𝐴(last (𝜁 ))). A
+policy is memoryless if 𝜋 (𝜁 ) only depends on last (𝜁 ); it is deterministic if for any finite path 𝜁 , 𝜋 (𝜁 ) is a Dirac distribution; it is flipping
+if for any finite path 𝜁 , 𝜋 (𝜁 ) is a mixture of two Dirac distributions.
+Í
+Throughout the paper, we let 𝑎∈𝐴(𝑠 ) 𝜆𝑎 𝑎 denote the probability
+distribution corresponding to sampling action 𝑎 with probability
+𝜆𝑎 . As an example, if 𝜋1 and 𝜋2 are two deterministic policies on
+M, the policy defined for any 𝑠 ∈ S as 𝜋 (𝑠) = 0.5𝜋1 (𝑠) + 0.5𝜋 2 (𝑠)
+denotes the flipping policy taking in 𝑠 the actions 𝜋 1 (𝑠) and 𝜋 2 (𝑠)
+with equal probability.
+For any policy 𝜋 of M and state 𝑠 ∈ 𝑆, let M𝜋𝑠 be the Markov
+chain induced by 𝜋 in M starting from state 𝑠 (c.f. [6]). let M𝜋
+denote M𝜋𝑠𝑖 and 𝑃𝜋 the transition function of M𝜋 . We denote the
+usual probability measure induced by the Markov chain M𝜋𝑠 on
+Paths (M) by prob𝑠M,𝜋 . We refer to [6, 8] for full details.
+Discounted expectations. For any random variable
+𝑋 : Paths (M) ↦→ R, let E𝑠M,𝜋 (𝑋 ) be the expectation of 𝑋 w.r.t. the
+probability distribution prob𝑠M,𝜋 , and let E M,𝜋 (𝑋 ) denote
+𝑖
+(𝑋 ). Given a path 𝜁 = 𝑠 0𝑎 0 . . . 𝑠𝑛 𝑎𝑛 . . . , we denote the disE𝑠M,𝜋
+Í
+counted cumulative reward along 𝜁 as R (𝜁 ) = 𝑡 ∈N 𝛾𝑟𝑡 𝑟 (𝑠𝑡 , 𝑎𝑡 ), and
+Í
+its discounted cumulative cost as C(𝜁 ) = 𝑡 ∈N 𝛾𝑐𝑡 𝑐 (𝑠𝑡 , 𝑎𝑡 ) , where
+𝛾𝑟 and 𝛾𝑐 are the discount factors for reward 𝑟 and cost 𝑐 respectively. For any policy 𝜋 if a CMDP M, we denote the discounted
+cumulative reward of 𝜋 as
+∑︁
+R𝑠M (𝜋) = E R𝑠 (𝜁 ) =
+𝛾𝑟𝑡 𝑟 (𝑠𝑡 , 𝑎𝑡 ),
+E
+𝜁 ∼𝜋
+
+(𝑠𝑡 ,𝑎𝑡 )𝑡 ∼𝜋,𝑠 0 =𝑠
+
+𝑡 ∈N
+
+and the discounted cumulative cost of 𝜋 as
+∑︁
+𝑠
+CM
+(𝜋) = E C𝑠 (𝜁 ) =
+𝛾𝑐𝑡 𝑐 (𝑠𝑡 , 𝑎𝑡 ).
+E
+𝜁 ∼𝜋
+
+(𝑠𝑡 ,𝑎𝑡 )𝑡 ∼𝜋,𝑠 0 =𝑠
+
+𝑡 ∈N
+
+𝑠𝑖
+𝑖
+We let R M (𝜋) = R𝑠M
+(𝜋) and CM (𝜋) = CM
+(𝜋), and omit M
+
+2
+
+BACKGROUND
+
+In this section we provide the background on Reinforcement Learning (RL) and the notations that will be used in the rest of the paper.
+This enables us to define the two key problems that we analyse: the
+Reinforcement Learning Problem (RLP) [38] and the Constrained
+RLP (CRLP) [1, 14].
+
+when there is no ambiguity.
+Q-values are functions 𝑄 : S × A → R that estimates the
+expected cost of taking action 𝑎 in state 𝑠, and following some
+policy thereafter. In our context, we are especially interested in
+1 This can be assumed wlog compared to a model with an initial probability distribution
+since it is always possible to add a new initial state to such a model with an action
+from this initial state whose associated probability distribution is the aforementioned
+initial probability distribution.
+
+Q-values approximating the minimal discounted cost, defined as
+𝑠
+𝑄𝑏∗ (𝑠, 𝑎) := min CM
+(𝜋).
+𝜋 :𝜋 (𝑠 )=𝑎
+
+We denote by 𝑄𝑏 any approximation of 𝑄𝑏∗ , and say it is an 𝜀approximation if ∥𝑄𝑏 − 𝑄𝑏∗ ∥ ∞ ≤ 𝜀.
+
+2.2
+
+Reinforcement Learning Problems
+
+This work is motivated by two central optimization problems in RL.
+The first, classic Reinforcement Learning problem (RLP), focuses on
+optimizing the expected reward [37]. The second, constrained RLP
+(CRLP), introduces explicit safety requirements in the form of cost
+constraints [1, 14]. Our method ProSh is designed specifically for
+CRLP, and aims to provide provably safe probabilistic guarantees
+even in the absence of a known model.
+Definition 1 (RL Problems). Let M be an MDP, 𝛾𝑟 the reward
+discount factor, and Π the set of policies over M.
+(𝑅𝐿𝑃) : Find policy 𝜋 ∗ ∈ Π such that R (𝜋 ∗ ) = max R (𝜋)
+𝜋 ∈Π
+
+Further, let M ′ be a CMDP, 𝛾𝑟 and 𝛾𝑐 the discount factors for rewards
+and costs respectively, and 𝑑 > 0 be a cost threshold .
+Denote Π ≤𝑑 the set of policies 𝜋 such that C(𝜋) ≤ 𝑑.
+
+3
+
+PROSH: THEORETICAL FOUNDATIONS
+
+We now present the theoretical backbone of ProSh, a scalable shielding mechanism for CRLP that provides formal safety guarantees.
+Our approach uses risk-augmentation, similarly to [24], whereby
+each state is paired with a risk budget representing the expected
+discounted cost that the agent is allowed to incur from that point
+onward. Unlike traditional shielding approaches, ProSh considers
+probabilistic expectations that the main actor chooses, and enforces
+these two structural properties:
+• Approximate consistence. The combined risk after one
+step is, in expectancy, approximately equal to the risk of the
+current step.
+• Approximate realizability. For every augmented state,
+there exists a policy whose expected cumulative cost is approximately less than or equal to the current risk.
+Our goal is to construct policies that satisfy the safety constraint
+throughout training and deployment, even in the absence of a known
+model. To this end, we augment the CMDP with a dynamically
+updated notion of risk.
+
+3.1
+
+Risk-Augmented CMDPs
+
+(CRLP) : Find policy 𝜋 ∈ Π ≤𝑑 such that R (𝜋 ) = max R (𝜋)
+
+Hereafter, for any 𝑄-value 𝑄𝑏 of a CMDP M, for any state 𝑠 and
+action 𝑎 ∈ 𝐴(𝑠), we let 𝑄𝑏 (𝑠) denote 𝛾𝑐 min𝑎∈𝐴(𝑠 ) (𝑄𝑏 (𝑠, 𝑎)).
+
+Notice that Definition 1 is not restricted to memoryless policies, as is usually the case [1, 2, 46]. This is because in the case of
+two different discount factors for the reward and the cost, optimal
+memoryless policies for CRLP are not guaranteed to exist [5]. Furthermore, in practical implementations, the cost discount factor is
+often higher than the reward discount factor since constraint satisfaction is paramount in CRLP. The additional difficulty does not
+break the optimality of the method we provide in the deterministic
+case.
+
+Definition 2 (Risk-augmented CMDP). For any CMDP M =
+(𝑆, 𝐴, 𝑠𝑖 , 𝑃, 𝑅, 𝐶, 𝑑, 𝛾𝑟 , 𝛾𝑐 ) with non-negative costs, maximal cost 𝑐 max =
+
+∗
+
+∗
+
+𝜋 ∈Π ≤𝑑
+
+Shielding and State-Augmentation challenges: a motivation example. We illustrate the limitations of traditional shielding techniques
+through the simple CMDP M1 shown in Fig. 1, with 𝛾𝑟 = 𝛾𝑐 = 1
+and cost threshold 𝑑 = 0.5. The goal is to solve the constrained RL
+problem (CRLP) for M1 :
+𝑎0
+
+𝑟 =1
+𝑐 =1
+
+𝑠1
+
+𝑎2
+
+𝑟 =0
+𝑐 =0
+
+𝑠0
+
+𝑠4
+𝑎1
+
+𝑟 =0
+𝑐 =0
+
+𝑠2
+
+𝑎3
+
+𝑟 =0
+𝑐 =0
+
+Figure 1: CMDP M1 with cost threshold 𝑑 = 0.5 and 𝛾𝑟 = 𝛾𝑐 = 1.
+The optimal safe policy 𝜋 ∗ takes action 𝑎 0 and 𝑎 1 with equal
+probability, yielding a cost C(𝜋 ∗ ) = 0.5 and a reward R (𝜋 ∗ ) = 0.5.
+This solution cannot be found using hard safety enforcement such
+as classic shielding [4], which would block 𝑎 0 . Nor does a stateaugmentation based approach such as [34], as path 𝑠 0𝑎 0𝑠 1𝑎 2𝑠 4 has
+a cumulative cost above the threshold. We claim that achieving safe
+optimality requires reasoning over expectations.
+
+𝑄𝑏
+
+||𝑐 ||𝐿∞ ( A S) , and 𝑄-value 𝑄𝑏 , we define M𝑑 as the MDP with 𝐶 max =
+𝑐𝑚𝑎𝑥
+(1−𝛾𝑐 ) , such that
+• States : 𝑆 = {(𝑠, 𝑥) | 𝑠 ∈ 𝑆, 𝑥 ∈ [−𝐶 max ; 𝐶 max ]}, with initial
+state 𝑠 𝑖 = (𝑠𝑖 , 𝑑);
+• Actions : 𝐴(𝑠, 𝑥) = {(𝑎, 𝑦) | 𝑎 ∈ 𝐴(𝑠), 𝑦 ∈ [−𝐶 max ; 𝐶 max ]};
+• Rewards : 𝑟 ((𝑠, 𝑥), (𝑎, 𝑦)) = 𝑟 (𝑠, 𝑎);
+• Costs : 𝑐 ((𝑠, 𝑥), (𝑎, 𝑦)) = 𝑐 (𝑠, 𝑎)
+• Transition Probability Function 𝑃: for 𝑠 = (𝑠, 𝑥), 𝑠 ′ = (𝑠 ′, 𝑥 ′ )
+in 𝑆, and 𝑎 = (𝑎, 𝑦) ∈ 𝐴(𝑠), we have
+(
+0
+if 𝑥 ′ ≠ 𝑦 − 𝑄𝑏 (𝑠, 𝑎) + 𝑄𝑏 (𝑠 ′ )
+′
+𝑃 𝑠, 𝑎, 𝑠 =
+𝑃 (𝑠, 𝑎, 𝑠 ′ ) if 𝑥 ′ = 𝑦 − 𝑄𝑏 (𝑠, 𝑎) + 𝑄𝑏 (𝑠 ′ )
+The risk-augmented CMDP introduces a new coordinate for
+states and actions: the risk. The policy can then choose any risk for
+its next actions, and the transition function 𝑃 simply ensures that
+the corresponding risk is spread coherently to each state in the nondeterministic case. We will introduce later the conditions on the
+policy to ensure that the second parameter 𝑥 indeed plays the role
+of a running budget, recording how much cumulative discounted
+cost the agent is allowed to incur.
+We now define a subset of policies on M, the valued policies.
+Definition 3 (Valued policy). A policy 𝜋¯ on the risk-augmented
+
+CMDP M is valued if there exists a mapping 𝑦𝜋¯ : S → 𝐴(𝑠) → R
+such that, for every augmented state (𝑠, 𝑥) ∈ S, we can write with
+the notation (𝑎, 𝑥)𝛿 = 𝛿𝑎,𝑥 , the Dirac Delta distribution choosing the
+action (𝑎, 𝑥) with probability 1,
+∑︁
+
+𝜋¯ (𝑠, 𝑥) =
+𝑃𝜋¯ (𝑎 | 𝑠, 𝑥) 𝑎, 𝑦𝜋¯ (𝑠, 𝑥)(𝑎) 𝛿
+𝑎∈𝐴(𝑠 )
+
+In other words, to any underlying state–risk pair (𝑠, 𝑥), the policy first
+assigns a risk value 𝑟 𝜋¯ (𝑠, 𝑥)(𝑎) to every available action 𝑎 ∈ 𝐴(𝑠).
+We call 𝑦𝜋¯ a valuation function, and we let Π 𝑣𝑎𝑙 denote the set of
+all valued policies.
+Asking the agent to attach a risk value to every possible action is
+not as restrictive as it looks. Indeed, we will show that considering
+only the set of valued policies is sufficient for optimality.
+
+3.2
+
+Shielded Policies, Safety and Optimality
+
+Among valued policies, we focus on those that keep the risk budget synchronized with the CMDP dynamics. We call those the
+𝑄𝑏 -shielded policies. In the rest of the paper, for any 𝑄-value 𝑄𝑏 ,
+we let 𝜋𝑏 (𝑄𝑏 ) (𝑠) = arg min𝑎∈𝐴(𝑠 ) 𝑄𝑏 (𝑠, 𝑎), and when there is no
+ambiguity, we write only 𝜋𝑏 for 𝜋𝑏 (𝑄𝑏 ). This action is the safest
+according to the estimation 𝑄𝑏 (𝑠, 𝑎) and will be used to decrease
+the expected cost when necessary.
+Definition 4 (𝑄𝑏 -Shielded policies). Let M be a CMDP, and
+let 𝑄𝑏 (M) be any 𝑄-valued function defined on AS. Denote M the
+corresponding augmented CMDP. A policy 𝜋¯ ∈ Π 𝑣𝑎𝑙 is said to be
+𝑄𝑏 -shielded if for any (𝑠, 𝑥) ∈ S̄, if 𝑥 ≥ 𝑄𝑏 (𝑠), there exist 𝜆 and
+{𝑦𝑎 }𝑎∈𝐴(𝑠 ) , with 𝑦𝑎 ≥ 𝑄𝑏 (𝑠, 𝑎) for all 𝑎 ∈ 𝐴(𝑠), such that
+∑︁
+
+𝜋¯ (𝑠, 𝑥) =(1 − 𝜆)
+𝑃𝜋¯ ((𝑎, 𝑦𝑎 ) | (𝑠, 𝑥))(𝑎, 𝑦𝑎 )𝛿
+
+
+
+
+𝑎
+
+
+
++ 𝜆(𝜋𝑏 (𝑠), 𝑄𝑏 (𝑠, 𝜋𝑏 (𝑠)))𝛿 ,
+
+∑︁
+
+
+
+𝑃𝜋 ((𝑎, 𝑦𝑎 ) | (𝑠, 𝑥))𝑦𝑎 + 𝛾𝑐 𝜆𝑄𝑏 (𝑠, 𝜋𝑏 (𝑠)),
+
+ 𝑥 ≥ 𝛾𝑐 (1 − 𝜆)
+
+𝑎
+and if 𝑥 < 𝑄𝑏 (𝑠), there exists 𝑧 ≤ 𝑥 such that
+(
+𝜋¯ (𝑠, 𝑥) = (𝜋𝑏 (𝑠), 𝑧),
+𝑥 ≥ 𝛾𝑐 𝑧
+Intuitively, the policies are shielded when they always allow
+a budget for the actions larger than the estimated minimal cost
+of taking this action. Moreover, the total budget allowed for the
+actions is, in expectancy, smaller than the current budget.
+We now define the corresponding Shield-Map, which takes any
+memoryless valued policy 𝜋¯ of M and outputs a 𝑄𝑏 -shielded policy.
+Definition 5 (Shield-map). Let 𝜋¯ be a memoryless valued policy
+of the augmented MDP M. We define the shield-map Ξ such that, for
+any state (𝑠, 𝑥) of M, if we let 𝑦˜𝑎 = max(𝑦˜𝑎 , 𝑄𝑏 (𝑠, 𝑎)), and
+∑︁
+∑︁
+𝜋˜ (𝑠, 𝑥) =
+𝑃𝜋¯ (𝑎 | 𝑠, 𝑥)(𝑎, 𝑦˜𝑎 )𝛿 , 𝑡 = 𝛾𝑐
+𝑃𝜋¯ (𝑎 | 𝑠, 𝑥)𝑦˜𝑎 ,
+𝑎∈𝐴(𝑠 )
+
+𝑎∈𝐴(𝑠 )
+
+we have
+
+
+𝜋˜ (𝑠, 𝑥)
+
+
+
+¯ (𝑠, 𝑥) = (𝜋𝑏 (𝑠), 𝑥/𝛾𝑐 )𝛿
+Ξ(𝜋)
+
+
+ (1 − 𝜆) 𝜋˜ (𝑠, 𝑥)𝛿 + 𝜆(𝜋𝑏 (𝑠), 𝑄𝑏 (𝑠, 𝜋𝑏 (𝑠)))𝛿
+
+where
+𝛾𝑐 𝑡 − 𝑥
+𝜆=
+.
+𝛾𝑐 𝑡 − 𝛾𝑐 𝑄𝑏 (𝑠, 𝜋𝑏 (𝑠))
+
+if 𝑡 ≤ 𝑥
+if 𝑥 < 𝑄𝑏 (𝑠)
+otherwise,
+
+Intuitively, the shield map blends the original policy with the estimated safest action 𝜋𝑏 so that the resulting policy always satisfies
+the 𝑄𝑏 -shielded condition. When the policy already respects this
+safety constraint, no modification is applied. If estimation errors
+
+lead to a state where any distribution would exceed the available
+budget, the shield falls back to the safest estimated action 𝜋𝑏 and
+allocates the entire budget to it.
+Because the constraint in the definition mirrors the Bellman
+equation for discounted costs, the risk 𝑥 is indeed an approximate
+upper bound of the expected future cost of the shielded policy that
+starts from the augmented state (𝑠, 𝑥). The next theorem makes
+this intuition precise.
+Theorem 1 (Safety Bounds for 𝑄𝑏 -shields). Let M be a CMDP
+with cost discount factor 𝛾𝑐 , and let 𝑄𝑏∗ be its optimal state–action
+cost function. Assume that 𝑄𝑏 is a 𝑄-value, and let Δ𝑏 = ||𝑄𝑏 −
+𝑄𝑏∗ ||𝐿∞ ( S A ) .
+For any policy 𝜋¯ ∈ Π val that is 𝑄𝑏 -shielded, the expected discounted
+cost from the augmented state (𝑠 0, 𝑥 0 ) satisfies
+¯ ≤ 𝑥0 +
+C (𝑠0 ,𝑥 0 ) ( 𝜋)
+
+2Δ𝑏
+,
+1 − 𝛾𝑐
+
+whenever 𝑥 0 ≥
+
+𝑄𝑏 (𝑠 0 )
+.
+𝛾𝑐
+
+Theorem 1 shows that an 𝜀-accurate 𝑄𝑏 is enough to keep any
+𝑄𝑏 -shielded policy inside the budget, up to a small additive slack.
+Moreover, the policy we consider in the augmented CMDP corresponds to policies in the original CMDP that have the same cost
+and reward, as stated in the next resilts.
+Definition 6 (Projection onto the base CMDP). For any
+𝑄𝑏 -shielded policy 𝜋¯ ∈ Πval of M, we define the backward projection
+¯ as the memoryful policy tracking a single scalar variable 𝑚 as
+𝑇 (𝜋)
+• In state 𝑠 and with current memory 𝑚 − 𝑥, sample (𝑎, 𝑥 ′ ) ∼
+𝜋¯ (𝑠, 𝑥) and execute 𝑎𝑡 in M.
+• As state 𝑠 ′ is reached in M, update the memory 𝑚 ← 𝑥 ′ −
+𝑄𝑏 (𝑠, 𝑎) + 𝑄𝑏 (𝑠 ′ ).
+We can now prove the following preservation result.
+¯ in
+Theorem 2 (Preservation). The cost and reward or 𝑇 (𝜋)
+Def. 6 satisfy
+¯
+CM (𝑇 (𝜋)) = CM̄ ( 𝜋),
+
+¯
+R M (𝑇 (𝜋)) = R M̄ (𝜋).
+
+Theorem 2 states that a 𝑄𝑏 -shielded policy keeps its cost and
+reward when mapped back to the original CMDP. This allows us
+to transfer our safety results from M to M. It remains to show
+that some 𝑄𝑏 -shielded policy attains the constrained optimum. The
+next theorem precisely answers this question. Recall that flipping
+policies associate to every state a mixture of two Dirac distributions.
+Theorem 3 (Optimality of the shielded policies). Let M be
+a deterministic CMDP with safety threshold 𝑑 and initial state 𝑠𝑖 , 𝑄𝑏
+be a Q-value, Δ𝑏 = ||𝑄𝑏 − 𝑄𝑏∗ ||𝐿∞ ( S A ) .
+Further, let Π the set of all policies of M, Π𝑠ℎ be the set of shielded
+𝑓
+
+policies of M, and Π be the set of valued flipping policies.
+2Δ𝑏 𝛾𝑐
+The, we have the following for E = 1−𝛾
+:
+𝑐
+max
+
+R (𝜋) ≤
+
+max
+
+¯ ≤
+R (𝑠𝑖 ,𝑥 0 ) ( 𝜋)
+
+𝜋 ∈Π, C (𝜋 ) ≤𝑑
+
+𝑓
+
+𝜋¯ ∈Ξ(Π ), 𝑥 0 ≤𝛾𝑐 𝑑+E
+
+𝑓
+
+¯
+R (𝑠𝑖 ,𝑥 0 ) (𝜋),
+
+max
+
+𝜋¯ ∈Ξ(Π ), 𝑥 0 ≤𝛾𝑐 𝑑+E
+
+max
+
+𝜋 ∈Π𝑠ℎ , 𝑥 0 ≤𝛾𝑐 𝑑+E
+
+¯
+R (𝑠𝑖 ,𝑥 0 ) (𝜋),
+
+We now summarize the results obtained in this section, which
+represent the theoretical backbone of ProSh.
+
+From constrained to unconstrained optimisation. Let Π 𝑣𝑎𝑙 the set
+of valued policies (potentially unsafe) of the augmented MDP, and
+ΠΞ = Ξ(Π 𝑣𝑎𝑙 ), then for Δ𝑏 = ||𝑄𝑏 − 𝑄𝑏∗ ||𝐿∞ ( S A ) ,
+• The set of shielded policies ΠΞ , starting with a risk up to
+𝑥 0 = 𝑑 + 2Δ𝑏 is enough to reach optimality, i.e.,
+max
+
+𝜋¯ ∈ Π̄, 𝑥 0 ≤𝑑+2Δ𝑏
+
+¯ ≥ max R (𝜋).
+R (𝑠𝑖 ,𝑥 0 ) (Ξ( 𝜋))
+𝜋 ∈Π
+
+¯ ∈ ΠΞ starting with a risk up to
+• Any shielded policy Ξ(𝜋)
+𝑥 0 = 𝑑 + 2Δ𝑏 has a cost satisfying
+Δ𝑏
+¯ ≤ 𝑑 + 2Δ𝑏 +
+C (𝑠𝑖 ,𝑥 0 ) (Ξ(𝜋))
+.
+1 − 𝛾𝑐
+Hence, we can optimize among all policies of the augmented
+MDP and apply the shield. Alternatively, one can choose a dynamic
+𝑥 0 < 𝑑 to ensure safety during training. This can be combined with
+any approach ensuring Δ𝑏 → 0, or making it sufficiently small.
+
+4
+
+Theorem 4 (Safety and near-Optimality).
+(i) At any step
+of the algorithm, the output policy 𝜋¯ satisfies
+¯ ≤ 𝑟0 +
+CM̄ ( 𝜋)
+
+¯ ≥ max R (𝜋) − 𝜂
+R (𝜋)
+𝜋 ∈Π
+
+Since our guarantees involve the difference Δ𝑏 and the assumption Δ𝑏 → 0, we discuss how restrictive this assumption is.
+Remark 1 (On assumption 𝚫𝒃 → 0). We present several cases in
+which Δ𝑏 → 0.
+• Tabular update: With exact Q-learning and sufficient exploa.s.
+ration, the classical result of [42] gives Δ𝑏 −−→ 0.
+• Neural networks: Recent results [3, 43] show that over-parameterised
+deep Q-learning converges to the Bellman fixed point when the
+optimiser drives training error to zero and the network remains
+within a neighbourhood of its initialization.
+• Batch (fitted) Q-evaluation: In the agnostic setting, fitted Qiteration with minimax regression loss enjoys finite-sample
+√
+O (1/ 𝑛) guarantees [25], so Δ𝑏 vanishes as the data set grows.
+
+In this section, we show how the theoretical foundations in Section
+3 are used to derive learning algorithms for CRLP. We first present
+a general approach and derive the corresponding safety guarantees.
+We then propose our implementation of the ProSh algorithm.
+
+Learning Algorithms
+
+In this section we present a minimal version of the training loop
+for the main actor in Algorithm 1. Then, in Sec. 4.2 we provide a
+complete implementation. ProSh behaves like "classical" shielding
+[4], but the shield acts on distribution rather than actions. The
+shield Ξ uses the values provided by the critic 𝑄𝑏 and combines it
+with the backup action to obtain a safe distribution.
+Algorithm 1 ProSh: Main Actor only
+1: Input: cost budget 𝑑, margin 𝛿, discount 𝛾𝑐
+2: Initialise main actor 𝜋¯𝑟 , backup critic 𝑄𝑏𝜃
+𝜓
+
+3: for each episode do
+4:
+
+𝑠 ← 𝑠𝑖 , 𝑥 ← 𝑑 − 𝛿
+while not done do
+𝜓
+6:
+Shield: 𝜇 safe ← Ξ𝑄𝑏 ( 𝜋¯𝑟 )(𝑠, 𝑥)
+7:
+Sample (𝑎, 𝑦) ∼ 𝜇safe
+8:
+Execute (𝑎, 𝑦), observe (𝑠 ′, 𝑥 ′ ), reward 𝑟 , cost 𝑐
+9:
+Store transition ((𝑠, 𝑥), (𝑎, 𝑦), 𝑟, 𝑐, (𝑠 ′, 𝑟 ′ ))
+10:
+𝑠 ← 𝑠′, 𝑟 ← 𝑟 ′
+11:
+end while
+12:
+Update:
+• Update 𝜋𝜃 using shielded distributions from memory
+13: end for
+𝜓
+14: return projected policy 𝜋˜𝑟 (via Thm. 2)
+5:
+
+The shield precedes sampling, so the exploration is budget-safe.
+The choice of the RL update for 𝜃 is open (e.g., PG, PPO, A2C).
+Additionally, the backup critic 𝑄𝑏 can be learned, either in parallel,
+off-policy, or even pre-computed.
+The previous results in Sec. 3 allows us to derive the following
+key safety guarantees for Algorithm 1.
+
+Δ𝑐 = ||𝑄𝑏 − 𝑄𝑏∗ || ∞
+
+(ii) The algorithm is asymptotically optimal in deterministic environments as Δ𝑏 → 0. More precisely, let M be a constrained
+deterministic environment modeled by a CMDP, and for any
+𝜂 > 0 and Δ𝑏 small enough, there exists 𝜋¯ ∈ Ξ𝑠ℎ with cost at
+2Δ𝑏 𝛾𝑐
+most 𝛾𝑐 𝑑 + E for E = 1−𝛾
+, such that
+𝑐
+
+SAFE RL THROUGH PROBABILISTIC
+SHIELDING
+
+4.1
+
+2𝛾𝑐 Δ𝑏
+,
+1 − 𝛾𝑐
+
+Hence, in all cases above, the safety slack 𝜅 (Δ𝑏 ) = 𝛾𝑐 Δ𝑏 /(1 − 𝛾𝑐 )
+converges to zero, ProSh is safe up to a controlled vanishing coefficient,
+and approaches true constrained optimality.
+
+4.2
+
+ProSh-TD3
+
+In this section we introduce ProSh-TD3, an implementation of
+ProSH based on TD3 [13], for continuous spaces. Hereafter we
+describe the four key components of ProSh-TD3: the network
+architecture, the implementation of the shield, the actor/critic pairs
+training, and the exploration strategy.
+Networks Architecture. The backup actor-critic pair follows
+the TD3 architecture. The backup critic has two output heads, 𝑄𝑏𝜃 1
+and 𝑄𝑏𝜃 2 , and takes as input a state-actor pair of the original environment M. The backup actor 𝜋𝑏 is deterministic, and takes as
+input a state in M and outputs an action. The main actor-critic
+pair also follows the TD3 architecture. The main critic also has two
+𝜙
+
+𝜉1
+
+𝜉2
+
+heads, 𝑄 𝑟 and 𝑄 𝑟 , but takes as input a state-action pair of the
+𝜓
+augmented environment M. The main actor 𝜋 𝑟 takes as input a
+state in the augmented environment and outputs a flipping policy in
+the augmented environment. Furthermore, we also maintain target
+𝑡𝑎𝑟𝑔
+
+𝜃
+
+𝑡𝑎𝑟𝑔
+
+𝜃
+
+networks 𝑄𝑏 1 and 𝑄𝑏 2 , etc, which are Polyak averages of the
+original networks, that we use for computing training targets, in
+order to stabilize training.
+Shield Implementation. We implement the shield using the
+Shield-map in Def. 5 as a fully differentiable layer after the output of
+𝜓
+the main actor. More precisely, if 𝑠 = (𝑠, 𝑥) and 𝜋 𝑟 (𝑠) = 𝜌 (𝑎 1, 𝑦1′ ) +
+′
+(1 − 𝜌)(𝑎 2, 𝑦2 ), we implement Ξ as
+Ξ(𝜋 𝜓 )(𝑠) = (1 − 𝜆)𝜌 (𝑎 1, 𝑦1′ ) + (1 − 𝜆)(1 − 𝜌)(𝑎 2, 𝑦2′ ) + 𝜆𝑎 3
+
+where 𝑦1′ = min(𝑦1, 𝑄𝑏𝜃 1 (𝑠, 𝑎 1 )), 𝑦2′ = min(𝑦2, 𝑄𝑏𝜃 1 (𝑠, 𝑎 2 )), 𝑎 3 =
+
+
+𝜓
+𝜙
+𝜋 𝑟 (𝑠), 𝑄𝑏𝜃 1 (𝑠, 𝜋𝑏 (𝑠) , and
+𝜌𝑦1′ + (1 − 𝜌)𝑦2′ − 𝑥
+
+©
+𝜆 = clip ­­
+
+
+
+
+
+ª
+, 0, 1®®
+
++𝜂
+relu
+¬
+«
+where 𝜂 is chosen sufficiently small (∼ 10− 8).
+Actor-critic Pairs Training. We train the actor-critic pairs
+with batch sampling from a replay buffer in which we store every
+transition made in the augmented CMDP. For the backup critic, we
+use the training target 𝑦𝑏 (𝑐, 𝑠 ′ ), proposed in [18], equal to
+"
+𝑡𝑎𝑟𝑔 
+
+𝜃
+𝜓 𝑡𝑎𝑟𝑔 ′
+𝑐 + 𝛾𝑐 𝛽 min 𝑄𝑏 𝑗
+𝑠 ′, 𝜋𝑏
+(𝑠 ) + 𝜖
+𝜌𝑦1′ + (1 − 𝜌)𝑦2′ − 𝑄𝑏𝜃 1 (𝑠, 𝜋𝑏 (𝑠))
+
+𝑗 ∈ {1,2}
+
++
+
+
+
+1 − 𝛽 ∑︁ 𝜃 𝑡𝑎𝑟𝑔
+𝜓 𝑡𝑎𝑟𝑔 ′
+𝑠 ′, 𝜋𝑏
+𝑄𝑏 𝑗
+(𝑠 ) + 𝜖
+2
+
+#
+
+𝑗 ∈ {1,2}
+
+where 𝜖 is a small gaussian noise and 𝛽 is a hyperparameter. Compared to the standard TD3 training target, this target helps combat
+the underestimation bias of TD3, improving the backup critic accuracy. The backup actor and the main critic are updated with the
+standard TD3 training losses. The main actor is updated taking into
+account the shield:
+
+ ∑︁
+
+
+𝜉1
+L (𝜓 ) = −E𝑠∼D 
+𝜆𝑘 𝑄 𝑟 (𝑠, 𝑎𝑘 )  , where
+
+𝑘 ∈ {1,2,3}
+
+
+∑︁
+𝜓
+Ξ(𝜋 𝑟 )(𝑠) =
+𝜆𝑘 𝑎𝑘 .
+
+Algorithms (TD3-Lagrangian and PID-Lagrangian), and three being On-Policy Algorithms (CPO, FOCOPS, PPO-Saute). Some algorithms are safer, such as PPO-Saute, while others impose less
+restrictions and seek higher rewards, such as TD3-Lagrangian. We
+included them despite not always being directly comparable – PPOSaute being in most cases the only algorithm that is safe during
+training – to present the overall performances of ProSh against
+states of the art algorithms, both in terms of safety and rewards.
+On each environment, the algorithms are run using three different
+seeds, and the mean and standard deviation are computed. Finally,
+the algorithms were implemented in the Omnisafe infrastructure
+[21] and use the hyperparameters provided by Omnisafe for each
+environment.
+
+5.2
+
+Experimental Results
+
+Overall Performance. Across all environments, ProSh maintains
+a high level of safety, with only occasional low-magnitude violations. PPO-Saute also achieves consistent safety, although this
+often coincides with reduced performance and lower rewards. The
+Off-Policy algorithms TD3-Lagrangian and PID-TD3 tend to exhibit
+unsafe behavior in most settings, while the On-Policy methods
+FOCOPS and CPO show less stable safety profiles, with costs that
+fluctuate even after extended training. Taken together, the results
+suggest that ProSh provides the best trade-off between safety and
+performance in the evaluated environments, especially when ensuring safety both at training and deployment time is a necessity.
+The Velocity Suite. In SafetyHopperVelocity and SafetyHalfCheetahVelocity, the agent has to move as quickly as possible, while
+adhering to a velocity constraint.
+
+𝑘 ∈ {1,2,3}
+
+2 https://github.com/DLR-RM/stable-baselines3
+
+Reward - HalfCheetah
+
+TD3Lag
+TD3PID
+ProSh
+
+35
+8000
+
+25
+
+Episode Reward
+
+30
+
+TD3Lag
+TD3PID
+ProSh
+Max Cost
+
+20
+15
+10
+
+6000
+
+4000
+
+2000
+
+5
+0
+
+0
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+Training Steps
+
+1.0
+1e6
+
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+Training Steps
+
+1.0
+1e6
+
+Figure 2: Comparison with Off-Policy Algorithms on Half
+Cheetah. Cost threshold 𝑑 = 10.
+
+Cost - HalfCheetah
+
+40
+35
+
+Episode Cost
+
+30
+25
+
+3000
+
+CPO
+FOCOPS
+PPOSaute
+ProSh
+Max Cost
+
+2500
+2000
+
+Episode Reward
+
+5 EXPERIMENTAL EVALUATION
+5.1 Experimental setup
+We implement ProSh-TD3 using the Stable-Baselines 3 implementation of TD32 . We evaluate our implementation of ProSh-TD3 on
+six environments of the Safety Gymnasium benchmark suite: SafetyHalfCheetahVelocity, SafetyHopperVelocity, SafetyPointCircle,
+SafetyPointGoal, SafetyCarCircle, and SafetyCarGoal are from the
+Navigation Suite. More details on the environments are provided in
+the comments on the experimental results. We benchmark against
+diverse Constrained RL algorithms, two of them being Off-Policy
+
+Cost - HalfCheetah
+
+40
+
+Episode Cost
+
+Note that the gradients can flow through 𝜆𝑘 and 𝑎𝑘 in the main
+actor training loss as they are computed in a fully differentiable
+way.
+Exploration. For a better estimation of the backup critic, we
+alternate between main episodes and hybrid episodes. In the main
+episodes, we sample from the (shielded) main actor. In the hybrid
+episodes, we explore using the shielded main actor until a certain
+step, after which we explore using the backup actor. All the actions
+of the backup actor are converted to risk-augmented actions by
+associating the risk of the current observed state. The corresponding
+backup actor is always 𝑄𝑏 -shielded by construction, so the sampling
+is safe during training.
+
+20
+15
+
+Reward - HalfCheetah
+
+CPO
+FOCOPS
+PPOSaute
+ProSh
+
+1500
+1000
+500
+
+10
+0
+5
+−500
+0
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+Training Steps
+
+0.8
+
+1.0
+1e6
+
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+Training Steps
+
+0.8
+
+1.0
+1e6
+
+Figure 3: Comparison with On-Policy Algorithms on Half
+Cheetah. Cost threshold 𝑑 = 10.
+
+Cost - PointCircle
+
+40
+
+50
+
+Episode Reward
+
+30
+
+Reward - PointCircle
+
+60
+
+TD3Lag
+TD3PID
+ProSh
+Max Cost
+
+35
+
+Episode Cost
+
+Experimental Results: Safety Half Cheetah. ProSh achieves
+absolute safety and stays under the cost constraint at all times.
+PID-TD3 displays comparable performance. TD3-Lag fails to be
+safe and does not achieve higher reward. ProSh displays higher
+reward than all the on-policy algorithms (CPO, FOCOPS, PPOSaute).
+Finally, FOCOPS fails to be safe and CPO violates the constraint
+after several steps.
+
+25
+20
+15
+
+40
+
+30
+
+20
+
+10
+10
+
+TD3Lag
+TD3PID
+ProSh
+
+5
+
+Cost - Hopper
+
+40
+
+Reward - Hopper
+1200
+
+35
+
+20
+15
+
+TD3Lag
+TD3PID
+ProSh
+
+0.0
+
+0.4
+
+0.6
+
+0.8
+
+Training Steps
+
+1.0
+1e6
+
+0.0
+
+0.4
+
+0.6
+
+0.8
+
+Training Steps
+
+1.0
+1e6
+
+800
+600
+
+Figure 6: Comparison with Off-Policy Algorithms on Point
+Circle. Cost threshold 𝑑 = 10.
+
+400
+200
+
+5
+
+0
+
+0
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+Training Steps
+
+1.0
+1e6
+
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+Training Steps
+
+1.0
+1e6
+
+Cost - PointCircle
+
+40
+
+30
+
+Episode Cost
+
+Figure 4: Comparison with Off-Policy Algorithms on Hopper.
+Cost threshold 𝑑 = 10.
+
+25
+
+40
+
+20
+15
+10
+
+Cost - Hopper
+
+CPO
+FOCOPS
+PPOSaute
+ProSh
+Max Cost
+
+35
+30
+25
+20
+15
+10
+
+1500
+1250
+
+20
+
+CPO
+FOCOPS
+PPOSaute
+ProSh
+
+10
+
+0
+0
+
+CPO
+FOCOPS
+PPOSaute
+ProSh
+
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+Training Steps
+
+1.0
+1e6
+
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+Training Steps
+
+1.0
+1e6
+
+1000
+750
+500
+
+Figure 7: Comparison with On-Policy Algorithms on Point
+Circle. Cost threshold 𝑑 = 10.
+
+250
+
+5
+
+30
+
+5
+
+Reward - Hopper
+
+Episode Reward
+
+40
+
+Reward - PointCircle
+
+50
+
+CPO
+FOCOPS
+PPOSaute
+ProSh
+Max Cost
+
+35
+
+Episode Cost
+
+0.2
+
+1000
+
+TD3Lag
+TD3PID
+ProSh
+Max Cost
+
+10
+
+0.0
+
+0.2
+
+Episode Reward
+
+25
+
+Episode Reward
+
+Episode Cost
+
+30
+
+0
+
+0
+
+0
+
+0
+0.4
+
+0.6
+
+Training Steps
+
+0.8
+
+1.0
+1e6
+
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+Training Steps
+
+0.8
+
+1.0
+1e6
+
+Figure 5: Comparison with On-Policy Algorithms on Hopper.
+Cost threshold 𝑑 = 10.
+
+Experimental Results: Safety Hopper. ProSh achieves absolute safety and stays under the cost constraint at all times. The
+off-policy algorithms (TD3-Lag, PID-TD3) fail to be safe. FOCOPS
+and CPO also fail to be safe (including the standard deviation),
+while having comparable reward to ProSh. PPO-Saute is safe and
+has the highest reward on this environment.
+The Navigation Suite. We consider four environments: SafetyCarCircle, SafetyCarGoal, SafetyPointCircle, and SafetyPointGoal. The
+agent controls either a simple robot (Point), which is constrained to
+the 2D plane, with one actuator for turning and another for moving
+forward or backward; or a slightly more complicated robot (Car),
+which has two independently-driven parallel wheels and a freerolling rear wheel that require coordination to properly navigate.
+Its goal is either to circle around the center of a circular area while
+avoiding going outside the boundaries (Circle), or to navigate to
+the Goal’s location while circumventing Hazards (Goal).
+
+Experimental Results: Safety Point Circle. ProSh achieves
+absolute safety and stays under the cost constraint at all times after
+a few steps. The off-policy algorithms (TD3-Lag, PID-TD3) fail to be
+safe and do not achieve higher rewards. FOCOPS and CPO also fail
+to be safe, while having comparable reward to ProSh. PPO-Saute
+is the only other safe algorithm, but it has lower performance.
+Cost - CarCircle
+
+40
+
+Reward - CarCircle
+
+TD3Lag
+TD3PID
+ProSh
+Max Cost
+
+35
+30
+
+20
+
+Episode Reward
+
+0.2
+
+Episode Cost
+
+0.0
+
+25
+20
+15
+10
+
+15
+
+10
+
+TD3Lag
+TD3PID
+ProSh
+
+5
+
+5
+0
+
+0
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+Training Steps
+
+0.8
+
+1.0
+1e6
+
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+Training Steps
+
+0.8
+
+1.0
+1e6
+
+Figure 8: Comparison with Off-Policy Algorithms on Car
+Circle. Cost threshold 𝑑 = 10.
+
+Reward - CarCircle
+
+25
+20
+15
+
+15.0
+12.5
+
+Cost - CarGoal
+
+20.0
+
+CPO
+FOCOPS
+PPOSaute
+ProSh
+
+Reward - CarGoal
+
+TD3Lag
+TD3PID
+ProSh
+Max Cost
+
+17.5
+15.0
+
+Episode Cost
+
+Episode Cost
+
+30
+
+17.5
+
+Episode Reward
+
+CPO
+FOCOPS
+PPOSaute
+ProSh
+Max Cost
+
+35
+
+10.0
+7.5
+5.0
+
+10
+
+30
+
+Episode Reward
+
+Cost - CarCircle
+
+40
+
+12.5
+10.0
+7.5
+
+20
+
+10
+
+TD3Lag
+TD3PID
+ProSh
+
+5.0
+0
+
+2.5
+5
+
+2.5
+0.0
+
+0
+
+0.0
+0.4
+
+0.6
+
+0.8
+
+1.0
+1e6
+
+Training Steps
+
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+Training Steps
+
+1.0
+1e6
+
+Figure 9: Comparison with On-Policy Algorithms on Car
+Circle. Cost threshold 𝑑 = 10.
+Experimental Results: Safety Car Circle. ProSh achieves
+absolute safety and stays under the cost constraint at all times after
+a few steps. The off-policy algorithms (TD3-Lag, PID-TD3) are not
+safe. FOCOPS and CPO are also not safe and have very slightly
+greater rewards compared to ProSh. PPO-Saute is the only other
+safe algorithm, but has lower performance.
+Cost - PointGoal
+
+20.0
+
+TD3Lag
+TD3PID
+ProSh
+Max Cost
+
+17.5
+
+10.0
+7.5
+
+2.0
+
+2.5
+
+3.0
+1e6
+
+12.5
+10.0
+7.5
+5.0
+
+0.5
+
+1.0
+
+1.5
+
+2.0
+
+2.5
+
+20
+15
+
+5
+
+2.0
+
+2.5
+
+3.0
+1e6
+
+3.0
+1e6
+
+10.0
+7.5
+
+30
+25
+20
+
+CPO
+FOCOPS
+PPOSaute
+ProSh
+
+15
+10
+5
+0
+−5
+−10
+
+0.5
+
+1.0
+
+1.5
+
+2.0
+
+2.5
+
+3.0
+1e6
+
+0.0
+
+0.5
+
+1.0
+
+1.5
+
+Training Steps
+
+2.0
+
+2.5
+
+3.0
+1e6
+
+Experimental Results: Safety Car Goal. PPO-Saute is always
+safe but only achieves a tiny reward. Among the others, ProSh is
+the safest algorithm, violating only the cost limit if the standard
+deviation is taken into account. The two off-policy algorithms TD3Lag and TD3-PID are completely unsafe, while the two on-policy
+algorithms CPO and FOCOPS are unsafe even after many steps.
+Their rewards is slightly higher than ProSh, which showcases the
+best tradeoff between safety and reward.
+
+6
+
+0
+
+CPO
+FOCOPS
+PPOSaute
+ProSh
+
+0.0
+1.5
+
+2.5
+
+10
+
+−5
+
+Training Steps
+
+2.0
+
+3.0
+1e6
+
+Reward - PointGoal
+
+−10
+
+1.0
+
+1.5
+
+Training Steps
+
+Figure 13: Comparison with On-Policy Algorithms on Car
+Goal. Cost threshold 𝑑 = 5.
+
+TD3Lag
+TD3PID
+ProSh
+
+2.5
+
+0.5
+
+1.0
+
+0
+
+Training Steps
+
+Episode Reward
+
+Episode Cost
+
+15.0
+
+12.5
+
+Training Steps
+
+25
+
+CPO
+FOCOPS
+PPOSaute
+ProSh
+Max Cost
+
+0.5
+
+5
+
+0.0
+
+Cost - PointGoal
+
+17.5
+
+0.0
+
+15.0
+
+0.0
+
+Figure 10: Comparison with Off-Policy Algorithms on Point
+Goal. Cost threshold 𝑑 = 5.
+
+20.0
+
+0.0
+
+Reward - CarGoal
+
+0.0
+
+0.0
+1.5
+
+3.0
+1e6
+
+CPO
+FOCOPS
+PPOSaute
+ProSh
+Max Cost
+
+17.5
+
+10
+
+−10
+
+Training Steps
+
+2.5
+
+Cost - CarGoal
+
+20.0
+
+15
+
+−5
+
+1.0
+
+2.0
+
+2.5
+
+2.5
+
+0.5
+
+1.5
+
+5.0
+
+5.0
+
+0.0
+
+1.0
+
+Figure 12: Comparison with Off-Policy Algorithms on Car
+Goal. Cost threshold 𝑑 = 5.
+
+20
+
+12.5
+
+0.5
+
+Training Steps
+
+25
+
+Episode Reward
+
+15.0
+
+Episode Cost
+
+Reward - PointGoal
+
+−10
+
+0.0
+
+Episode Reward
+
+0.2
+
+Episode Cost
+
+0.0
+
+0.0
+
+0.5
+
+1.0
+
+1.5
+
+Training Steps
+
+2.0
+
+2.5
+
+3.0
+1e6
+
+Figure 11: Comparison with On-Policy Algorithms on Point
+Goal. Cost threshold 𝑑 = 5.
+Experimental Results: Safety Point Goal. Every algorithm is
+unsafe except PPO-Saute, that only achieves a tiny reward. ProSh
+is much safer than the other Algorithms, with a cost that evolves
+smoothly below the limit on average. Off-policy algorithms largely
+exceed the cost threshold, while on-policy algorithms stay closer
+to the threshold but violate the constraint even after several steps.
+In this environment, the higher safety of ProSh comes at the cost
+of diminished reward compared to CPO and FOCOPS.
+
+CONCLUSION
+
+We introduced ProSh, a model-free algorithm for safe reinforcement learning based on probabilistic shielding in a risk-augmented
+state space. Our method enforces strict safety during training, with
+formal guarantees depending only on the approximation quality of
+the backup critic 𝑄𝑏 . While this assumption is practically achievable
+in various settings, future work could leverage a dynamic risk margin that adapts to the critic’s accuracy over time, ensuring safety
+even in early training stages.
+Our theoretical results focus on deterministic environments. To
+address the stochastic case, a risk-worthiness function could be
+learned to guide risk allocation among successor states.
+Finally, while our approach prioritized theoretical guarantees
+over fine-tuned optimization, the experimental results already demonstrate the soundness and promise of the core shielding mechanism.
+We expect performance to further improve with more refined implementations.
+
+Acknowledgments. The research described in this paper was partially supported by the EPSRC (grant number EP/X015823/1) and
+by the Moro-Barry family.
+
+REFERENCES
+[1] Joshua Achiam, David Held, Aviv Tamar, and Pieter Abbeel. 2017. Constrained
+policy optimization. In Proceedings of the 34th International Conference on Machine
+Learning (ICML). PMLR, 22–31.
+[2] Joshua Achiam, David Held, Aviv Tamar, and Pieter Abbeel. 2019. Benchmarking
+Safe Exploration in Deep Reinforcement Learning. arXiv preprint arXiv:1805.05800
+(2019).
+[3] Alekh Agarwal, Sham Kakade, Nan Jiang, and Wen Sun. 2020. Flambe: Structural
+Complexity and Representation Learning of Low Rank MDPs. In Advances in
+Neural Information Processing Systems (NeurIPS).
+[4] Mohammed Alshiekh, Roderick Bloem, Rüdiger Ehlers, Bettina Könighofer, Scott
+Niekum, and Ufuk Topcu. 2017. Safe Reinforcement Learning via Shielding. CoRR
+abs/1708.08611 (2017). arXiv:1708.08611 http://arxiv.org/abs/1708.08611
+[5] Eitan Altman. 1999. Constrained Markov Decision Processes. https://api.
+semanticscholar.org/CorpusID:14906227
+[6] Christel Baier and Joost-Pieter Katoen. 2008. Principles of model checking. MIT
+press.
+[7] Marc G. Bellemare, Will Dabney, and Rémi Munos. 2017. A Distributional Perspective on Reinforcement Learning. In International Conference on Machine
+Learning (ICML).
+[8] Dimitri P. Bertsekas and Steven E. Shreve. 2007. Stochastic Optimal Control: The
+Discrete-Time Case. Athena Scientific.
+[9] Miguel Calvo-Fullana, Santiago Paternain, Luiz F. O. Chamon, and Alejandro
+Ribeiro. 2021. State Augmented Constrained Reinforcement Learning: Overcoming the Limitations of Learning with Rewards. CoRR abs/2102.11941 (2021).
+arXiv:2102.11941 https://arxiv.org/abs/2102.11941
+[10] Yinlam Chow, Ofir Nachum, Edgar Duenez-Guzman, and Mohammad
+Ghavamzadeh. 2018. A lyapunov-based approach to safe reinforcement learning.
+Advances in neural information processing systems 31 (2018).
+[11] Yinlam Chow, Ofir Nachum, Aleksandra Faust, Mohammad Ghavamzadeh, and
+Edgar A. Duéñez-Guzmán. 2019. Lyapunov-based Safe Policy Optimization
+for Continuous Control. CoRR abs/1901.10031 (2019). arXiv:1901.10031 http:
+//arxiv.org/abs/1901.10031
+[12] Ingy Elsayed-Aly, Suda Bharadwaj, Christopher Amato, Rüdiger Ehlers, Ufuk
+Topcu, and Lu Feng. 2021. Safe Multi-Agent Reinforcement Learning via
+Shielding. In AAMAS ’21: 20th International Conference on Autonomous Agents
+and Multiagent Systems, Virtual Event, United Kingdom, May 3-7, 2021, Frank
+Dignum, Alessio Lomuscio, Ulle Endriss, and Ann Nowé (Eds.). ACM, 483–491.
+https://doi.org/10.5555/3463952.3464013
+[13] Scott Fujimoto, Herke Van Hoof, and David Meger. 2018. Addressing function approximation error in actor-critic methods. In International Conference on Machine
+Learning (ICML). PMLR, 1587–1596.
+[14] Javier Garcıa and Fernando Fernández. 2015. A comprehensive survey on safe
+reinforcement learning. Journal of Machine Learning Research 16, 1 (2015), 1437–
+1480.
+[15] Alexander W. Goodall and Francesco Belardinelli. 2024. Leveraging Approximate Model-based Shielding for Probabilistic Safety Guarantees in Continuous
+Environments. In Proceedings of the 23rd International Conference on Autonomous
+Agents and Multiagent Systems, AAMAS 2024, Auckland, New Zealand, May 610, 2024, Mehdi Dastani, Jaime Simão Sichman, Natasha Alechina, and Virginia
+Dignum (Eds.). International Foundation for Autonomous Agents and Multiagent
+Systems / ACM, 2291–2293. https://doi.org/10.5555/3635637.3663137
+[16] Shangding Gu, Long Yang, Yali Du, Guang Chen, Florian Walter, Jun Wang,
+Yaodong Yang, and Alois C. Knoll. 2022. A Review of Safe Reinforcement Learning:
+Methods, Theory and Applications. CoRR abs/2205.10330 (2022). https://doi.org/
+10.48550/ARXIV.2205.10330 arXiv:2205.10330
+[17] Tuomas Haarnoja, Aurick Zhou, Pieter Abbeel, and Sergey Levine. 2018. Soft
+Actor-Critic: Off-Policy Maximum Entropy Deep Reinforcement Learning with a
+Stochastic Actor. CoRR abs/1801.01290 (2018). arXiv:1801.01290 http://arxiv.org/
+abs/1801.01290
+[18] Qiang He and Xinwen Hou. 2020. WD3: Taming the Estimation Bias in Deep
+Reinforcement Learning. In 32nd IEEE International Conference on Tools with
+Artificial Intelligence, ICTAI 2020, Baltimore, MD, USA, November 9-11, 2020. IEEE,
+391–398. https://doi.org/10.1109/ICTAI50040.2020.00068
+[19] Nils Jansen, Bettina Könighofer, Sebastian Junges, Alex Serban, and Roderick
+Bloem. 2020. Safe Reinforcement Learning Using Probabilistic Shields (Invited
+Paper). In 31st International Conference on Concurrency Theory, CONCUR 2020,
+September 1-4, 2020, Vienna, Austria (Virtual Conference) (LIPIcs, Vol. 171), Igor
+Konnov and Laura Kovács (Eds.). Schloss Dagstuhl - Leibniz-Zentrum für Informatik, 3:1–3:16. https://doi.org/10.4230/LIPICS.CONCUR.2020.3
+[20] Jiaming Ji, Borong Zhang, Jiayi Zhou, Xuehai Pan, Weidong Huang, Ruiyang
+Sun, Yiran Geng, Yifan Zhong, Juntao Dai, and Yaodong Yang. 2023.
+Safety-Gymnasium: A Unified Safe Reinforcement Learning Benchmark.
+arXiv:2310.12567 [cs.AI] https://arxiv.org/abs/2310.12567
+[21] Jiaming Ji, Jiayi Zhou, Borong Zhang, Juntao Dai, Xuehai Pan, Ruiyang Sun,
+Weidong Huang, Yiran Geng, Mickel Liu, and Yaodong Yang. 2023. OmniSafe: An Infrastructure for Accelerating Safe Reinforcement Learning Research.
+
+arXiv:2305.09304 [cs.LG] https://arxiv.org/abs/2305.09304
+[22] Alex Kendall, Jeffrey Hawke, David Janz, Przemyslaw Mazur, Daniele Reda, JohnMark Allen, Vinh-Dieu Lam, Alex Bewley, and Amar Shah. 2019. Learning to
+Drive in a Day. In International Conference on Robotics and Automation, ICRA
+2019, Montreal, QC, Canada, May 20-24, 2019. IEEE, 8248–8254. https://doi.org/
+10.1109/ICRA.2019.8793742
+[23] Jens Kober, J. Bagnell, and Jan Peters. 2013. Reinforcement Learning in Robotics:
+A Survey. The International Journal of Robotics Research 32 (09 2013), 1238–1274.
+https://doi.org/10.1177/0278364913495721
+[24] Edwin Hamel-De le Court, Francesco Belardinelli, and Alexander W. Goodall.
+2025. Probabilistic Shielding for Safe Reinforcement Learning. In AAAI-25, Sponsored by the Association for the Advancement of Artificial Intelligence, February 25
+- March 4, 2025, Philadelphia, PA, USA, Toby Walsh, Julie Shah, and Zico Kolter
+(Eds.). AAAI Press, 16091–16099. https://doi.org/10.1609/AAAI.V39I15.33767
+[25] Xingtu Liu. 2024. Information-Theoretic Generalization Bounds for Batch Reinforcement Learning. Entropy 26, 11 (2024), 995.
+[26] Yongshuai Liu, Jiaxin Ding, and Xin Liu. 2020. IPO: Interior-Point Policy Optimization under Constraints. In The Thirty-Fourth AAAI Conference on Artificial
+Intelligence, AAAI 2020, The Thirty-Second Innovative Applications of Artificial
+Intelligence Conference, IAAI 2020, The Tenth AAAI Symposium on Educational
+Advances in Artificial Intelligence, EAAI 2020, New York, NY, USA, February 7-12,
+2020. AAAI Press, 4940–4947. https://doi.org/10.1609/AAAI.V34I04.5932
+[27] Volodymyr Mnih, Koray Kavukcuoglu, David Silver, Alex Graves, Ioannis
+Antonoglou, Daan Wierstra, and Martin A. Riedmiller. 2013. Playing Atari
+with Deep Reinforcement Learning. CoRR abs/1312.5602 (2013). arXiv:1312.5602
+http://arxiv.org/abs/1312.5602
+[28] Volodymyr Mnih, Koray Kavukcuoglu, David Silver, Andrei A Rusu, Joel Veness,
+Marc G Bellemare, Alex Graves, Martin Riedmiller, Andreas K Fidjeland, Georg
+Ostrovski, et al. 2015. Human-level control through deep reinforcement learning.
+Nature 518, 7540 (2015), 529–533.
+[29] Haritz Odriozola-Olalde, Maider Zamalloa, and Nestor Arana-Arexolaleiba. 2023.
+Shielded Reinforcement Learning: A review of reactive methods for safe learning.
+In 2023 IEEE/SICE International Symposium on System Integration (SII). 1–8. https:
+//doi.org/10.1109/SII55687.2023.10039301
+[30] Alex Ray, Joshua Achiam, and Dario Amodei. 2019. Benchmarking Safe Exploration in Deep Reinforcement Learning. In arXiv preprint arXiv:1910.01708.
+[31] Harsh Satija, Philip Amortila, and Joelle Pineau. 2020. Constrained markov
+decision processes via backward value functions. In International Conference on
+Machine Learning. PMLR, 8502–8511.
+[32] John Schulman, Sergey Levine, Philipp Moritz, Michael I. Jordan, and Pieter
+Abbeel. 2015. Trust Region Policy Optimization. CoRR abs/1502.05477 (2015).
+arXiv:1502.05477 http://arxiv.org/abs/1502.05477
+[33] John Schulman, Filip Wolski, Prafulla Dhariwal, Alec Radford, and Oleg Klimov.
+2017. Proximal Policy Optimization Algorithms. CoRR abs/1707.06347 (2017).
+arXiv:1707.06347 http://arxiv.org/abs/1707.06347
+[34] Aivar Sootla, Alexander I. Cowen-Rivers, Taher Jafferjee, Ziyan Wang,
+David Henry Mguni, Jun Wang, and Haitham Ammar. 2022. Saute RL: Almost
+Surely Safe Reinforcement Learning Using State Augmentation. In International
+Conference on Machine Learning, ICML 2022, 17-23 July 2022, Baltimore, Maryland,
+USA (Proceedings of Machine Learning Research, Vol. 162), Kamalika Chaudhuri,
+Stefanie Jegelka, Le Song, Csaba Szepesvári, Gang Niu, and Sivan Sabato (Eds.).
+PMLR, 20423–20443. https://proceedings.mlr.press/v162/sootla22a.html
+[35] Krishnan Srinivasan, Benjamin Eysenbach, Sehoon Ha, Jie Tan, and Chelsea Finn.
+2020. Learning to be Safe: Deep RL with a Safety Critic. CoRR abs/2010.14603
+(2020). arXiv:2010.14603 https://arxiv.org/abs/2010.14603
+[36] Adam Stooke, Joshua Achiam, and Pieter Abbeel. 2020. Responsive Safety in
+Reinforcement Learning by PID Lagrangian Methods. In ICML.
+[37] Richard S Sutton and Andrew G Barto. 2018. Reinforcement Learning: An Introduction (2nd ed.). MIT press, Cambridge, MA.
+[38] Richard S. Sutton and Andrew G. Barto. 2018. Reinforcement Learning: An Introduction. A Bradford Book, Cambridge, MA, USA.
+[39] Sebastian Thrun and Anton Schwartz. 1993. Issues in using function approximation for reinforcement learning. In Proceedings of the 1993 Connectionist Models
+Summer School. Lawrence Erlbaum.
+[40] Hado Van Hasselt. 2010. Double Q-learning. In Advances in neural information
+processing systems. 2613–2621.
+[41] Ziyu Wang, Tom Schaul, Matteo Hessel, Hado P. van Hasselt, Marc G. Bellemare,
+and Nando de Freitas. 2016. Dueling Network Architectures for Deep Reinforcement Learning. In International Conference on Machine Learning (ICML).
+[42] Christopher J. C. H. Watkins and Peter Dayan. 1992. Q-Learning. Machine
+Learning 8, 3–4 (1992), 279–292.
+[43] Zhihan Xie, Qi Cai, Ethan Zhou, Alexander Risteski, and Alexander G. Gray. 2021.
+Bellman Error is a Good Proxy for Value Error. In International Conference on
+Machine Learning (ICML).
+[44] Wen-Chi Yang, Giuseppe Marra, Gavin Rens, and Luc De Raedt. 2023. Safe
+Reinforcement Learning via Probabilistic Logic Shields. In Proceedings of the
+Thirty-Second International Joint Conference on Artificial Intelligence, IJCAI 2023,
+19th-25th August 2023, Macao, SAR, China. ijcai.org, 5739–5749. https://doi.org/
+
+10.24963/IJCAI.2023/637
+[45] Yiming Zhang, Quan Vuong, and Keith Ross. 2020. First order constrained
+optimization in policy space. Advances in Neural Information Processing Systems
+33 (2020), 15338–15349.
+[46] Yiming Zhang, Quan Vuong, and Keith W. Ross. 2020. First Order Optimization in
+Policy Space for Constrained Deep Reinforcement Learning. CoRR abs/2002.06506
+(2020). arXiv:2002.06506 https://arxiv.org/abs/2002.06506
+
+A TECHNICAL APPENDICES AND SUPPLEMENTARY MATERIAL
+A.1 ProSH-TD3 implementation
+We provide additional details on the implementation of ProSH-TD3 and the theoretical guarantees that ensure its safety during training.
+First, we describe the full training procedure, including the update rules for both the main and backup actor–critic pairs. We then present the
+exact loss functions used to train each component of the algorithm. Finally, we prove that ProSH-TD3 sampling remains safe even in the
+presence of exploration noise and hybrid training episodes.
+A.1.1 Pseudo-code and training. The complete algorithm is outlined in Algorithm 2, including the training of the main actor and the backup
+actor, using normal episode where the main actor is used for sampling, and hybrid episode where the backup actor is used for sampling after
+several steps of the main actor.
+Algorithm 2 ProSh-TD3
+1: Input: cost budget 𝑑, margin 𝛿, discount factors 𝛾, 𝛾𝑐 , ℎ𝑦𝑏𝑟𝑖𝑑_𝑑𝑒𝑙𝑎𝑦, 𝑝𝑜𝑙𝑖𝑐𝑦_𝑑𝑒𝑙𝑎𝑦
+𝜉𝑖
+
+2: Initialize actor-critic pairs 𝑄𝑏 𝑖 , 𝜋𝑏 , 𝑄 𝑟 , 𝜋 𝑟 , 𝑒𝑝_𝑛𝑢𝑚𝑏𝑒𝑟 ← 0, 𝐿 ← []
+𝜃
+
+𝜙
+
+𝜓
+
+3: for each episode do
+4:
+5:
+6:
+7:
+8:
+9:
+
+10:
+11:
+12:
+
+𝑠 ← 𝑠 init, 𝑟 ← 𝑑 − 𝛿, 𝑠𝑡𝑒𝑝_𝑖𝑛𝑑 ← 0
+if 𝑒𝑝_𝑛𝑢𝑚𝑏𝑒𝑟 mod ℎ𝑦𝑏𝑟𝑖𝑑_𝑑𝑒𝑙𝑎𝑦 = 0 then
+𝑠𝑤𝑖𝑡𝑐ℎ_𝑠𝑡𝑒𝑝 ← rand(0, mean(𝐿))
+else
+𝑠𝑤𝑖𝑡𝑐ℎ_𝑠𝑡𝑒𝑝 ← +∞
+end if
+while not done do
+if 𝑠𝑡𝑒𝑝_𝑖𝑛𝑑 ≤ 𝑠𝑤𝑖𝑡𝑐ℎ_𝑠𝑡𝑒𝑝
+then
+ 
+
+Sample 𝑎 ∼ Ξ 𝜋 𝑟 (𝑠) and add noise to 𝑎
+𝜓
+
+Execute 𝑎, observe 𝑠 ′ , reward 𝑟 , cost 𝑐
+14:
+else
+15:
+(𝑠, 𝑥) ← 𝑠
+𝜙
+16:
+Sample 𝑎 ∼ 𝜋𝑏 and add noise to 𝑎
+17:
+Execute 𝑎 = (𝑎, 𝑥), observe 𝑠 ′ , reward 𝑟 , cost 𝑐
+18:
+end if
+19:
+store (𝑠, 𝑎, 𝑟, 𝑐, 𝑠 ′ ) in D
+20:
+𝑠 ← 𝑠 ′ , 𝑠𝑡𝑒𝑝_𝑖𝑛𝑑 ← 𝑠𝑡𝑒𝑝_𝑖𝑛𝑑 + 1
+21:
+Sample from D and update critic networks by minimizing losses L (𝜃 𝑖 ), L (𝜉𝑖 )
+22:
+if 𝑒𝑝_𝑛𝑢𝑚𝑏𝑒𝑟 mod 𝑝𝑜𝑙𝑖𝑐𝑦_𝑑𝑒𝑙𝑎𝑦 = 0 then
+23:
+update actor networks by minimizing losses L (𝜙), L (𝜓 )
+24:
+end if
+25:
+end while
+26:
+append 𝑠𝑡𝑒𝑝_𝑖𝑛𝑑 to 𝐿, 𝑒𝑝_𝑛𝑢𝑚𝑏𝑒𝑟 ← 𝑒𝑝_𝑛𝑢𝑚𝑏𝑒𝑟 + 1
+27: end for
+28: return projected policy 𝜋˜ (via Thm. 2)
+13:
+
+Actor-critic pairs training. We train the actor-critic pairs with batch sampling from a replay buffer in which we store every transition
+made in the augmented MDP. For the backup critic, we use the training target 𝑦𝑏 (𝑐, 𝑠 ′ ), proposed in [18], equal to
+
+𝑡𝑎𝑟𝑔 
+ 1 − 𝛽 ∑︁ 𝜃 𝑡𝑎𝑟𝑔 
+ 
+
+𝜃
+𝜓 𝑡𝑎𝑟𝑔 ′
+𝜓 𝑡𝑎𝑟𝑔 ′
+𝑐 + 𝛾𝑐 𝛽 min 𝑄𝑏 𝑗
+𝑠 ′, 𝜋𝑏
+(𝑠 ) + 𝜖 +
+𝑄𝑏 𝑗
+𝑠 ′, 𝜋𝑏
+(𝑠 ) + 𝜖  ,
+2
+ 𝑗 ∈ {1,2}
+
+𝑗 ∈ {1,2}
+
+
+where 𝜖 is a small gaussian noise and 𝛽 is a hyperparameter. Compared to the standard TD3 training target, this target helps combat the
+underestimation bias of TD3 [18].
+Both of the backup critic heads are learned by regressing to this target:
+
+2
+𝜃𝑖
+′
+L (𝜃 𝑖 ) = E ( (𝑠,𝑥 ),(𝑎,𝑦),𝑟,𝑐 (𝑠 ′ ,𝑥 ′ ) )∼D 𝑄𝑏 (𝑠, 𝑎) − 𝑦𝑏 (𝑐, 𝑠 )
+.
+The backup actor is updated with the standard TD3 actor loss:
+h
+i
+L (𝜙) = −E (𝑠,𝑥 )∼D 𝑄𝑏𝜃 1 (𝑠, 𝜋 𝜙 (𝑠)) .
+
+The main critic is updated with a loss adapted from TD3, but taking into account that the shielded main actor outputs three actions with
+their respective probabilities:
+
+2
+𝜉𝑖
+, where
+L (𝜉𝑖 ) = E (𝑠,𝑎,𝑟,𝑐,𝑠 ′ )∼D 𝑄 𝑟 (𝑠, 𝑎) − 𝑦𝑟 (𝑟, 𝑠 ′ )
+𝑡𝑎𝑟𝑔
+
+𝑦𝑟 (𝑟, 𝑠 ′ ) = 𝑟 + 𝛾
+
+∑︁
+𝑘 ∈ {1,2,3}
+
+𝜃
+
+𝜆𝑘 min 𝑄 𝑟 𝑗
+𝑗 ∈ {1,2}
+
+
+𝜓
+𝑠 ′, 𝑎𝑘 + 𝜖 with Ξ(𝜋 𝑟 )(𝑠 ′ ) =
+
+∑︁
+
+𝜆𝑘 𝑎𝑘 .
+
+𝑘 ∈ {1,2,3}
+
+Similarly, the main actor is updated taking into account the shield:
+ ∑︁
+
+∑︁
+
+
+𝜉1
+𝜓
+L (𝜓 ) = −E𝑠∼D 
+𝜆𝑘 𝑄 𝑟 (𝑠, 𝑎𝑘 )  where Ξ(𝜋 𝑟 )(𝑠) =
+𝜆𝑘 𝑎𝑘 .
+𝑘 ∈ {1,2,3}
+
+𝑘 ∈ {1,2,3}
+
+
+Note that the gradients can flow through the 𝜆𝑘 and the 𝑎𝑘 in the main actor training loss as they are computed in a fully differentiable
+way.
+A.1.2 Safe sampling guarantees. The algorithm 2 includes noise for the exploration as well as exploration rounds to train the backup actor
+and the backup critic. We will present Theorem 5 stating that the sampling is still safe and provide an upper-bound for the cost.
+Theorem 5 (Safety of the shielding with noise). We consider a MDP M and any two policies 𝜋¯1 and 𝜋¯2 , and 𝜉 ∈ [0, 1] a small number.
+Then, with 𝜋¯ the policy defined as
+𝜋¯ (𝑠) = (1 − 𝜉) 𝜋¯1 (𝑠) + 𝜉 𝜋¯2 (𝑠)
+for all 𝑠 ∈ S, the discounted cost of the policy 𝜋¯ satisfies
+𝜉𝑐 max
+1
+¯ ≤ 𝐶 (𝜋¯1 ) +
+𝐶 (𝜋)
+.
+1 − 𝛾𝑐 1 − (1 − 𝜉)𝛾𝑐
+We now consider the effective policy used during sampling, and not only the policy that the algorithm ouptuts. We aim to show that it
+also satisfies the safety guarantees. In practice, ProSH alternates between two modes: standard training episodes using the main actor, and
+hybrib episodes where the backup actor is used after several steps of the main actor. This alternation is used to improve the training of the
+backup critic 𝑄𝑏 . In both cases, a small noise is added.
+For every augmented state (𝑠, 𝑥), both the main actor policy and the hybrid policy, without noise, can be written as
+𝜋¯ (𝑠, 𝑥) = 𝜆(𝑠, 𝑥) 𝜋¯1 + (1 − 𝜆(𝑠, 𝑥)) 𝜋¯𝑏 ,
+where 𝜋¯1 is the main actor and 𝜋¯𝑏 . Hence, the policy 𝜋¯ is also 𝑄𝑏 -shielded, and its cost satisfies the estimate
+2Δ𝑏
+¯ ≤ 𝑥0 +
+𝐶 ( 𝜋)
+.
+1 − 𝛾𝑐
+We now consider the final policy used for sampling with noise, and define
+𝜋¯0 = (1 − 𝜉) 𝜋¯ + 𝜉 𝜋¯𝑛𝑜𝑖𝑠𝑒 .
+Using theorem 5, we have the upperbounds:
+1
+𝜉𝑐 max
+2Δ𝑏
+1
+𝜉𝑐 max
+≤ 𝑥0 +
++
+.
+1 − 𝛾𝑐 1 − (1 − 𝜉)𝛾𝑐
+1 − 𝛾𝑐 1 − 𝛾𝑐 1 − (1 − 𝜉)𝛾𝑐
+So the policy used for sampling is also safe, and the term induced by the noise can be removed by choosing
+1
+𝜉𝑐 max
+𝑥0 ≤ 𝑑 −
+.
+1 − 𝛾𝑐 1 − (1 − 𝜉)𝛾𝑐
+¯ +
+𝐶 (𝜋¯0 ) ≤ 𝐶 (𝜋)
+
+A.2
+
+Velocity and Navigation environments
+
+We evaluate our method on environments from the Safe Velocity and Safe Navigation suites of Safety-Gymnasium. Specifically, we use
+HalfCheetah, and Hopper (velocity tasks), and CarGoal, CarCircle, PointGoal, and PointCircle (navigation tasks).
+Velocity Tasks. These tasks focus on moving forward quickly while remaining within a safe speed limit. The reward is proportional to
+forward progress, and the cost is binary: it equals 1 if the agent’s velocity exceeds 50% of its training-time maximum, and 0 otherwise.
+• HalfCheetah: A 2D robot with 9 links and 8 joints learns to run forward via torque control.
+• Hopper: A one-legged robot learns to hop forward by coordinating joint torques.
+Navigation Tasks. These tasks require agents to reach goals or follow paths while avoiding unsafe regions. The reward is based on
+proximity to the goal or path adherence, and the cost equals 1 upon contact with obstacles or hazardous zones.
+• CarGoal vs. PointGoal: Both tasks require reaching a fixed target location.
+– CarGoal uses a wheeled robot with non-holonomic constraints, simulating a simplified autonomous vehicle.
+– PointGoal uses a free-moving point mass, which can change direction instantaneously.
+• CarCircle vs. PointCircle: The goal is to follow a predefined circular trajectory.
+– CarCircle again uses the wheeled car agent, requiring continuous steering control.
+– PointCircle uses the point mass agent, allowing for simpler motion planning but still subject to the same cost constraints.
+
+(a) CarCircle
+
+(b) CarGoal
+
+(c) Hopper
+
+(d) Half Cheetah
+
+Figure 14: On the left, two environments of the Safe Navigation suite from Safety-Gymnasium, CarCircle and CarGoal. In
+CarCircle, the agent needs to circle around the center of the circle area while avoiding going outside the boundaries. In CarGoal,
+the agent needs to navigate to the Goal’s location while circumventing Hazards. In both case we choose 𝐿𝑒𝑣𝑒𝑙 = 1. On the right,
+two environments of the Safe Velocity suite from Safety-Gymnasium, SafetyHopper and SafetyHalfCheetah. In both cases the
+agent has to move as quickly as possible while adhering to a velocity constraint.
+
+A.3
+
+Experimental Setup
+
+Hyperparameters. For PPO-Saute and TD3-Lag, we set 𝛾𝑐 = 0.995, and we set 𝛾𝑆𝑎𝑢𝑡𝑒 = 0.995 for PPO-Saute. For the other hyperparameters
+for TD3-Lag and PPO-Saute , we use for each environments the default hyperparameters provided by Omnisafe [21]. As for our algorithm,
+the set of hyperparameters used for every environment is given in Table 1. The more difficult the environment, the more the learning rate of
+the actors are decreased and the learning rate of the critics increased, as is standard for modern TD3 implementations.
+In Table 1, 𝛽 is the hyperparameter in the backup critic target.
+Experimental Setup. All experiments were conducted on a PBS-managed high-performance computing cluster running Red Hat Enterprise
+Linux 8.5 (Ootpa). Each compute node is equipped with 2× AMD EPYC 7742 CPUs (128 cores total), 1 TB of RAM, and 8× NVIDIA Quadro
+RTX 6000 GPUs. We launched each experiment seed as an independent PBS job, allocating 1 CPU core, 12GB of RAM, and 1 GPU per job. A
+typical training run (1 million environment steps) took approximately 4 hours.
+For PPO-Saute, CPO, FOCOPS, TD3-PID, and TD3-Lag, we used Python 3.10.0, Omnisafe version 0.5.0, Torch version 2.7.0 and Cuda 11.8.
+For ProSH-TD3, we used Python 3.10.0, Stable baselines3 version 2.6.0, Torch version 2.7.0 and Cuda 11.8.
+
+Hyperparameter
+Main actor LR
+Backup actor LR
+Main critic LR
+Backup critic LR
+Reward Discount factor
+Cost Discount factor
+policy_delay
+hybrid_delay
+𝛽
+net_arch
+Exploration Policy
+
+HalfCheetah
+
+PointCircle
+
+Hopper
+
+CarCircle
+
+PointGoal
+
+CarGoal
+
+1e-4
+1e-4
+1e-4
+1e-4
+0.99
+0.995
+2
+2
+0.75
+[400,300]
+N (0, 0.2)
+
+1e-4
+1e-4
+1e-4
+1e-4
+0.99
+0.995
+2
+2
+0.75
+[400,300]
+N (0, 0.2)
+
+5e-4
+5e-4
+1e-3
+1e-3
+0.99
+0.995
+2
+2
+0.75
+[400,300]
+N (0, 0.2)
+
+5e-5
+5e-5
+1e-3
+3e-4
+0.99
+0.995
+2
+2
+0.75
+[400,300]
+N (0, 0.2)
+
+5e-5
+5e-6
+1e-3
+3e-4
+0.99
+0.995
+2
+3
+0.75
+[400,300]
+N (0, 0.2)
+
+5e-6
+5e-5
+1e-4
+3e-4
+0.99
+0.995
+2
+3
+0.75
+[400,300]
+N (0, 0.2)
+
+Table 1: Hyperparameters for ProSH-TD3
+
+A.4
+
+Theoretical Analysis
+
+In this section, we provide all the proofs for the theorem we have stated throughout the article.
+A.4.1 Proof of Theorem 1. We recall Theorem 1:
+Theorem 1. (Safety bound for 𝑄𝑏 -shields.)
+Let M be a CMDP with cost discount factor 𝛾𝑐 , and let 𝑄𝑏∗ be its optimal state–action cost function. Assume that 𝑄𝑏 is a 𝑄-value, and let
+Δ𝑏 = ||𝑄𝑏 − 𝑄𝑏∗ ||𝐿∞ ( S A ) . For any policy 𝜋¯ ∈ Π val that is 𝑄𝑏 -shielded, the expected discounted cost from the augmented state (𝑠 0, 𝑥 0 ) obeys
+𝑥0
+2Δ𝑏
++
+,
+whenever 𝑥 0 ≥ 𝑄𝑏 (𝑠 0 ).
+𝛾𝑐 1 − 𝛾𝑐
+In order to prove theorem 1, we will first prove the following lemma.
+¯ ≤
+C (𝑠0 ,𝑥 0 ) ( 𝜋)
+
+¯ Then,
+Lemma 1. Let 𝐶𝑛 (𝑠, 𝑥) = 𝛾𝑐 𝐷𝑛−1 (𝑠, 𝑥), where 𝐷𝑛 is the expected discounted cost of the 𝑛 first steps of the policy 𝜋.
+
+𝐶𝑛 (𝑠, 𝑥) ≤ 𝑥 + 𝑓𝑛 (Δ𝑏 ), when 𝑥 ≥ 𝑄𝑏 (𝑠),
+𝐶𝑛 (𝑠, 𝑥) ≤ 𝑄𝑏 (𝑠) + 𝑔𝑛 (Δ𝑏 ), when 𝑥 < 𝑄𝑏 (𝑠)
+as long as the sequences 𝑓𝑛 (Δ𝑏 ) and 𝑔𝑛 (Δ𝑏 ) satisfy 𝑓1 (Δ𝑏 ) ≥ 𝛾𝑐 Δ𝑏 , 𝑔1 (Δ𝑏 ) ≥ 𝛾𝑐 Δ𝑏 and for every 𝑛 ≥ 2,
+
+𝑓𝑛 (Δ𝑏 ) ≥ 2𝛾𝑐 Δ𝑏 + 𝛾𝑐 𝑓𝑛−1,
+𝑔𝑛 (Δ𝑏 ) ≥ max(2𝛾𝑐 Δ𝑏 + 𝛾𝑐 𝑔𝑛−1 (Δ𝑏 ), 3𝛾𝑐 Δ𝑏 + 𝛾𝑐 𝑓𝑛−1 (Δ𝑏 )).
+¯
+Proof. For 𝜋¯ a 𝑄𝑏 -shielded policy of the augmented CMDP, we define the sequence 𝐶𝑛 (𝑠, 𝑥) as (we omit the dependency on 𝜋)
+∑︁
+∑︁
+𝑃 (𝑠 ′, 𝑎)𝛾𝑐 (𝑐 (𝑠, 𝑎) + 𝐶𝑛−1 (𝑠 ′, 𝑥 ′ ))
+𝐶𝑛 (𝑠, 𝑥) =(1 − 𝜆)
+𝑃𝜋¯ ((𝑎, 𝑦𝑎 )|(𝑠, 𝑥))
+𝑠′
+
+𝑎∈𝐴(𝑠 )
+
++𝜆
+
+∑︁
+
+′
+
+𝑃 (𝑠 |𝜋𝑏 (𝑠))𝛾𝑐 (𝑐 (𝑠, 𝜋𝑏 (𝑠)) + 𝐶𝑛−1 (𝑠 ′, 𝑄𝑏 (𝑠 ′ )),
+
+𝐶 0 (𝑠, 𝑥) = 0,
+
+𝑠′
+
+where 𝑥 ′ = 𝑦𝑎 − 𝑄𝑏 (𝑠, 𝑎) + 𝑄𝑏 (𝑠 ′ ). Note that 𝐶𝑛 (𝑠, 𝑥) = 𝛾𝑐 𝐷𝑛−1 (𝑠, 𝑥), where 𝐷𝑛−1 (𝑠, 𝑥) is the average discounted expected cost of the policy
+¯ We used the fact that 𝑃 ((𝑠 ′, 𝑥 ′ )|(𝑎, 𝑦𝑎 )) = 𝑃 (𝑠 ′ |𝑎) when 𝑥 ′ = 𝑦𝑎 − 𝑄𝑏 (𝑠, 𝑎) + 𝑄𝑏 (𝑠 ′ ). Finally, throughout this proof, when there is no
+𝜋.
+ambiguity, we will denote 𝑃𝑎 = 𝑃 ((𝑎, 𝑦𝑎 )|(𝑠, 𝑥)).
+We will show by induction that
+
+𝐶𝑛 (𝑠, 𝑥) ≤ 𝑥 + 𝑓𝑛 (Δ𝑏 ), 𝑥 ≥ 𝑄𝑏 (𝑠),
+𝐶𝑛 (𝑠, 𝑥) ≤ 𝑄𝑏 (𝑠) + 𝑔𝑛 (Δ𝑏 ), 𝑥 < 𝑄𝑏 (𝑠).
+Base case, 𝑛 = 1, 𝑥 ≥ 𝑄𝑏 (𝑠):
+In this case, we have by definition that
+𝜋¯ (𝑠, 𝑥) = (1 − 𝜆)
+
+∑︁
+
+𝑃𝑎 (𝑎, 𝑦𝑎 ) + 𝜆(𝜋𝑏 (𝑠), 𝑄𝑏 (𝑠, 𝜋𝑏 (𝑠))),
+
+𝑎∈𝐴(𝑠 )
+
+where
+𝑥 ≥ 𝛾𝑐 (1 − 𝜆)
+
+∑︁
+𝑎
+
+𝑃𝑎𝑦𝑎 + 𝛾𝑐 𝜆𝑄𝑏 (𝑠, 𝜋𝑏 (𝑠)).
+
+The cost function 𝐶 1 (𝑠, 𝑥) satisfies by definition
+∑︁
+
+𝐶 1 (𝑠, 𝑥) =(1 − 𝜆)
+
+∑︁
+
+𝑃𝑎
+
+𝑎
+
++ 𝜆𝛾𝑐
+
+𝑃 (𝑠 ′ |𝑎)𝛾𝑐 (𝑐 (𝑠, 𝑎) + 𝐶 0 (𝑠 ′, 𝑥 ′ ))
+
+𝑠′
+
+∑︁
+
+𝑃 (𝑠 ′ |𝜋𝑏 (𝑠))(𝑐 (𝑠, 𝜋𝑏 (𝑠)) + 𝐶 0 (𝑠 ′, 𝑦 ′ )),
+
+𝑠′
+
+so, using 𝐶 0 = 0,
+𝐶 1 (𝑠, 𝑥) = (1 − 𝜆)
+
+∑︁
+
+𝑃𝑎
+
+∑︁
+
+𝑃 (𝑠 ′ |𝑎)𝛾𝑐 𝑐 (𝑠, 𝑎) + 𝜆𝛾𝑐
+
+𝑠′
+
+𝑎
+
+∑︁
+
+𝑃 (𝑠 ′ |𝜋𝑏 (𝑠))𝑐 (𝑠, 𝜋𝑏 (𝑠)).
+
+𝑠′
+
+Now, any policy taking action 𝑎 has a cost at least equal to
+Í
+′
+∗
+𝑠 ′ 𝑃 (𝑠 |𝜋𝑏 (𝑠))𝑐 (𝑠, 𝜋𝑏 (𝑠)). Using ||𝑄𝑏 − 𝑄𝑏 || ∞ ≤ Δ𝑏 gives
+∑︁
+𝑃 (𝑠 ′, 𝑎)𝑐 (𝑠, 𝑎) ≤ 𝑄𝑏 (𝑠, 𝑎) + Δ𝑏 ,
+
+Í
+′
+∗
+′
+∗
+𝑠 ′ 𝑃 (𝑠 |𝑎)𝑐 (𝑠, 𝑎). Similarly, 𝑄𝑏 (𝑠, 𝜋𝑏 (𝑠)) ≥
+𝑠 ′ 𝑃 (𝑠 |𝑎)𝑐 (𝑠, 𝑎), so 𝑄𝑏 (𝑠, 𝑎) ≥
+
+Í
+
+∑︁
+
+𝑠′
+
+𝑃 (𝑠 ′ |𝜋𝑏 (𝑠))𝑐 (𝑠, 𝜋𝑏 (𝑠)) ≤ 𝑄𝑏 (𝑠, 𝜋𝑏 (𝑠)) + Δ𝑏 .
+
+𝑠′
+
+Hence, we get
+∑︁
+
+𝐶 1 (𝑠, 𝑥) ≤ (1 − 𝜆)𝛾𝑐
+
+𝑃𝑎 𝑄𝑏 (𝑠, 𝑎) + 𝜆𝛾𝑐 𝑄𝑏 (𝑠, 𝜋𝑏 (𝑠)) + 𝛾𝑐 Δ𝑏 .
+
+𝑎
+
+Since for any 𝑎 ∈ 𝐴(𝑠), 𝑦𝑎 ≥ 𝑄𝑏 (𝑠, 𝑎), we obtain
+𝐶 1 (𝑠, 𝑥) ≤ (1 − 𝜆)𝛾𝑐
+
+∑︁
+
+𝑃𝑎𝑦𝑎 + 𝜆𝛾𝑐 𝑄𝑏 (𝑠, 𝜋𝑏 (𝑠)) + 𝛾𝑐 Δ𝑏 .
+
+𝑎
+
+Using the weight condition, we finally obtain
+
+𝐶 1 (𝑠, 𝑥) ≤ 𝑥 + 𝛾𝑐 Δ𝑏 .
+
+Base case, 𝑛 = 1, 𝑥 < 𝑄𝑏 (𝑠):
+In this situation, we have by the definition of a 𝑄𝑏 -shielded policy that
+𝜋¯ (𝑠, 𝑥) = (𝜋𝑏 (𝑠), 𝑧),
+
+𝛾𝑐 𝑧 ≤ 𝑥 .
+
+In this case, the cost function 𝐶 1 satisfies
+∑︁
+∑︁
+𝐶 1 (𝑠, 𝑥) =
+𝑃 (𝑠 ′ |𝜋𝑏 (𝑠))𝛾𝑐 (𝐶 0 (𝑠 ′, 𝑄𝑏 (𝑠 ′ )) + 𝑐 (𝑠, 𝜋𝑏 (𝑠))) =
+𝑃 (𝑠 ′ |𝜋𝑏 (𝑠))𝛾𝑐 𝑐 (𝑠, 𝜋𝑏 (𝑠)).
+𝑠′
+
+𝑠′
+
+Í
+Any policy taking 𝑠 ′ with probability 1 would have a cost of at least 𝑠 ′ 𝑃 (𝑠 ′ |𝜋𝑏 (𝑠))𝑐 (𝑠, 𝜋𝑏 (𝑠)), which means
+∑︁
+𝑃 (𝑠 ′ |𝜋𝑏 (𝑠))𝑐 (𝑠, 𝜋𝑏 (𝑠)),
+𝑄𝑏∗ (𝑠, 𝜋𝑏 (𝑠)) ≥
+𝑠′
+
+so
+𝑄𝑏 (𝑠, 𝜋𝑏 (𝑠)) ≥
+
+∑︁
+
+𝑃 (𝑠 ′ |𝜋𝑏 (𝑠))𝑐 (𝑠, 𝜋𝑏 (𝑠)) − Δ𝑏 .
+
+𝑠′
+
+Consequently,
+
+𝐶 1 (𝑠, 𝑥) ≤ 𝛾𝑐 (𝑄𝑏 (𝑠, 𝜋𝑏 (𝑠)) + Δ𝑏 ) = 𝑄𝑏 (𝑠) + 𝛾𝑐 Δ𝑏 .
+
+Induction step, 𝑥 ≥ 𝑄𝑏 (𝑠):
+With the same notation, 𝜋¯ now satisfies
+𝜋¯ (𝑠, 𝑥) = (1 − 𝜆)
+
+∑︁
+
+𝑃𝑎 (𝑎, 𝑦𝑎 ) + 𝜆(𝜋𝑏 (𝑠), 𝑄𝑏 (𝑠, 𝜋𝑏 (𝑠))),
+
+𝑎
+
+where
+𝑥 ≥ 𝛾𝑐 (1 − 𝜆)
+
+∑︁
+
+𝑃𝑎𝑦𝑎 + 𝛾𝑐 𝜆𝑄𝑏 (𝑠, 𝜋𝑏 (𝑠)).
+
+𝑎
+
+By definition, the cost functional 𝐶𝑛 satisfies
+𝐶𝑛 (𝑠, 𝑥) = (1 − 𝜆)
+
+∑︁
+
+𝑃𝑎
+
+𝑎
+
++𝜆
+
+∑︁
+
+∑︁
+
+𝑃 (𝑠 ′ |𝑎)𝛾𝑐 (𝑐 (𝑠, 𝑎) + 𝐶𝑛−1 (𝑠 ′, 𝑥 ′ ))
+
+𝑠′
+
+𝑃 (𝑠 ′ |𝜋𝑏 (𝑠))𝛾𝑐 (𝑐 (𝑠, 𝜋𝑏 (𝑠)) + 𝐶𝑛−1 (𝑠 ′, 𝑄𝑏 (𝑠 ′ ))),
+
+𝑠′
+
+where 𝑥 ′ = 𝑦𝑎 − 𝑄𝑏 (𝑠, 𝑎) + 𝑄𝑏 (𝑠 ′ ). Since for all 𝑎 ∈ 𝐴(𝑠), 𝑦𝑎 ≥ 𝑄𝑏 (𝑠, 𝑎), then 𝑥 ′ ≥ 𝑄𝑏 (𝑠 ′ ), so we can apply the induction hypothesis and find
+𝐶𝑛−1 (𝑠 ′, 𝑥 ′ ) ≤ 𝑥 ′ + 𝑓𝑛−1 (Δ𝑏 ),
+
+𝐶𝑛−1 (𝑠 ′, 𝑄𝑏 (𝑠 ′ )) ≤ 𝑄𝑏 (𝑠 ′ ) + 𝑓𝑛−1 (Δ𝑏 ).
+
+Hence, 𝐶𝑛 (𝑠, 𝑥) satisfies
+𝐶𝑛 (𝑠, 𝑥) ≤ (1 − 𝜆)𝐴 + 𝜆𝐵 + 𝛾𝑐 𝑓𝑛−1 (Δ𝑏 ),
+
+where
+𝐴=
+
+∑︁
+
+𝑃𝑎
+
+𝑎
+
+𝐵=
+
+∑︁
+
+∑︁
+
+𝑃 (𝑠 ′, 𝑎)𝛾𝑐 (𝑐 (𝑠, 𝑎) + 𝑥 ′ ),
+
+𝑠′
+
+𝑃 (𝑠 ′ |𝜋𝑏 (𝑠))𝛾𝑐 (𝑐 (𝑠, 𝜋𝑏 (𝑠)) + 𝑄𝑏 (𝑠 ′ )).
+
+𝑠′
+
+Now, we have
+𝑄𝑏∗ (𝑠, 𝑎) = 𝑐 (𝑠, 𝑎) +
+
+∑︁
+
+𝑃 (𝑠 ′ |𝑎)𝑄𝑏∗ (𝑠 ′ ) ≥ 𝑐 (𝑠, 𝑎) +
+
+∑︁
+
+𝑠′
+
+so 𝑄𝑏 (𝑠, 𝑎) ≥ 𝑐 (𝑠, 𝑎) +
+
+𝑃 (𝑠 ′ |𝑎)(𝑄𝑏 (𝑠 ′ ) − Δ𝑏 ),
+
+𝑠′
+
+′
+′
+′
+𝑎 𝑃𝑎 (𝑠 |𝑎) − 2Δ𝑏 . Using additionally 𝑥 = 𝑦𝑎 − 𝑄𝑏 (𝑠, 𝑎) + 𝑄𝑏 (𝑠 ), we obtain
+
+Í
+
+𝐴≤
+
+∑︁
+
+𝑃𝑎
+
+∑︁
+
+𝑃𝑎
+
+𝑎
+
++
+
+∑︁
+𝑎
+
+≤
+
+∑︁
+
+𝑃 (𝑠 ′ |𝑎)𝛾𝑐 (𝑐 (𝑠, 𝑎) + 𝑦𝑎 − 𝑄𝑏 (𝑠, 𝑎) + 𝑄𝑏 (𝑠 ′ ))
+
+𝑠′
+
+𝑎
+
+≤
+
+∑︁
+
+𝑃𝑎
+
+∑︁
+
+𝑃 (𝑠 ′ |𝑎)𝛾𝑐 𝑄𝑏 (𝑠 ′ ) −
+
+∑︁
+
+𝑠′
+
+𝑎
+
+∑︁
+
+𝑃 (𝑠 ′, 𝑎)𝛾𝑐 𝑦𝑎 + 2𝛾𝑐 Δ𝑏
+
+𝑃𝑎
+
+∑︁
+
+𝑃 (𝑠 ′ |𝑎)𝛾𝑐 𝑄𝑏 (𝑠 ′ )
+
+𝑠′
+
+𝑠′
+
+𝛾𝑐 𝑃𝑎𝑦𝑎 + 2𝛾𝑐 Δ𝑏 .
+
+𝑎
+
+We reason in a similar way for the second term 𝐵. We have
+𝑄𝑏∗ (𝑠, 𝜋𝑏 (𝑠)) ≥ 𝑐 (𝑠, 𝜋𝑏 (𝑠)) +
+
+∑︁
+
+𝑃 (𝑠 ′ |𝜋𝑏 (𝑠))(𝑄𝑏 (𝑠 ′ ) − Δ𝑏 ),
+
+𝑠′
+
+so 𝑄𝑏 (𝑠, 𝜋𝑏 (𝑠)) ≥ 𝑐 (𝑠, 𝜋𝑏 (𝑠)) +
+
+𝑃 (𝑠 ′ |𝜋𝑏 (𝑠))𝑄𝑏 (𝑠 ′ ) − 2Δ𝑏 . Using this inequality gives for 𝐵
+∑︁
+𝐵≤
+𝑃 (𝑠 ′ |𝜋𝑏 (𝑠))𝛾𝑐 (𝑐 (𝑠, 𝜋𝑏 (𝑠)) + 𝑄𝑏 (𝑠 ′ )) ≤ 𝛾𝑐 𝑄𝑏 (𝑠, 𝜋𝑏 (𝑠)) + 2𝛾𝑐 Δ𝑏 .
+
+Í
+
+𝑠′
+
+𝑠′
+
+Finally, we get
+𝐶𝑛 (𝑠, 𝑥) ≤ (1 − 𝜆)
+
+∑︁
+
+𝛾𝑐 𝑃𝑎𝑦𝑎 + (1 − 𝜆)2𝛾𝑐 Δ𝑏 + 𝜆𝛾𝑐 𝑄𝑏 (𝑠, 𝜋𝑏 (𝑠)) + 2𝜆𝛾𝑐 Δ𝑏 + 𝛾𝑐 𝑓𝑛−1 (Δ𝑏 ).
+
+𝑎
+
+Using the shielding condition on the weights that 𝜋¯ satisfies, we finally obtain
+𝐶𝑛 (𝑠, 𝑥) ≤ 𝑥 + 2𝛾𝑐 Δ𝑏 + 𝛾𝑐 𝑓𝑛−1 (Δ𝑏 ) = 𝑥 + 𝑓𝑛 (Δ𝑏 ).
+Induction step, 𝑥 < 𝑄𝑏 (𝑠): In this case, 𝜋¯ is given by
+𝜋¯ (𝑠, 𝑥) = (𝜋𝑏 (𝑠), 𝑧),
+
+𝛾𝑐 𝑧 ≤ 𝑥 .
+
+This means that the cost functional satisfies
+∑︁
+𝐶𝑛 (𝑠, 𝑥) =
+𝑃 (𝑠 ′ |𝜋𝑏 (𝑠))𝛾𝑐 (𝑐 (𝑠, 𝜋𝑏 (𝑠)) + 𝐶𝑛−1 (𝑠 ′, 𝑥 ′ )),
+
+𝑥 ′ = 𝑧 − 𝑄𝑏 (𝑠, 𝜋𝑏 (𝑠)) + 𝑄𝑏 (𝑠 ′ ).
+
+𝑠′
+
+Since 𝑧 ≤ 𝑥/𝛾𝑐 , and 𝑥 < 𝑄𝑏 (𝑠), we obtain 𝑧 < 𝑄𝑏 (𝑠)/𝛾𝑐 . As a result,
+𝑥 ′ < 𝑄𝑏 (𝑠)/𝛾𝑐 − 𝑄𝑏 (𝑠, 𝜋𝑏 (𝑠)) + 𝑄𝑏 (𝑠 ′ ).
+Now, 𝑄𝑏 (𝑠, 𝜋𝑏 (𝑠)) ≥ 𝑄𝑏∗ (𝑠, 𝜋𝑏 (𝑠)) − Δ𝑏 , and 𝑄𝑏∗ (𝑠) ≤ 𝛾𝑐 𝑄𝑏∗ (𝑠, 𝜋𝑏 (𝑠)) as it is defined as the minimum over the actions, so
+𝑄𝑏 (𝑠, 𝜋𝑏 (𝑠)) ≥ 𝑄𝑏∗ (𝑠)/𝛾𝑐 − Δ𝑏 .
+Overall,
+
+𝑥 ′ < 𝑄𝑏 (𝑠 ′ ) + Δ𝑏 .
+Two situations are possible here. Either 𝑥 ′ < 𝑄𝑏 (𝑠 ′ ), or 𝑥 ′ ≥ 𝑄𝑏 (𝑠 ′ ). We start with 𝑥 ′ < 𝑄𝑏 (𝑠 ′ ).
+In this case, we obtain
+𝐶𝑛−1 (𝑠 ′, 𝑥 ′ ) ≤ 𝑄𝑏 (𝑠 ′ ) + 𝑓𝑛−1 (Δ𝑏 ),
+so we get for 𝐶𝑛 (𝑠, 𝑥)
+∑︁
+𝐶𝑛 (𝑠, 𝑥) ≤
+𝑃 (𝑠 ′ |𝜋𝑏 (𝑠))𝛾𝑐 (𝑐 (𝑠, 𝜋𝑏 (𝑠)) + 𝑄𝑏 (𝑠 ′ )) + 𝛾𝑐 𝑓𝑛−1 (Δ𝑏 ).
+Now, 𝑄𝑏 (𝑠 ′ ) ≤ 𝑄𝑏∗ (𝑠 ′ ) + Δ𝑏 , and
+
+𝑠′
+′
+∗ ′
+∗
+𝑠 ′ 𝑃 (𝑠 , 𝜋𝑏 (𝑠))𝛾𝑐 (𝑐 (𝑠, 𝜋𝑏 (𝑠)) + 𝑄𝑏 (𝑠 )) = 𝛾𝑐 𝑄𝑏 (𝑠, 𝜋𝑏 (𝑠)), so
+𝐶𝑛 (𝑠, 𝑥) ≤ 𝛾𝑐 𝑄𝑏∗ (𝑠, 𝜋𝑏 (𝑠)) + 𝛾𝑐 Δ𝑏 + 𝛾𝑐 𝑓𝑛−1 (Δ𝑏 ).
+
+Í
+
+Finally, using 𝑄𝑏∗ (𝑠, 𝜋𝑏 (𝑠)) ≤ 𝑄𝑏 (𝑠, 𝜋𝑏 (𝑠)) + Δ𝑏 ,
+𝐶𝑛 (𝑠, 𝑥) ≤ 𝛾𝑐 𝑄𝑏 (𝑠, 𝜋𝑏 (𝑠)) + 2𝛾𝑐 + 𝛾𝑐 𝑓𝑛−1 (Δ𝑏 ) =≤ 𝑄𝑏 (𝑠) + 2𝛾𝑐 + 𝛾𝑐 𝑓𝑛−1 (Δ𝑏 ) ≤ 𝑄𝑏 (𝑠) + 𝑓𝑛 (Δ𝑏 ).
+
+Now, in the other situation, we have 𝑥 ′ ≥ 𝑄𝑏 (𝑠 ′ ). But we also have 𝑥 ′ ≤ 𝑄𝑏 (𝑠 ′ ) + Δ𝑏 . Hence, we can write
+𝐶𝑛−1 (𝑠 ′, 𝑥 ′ ) ≤ 𝑥 ′ + 𝑓𝑛−1 (Δ𝑏 ) ≤ 𝑄𝑏 (𝑠 ′ ) + Δ𝑏 + 𝑓𝑛−1 (Δ𝑏 ).
+So
+𝐶𝑛 (𝑠, 𝑥) ≤
+
+∑︁
+
+𝑃 (𝑠 ′ |𝜋𝑏 (𝑠))𝛾𝑐 (𝑐 (𝑠, 𝜋𝑏 (𝑠)) + 𝑥 ′ + 𝑓𝑛−1 (Δ𝑏 ))
+
+𝑠′
+
+≤
+
+∑︁
+
+≤
+
+∑︁
+
+𝑃 (𝑠 ′ |𝜋𝑏 (𝑠))𝛾𝑐 (𝑐 (𝑠, 𝜋𝑏 (𝑠)) + 𝑄𝑏 (𝑠 ′ ) + Δ𝑏 + 𝑓𝑛−1 (Δ𝑏 ))
+
+𝑠′
+
+𝑃 (𝑠 ′ |𝜋𝑏 (𝑠))𝛾𝑐 (𝑐 (𝑠, 𝜋𝑏 (𝑠)) + 𝑄𝑏∗ (𝑠 ′ ) + 2Δ𝑏 + 𝑓𝑛−1 (Δ𝑏 ))
+
+𝑠′
+
+≤ 𝛾𝑐 𝑄𝑏∗ (𝑠, 𝜋𝑏 (𝑠)) + 2𝛾𝑐 Δ𝑏 + 𝛾𝑐 𝑓𝑛−1 (Δ𝑏 )
+≤ 𝛾𝑐 𝑄𝑏 (𝑠, 𝜋𝑏 (𝑠)) + 3𝛾𝑐 Δ𝑏 + 𝛾𝑐 𝑓𝑛−1 (Δ𝑏 ) = 𝑄𝑏 (𝑠) + 3𝛾𝑐 Δ𝑏 + 𝛾𝑐 𝑓𝑛−1 (Δ𝑏 ).
+□
+We can now go on with the proof of theorem 1.
+Proof. Assume the assumptions of the theorem are satisfied. We use lemma 1 and obtain
+
+𝐶𝑛 (𝑠, 𝑥) ≤ 𝑥 + 𝑓𝑛 (Δ𝑏 ), when 𝑥 ≥ 𝑄𝑏 (𝑠),
+𝐶𝑛 (𝑠, 𝑥) ≤ 𝑄𝑏 (𝑠) + 𝑔𝑛 (Δ𝑏 ), when 𝑥 < 𝑄𝑏 (𝑠)
+as long as the sequences 𝑓𝑛 (Δ𝑏 ) and 𝑔𝑛 (Δ𝑏 ) satisfy 𝑓1 (Δ𝑏 ) ≥ 𝛾𝑐 Δ𝑏 , 𝑔1 (Δ𝑏 ) ≥ 𝛾𝑐 Δ𝑏 and for every 𝑛 ≥ 2,
+
+𝑓𝑛 (Δ𝑏 ) ≥ 2𝛾𝑐 Δ𝑏 + 𝛾𝑐 𝑓𝑛−1,
+We can choose 𝑓𝑛 (Δ𝑏 ) =
+
+𝑔𝑛 (Δ𝑏 ) ≥ max(2𝛾𝑐 Δ𝑏 + 𝛾𝑐 𝑔𝑛−1 (Δ𝑏 ), 3𝛾𝑐 Δ𝑏 + 𝛾𝑐 𝑓𝑛−1 (Δ𝑏 )).
+Í𝑛
+𝑘
+𝑘
+𝑘=1 2Δ𝑏 𝛾𝑐 and 𝑔𝑛 (Δ𝑏 ) = 𝑘=1 3Δ𝑏 𝛾𝑐 , and we obtain for every 𝑛
+
+Í𝑛
+
+𝑛
+∑︁
+
+
+
+
+𝐶
+(𝑠,
+𝑥)
+≤
+𝑥
++
+2Δ𝑏 𝛾𝑐𝑘 , when 𝑥 ≥ 𝑄𝑏 (𝑠),
+𝑛
+
+
+
+
+𝑘=1
+𝑛
+∑︁
+
+
+
+
+𝐶𝑛 (𝑠, 𝑥) ≤ 𝑄𝑏 (𝑠) +
+3Δ𝑏 𝛾𝑐𝑘 , when 𝑥 < 𝑄𝑏 (𝑠)
+
+
+
+𝑘=1
+
+Subsequently, we obtain for the finite expected discounted cost
+𝑛
+
+1
+𝑥
+𝑥 ∑︁
+
+
+
++
+2Δ𝑏 𝛾𝑐𝑘 −1 ≤
++ 2Δ𝑏
+, when 𝑥 ≥ 𝑄𝑏 (𝑠),
+𝐷
+(𝑠,
+𝑥)
+≤
+𝑛−1
+
+
+𝛾𝑐
+𝛾𝑐
+1 − 𝛾𝑐
+
+
+𝑘=1
+
+𝑛
+
+
+𝑄𝑏 (𝑠) ∑︁
+1
+𝑄𝑏 (𝑠)
+
+
+𝐷𝑛−1 (𝑠, 𝑥) ≤
++
+3Δ𝑏 𝛾𝑐𝑘 −1 ≤
++ 3Δ𝑏
+, when 𝑥 < 𝑄𝑏 (𝑠).
+
+
+𝛾
+𝛾
+1
+−
+𝛾𝑐
+𝑐
+𝑐
+
+𝑘=1
+Since 𝐷𝑛 is Cauchy, we can just take the limit and obtain
+
+2Δ𝑏
+𝑥
+
+
+
+C(𝑠, 𝑥) ≤
++
+, when 𝑥 ≥ 𝑄𝑏 (𝑠),
+
+
+
+𝛾𝑐 1 − 𝛾𝑐
+
+𝑄𝑏 (𝑠)
+3Δ𝑏
+
+
++
+, when 𝑥 < 𝑄𝑏 (𝑠).
+ C(𝑠, 𝑥) ≤ 𝛾
+1 − 𝛾𝑐
+
+𝑐
+□
+A.4.2 Proof of theorem 3. We recall Theorem 3.
+Theorem 3. (Optimality of the shielded policies) Let M be a deterministic CMDP with safety threshold 𝑑 and initial state 𝑠𝑖 , 𝑄𝑏 be a
+𝑓
+
+Q-value, Δ𝑏 = ||𝑄𝑏 − 𝑄𝑏∗ ||𝐿∞ ( S A ) . Then, if we let Π the set of all policies of M, Π𝑠ℎ be the set of shielded policies of M, and Π be the set of
+valued flipping policies, we have
+max
+
+𝜋 ∈Π, C (𝜋 ) ≤𝑑
+2Δ 𝛾
+
+R (𝜋) ≤
+𝑓
+
+max
+
+¯ ≤
+R (𝑠𝑖 ,𝑥 0 ) (𝜋)
+
+𝜋¯ ∈Ξ(Π ), 𝑥 0 ≤𝛾𝑐 𝑑+E
+
+𝑏 𝑐
+for E = 1−𝛾
+.
+𝑐
+Before proving Theorem 3, we first need to introduce the following lemma.
+
+max
+
+𝜋 ∈Π𝑠ℎ , 𝑥 0 ≤𝛾𝑐 𝑑+E
+
+¯
+R (𝑠𝑖 ,𝑥 0 ) (𝜋),
+
+𝑄★
+
+Lemma 2. For any deterministic MDP M and safety threshold 𝑑, there exists a 𝑄𝑏★-shielded flipping memoryless policy 𝜋 ∗ of M 𝑏 such that
+R ( 𝜋¯ ∗ ) =
+
+max
+
+R (𝜋),
+
+𝜋 ∈Π, C (𝜋 ) ≤𝑑
+
+and starting at initial state (𝑠 0, 𝑑). Subsequently, 𝜋¯ ∗ also satisfies
+C( 𝜋¯ ∗ ) ≤ 𝑑.
+𝑚𝑎𝑥
+Proof. Let M = (𝑆, 𝐴, 𝑠𝑖 , 𝑃, 𝑅, 𝐶, 𝑑) be a deterministic CMDP with positive costs, and let 𝐶𝑚𝑎𝑥 be equal to 𝑐1−𝛾
+. For any state (𝑠, 𝑥) of M,
+𝑐
+
+and any mapping 𝑦 : 𝐴(𝑠) ↦→ [0; 𝐶𝑚𝑎𝑥 ] such that 𝑦(𝑎) ≥ 𝑄𝑏★ (𝑠, 𝑎), we let 𝐷 (𝑠, 𝑥, 𝑦) be the set of points 𝑧 ∈ R𝐴(𝑠 ) such that 𝑥𝑎 ≥ 0 for all
+𝑎 ∈ 𝐴(𝑠),
+∑︁
+𝑥
+𝑧𝑎𝑦 (𝑎) ≤ ,
+(1)
+𝛾𝑐
+𝑎∈𝐴(𝑠 )
+
+and
+
+∑︁
+
+𝑧𝑎 = 1.
+
+(2)
+
+𝑎∈𝐴(𝑠 )
+
+For any 𝑠, 𝑥, 𝑦, 𝐷 (𝑠, 𝑥, 𝑦) is the intersection between the convex polytope whose extreme points are all points 𝑧𝑎 ∈ R𝐴(𝑠 ) such that for any
+𝑎, 𝑎 ′ ∈ 𝐴(𝑠), 𝑧𝑎𝑎′ = 1 if 𝑎 = 𝑎 ′ and 0 otherwise, and the (convex) half-space defined by Equation (1). Thus, for any 𝑠, 𝑥, 𝑦, 𝐷 (𝑠, 𝑥, 𝑦) is a convex
+′
+polytope, and its extreme points are of the form 𝜆𝑧𝑎 + (1 − 𝜆)𝑧𝑎 where 𝑎, 𝑎 ′ ∈ 𝐴(𝑠). Let 𝑉 (𝑠, 𝑥, 𝑦) be the extreme points of 𝐷 (𝑥, 𝑠, 𝑦). We let
+𝑉𝑏★ (𝑠) = min𝑎∈𝐴(𝑠 ) 𝑄𝑏★ (𝑠, 𝑎), and we define M̂ to be the MDP with
+
+
+
+• States : 𝑆ˆ = (𝑠, 𝑥) | 𝑠 ∈ 𝑆, 𝑥 ∈ 𝑉𝑏★ (𝑠); 𝐶 max , with initial state 𝑠 𝑖 = (𝑠𝑖 , 𝑑);
+ˆ 𝑥) equal to the set of all (𝑦, 𝑣) where 𝑦 : 𝐴(𝑠) ↦→ [0; 𝐶𝑚𝑎𝑥 ] and 𝑦 (𝑎) ≥ 𝑄 ★ (𝑠, 𝑎) for any 𝑎 ∈ 𝐴(𝑠) and 𝑣 ∈ 𝑉 (𝑠, 𝑥, 𝑦);
+• Actions : 𝐴(𝑠,
+𝑏
+• Rewards : 𝑟ˆ ((𝑠, 𝑥), (𝑎, 𝑦)) = 𝑟 (𝑠, 𝑎);
+ˆ for 𝑠ˆ = (𝑠, 𝑥), 𝑠ˆ′ = (𝑠 ′, 𝑥 ′ ) in 𝑆,
+ˆ and 𝑎ˆ = (𝑦, 𝑣) ∈ 𝐴(
+ˆ 𝑠),
+ˆ we have
+• Transition Probability Function 𝑃:
+(
+′
+★
+★
+′
+0 if 𝑥 ≠ 𝑦 − 𝑄𝑏 (𝑠, 𝑎) + 𝑄𝑏 (𝑠 ) for all 𝑎 ∈ 𝐴(𝑠)
+ˆ 𝑣,
+ˆ 𝑠ˆ′ ) = Í
+𝑃ˆ (𝑠,
+′
+𝑎 |𝑥 ′ =𝑦−𝑄𝑏 (𝑠,𝑎)+𝑄𝑏 (𝑠 ′ ) 𝑣 𝑎 𝑃 (𝑠, 𝑎, 𝑠 ) otherwise .
+First, notice that the MDP M̂ satisfies the hypothesis of the lower-continuous model (Definition 8.7 of [8]), and thus admits an optimal
+memoryless policy 𝜋ˆ ★ (Corollary 9.17.2 of [8]). Second, any memoryfull stochastic policy 𝜋 of M such that C(𝜋) ≤ 𝑑 can be transformed
+Í
+into a memoryfull policy 𝜋ˆ of M̂ with the same cost and reward by letting 𝑃𝜋ˆ (𝑠, 𝑎) = 𝑣 ∈𝑉 (𝑠,𝑥,𝑦) 𝜆𝑣 (𝑦, 𝑣), where
+∑︁
+𝑦 (𝑎) = E𝑠0 ,𝑎0 ,...∼𝜋,(𝑠0 ,𝑎0 )=(𝑠,𝑎)
+𝛾𝑐𝑡 𝑐 (𝑠𝑡 , 𝑎𝑡 ),
+𝑡
+
+Í
+Í
+and where the 𝜆𝑣 are such that 𝑣 ∈𝑉 (𝑠,𝑥,𝑦) 𝜆𝑣 𝑣 = 𝑃𝜋 , 𝜆𝑣 ∈ [0; 1] and 𝑣 ∈𝑉 (𝑠,𝑥,𝑦) 𝜆𝑣 = 1. Conversely, similarly to Theorem 2, any memoryless
+deterministic policy of M̂ can be backwards projected to a memoryfull stochastic policy of M with the same cost and reward. Furthermore,
+𝑄★
+
+ˆ ≤ 𝑑. The lemma
+by definition of M̂, any policy 𝜋ˆ of can be seen as a 𝑄𝑏★-shielded policy of M 𝑏 , and we thus have by Theorem 1 that C( 𝜋)
+follows.
+□
+We now go on and provide a proof of Theorem 3.
+𝑄∗
+
+Using Lemma 2, we have the existence of a 𝑄𝑏∗ policy 𝜋¯ ∗ of the Risk-Augmented MDP M 𝐵 , satisfying
+
+R (𝜋¯ ∗ ) =
+max
+R (𝜋),
+
+
+𝜋 ∈Π, C (𝜋 ) ≤𝑑
+
+
+
+𝑥 0 = 𝑑,
+
+
+
+ C( 𝜋¯ ∗ ) ≤ 𝑑.
+
+
+Moreover, 𝜋¯ ∗ is 𝑄𝑏∗ -shielded, valued, and flipping, so we can write for any (𝑠, 𝑥) ∈ S such that for 𝑥 ≥ 𝑄𝑏∗ (𝑠),
+𝜋¯ ∗ (𝑠, 𝑥) = 𝑃 1 (𝑎 1, 𝑦1 ) + 𝑃 2 (𝑎 2, 𝑦2 ),
+where the risks satisfy
+(
+𝑥 = 𝛾𝑐 (𝑃1𝑦1 + 𝑃 2𝑦2 ),
+𝑦1 ≥ 𝑄𝑏∗ (𝑠, 𝑎 1 ), 𝑦2 ≥ 𝑄𝑏∗ (𝑠, 𝑎 2 ).
+Note that 𝜋¯ ∗ is not defined yet on the set {(𝑠, 𝑥), 𝑥 < 𝑄𝑏∗ (𝑠)}. We show now that it does not matter, since this set can not be reached from
+the initial state.
+Define 𝐷 = {(𝑠, 𝑥), 𝑥 ≥ 𝑄𝑏∗ (𝑠)}. Call S 𝜋¯ ∗ ,𝑛 the set of states reached following 𝜋¯ ∗ in 𝑛 steps with a non-zero probability. We have,
+S 𝜋¯ ∗ ,0 = {(𝑠 0, 𝑑)} ⊆ 𝐷. By induction, assume now that S 𝜋¯ ∗ ,𝑛 ⊆ 𝐷. For any (𝑠, 𝑥) ∈ 𝐷,
+𝜋¯ ∗ (𝑠, 𝑥) = 𝑃 1 (𝑎 1, 𝑦1 ) + 𝑃 2 (𝑎 2, 𝑦2 ),
+
+𝑦 𝑗 ≥ 𝑄𝑏∗ (𝑠, 𝑎 𝑗 ).
+
+Hence, the state 𝜋¯ ∗ can reach in one more step, using the definition of the augmented MDP, have risks satisfying
+𝑥 𝑗 = 𝑦 𝑗 − 𝑄𝑏∗ (𝑠, 𝑎 𝑗 ) + 𝑄𝑏∗ (𝑠 𝑗 ) ≥ 𝑄𝑏∗ (𝑠 𝑗 ),
+which means S 𝜋¯ ∗ ,𝑛+1 ⊆ 𝐷.
+¯ that will be 𝑄𝑏 -shielded, have a
+The challenge here is that 𝜋¯ ∗ is not a 𝑄𝑏 -shielded policy, as 𝑄𝑏 ≠ 𝑄𝑏∗ . We will now construct a policy 𝜋,
+slightly increased cost, and yield the same reward.
+¯
+Definition of 𝜋.
+The initial state of 𝜋¯ is (𝑠 0, 𝑑 + E).
+˜ we define
+We first define 𝜋¯ on the set 𝐷˜ = {(𝑠, 𝑥), 𝑥 ≥ 𝑄𝑏∗ (𝑠) + E}. We show later that it is enough. For (𝑠, 𝑥) ∈ 𝐷,
+𝜋¯ (𝑠, 𝑥) = 𝑃1 (𝑎 1, 𝑧 1 ) + 𝑃 2 (𝑎 2, 𝑧 2 ),
+
+𝑧 𝑗 = 𝑦 𝑗 + E + 𝑄𝑏 (𝑠, 𝑎 𝑗 ) − 𝑄𝑏 (𝑠 𝑗 ) − 𝑐 (𝑠, 𝑎 𝑗 ),
+
+where 𝑃 1 , 𝑃 2 , 𝑎 1 , 𝑎 2 , 𝑦1 , 𝑦2 are defined using the image of the optimal policy 𝜋¯∗ at (𝑠, 𝑥 − E) as in
+𝜋¯∗ (𝑠, 𝑥 − E) = 𝑃1 (𝑎 1, 𝑦1 ) + 𝑃 2 (𝑎 2, 𝑦2 ),
+and 𝑠 1 (resp. 𝑠 2 ) is the state reached when taking 𝑎 1 (resp. 𝑎 2 ) in M, since M is assumed to be deterministic. Note that for 𝑥 ≥ 𝑄𝑏∗ (𝑠) + E, we
+have 𝑥 − E ≥ 𝑄𝑏∗ (𝑠), so 𝜋¯∗ is well defined.
+˜ Moreover, consider 𝑆 𝑛,𝜋¯ , the set of states reachable by 𝜋¯ in 𝑛 steps. We already have
+We first remark that the initial state (𝑠 0, E) is in 𝐷.
+˜ Assume now that 𝑆 𝑛−1,𝜋¯ ⊆ 𝐷.
+˜ We consider a path 𝜁 = (𝑠 0 . . . 𝑠𝑛 ) of length 𝑛, and look at the last transition. Since 𝑠𝑛−1 ∈ 𝐷,
+˜ it is of
+𝑆 0,𝜋¯ ⊆ 𝐷.
+∗
+the form 𝑠𝑛−1 = (𝑠, 𝑥) 𝜋¯ with 𝑥 ≥ 𝑄𝑏 (𝑠) + E. 𝜋¯ is defined as
+𝜋¯ (𝑠, 𝑥) = 𝑃1 (𝑎 1, 𝑧 1 ) + 𝑃 2 (𝑎 2, 𝑧 2 ),
+
+𝑧 𝑗 = 𝑦 𝑗 + E + 𝑄𝑏 (𝑠, 𝑎 𝑗 ) − 𝑄𝑏 (𝑠 𝑗 ) − 𝑐 (𝑠, 𝑎 𝑗 ),
+
+where
+
+𝜋¯∗ (𝑠, 𝑥 − E) = 𝑃1 (𝑎 1, 𝑦1 ) + 𝑃 2 (𝑎 2, 𝑦2 ).
+Using the definition of the augmented MDP for the Q-value 𝑄𝑏 , the state reached after taking the action (𝑎 𝑗 , 𝑧 𝑗 ) is (𝑠 𝑗 , 𝑥 𝑗 ) with
+𝑥 𝑗 = 𝑧 𝑗 − 𝑄𝑏 (𝑠, 𝑎 𝑗 ) + 𝑄𝑏 (𝑠 𝑗 ) = 𝑦 𝑗 − 𝑐 (𝑠, 𝑎 𝑗 ) + E.
+Since 𝑦 𝑗 ≥ 𝑄𝑏∗ (𝑠, 𝑎 𝑗 ) = 𝑐 𝑗 + 𝑄𝑏∗ (𝑠 𝑗 ) as 𝜋¯∗ is 𝑄𝑏∗ -shielded, we have
+𝑥 𝑗 ≥ 𝑄𝑏 (𝑠 𝑗 ) + E,
+˜
+so 𝑠𝑛 ∈ 𝐷.
+𝜋¯ is 𝑄𝑏 -shielded.
+Now, we check if the policy is 𝑄𝑏 -shielded. Using the definition in the case where 𝑥 ≥ 𝑄𝑏 (𝑠), 𝜋¯ is 𝑄𝑏 -shielded if and only if
+𝑥 ≥ 𝛾𝑐 (𝑃1𝑧 1 + 𝑃 2𝑧 2 ),
+
+𝑧 𝑗 = 𝑦 𝑗 + E + 𝑄𝑏 (𝑠, 𝑎 𝑗 ) − 𝑄𝑏 (𝑠 𝑗 ) − 𝑐 (𝑠, 𝑎 𝑗 ).
+
+We use the fact that 𝜋¯ ∗ is 𝑄𝑏∗ shielded, so
+𝑥 − E ≥ 𝛾𝑐 (𝑃1𝑦1 + 𝑃 2𝑦2 ).
+Plugging this in (3) gives
+𝛾𝑐 (𝑃1𝑦1 + 𝑃 2𝑦2 ) + 𝛾𝑐 (𝑃1 (−𝑄𝑏 (𝑠 1 ) + 𝑄𝑏 (𝑠, 𝑎 1 ) − 𝑐 (𝑠, 𝑎 1 ))
++ 𝑃 2 (−𝑄𝑏 (𝑠 2 ) + 𝑄𝑏 (𝑠, 𝑎 2 ) − 𝑐 (𝑠, 𝑎 2 ))) + 𝛾𝑐 E
+≤ 𝑥 − E + 𝛾𝑐 (𝑃 1 (−𝑄𝑏 (𝑠 1 ) + 𝑄𝑏 (𝑠, 𝑎 1 ) − 𝑐 (𝑠, 𝑎 1 ))
++ 𝑃 2 (−𝑄𝑏 (𝑠 2 ) + 𝑄𝑏 (𝑠, 𝑎 2 ) − 𝑐 (𝑠, 𝑎 2 ))) + 𝛾𝑐 E
+≤ 𝑥 + (𝛾𝑐 − 1)E + 2𝛾𝑐 Δ𝑏 .
+Here, we used that
+
+
+𝑄 ∗ (𝑠, 𝑎 𝑗 ) = 𝑄𝑏 (𝑠 𝑗 ) + 𝑐 (𝑠, 𝑎 𝑗 ),
+
+
+ 𝑏
+
+|𝑄𝑏 (𝑠, 𝑎 𝑗 ) − 𝑄𝑏∗ (𝑠, 𝑎 𝑗 )| ≤ Δ𝑏 ,
+
+
+ |𝑄𝑏 (𝑠 𝑗 ) − 𝑄 ∗ (𝑠 𝑗 )| ≤ Δ𝑏 ,
+𝑏
+
+
+to obtain that | − 𝑄𝑏 (𝑠 2 ) + 𝑄𝑏 (𝑠, 𝑎 2 ) − 𝑐 (𝑠, 𝑎 2 ))| ≤ 2Δ𝑏 .
+Hence, 𝜋¯ is 𝑄𝑏 -shielded when
+
+2𝛾𝑐 Δ𝑏 ≤ (1 − 𝛾𝑐 )E,
+
+2Δ 𝛾
+
+𝑏 𝑐
+.
+so when E ≥ 1−𝛾
+𝑐
+
+We also need to show that for everytime the policy 𝜋¯ takes an action (𝑎, 𝑧), then 𝑧 ≥ 𝑄𝑏 (𝑠, 𝑎). We consider (𝑠, 𝑥) ∈ 𝐷˜ and denote
+𝜋¯ (𝑠, 𝑥) = 𝑃1 (𝑎 1, 𝑧 1 ) + 𝑃 2 (𝑎 2, 𝑧 2 ).
+
+Since
+𝑧 𝑗 = 𝑦 𝑗 + 𝑄𝑏 (𝑠 𝑗 ) − 𝑄𝑏 (𝑠, 𝑎 𝑗 ) + 𝑐 (𝑠, 𝑎 𝑗 ) + E,
+
+(3)
+
+and
+𝑦 𝑗 ≥ 𝑄𝑏∗ (𝑠, 𝑎 𝑗 )
+since 𝜋¯∗ is 𝑄𝑏∗ -shielded, we get
+𝑧 𝑗 ≥ 𝑄𝑏∗ (𝑠, 𝑎 𝑗 ) − 𝑄𝑏 (𝑠, 𝑎 𝑗 ) + 𝑄𝑏 (𝑠 𝑗 ) + 𝑐 (𝑠, 𝑎 𝑗 ) + E ≥ 𝑄𝑏 (𝑠 𝑗 ) + 𝑐 (𝑠, 𝑎 𝑗 ) − Δ𝑏 + E.
+Since 𝑄𝑏∗ (𝑠 𝑗 ) + 𝑐 (𝑠, 𝑎 𝑗 ) = 𝑄𝑏∗ (𝑠, 𝑎 𝑗 ) and |𝑄𝑏 (𝑠 𝑗 ) − 𝑄𝑏∗ (𝑠 𝑗 )| ≤ Δ𝑏 , we finally obtain
+𝑧 𝑗 ≥ 𝑄𝑏 (𝑠, 𝑎 𝑗 ) − 2Δ𝑏 + E.
+2𝛾
+
+This is satisfied as long as 1−𝛾𝑐𝑐 ≥ 2.
+The rewards of 𝜋¯ and 𝜋¯∗ are equal.
+We now define M1 and M2 the two Markov Chains as
+𝑄∗
+𝑄∗
+
+
+ M1 = M 𝜋¯∗𝑏 , the Markov Chained induced by 𝜋¯∗ on M 𝑏 ,
+
+
+ M2 = M 𝑄𝑏 , the Markov Chained induced by 𝜋¯ on M 𝑄𝑏 .
+𝜋¯
+
+𝑄∗
+
+𝑄𝑏
+
+Since M is deterministic, M 𝑏 and M are also deterministic. M1 and M2 however are not deterministic, since the policies 𝜋¯ ∗ and 𝜋¯
+are flipping.
+The Markov Chain M1 : Has one initial state, (𝑥 0, 𝑑). For any (𝑠, 𝑥) reachable by 𝜋¯∗ , 𝑥 ≥ 𝑄𝑏∗ (𝑠) so 𝜋¯∗ is defined as
+𝜋¯∗ (𝑠, 𝑥) = 𝑃 1 (𝑎 1, 𝑦1 ) + 𝑃 2 (𝑎 2, 𝑦2 ),
+for some 𝑃 1 , 𝑃 2 , 𝑎 1 , 𝑎 2 , 𝑦1 and 𝑦2 . Call 𝑠 1 (resp. 𝑠 2 ) the state reached when taking 𝑎 1 (resp. 𝑎 2 ) in M from 𝑠. Then,
+𝑃𝜋¯∗ ((𝑠 𝑗 , 𝑦 𝑗 − 𝑐 𝑗 )|(𝑠, 𝑥)) = 𝑃 𝑗 , 𝑐 𝑗 = 𝑐 (𝑠, 𝑎 𝑗 ),
+¯ 𝑥)) = 0 for any other 𝑧.
+¯ Hence, the Markov Chain M1 has two transitions starting from (𝑠, 𝑥):
+and 𝑃𝜋¯∗ (𝑧|(𝑠,
+• (𝑠, 𝑥) → (𝑠 1, 𝑦1 − 𝑐 1 ) with probability 𝑃1 ,
+• (𝑠, 𝑥) → (𝑠 2, 𝑦2 − 𝑐 2 ) with probability 𝑃2 .
+The Markov Chain M2 : Has one initial state, (𝑥 0, 𝑑 + 𝐷). For any (𝑠, 𝑥) reachable by 𝜋¯∗ , 𝑥 ≥ 𝑄𝑏∗ (𝑠) so 𝜋¯∗ is defined as
+𝜋¯ (𝑠, 𝑥 + 𝐷) = 𝑃1 (𝑎 1, 𝑧 1 ) + 𝑃 2 (𝑎 2, 𝑧 2 ), 𝑧 𝑗 = 𝑦 𝑗 − 𝑄𝑏 (𝑠 𝑗 ) + 𝑄𝑏 (𝑠, 𝑎 𝑗 ) + 𝐷,
+where 𝑃 1 , 𝑃 2 , 𝑎 1 , 𝑎 2 , 𝑦1 , 𝑦2 are defined with 𝜋¯∗ as
+𝜋¯∗ (𝑠, 𝑥) = 𝑃 1 (𝑎 1, 𝑦1 ) + 𝑃 2 (𝑎 2, 𝑦2 ).
+and where 𝑠 1 (resp. 𝑠 2 ) is the state reached when taking 𝑎 1 (resp. 𝑎 2 ) in M from 𝑠. Then,
+𝑃𝜋¯ ((𝑠 𝑗 , 𝑦 𝑗 − 𝑐 𝑗 + 𝐷)|(𝑠, 𝑥)) = 𝑃 𝑗 , 𝑐 𝑗 = 𝑐 (𝑠, 𝑎 𝑗 ),
+¯ 𝑥)) = 0 for any other 𝑧.
+¯ Hence, the Markov Chain M2 has two transitions starting from (𝑠, 𝑥):
+and 𝑃𝜋¯ (𝑧|(𝑠,
+• (𝑠, 𝑥 + 𝐷) → (𝑠 1, 𝑦1 − 𝑐 1 + 𝐷) with probability 𝑃1 ,
+• (𝑠, 𝑥 + 𝐷) → (𝑠 2, 𝑦2 − 𝑐 2 + 𝐷) with probability 𝑃2 .
+𝑄∗
+
+With 𝜙 : S 𝑏 → S
+
+𝑄𝑏
+
+, defined as
+𝜙 (𝑠, 𝑥) = (𝑠, 𝑥 + 𝐷).
+
+We have that
+
+𝜙 (𝑠 0, 𝑑) = (𝑠 0, 𝑑 + 𝐷),
+
+
+
+
+𝑃 M1 ((𝑠 ′, 𝑥 ′ )|(𝑠, 𝑥)) = 𝑃 M2 (𝜙 (𝑠 ′, 𝑥 ′ )|𝜙 (𝑠, 𝑥)),
+
+
+𝑟 M ((𝑠, 𝑥) → (𝑠 ′, 𝑥 ′ )) = 𝑟 M (𝜙 (𝑠, 𝑥) → 𝜙 (𝑠 ′, 𝑥 ′ )).
+2
+ 1
+Hence, we have for the expected discounted reward, as it is defined as an expectation, that
+¯ = R ( 𝜋¯∗ ).
+R (𝜋)
+
+A.4.3
+
+Proof of Remark 2: better safety bound in the deterministic case.
+
+Remark 2. In the deterministic case, one can choose instead, in the definition of the Risk-Augmented MDP, to take the risk 𝑥𝑖 = 𝑦𝑖 − 𝑐 (𝑠, 𝑎)
+instead of the risk 𝑥𝑖 = 𝑦𝑖 − 𝑄𝑏 (𝑠, 𝑎) + 𝑄𝑏 (𝑠 ′ ) after taking the action (𝑎, 𝑦𝑖 ) and reaching 𝑠 ′ . This is what we used in practice in that case, as the
+performances are slightly better. In that case, the optimality bound is improved, and we have
+max
+
+R𝑠0 (𝜋) ≤
+
+max
+
+𝜋¯ ∈Π, 𝑥 0 ≤𝑑+2Δ𝑏
+
+𝜋 ∈Π, C (𝜋 ) ≤𝑑
+
+¯
+R (𝑠0 ,𝑥 0 ) (𝜋).
+
+The safety results are identical.
+Proof. (Of Remark 2)
+The proof is very similar to the proof of 3. Using Lemma 2 again, we have the existence of a 𝑄𝑏∗ policy 𝜋¯ ∗ of the Risk-Augmented MDP
+𝑄∗
+
+M 𝐵 , satisfying
+
+R (𝜋¯ ∗ ) =
+max
+R (𝜋),
+
+
+𝜋 ∈Π, C (𝜋 ) ≤𝑑
+
+
+
+𝑥 0 = 𝑑,
+
+
+
+ C( 𝜋¯ ∗ ) ≤ 𝑑.
+
+Moreover, 𝜋¯ ∗ is 𝑄𝑏∗ -shielded, valued, and flipping, so we can write for any (𝑠, 𝑥) ∈ S such that for 𝑥 ≥ 𝑄𝑏∗ (𝑠),
+𝜋¯ ∗ (𝑠, 𝑥) = 𝑃 1 (𝑎 1, 𝑦1 ) + 𝑃 2 (𝑎 2, 𝑦2 ),
+where the risks satisfy
+(
+𝑥 = 𝛾𝑐 (𝑃1𝑦1 + 𝑃 2𝑦2 ),
+𝑦1 ≥ 𝑄𝑏∗ (𝑠, 𝑎 1 ), 𝑦2 ≥ 𝑄𝑏∗ (𝑠, 𝑎 2 ).
+¯
+Definition of 𝜋.
+𝑄𝑏
+We define 𝐷˜ = {(𝑠, 𝑥), 𝑥 ≥ 𝑄𝑏∗ + 2Δ𝑏 }, and define the policy 𝜋¯ on the augmented MDP M as follows.
+• The starting state of 𝜋¯ is (𝑠 0, 𝑑 + 2Δ𝑏 ).
+˜
+• For every (𝑠, 𝑥) ∈ 𝑆 ∩ 𝐷,
+𝜋¯ (𝑠, 𝑥) = 𝑃1 (𝑎 1, 𝑧 1 ) + 𝑃 2 (𝑎 2, 𝑧 2 ), 𝑧 𝑗 = 𝑦 𝑗 + 2Δ𝑏 ,
+where 𝑃 1 , 𝑃 2 , 𝑎 1 , 𝑎 2 , 𝑦1 , and 𝑦2 are defined via the image of the optimal policy 𝜋¯∗ as
+𝜋¯∗ (𝑠, 𝑥 − 2Δ𝑏 ) = 𝑃1 (𝑎 1, 𝑦1 ) + 𝑃 2 (𝑎 2, 𝑦2 ).
+˜ This means that 𝜋¯ is well defined
+First, Note that again, by a quick induction, all the states reachable from the initial state belong to 𝐷.
+˜
+despite having been only defined on 𝐷.
+𝜋¯ is 𝑄𝑏 -shielded.
+˜ 𝑥 ≥ 𝑄 ∗ (𝑠) + 2Δ𝑏 ≥ 𝑄𝑏 (𝑠). So the shielding conditions become
+We verify now that 𝜋¯ is 𝑄𝑏 -shielded. For every (𝑠, 𝑥) ∈ 𝐷,
+𝑏
+(1) For every (𝑎 𝑗 , 𝑧 𝑗 ) that the policy takes, we have 𝑧 𝑗 ≥ 𝑄𝑏 (𝑠, 𝑎 𝑗 ).
+(2) The weights satisfy
+𝑥 ≥ 𝛾𝑐 (𝑃1𝑧 1 + 𝑃 2𝑧 2 ).
+For the first one, the optimal policy 𝜋∗ is 𝑄𝑏∗ shielded, so that we have
+𝑦 𝑗 ≥ 𝑄𝑏∗ (𝑠, 𝑎 𝑗 ).
+Hence,
+𝑧 𝑗 ≥ 𝑄𝑏∗ (𝑠, 𝑎 𝑗 ) + 2Δ𝑏 ≥ 𝑄𝑏 (𝑠, 𝑎 𝑗 ) + Δ𝑏 .
+For the second one, we have, again because 𝜋¯∗ is 𝑄𝑏∗ -shielded
+𝑥 − 2Δ𝑏 ≥ 𝛾𝑐 (𝑃1𝑦1 + 𝑃 2𝑦2 ),
+so
+𝛾𝑐 (𝑃1𝑧 1 + 𝑃 2𝑧 2 ) = 𝛾𝑐 (𝑃1𝑦1 + 𝑃 2𝑦2 + 2Δ𝑏 ) ≤ (𝑥 − 2Δ𝑏 ) + 2𝛾𝑐 Δ𝑏 ≤ 𝑥 .
+So 𝜋¯ is 𝑄𝑏 -shielded. Again, we prove that the rewards are identical by showing that the Markov Chain are identical, the details are
+identitcal to the proof of theorem 3.
+□
+
+A.4.4 Proof of Theorem 5: Safety preserved with additional noise. Theorem 5.(Safety of the shielding with noise) We consider a MDP M and
+any two policies 𝜋¯1 and 𝜋¯2 , and 𝜉 ∈ [0, 1] a small number. Then, with 𝜋¯ the policy defined as
+𝜋¯ (𝑠) = (1 − 𝜉) 𝜋¯1 (𝑠) + 𝜉 𝜋¯2 (𝑠)
+for all 𝑠 ∈ S, the discounted cost of the policy 𝜋¯ satisfies
+¯ ≤ 𝐶 (𝜋¯1 ) +
+𝐶 (𝜋)
+
+1
+𝜉𝑐 max
+.
+1 − 𝛾𝑐 1 − (1 − 𝜉)𝛾𝑐
+
+Proof. We let 𝐶𝑛 = 𝛾𝑐 𝐷𝑛−1 , where 𝐷𝑛 is the discounted cost of the 𝑛 first steps. We will use an induction to show
+𝑛
+𝛾𝑐 max ∑︁
+¯ 𝑠) ≤ 𝐶𝑛 ( 𝜋¯1, 𝑠) + 𝜉
+𝐶𝑛 (𝜋,
+(1 − 𝜉)𝑘 𝛾𝑐𝑘 .
+1 − 𝛾𝑐
+𝑘=1
+
+For 𝑛 = 1, we have
+
+¯ 𝑠) =(1 − 𝜉)
+𝐶 1 ( 𝜋,
+
+∑︁
+
+¯ 𝑠 ′ ))
+𝑃𝜋¯1 (𝑎|𝑠)𝑃 (𝑠 ′ |𝑎)𝛾𝑐 (𝑐 (𝑠, 𝑎) + 𝐶 0 ( 𝜋,
+
+𝑎∈𝐴(𝑠 )
+
++𝜉
+
+∑︁
+
+¯ 𝑠 ′ )) ≤ (1 − 𝜉)𝛾𝑐 𝑐 max .
+𝑃𝜋¯2 (𝑎|𝑠)𝑃 (𝑠 ′ |𝑎)𝛾𝑐 (𝑐 (𝑠, 𝑎) + 𝐶 0 ( 𝜋,
+
+𝑎∈𝐴(𝑠 )
+
+It is in particular smaller than the induction formula for 𝑛 = 1.
+Now, assuming the property holds for 𝑘 ≤ 𝑛 − 1. We write
+∑︁
+¯ 𝑠) =(1 − 𝜉)
+¯ 𝑠 ′ ))
+𝐶𝑛 ( 𝜋,
+𝑃𝜋¯1 (𝑎|𝑠)𝑃 (𝑠 ′ |𝑎)𝛾𝑐 (𝑐 (𝑠, 𝑎) + 𝐶𝑛−1 ( 𝜋,
+𝑎∈𝐴(𝑠 )
+
++𝜉
+
+∑︁
+
+¯ 𝑠 ′ )),
+𝑃𝜋¯2 (𝑎|𝑠)𝑃 (𝑠 ′ |𝑎)𝛾𝑐 (𝑐 (𝑠, 𝑎) + 𝐶𝑛−1 ( 𝜋,
+
+𝑎∈𝐴(𝑠 )
+
+so
+𝐶𝑛 ≤(1 − 𝜉)
+
+∑︁
+
+¯ 𝑠 ′ )) + 𝜉𝛾𝑐
+𝑃𝜋¯1 (𝑎|𝑠)𝑃 (𝑠 ′ |𝑎)𝛾𝑐 (𝑐 (𝑠, 𝑎) + 𝐶𝑛−1 (𝜋,
+
+𝑎∈𝐴(𝑠 )
+
+𝑐 max
+1 − 𝛾𝑐
+𝑛
+
+≤(1 − 𝜉)
+
+∑︁
+
+′
+
+𝑃𝜋¯1 (𝑎|𝑠)𝑃 (𝑠 |𝑎)𝛾𝑐
+
+𝑎∈𝐴(𝑠 )
+
+Now, we remark that
+
+𝑐 max
+,
++ 𝜉𝛾𝑐
+1 − 𝛾𝑐
+∑︁
+
+𝛾𝑐 max ∑︁
+𝑐 (𝑠, 𝑎) + 𝐶𝑛−1 ( 𝜋¯1, 𝑠 ) + 𝜉
+(1 − 𝜉)𝑘 𝛾𝑐𝑘
+1 − 𝛾𝑐
+
+!
+
+′
+
+𝑘=1
+
+𝑃𝜋¯1 (𝑎|𝑠)𝑃 (𝑠 ′ |𝑎)𝛾𝑐 (𝑐 (𝑠, 𝑎) + 𝐶𝑛−1 ( 𝜋¯1, 𝑠 ′ )) = 𝐶𝑛 ( 𝜋¯1, 𝑠),
+
+𝑎∈𝐴(𝑠 )
+
+so the inequality becomes
+𝑛−1
+
+¯ 𝑠) ≤(1 − 𝜉)𝐶𝑛 (𝜋¯1, 𝑠) + (1 − 𝜉)𝜉𝛾𝑐
+𝐶𝑛 (𝜋,
+
+𝛾𝑐 𝑐 max ∑︁
+𝑐 max
+(1 − 𝜉)𝑘 𝛾𝑐𝑘 + 𝜉𝛾𝑐
+1 − 𝛾𝑐
+1 − 𝛾𝑐
+𝑘=1
+
+≤𝐶𝑛 (𝜋¯1, 𝑠) +
+
+𝑛
+𝜉𝛾𝑐 𝑐 max ∑︁
+
+1 − 𝛾𝑐
+
+(1 − 𝜉)𝑘 𝛾𝑐𝑘 ,
+
+𝑘=1
+
+which concludes the induction and the proof.
+□
+
+

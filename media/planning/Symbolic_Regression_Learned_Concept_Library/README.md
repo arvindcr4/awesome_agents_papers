@@ -1,5 +1,5 @@
 # Symbolic Regression Learned Concept Library
-- Paper: [Symbolic_Regression_Learned_Concept_Library.pdf](../../../papers/planning/Symbolic_Regression_Learned_Concept_Library.pdf)
+- Paper: [Symbolic_Regression_Learned_Concept_Library.pdf](../../../reinforcement_learning_papers/09_agentic_rl/Symbolic_Regression_Learned_Concept_Library.pdf)
 
 ## Gemini diagrams
 

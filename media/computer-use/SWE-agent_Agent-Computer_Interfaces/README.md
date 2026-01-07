@@ -1,5 +1,5 @@
 # SWE-agent Agent-Computer Interfaces
-- Paper: [SWE-agent_Agent-Computer_Interfaces.pdf](../../../papers/computer-use/SWE-agent_Agent-Computer_Interfaces.pdf)
+- Paper: [SWE-agent_Agent-Computer_Interfaces.pdf](../../../reinforcement_learning_papers/09_agentic_rl/SWE-agent_Agent-Computer_Interfaces.pdf)
 
 ## Gemini diagrams
 
